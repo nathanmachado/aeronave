@@ -168,9 +168,11 @@ pub fn skin_thickness_mm(m_bending_nm: f64, chord_m: f64, spar_height_m: f64) ->
 ///   V_flutter = 2.0 × VD   (meta de projeto — garantida por design e teste)
 ///   Pré-verificação: frequência de torção > 10 Hz para esta classe
 ///
-/// Retorna V_flutter estimado em m/s.
+/// Retorna V_flutter estimado em m/s — estimativa física sem piso artificial.
 pub fn flutter_speed_ms(vd_ms: f64, wing_area_m2: f64, span_m: f64,
-                         chord_root_m: f64, spar_height_m: f64) -> f64 {
+                         chord_root_m: f64, spar_height_m: f64,
+                         wing_mass_kg: f64) -> f64 {
+    let _ = vd_ms; // não participa da estimativa — apenas do critério
     // GJ da longarina (rigidez torsional estimada)
     // GJ = G × J onde G = E/(2(1+ν)) = 71.7e9/2.6 ≈ 27.6 GPa para Al 7075-T6
     let g_al = 27.6e9_f64; // Pa
@@ -181,15 +183,12 @@ pub fn flutter_speed_ms(vd_ms: f64, wing_area_m2: f64, span_m: f64,
 
     // Momento de inércia de massa em torção por unidade de envergadura (I_α)
     // I_α ≈ m_asa × (chord/4)²  por unidade de comprimento
-    let m_per_m = (130.0_f64 / span_m); // kg/m (massa da asa distribuída)
+    let m_per_m = wing_mass_kg / span_m; // kg/m (massa da asa distribuída)
     let r_alpha = chord_root_m / 4.0; // raio de giração
     let i_alpha_per_m = m_per_m * r_alpha * r_alpha; // kg·m²/m
 
     // Velocidade de flutter (método de energia)
-    let vf = 0.60 * (gj / (i_alpha_per_m * wing_area_m2 / span_m)).sqrt();
-
-    // Garante no mínimo 1.20 × VD × 1.15 (margem de teste)
-    vf.max(1.20 * vd_ms * 1.15)
+    0.60 * (gj / (i_alpha_per_m * wing_area_m2 / span_m)).sqrt()
 }
 
 /// Verificação: V_flutter ≥ 1.20 × VD (CS 23.629)
@@ -261,7 +260,7 @@ impl StructuralAgent {
         // Flutter e velocidades de projeto
         let vc   = vc_ms(280.0);
         let vd   = vd_ms(vc);
-        let vf   = flutter_speed_ms(vd, wing.area_m2, wing.span_m, chord_root_m, h_spar);
+        let vf   = flutter_speed_ms(vd, wing.area_m2, wing.span_m, chord_root_m, h_spar, wing_mass_kg);
         let fl_ok = flutter_check(vf, vd);
 
         // Tensão operacional na longarina (1g nivelado — base para fadiga)
@@ -353,6 +352,16 @@ mod tests {
         assert!(struc.flutter_ok,
             "Flutter {:.0} km/h abaixo do limite 1.20×VD={:.0} km/h",
             struc.flutter_speed_kmh, vd * 3.6 * 1.20);
+    }
+
+    #[test]
+    fn flutter_reprova_com_longarina_fraca() {
+        // Longarina de 20 mm de altura em asa de 12 m: rigidez torsional GJ ~ h⁴
+        // despenca e V_flutter deve cair abaixo de 1.2×VD.
+        let vd = vd_ms(vc_ms(280.0));
+        let vf = flutter_speed_ms(vd, 14.2, 11.94, 1.64, 0.020, 130.0);
+        assert!(!flutter_check(vf, vd),
+            "Flutter check passou com longarina de 20 mm — verificação vácua");
     }
 
     #[test]
