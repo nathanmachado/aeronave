@@ -322,6 +322,40 @@ mod tests {
     }
 
     #[test]
+    // Cobertura de regressão (Task 0.3 code review, 2026-08-02): com
+    // `autonomia_minima_8_horas` marcado #[ignore], nenhum teste da suíte
+    // padrão exercitava `PropulsionAgent::run()` ponta a ponta — os testes
+    // `load_fraction_relativa_a_potencia_disponivel_no_rpm` e
+    // `consumo_cruzeiro_entre_20_e_35_lph` só recalculam funções auxiliares
+    // isoladas e já passavam mesmo com o bug antigo. Este teste roda `run()`
+    // de verdade e verifica que o BSFC/consumo de cruzeiro refletem a carga
+    // relativa à potência DISPONÍVEL no rpm (não a POWER_KW_MAX em SL).
+    // Com o bug antigo (load_fraction = p_req_kw / POWER_KW_MAX ≈ 0.73):
+    //   bsfc_cruise_gkwh ≈ 201 g/kWh, fc_cruise_lph ≈ 26.4 L/h.
+    // Com a correção (load_fraction = p_req_kw / p_shaft_kw ≈ 0.99):
+    //   bsfc_cruise_gkwh ≈ 221 g/kWh, fc_cruise_lph ≈ 28.9 L/h.
+    // Os limiares abaixo (>210 g/kWh, >27 L/h) separam claramente os dois
+    // casos, sem depender dos limiares de autonomia/alcance de 8h/2.240km
+    // (que hoje falham genuinamente — ver `autonomia_minima_8_horas` acima).
+    fn run_bsfc_reflete_carga_relativa_a_potencia_disponivel() {
+        use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+        use crate::agents::aerodynamics::AerodynamicsAgent;
+
+        let state = AircraftState::initial();
+        let req   = Requirements::project_default();
+        let wing  = AerodynamicsAgent::run(&state, &req);
+        let prop  = PropulsionAgent::run(&state, &req, &wing);
+
+        assert!(prop.bsfc_cruise_gkwh > 210.0,
+            "BSFC de cruzeiro {:.0} g/kWh baixo demais — load_fraction pode \
+             ter regredido para usar POWER_KW_MAX (SL) em vez da potência \
+             disponível no rpm de cruzeiro", prop.bsfc_cruise_gkwh);
+        assert!(prop.fc_cruise_lph > 27.0,
+            "Consumo de cruzeiro {:.1} L/h baixo demais — consistente com o \
+             bug antigo de load_fraction (denominador POWER_KW_MAX)", prop.fc_cruise_lph);
+    }
+
+    #[test]
     // VIOLAÇÃO DE REQUISITO CONHECIDA (Task 0.3, 2026-08-02):
     // Corrigir load_fraction para referenciar P_disponível no rpm (em vez de
     // POWER_KW_MAX em SL) elevou a carga de cruzeiro de ~0.73 para ~0.99
