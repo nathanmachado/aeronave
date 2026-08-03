@@ -136,11 +136,7 @@ fn search_cruise_rpm(
     let mut best_feasible: Option<CruisePoint> = None;
     let mut best_effort: Option<CruisePoint> = None;
 
-    let steps = (((rpm_hi - rpm_lo) / 50.0).floor() as i64).max(0);
-    for i in 0..=steps {
-        let rpm = rpm_lo + i as f64 * 50.0;
-        let point = evaluate(rpm);
-
+    let mut consider = |point: CruisePoint| {
         if point.p_shaft_kw >= point.p_req_kw {
             let better = match best_feasible {
                 Some(b) => point.bsfc_gkwh < b.bsfc_gkwh,
@@ -154,6 +150,24 @@ fn search_cruise_rpm(
             None => true,
         };
         if better_effort { best_effort = Some(point); }
+    };
+
+    let steps = (((rpm_hi - rpm_lo) / 50.0).floor() as i64).max(0);
+    let mut last_sampled_rpm = rpm_lo;
+    for i in 0..=steps {
+        let rpm = rpm_lo + i as f64 * 50.0;
+        last_sampled_rpm = rpm;
+        consider(evaluate(rpm));
+    }
+    // Garante que o limite superior da faixa (`rpm_hi`) é sempre amostrado,
+    // mesmo quando (rpm_hi - rpm_lo) não é múltiplo exato de 50 rpm — sem
+    // isto, o laço de passos de 50 em 50 acima nunca alcança `rpm_hi`
+    // exatamente (ex.: uma faixa 1.760→2.640 rpm pára em 2.610, nunca avalia
+    // 2.640, que pode entregar BSFC melhor por estar mais perto do limite
+    // superior de potência disponível — ver tests/generic_engine.rs para um
+    // caso real onde isso muda o resultado).
+    if rpm_hi - last_sampled_rpm > 1e-6 {
+        consider(evaluate(rpm_hi));
     }
 
     match best_feasible {
@@ -234,82 +248,8 @@ impl PropulsionAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::engine::{BsfcModel, FuelSpec, Induction};
-
-    /// Motor fictício de teste — não referencia nenhum motor real por nome.
-    /// Usado apenas para exercitar a física genérica deste módulo; motores
-    /// reais só aparecem em `tests/generic_engine.rs`.
-    fn engine_teste() -> EngineSpec {
-        EngineSpec {
-            name: "Motor Genérico Teste".into(),
-            mass_kg: 195.0,
-            rpm_idle: 700.0,
-            rpm_rated: 3_400.0,
-            rpm_redline: 3_800.0,
-            rpm_max_continuous: 3_000.0,
-            torque_curve: vec![
-                [700.0, 200.0],
-                [1_600.0, 500.0],
-                [2_800.0, 500.0],
-                [3_400.0, 420.0],
-                [3_800.0, 0.0],
-            ],
-            bsfc: BsfcModel {
-                bsfc_min_gkwh: 200.0,
-                rpm_optimal: 2_200.0,
-                load_optimal: 0.70,
-                rpm_penalty_gkwh: 18.0,
-                load_penalty_gkwh: 22.0,
-                bsfc_max_gkwh: 380.0,
-            },
-            induction: Induction::Turbocharged {
-                critical_altitude_m: 2_000.0,
-                power_loss_per_1000m: 0.167,
-            },
-            fuel: FuelSpec {
-                name: "Diesel de teste".into(),
-                density_kg_per_l: 0.840,
-                lhv_mj_per_kg: 42.5,
-            },
-        }
-    }
-
-    /// Motor fictício "fraco" — potência baixa demais para sustentar 280
-    /// km/h com a célula do fixture, usado para testar o caminho de
-    /// inviabilidade de `search_cruise_rpm` sem depender de um motor real.
-    fn engine_fraco_teste() -> EngineSpec {
-        EngineSpec {
-            name: "Motor Fraco Teste".into(),
-            mass_kg: 80.0,
-            rpm_idle: 1_400.0,
-            rpm_rated: 5_800.0,
-            rpm_redline: 5_800.0,
-            rpm_max_continuous: 5_500.0,
-            torque_curve: vec![
-                [1_400.0, 80.0],
-                [4_300.0, 132.0],
-                [4_900.0, 137.0],
-                [5_800.0, 111.0],
-            ],
-            bsfc: BsfcModel {
-                bsfc_min_gkwh: 285.0,
-                rpm_optimal: 4_800.0,
-                load_optimal: 0.75,
-                rpm_penalty_gkwh: 25.0,
-                load_penalty_gkwh: 30.0,
-                bsfc_max_gkwh: 420.0,
-            },
-            induction: Induction::Turbocharged {
-                critical_altitude_m: 4_600.0,
-                power_loss_per_1000m: 0.09,
-            },
-            fuel: FuelSpec {
-                name: "Mogas de teste".into(),
-                density_kg_per_l: 0.72,
-                lhv_mj_per_kg: 43.5,
-            },
-        }
-    }
+    use crate::models::engine::test_fixtures::{motor_generico_teste as engine_teste,
+                                                 motor_generico_fraco_teste as engine_fraco_teste};
 
     #[test]
     fn prop_rpm_correto() {
@@ -358,8 +298,8 @@ mod tests {
 
         let prop = PropulsionAgent::run(&state, &req, &wing, &engine);
 
-        assert_eq!(prop.engine_model, "Motor Genérico Teste");
-        assert_eq!(prop.engine_mass_kg, 195.0);
+        assert_eq!(prop.engine_model, "Motor Sintético de Teste");
+        assert_eq!(prop.engine_mass_kg, 150.0);
         assert!(prop.fc_cruise_lph > 0.0);
         assert!(prop.bsfc_cruise_gkwh >= engine.bsfc.bsfc_min_gkwh);
         assert!(prop.endurance_h > 0.0);
@@ -379,7 +319,7 @@ mod tests {
         let prop = PropulsionAgent::run(&state, &req, &wing, &engine);
 
         assert!(!prop.cruise_feasible,
-            "motor fraco (potência de pico ~70 kW) não deveria sustentar 280 km/h");
+            "motor fraco (potência de pico ~52 kW) não deveria sustentar 280 km/h");
         assert!(prop.p_req_cruise_kw > prop.p_shaft_cruise_kw);
     }
 
@@ -395,8 +335,16 @@ mod tests {
 
         let prop = PropulsionAgent::run(&state, &req, &wing, &engine);
 
+        println!("motor_forte: P_req={:.1}kW P_shaft={:.1}kW @ {:.0}rpm",
+            prop.p_req_cruise_kw, prop.p_shaft_cruise_kw, prop.engine_rpm_cruise);
         assert!(prop.cruise_feasible,
-            "motor de teste (potência de pico ~150 kW) deveria sustentar 280 km/h");
+            "motor de teste (potência de pico ~147 kW) deveria sustentar 280 km/h");
         assert!(prop.p_req_cruise_kw <= prop.p_shaft_cruise_kw);
+        // Margem folgada (não só tecnicamente viável) — confirma que a
+        // fixture não está no limite exato, o que tornaria o teste frágil a
+        // qualquer ajuste futuro de física com efeito de poucos %.
+        assert!(prop.p_shaft_cruise_kw > prop.p_req_cruise_kw * 1.03,
+            "margem de viabilidade P_shaft/P_req = {:.3} — muito apertada (esperado > 1.03)",
+            prop.p_shaft_cruise_kw / prop.p_req_cruise_kw);
     }
 }

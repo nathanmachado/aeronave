@@ -337,49 +337,8 @@ impl PerformanceAgent {
 mod tests {
     use super::*;
     use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
-    use crate::models::engine::{BsfcModel, FuelSpec, Induction};
+    use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
     use crate::agents::{aerodynamics::AerodynamicsAgent, propulsion::PropulsionAgent};
-
-    /// Motor fictício de teste (mesma forma do fixture usado em propulsion.rs
-    /// e engine.rs) — sem referenciar nenhum motor real por nome. Os campos
-    /// numéricos reproduzem a forma física de um motor turbo diesel típico
-    /// desta classe (mesma banda de torque, rpm nominal e fator de altitude
-    /// turbo do modelo original desta aeronave), o que preserva os
-    /// intervalos físicos das asserções herdadas.
-    fn engine_teste() -> EngineSpec {
-        EngineSpec {
-            name: "Motor Genérico Teste".into(),
-            mass_kg: 195.0,
-            rpm_idle: 700.0,
-            rpm_rated: 3_400.0,
-            rpm_redline: 3_800.0,
-            rpm_max_continuous: 3_000.0,
-            torque_curve: vec![
-                [700.0, 200.0],
-                [1_600.0, 500.0],
-                [2_800.0, 500.0],
-                [3_400.0, 420.0],
-                [3_800.0, 0.0],
-            ],
-            bsfc: BsfcModel {
-                bsfc_min_gkwh: 200.0,
-                rpm_optimal: 2_200.0,
-                load_optimal: 0.70,
-                rpm_penalty_gkwh: 18.0,
-                load_penalty_gkwh: 22.0,
-                bsfc_max_gkwh: 380.0,
-            },
-            induction: Induction::Turbocharged {
-                critical_altitude_m: 2_000.0,
-                power_loss_per_1000m: 50.0 / 300.0,
-            },
-            fuel: FuelSpec {
-                name: "Diesel de teste".into(),
-                density_kg_per_l: 0.840,
-                lhv_mj_per_kg: 42.5,
-            },
-        }
-    }
 
     fn setup() -> (AircraftState, WingSpec, PropulsionSpec, EngineSpec) {
         let state  = AircraftState::initial();
@@ -414,9 +373,11 @@ mod tests {
         let (state, wing, _prop, engine) = setup();
         let ceiling = service_ceiling_m(state.mtow_kg * 0.85, &wing, &state, &engine);
         println!("Teto de serviço: {ceiling:.0} m ({:.0} ft)", ceiling * 3.2808);
-        // Para motor desta classe (turbo automotivo ~200hp): teto esperado 3.500–8.000 m
-        assert!(ceiling > 3_500.0 && ceiling < 8_000.0,
-            "Teto {ceiling:.0} m fora do intervalo esperado (3.500–8.000 m)");
+        // Valor observado empiricamente para a fixture sintética: ~7.600 m.
+        // Janela apertada o suficiente para pegar regressões reais (não é só
+        // "menor que o teto artificial de 8.000 m do laço de busca").
+        assert!(ceiling > 7_000.0 && ceiling < 7_900.0,
+            "Teto {ceiling:.0} m fora do intervalo esperado (7.000–7.900 m)");
     }
 
     #[test]
@@ -424,9 +385,10 @@ mod tests {
         let (state, wing, _prop, engine) = setup();
         let d = takeoff_distance_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine);
         println!("Decolagem pista pavimentada: {d:.0} m");
-        // CS-23 limita 580 m para categoria Normal MTOW < 1.500 kg
-        assert!(d > 200.0 && d < 700.0,
-            "Distância TO {d:.0} m fora do esperado (200–700 m)");
+        // CS-23 limita 580 m para categoria Normal MTOW < 1.500 kg; valor
+        // observado empiricamente para a fixture sintética: ~268 m.
+        assert!(d > 200.0 && d < 400.0,
+            "Distância TO {d:.0} m fora do esperado (200–400 m)");
     }
 
     #[test]
@@ -435,8 +397,9 @@ mod tests {
         let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
         let d = landing_distance_m(mass_ldg, RHO_SL, &wing, 1.0);
         println!("Pouso pista pavimentada: {d:.0} m");
-        assert!(d > 300.0 && d < 700.0,
-            "Distância LDG {d:.0} m fora do esperado (300–700 m)");
+        // Valor observado empiricamente para a fixture sintética: ~390 m.
+        assert!(d > 300.0 && d < 500.0,
+            "Distância LDG {d:.0} m fora do esperado (300–500 m)");
     }
 
     #[test]
@@ -448,15 +411,17 @@ mod tests {
         // Deve ser um número resolvido (não o requisito ecoado) e > requisito
         assert!(v_max_kmh > 280.0 && v_max_kmh < 400.0,
             "V_max nivelada {v_max_kmh:.0} km/h implausível");
-        // O refinamento em duas etapas não deve alterar o resultado obtido
-        // pela bissecção simples anterior (310.25 km/h, medido antes do
-        // refactor de coarse-to-fine) para os dados equivalentes ao motor
-        // original deste projeto (mesma forma de curva/física, agora via
-        // fixture genérico em vez de constantes hardcoded).
-        let v_max_pre_refactor_kmh = 310.25137319753946;
-        assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
-            "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pré-refactor \
-             {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
+        // Regressão do resolvedor coarse-to-fine (bissecção): valor medido
+        // empiricamente para a fixture sintética `motor_generico_teste`
+        // (não é um motor real — o pin contra o motor real de verdade vive
+        // em tests/generic_engine.rs, carregado do TOML de verdade). Este
+        // teste aqui existe para pegar regressões no algoritmo de busca de
+        // `max_level_speed_ms` em si, não para validar um motor específico.
+        let v_max_observado_kmh = 309.4988370961842;
+        assert!((v_max_kmh - v_max_observado_kmh).abs() < 0.5,
+            "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor observado \
+             {v_max_observado_kmh:.2} km/h em mais de 0.5 km/h — possível \
+             regressão no resolvedor coarse-to-fine");
     }
 
     #[test]

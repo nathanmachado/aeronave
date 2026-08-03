@@ -117,3 +117,60 @@ impl ConstraintChecker {
         ConstraintReport { violations, warnings }
     }
 }
+
+// ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::aerodynamics::AerodynamicsAgent;
+    use crate::agents::propulsion::PropulsionAgent;
+    use crate::models::aircraft_state::AircraftState;
+    use crate::models::engine::test_fixtures::motor_generico_teste;
+
+    /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec)` coerente
+    /// via os agentes reais (motor sintético de teste — não um motor real),
+    /// para servir de base às asserções de violação isolada abaixo. Os
+    /// testes sobrescrevem apenas os campos de `PropulsionSpec` relevantes à
+    /// violação #9, para não depender do resultado real de
+    /// `search_cruise_rpm` (que já é testado em `propulsion.rs`).
+    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec) {
+        let state  = AircraftState::initial();
+        let req    = Requirements::project_default();
+        let wing   = AerodynamicsAgent::run(&state, &req);
+        let engine = motor_generico_teste();
+        let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
+        (req, wing, prop, engine)
+    }
+
+    #[test]
+    fn violacao_cruzeiro_inviavel_aparece_quando_infeasible() {
+        let (req, wing, mut prop, engine) = setup();
+        // Força a inviabilidade independentemente do resultado real da busca
+        // de rpm, para testar isoladamente a violação #9.
+        prop.cruise_feasible = false;
+        prop.p_req_cruise_kw = 150.0;
+        prop.p_shaft_cruise_kw = 100.0;
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine);
+
+        assert!(report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
+            "esperava violação de cruzeiro inviável, obteve: {:?}", report.violations);
+        // A mensagem deve carregar os números reais, não só um rótulo.
+        assert!(report.violations.iter().any(|v| v.contains("150.0") && v.contains("100.0")),
+            "violação deveria citar P_req/P_shaft: {:?}", report.violations);
+    }
+
+    #[test]
+    fn sem_violacao_cruzeiro_quando_feasible() {
+        let (req, wing, mut prop, engine) = setup();
+        prop.cruise_feasible = true;
+        prop.p_req_cruise_kw = 90.0;
+        prop.p_shaft_cruise_kw = 100.0;
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
+            "não deveria haver violação de cruzeiro inviável, obteve: {:?}", report.violations);
+    }
+}

@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 
 use aeronave::agents::aerodynamics::AerodynamicsAgent;
+use aeronave::agents::performance::max_level_speed_ms;
 use aeronave::agents::propulsion::PropulsionAgent;
 use aeronave::models::aircraft_state::AircraftState;
 use aeronave::models::config::load_engine;
@@ -66,13 +67,28 @@ fn trocar_motor_muda_resultado_sem_mudar_codigo() {
 // A Task 1.4 substitui o rpm de cruzeiro fixo (2.400) por uma busca que
 // varre `rpm_optimal ± 20%` (limitada por `rpm_max_continuous`) e escolhe o
 // rpm de menor BSFC entre os que entregam a potência requerida. Para o
-// motor Toyota 1GD-FTV isto desloca o cruzeiro para ~2.610 rpm, um pouco
-// acima do rpm ótimo de BSFC (2.200) mas ainda dentro da banda de torque
-// plano — o suficiente para reduzir o BSFC de ~221 para ~211 g/kWh e o
-// consumo de ~28.9 para ~26.9 L/h em relação ao valor a 2.400 rpm fixo.
-// Isso fecha a lacuna: autonomia medida ~8.02h (>= 8.0h) e alcance
-// ~2.245km (>= 2.240km) — ver task-1.4-report.md para os números completos.
-// Requisito NÃO foi enfraquecido; a física é que melhorou.
+// motor Toyota 1GD-FTV isto desloca o cruzeiro para 2.640 rpm — o limite
+// superior exato da faixa de busca (`min(rpm_max_continuous, rpm_optimal
+// ·1.2)` = min(3.000, 2.640) = 2.640) — um pouco acima do rpm ótimo de BSFC
+// (2.200) mas ainda dentro da banda de torque plano. Isso reduz o BSFC de
+// ~221 para ~211 g/kWh e o consumo de ~28.9 para ~26.8 L/h em relação ao
+// valor a 2.400 rpm fixo.
+//
+// Fix pós-review (code review da Task 1.4): a varredura original amostrava
+// só rpm_lo, rpm_lo+50, rpm_lo+100, ... e nunca avaliava rpm_hi=2.640
+// exatamente quando (rpm_hi-rpm_lo) não era múltiplo de 50 — parava em
+// 2.610 (17 passos de 50 a partir de 1.760), perdendo o ponto de menor BSFC
+// viável (2.640, BSFC ~211 vs ~211 em 2.610 — a diferença é pequena aqui,
+// mas em outras configurações de motor pode ser maior). `search_cruise_rpm`
+// agora sempre avalia `rpm_hi` como amostra final quando ele não coincide
+// com o último passo de 50 em 50. Números finais medidos após o fix: rpm
+// 2.640, BSFC ~211 g/kWh, consumo ~26.8 L/h, autonomia ~8.07h (era ~8.02h),
+// alcance ~2.258km (era ~2.245km) — ver task-1.4-report.md para os números
+// completos e a comparação com a linha de base pré-Task-1.4 (2.400 rpm
+// fixo: 221 g/kWh, 28.9 L/h, 7.46h, 2.090km).
+//
+// Requisito (>= 8.0h, >= 2.240km) NÃO foi enfraquecido; a física é que
+// melhorou.
 #[test]
 fn autonomia_minima_8_horas() {
     let state = AircraftState::initial();
@@ -92,4 +108,31 @@ fn autonomia_minima_8_horas() {
         "Autonomia {:.2} h abaixo do requisito de 8 h", prop.endurance_h);
     assert!(prop.range_km >= 2_240.0,
         "Alcance {:.0} km abaixo do requisito de 2.240 km", prop.range_km);
+}
+
+// Regressão do resolvedor coarse-to-fine de `max_level_speed_ms` (bissecção
+// em duas etapas) contra o motor Toyota 1GD-FTV real, medida antes do
+// refactor da Task 1.4 (quando o motor ainda era um `const` hardcoded em
+// `propulsion.rs`): 310.25137319753946 km/h. Esse pin foi originalmente
+// mantido dentro de `src/agents/performance.rs`, mas usava uma fixture de
+// teste local cujos valores coincidiam byte-a-byte com o Toyota real — o
+// que reintroduzia dados de motor real em `src/` (ver code review da Task
+// 1.4). Ele foi movido para cá: `src/` agora usa uma fixture sintética
+// própria (com seu próprio pin, ~309.50 km/h, não coincidente com este),
+// e o pin do motor real vive apenas aqui, contra o TOML de verdade.
+#[test]
+fn toyota_v_max_regressao_310kmh() {
+    let state = AircraftState::initial();
+    let req   = Requirements::project_default();
+    let wing  = AerodynamicsAgent::run(&state, &req);
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+
+    let v_max_ms = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, &toyota);
+    let v_max_kmh = v_max_ms * 3.6;
+    println!("Toyota V_max nivelada = {v_max_kmh:.6} km/h");
+
+    let v_max_pre_refactor_kmh = 310.25137319753946;
+    assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
+        "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pré-refactor \
+         {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
 }
