@@ -35,6 +35,10 @@ pub struct AircraftConfig {
     /// Frações históricas (Raymer Tab. 6.5) que dimensionam aileron, flap,
     /// profundor e leme — consumidas por `agents::control_surfaces`.
     pub control_surfaces: ControlSurfacesCfg,
+    /// Parâmetros de desempenho (Task 4.7) — atrito de frenagem por
+    /// superfície, fator empírico de tração estática, e tempos/ângulos dos
+    /// segmentos de decolagem/pouso sobre obstáculo de 15m (50 ft).
+    pub performance: PerformanceCfg,
 }
 
 /// Parâmetros do laço de convergência de MTOW (`orchestrator::size_aircraft`,
@@ -255,6 +259,38 @@ pub struct ControlSurfacesCfg {
     pub rudder_chord_frac: f64,
 }
 
+/// Parâmetros de desempenho (Task 4.7) — substituem os fatores ad hoc do
+/// M5 (`/surface_factor`, `·√surface_factor`, tração estática sem correção,
+/// distância aérea de pouso fixa em 200m) por dados de configuração
+/// explícitos, consumidos por `agents::performance`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceCfg {
+    /// Coeficiente de atrito de frenagem em pista pavimentada seca —
+    /// substitui o antigo `0.40` literal em `landing_distance_m`.
+    pub mu_brake_paved: f64,
+    /// Coeficiente de atrito de frenagem em grama firme/terra compactada.
+    /// As funções de pouso (`agents::performance::landing_distance_m`/
+    /// `landing_distance_50ft_m`) recebem `mu_brake` genericamente — este
+    /// valor está pronto para uso, mas `PerformanceSpec` hoje só modela
+    /// pouso em pista pavimentada (mesma assimetria pré-existente: só
+    /// decolagem tinha variantes pavimentada/grama antes da Task 4.7).
+    pub mu_brake_grass: f64,
+    /// Fator empírico (McCormick) aplicado sobre a tração estática IDEAL de
+    /// Rankine-Froude (disco atuador) — a teoria de disco atuador
+    /// superestima a tração real por não modelar perdas de ponta de pá,
+    /// rotação de esteira e não-uniformidade da distribuição de carga.
+    pub static_thrust_factor: f64,
+    /// Tempo de rotação — do início da rotação até V_LOF, a V_LOF
+    /// aproximadamente constante (s).
+    pub rotation_time_s: f64,
+    /// Tempo de flare/arredondamento no pouso, a V_ref aproximadamente
+    /// constante (s).
+    pub flare_time_s: f64,
+    /// Ângulo de aproximação padrão de pouso (graus) — define a distância
+    /// aérea até a altura de 15m (50 ft) na aproximação final.
+    pub approach_angle_deg: f64,
+}
+
 /// Um item de massa do orçamento de peso vazio (OEW), com o braço de
 /// momento expresso por REFERÊNCIA a uma entrada de `[arms]` (ou de
 /// `[wing]`/`[gear]`, ver `weight_balance::ArmConfig::by_name`) mais um
@@ -404,6 +440,17 @@ pub mod test_fixtures {
                 elevator_chord_frac: 0.33,
                 rudder_span_frac: 0.85,
                 rudder_chord_frac: 0.32,
+            },
+            // Levemente diferente do baseline real (0.40/0.30/0.75/1.0/1.5/3.0)
+            // — mesma justificativa de "nenhum destes números coincide com o
+            // baseline real" usada nas demais seções desta fixture.
+            performance: PerformanceCfg {
+                mu_brake_paved: 0.38,
+                mu_brake_grass: 0.28,
+                static_thrust_factor: 0.72,
+                rotation_time_s: 1.2,
+                flare_time_s: 1.4,
+                approach_angle_deg: 3.2,
             },
         }
     }

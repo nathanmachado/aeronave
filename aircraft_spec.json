@@ -107,11 +107,19 @@
     "rc_sl_ms": 4.989911001499973,
     "rc_cruise_alt_ms": 4.551291474056924,
     "service_ceiling_m": 5200.0,
-    "to_distance_paved_m": 294.7623575586021,
-    "to_distance_grass_m": 353.71482907032254,
+    "to_distance_paved_m": 359.2413340073314,
+    "to_distance_grass_m": 431.0896008087976,
     "landing_distance_m": 397.54569052729556,
     "range_km": 2386.6903464706115,
-    "endurance_h": 8.523894094537898
+    "endurance_h": 8.523894094537898,
+    "vx_kmh": 119.71227517723408,
+    "vy_kmh": 151.63554855782982,
+    "best_glide_kmh": 175.7194422389418,
+    "glide_ratio": 16.456402830285228,
+    "climb_gradient_pct": 14.231571171629945,
+    "to_50ft_paved_m": 388.85209630572206,
+    "to_50ft_grass_m": 436.75094084003297,
+    "ldg_50ft_m": 542.8152179851822
   },
   "vn_diagram": {
     "va_kmh": 242.02534264410477,

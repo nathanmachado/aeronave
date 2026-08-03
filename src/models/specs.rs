@@ -177,6 +177,27 @@ pub struct PerformanceSpec {
     pub landing_distance_m: f64,
     pub range_km: f64,
     pub endurance_h: f64,
+    // ─── Task 4.7: Vx/Vy, planeio, gradiente CS 23.65, distâncias sobre 15m ──
+    /// Velocidade de MELHOR ÂNGULO de subida (km/h) — maximiza RC(V)/V, não
+    /// RC(V) absoluto (isso é `vy_kmh`). Sempre < `vy_kmh`.
+    pub vx_kmh: f64,
+    /// Velocidade de MELHOR RAZÃO de subida (km/h) — maximiza RC(V).
+    pub vy_kmh: f64,
+    /// Velocidade de melhor planeio (km/h) — `V_bg = √(2W/ρS)·(K/CD0)^0.25`.
+    pub best_glide_kmh: f64,
+    /// Razão L/D máxima (planeio) — `1/(2√(K·CD0))`, K = 1/(π·AR·e).
+    pub glide_ratio: f64,
+    /// Gradiente de subida máximo (%) — `100·RC(Vx)/Vx`, avaliado no solo
+    /// (MTOW). CS 23.65 exige ≥ 8.3% para esta categoria.
+    pub climb_gradient_pct: f64,
+    /// Distância de decolagem sobre obstáculo de 15m/50ft (pista pavimentada,
+    /// m) — soma de segmentos: ground roll + rotação + subida até 15m.
+    pub to_50ft_paved_m: f64,
+    /// Distância de decolagem sobre obstáculo de 15m/50ft (grama/terra, m).
+    pub to_50ft_grass_m: f64,
+    /// Distância de pouso sobre obstáculo de 15m/50ft (pista pavimentada, m)
+    /// — soma de segmentos: aproximação (γ padrão) + flare + ground roll.
+    pub ldg_50ft_m: f64,
 }
 
 /// Saída do StructuralAgent

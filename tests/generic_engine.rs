@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use aeronave::agents::aerodynamics::AerodynamicsAgent;
 use aeronave::agents::empennage::EmpennageAgent;
-use aeronave::agents::performance::max_level_speed_ms;
+use aeronave::agents::performance::{max_level_speed_ms, PerformanceAgent};
 use aeronave::agents::propulsion::PropulsionAgent;
 use aeronave::agents::weight_balance::WeightBalanceAgent;
 use aeronave::models::aircraft_state::AircraftState;
@@ -278,7 +278,8 @@ fn toyota_v_max_regressao_310kmh() {
     // Massa fixa (1.461 kg) igual ao antigo `AircraftState::initial().mtow_kg`
     // — mantida como literal para não acoplar este pin de regressão ao
     // `mtow_guess_kg` do baseline (que poderia mudar por outros motivos).
-    let v_max_ms = max_level_speed_ms(1_461.0, 2_500.0, 0.0, &wing, &state, &toyota);
+    let v_max_ms = max_level_speed_ms(1_461.0, 2_500.0, 0.0, &wing, &state, &toyota,
+                                       cfg.performance.static_thrust_factor);
     let v_max_kmh = v_max_ms * 3.6;
     println!("Toyota V_max nivelada = {v_max_kmh:.6} km/h");
 
@@ -365,7 +366,8 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // V_max nivelada @ MTOW convergido — mesmo pipeline que alimenta
     // `perf.v_cruise_kmh` em `main.rs` (agora com `design_mtow_kg`, não
     // mais `wb.spec.mtow_kg`).
-    let v_max_ms = max_level_speed_ms(sized.state.mtow_kg, 2_500.0, 0.0, &sized.wing, &sized.state, &toyota);
+    let v_max_ms = max_level_speed_ms(sized.state.mtow_kg, 2_500.0, 0.0, &sized.wing, &sized.state,
+                                       &toyota, cfg.performance.static_thrust_factor);
     let v_max_kmh = v_max_ms * 3.6;
     println!("golden: v_cruise_kmh={v_max_kmh:.6}");
     // Pré-Task-4.6: 308.64323162934545 km/h (densidade exponencial).
@@ -373,6 +375,103 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     assert!((v_max_kmh - v_max_pos_task_4_6_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-4.6 \
          {v_max_pos_task_4_6_kmh:.6} km/h", );
+}
+
+// ─── TASK 4.7: Vx/Vy, planeio, gradiente CS 23.65, distâncias sobre 15m ────
+//
+// Regressão de ouro contra o baseline Toyota real (`size_aircraft`, MTOW de
+// missão convergido ~1.529,98 kg — mesmo pipeline de `golden_toyota_
+// baseline_regressao_task_2_1` acima). Valores medidos empiricamente,
+// pré/pós Task 4.7 (`cargo run` / esta suíte, ANTES vs. DEPOIS desta task):
+//
+//   campo                     ANTES (M5, ad hoc)   DEPOIS (Task 4.7)   Δ
+//   to_distance_paved_m       295 m                 359 m              +22%
+//   to_distance_grass_m       354 m                 431 m              +22%
+//   landing_distance_m        398 m                 398 m              ~0%
+//     (T_avg de decolagem passou a usar tração ESTÁTICA corrigida em V=0 —
+//      Rankine-Froude × static_thrust_factor=0.75 — em vez da estimativa
+//      ad hoc "80% da tração a V_lo/2"; a distância de pouso NÃO mudou
+//      porque `mu_brake_paved=0.40` no TOML reproduz exatamente o antigo
+//      literal hardcoded `0.40/surface_factor` com surface_factor=1.0)
+//
+// Campos NOVOS desta task (não existiam antes — sem "ANTES" para comparar):
+//   vx_kmh=119.712  vy_kmh=151.636  best_glide_kmh=175.719  glide_ratio=16.456
+//   climb_gradient_pct=14.232  (CS 23.65 exige ≥8.3% — folga de quase 6 p.p.)
+//   to_50ft_paved_m=388.852  to_50ft_grass_m=436.751  ldg_50ft_m=542.815
+#[test]
+fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
+    let cfg    = baseline_state();
+    let req    = baseline_mission();
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized  = size_aircraft(&cfg, &toyota, &req).unwrap();
+    let perf = PerformanceAgent::run(&sized.state, &sized.wing, &sized.prop, sized.state.mtow_kg,
+                                      &toyota, &req, &cfg.performance);
+
+    println!(
+        "vx={:.3}km/h vy={:.3}km/h v_bg={:.3}km/h ld_max={:.3} gradiente={:.3}% \
+         to_50ft_pav={:.3}m to_50ft_grama={:.3}m ldg_50ft={:.3}m",
+        perf.vx_kmh, perf.vy_kmh, perf.best_glide_kmh, perf.glide_ratio,
+        perf.climb_gradient_pct, perf.to_50ft_paved_m, perf.to_50ft_grass_m, perf.ldg_50ft_m
+    );
+
+    // Vx < Vy < V_bg — ordenação física esperada (melhor ângulo < melhor
+    // razão < velocidade de planeio limpo, tipicamente a maior das três para
+    // esta célula/polar).
+    assert!(perf.vx_kmh < perf.vy_kmh, "Vx deveria ser < Vy");
+    assert!(perf.vy_kmh < perf.best_glide_kmh, "Vy deveria ser < V_bg para esta polar");
+
+    // Pins ±1% (ou mais apertado quando o valor é robusto/determinístico).
+    let pins: [(&str, f64, f64, f64); 8] = [
+        ("vx_kmh",             perf.vx_kmh,             119.712275, 0.01),
+        ("vy_kmh",              perf.vy_kmh,             151.635549, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     175.719442, 0.01),
+        ("glide_ratio",         perf.glide_ratio,         16.456403, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  14.231571, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    388.852096, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    436.750941, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         542.815218, 0.01),
+    ];
+    for (nome, obtido, esperado, tol_frac) in pins {
+        let tol = esperado.abs() * tol_frac;
+        assert!((obtido - esperado).abs() < tol,
+            "{nome} = {obtido:.6} divergiu do pin {esperado:.6} em mais de {:.1}%",
+            tol_frac * 100.0);
+    }
+
+    // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
+    // real passa com folga confortável (~14.2%, quase 6 p.p. acima do piso).
+    assert!(perf.climb_gradient_pct >= 8.3,
+        "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
+
+    // Tabela old→new (ver comentário acima) — `to_distance_*`/
+    // `landing_distance_m` continuam "baseados em rolagem de solo"
+    // (decisão do controller), mas T_avg de decolagem mudou de fonte.
+    let to_distance_paved_novo_pin = 359.241334;
+    assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
+                < to_distance_paved_novo_pin * 0.01,
+        "to_distance_paved_m {:.3} divergiu do pin pós-Task-4.7 {:.3}",
+        perf.to_distance_paved_m, to_distance_paved_novo_pin);
+    let to_distance_grass_novo_pin = 431.089601;
+    assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
+                < to_distance_grass_novo_pin * 0.01,
+        "to_distance_grass_m {:.3} divergiu do pin pós-Task-4.7 {:.3}",
+        perf.to_distance_grass_m, to_distance_grass_novo_pin);
+    // landing_distance_m NÃO deveria ter mudado (mu_brake_paved=0.40
+    // reproduz exatamente o antigo literal hardcoded) — tolerância apertada.
+    let landing_distance_pin_inalterado = 397.545691;
+    assert!((perf.landing_distance_m - landing_distance_pin_inalterado).abs() < 0.5,
+        "landing_distance_m {:.3} divergiu do valor esperado (deveria ficar praticamente \
+         inalterado, {:.3})", perf.landing_distance_m, landing_distance_pin_inalterado);
+
+    // Decolagem/pouso sobre 15m devem exceder as estimativas ground-roll-
+    // based simplificadas — segmentos adicionais (rotação/subida,
+    // aproximação/flare) só somam distância.
+    assert!(perf.to_50ft_paved_m > perf.to_distance_paved_m,
+        "TO sobre 15m ({:.1}m) deveria exceder a estimativa ground-roll×1.5 ({:.1}m)",
+        perf.to_50ft_paved_m, perf.to_distance_paved_m);
+    assert!(perf.ldg_50ft_m > perf.landing_distance_m,
+        "Pouso sobre 15m ({:.1}m) deveria exceder a estimativa legada de 200m fixos ({:.1}m)",
+        perf.ldg_50ft_m, perf.landing_distance_m);
 }
 
 /// Achado da revisão da Task 3.1 (checagem de aceite rodando a cada

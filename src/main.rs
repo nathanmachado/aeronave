@@ -276,16 +276,25 @@ fn main() {
 
     // ── Agente 4: Desempenho ──────────────────────────────────────────────────
     println!("[ AGENTE 4 ] PerformanceAgent");
-    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req);
+    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
+                                      &cfg.performance);
     println!("  V_cruzeiro: {:.1}km/h  |  V_stall: {:.1}km/h",
              perf.v_cruise_kmh, perf.v_stall_kmh);
     println!("  RC (SL/MTOW): {:.2}m/s ({:.0}fpm)  |  RC (2500m): {:.2}m/s",
              perf.rc_sl_ms, perf.rc_sl_ms * 196.85, perf.rc_cruise_alt_ms);
     println!("  Teto: {:.0}m ({:.0}ft)",
              perf.service_ceiling_m, perf.service_ceiling_m * 3.281);
-    println!("  TO pav: {:.0}m  TO grama: {:.0}m  Pouso: {:.0}m\n",
+    println!("  Vx (melhor ângulo): {:.1}km/h  |  Vy (melhor razão): {:.1}km/h  |  \
+              Gradiente (CS 23.65): {:.1}%",
+             perf.vx_kmh, perf.vy_kmh, perf.climb_gradient_pct);
+    println!("  Melhor planeio: {:.1}km/h  |  L/Dmax: {:.1}",
+             perf.best_glide_kmh, perf.glide_ratio);
+    println!("  TO pav: {:.0}m  TO grama: {:.0}m  Pouso: {:.0}m  \
+              (rolagem ×1,5 — estimativa simplificada)",
              perf.to_distance_paved_m, perf.to_distance_grass_m,
              perf.landing_distance_m);
+    println!("  Sobre 15m/50ft — TO pav: {:.0}m  TO grama: {:.0}m  Pouso: {:.0}m\n",
+             perf.to_50ft_paved_m, perf.to_50ft_grass_m, perf.ldg_50ft_m);
 
     // ── Agente 5: Estrutura ───────────────────────────────────────────────────
     println!("[ AGENTE 5 ] StructuralAgent — Longarina e Flutter");
@@ -340,7 +349,7 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb, &propeller);
+    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb, &propeller, &perf);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -348,7 +357,7 @@ fn main() {
     let nose_ok = gear.nose_load_fraction_pct >= 8.0 && gear.nose_load_fraction_pct <= 25.0;
 
     let checks = [
-        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice"),
+        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65"),
         (perf.v_cruise_kmh >= 280.0,          "V_cruzeiro ≥ 280 km/h"),
         (prop.endurance_h  >= 8.0,            "Autonomia ≥ 8 h"),
         (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar"),

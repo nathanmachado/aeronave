@@ -104,6 +104,20 @@ cd0_misc = 0.003
 sm_min = 0.05   # margem estática mínima — limite TRASEIRO do CG
 sm_max = 0.25   # proxy de autoridade de profundor (flare) — limite DIANTEIRO do CG
 
+# Parâmetros de desempenho (Task 4.7) — substituem os fatores ad hoc do M5
+# (tração estática sem correção, distância de pouso aérea fixa em 200m,
+# fatores de superfície /√surface_factor) por dados de configuração.
+[performance]
+mu_brake_paved = 0.40      # frenagem em pista pavimentada seca
+mu_brake_grass = 0.30      # frenagem em grama firme/terra compactada
+# Fator empírico (McCormick) sobre a tração estática ideal de Rankine-Froude
+# (disco atuador) — corrige a superestimativa por não modelar perdas de
+# ponta de pá/rotação de esteira.
+static_thrust_factor = 0.75
+rotation_time_s = 1.0      # tempo de rotação até V_LOF, s
+flare_time_s = 1.5         # tempo de flare no pouso a V_ref, s
+approach_angle_deg = 3.0   # ângulo de aproximação padrão até 15m (50 ft)
+
 # Superfícies de controle (Task 4.2) — frações históricas (Raymer Tab. 6.5,
 # monomotor GA) que dimensionam aileron, flap, profundor e leme a partir da
 # asa (aileron/flap) e da empenagem (profundor/leme) já dimensionadas.

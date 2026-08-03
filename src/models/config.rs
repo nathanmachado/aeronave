@@ -534,6 +534,37 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         )));
     }
 
+    // [performance] (Task 4.7) — atrito de frenagem por superfície, fator
+    // empírico de tração estática, tempos de rotação/flare, ângulo de
+    // aproximação.
+    require_finite("performance.mu_brake_paved", cfg.performance.mu_brake_paved)?;
+    if cfg.performance.mu_brake_paved <= 0.05 || cfg.performance.mu_brake_paved >= 0.8 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.mu_brake_paved deve estar em \
+             (0.05, 0.8) (valor: {})",
+            cfg.performance.mu_brake_paved
+        )));
+    }
+    require_finite("performance.mu_brake_grass", cfg.performance.mu_brake_grass)?;
+    if cfg.performance.mu_brake_grass <= 0.05 || cfg.performance.mu_brake_grass >= 0.8 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.mu_brake_grass deve estar em \
+             (0.05, 0.8) (valor: {})",
+            cfg.performance.mu_brake_grass
+        )));
+    }
+    require_positive("performance.static_thrust_factor", cfg.performance.static_thrust_factor)?;
+    require_positive("performance.rotation_time_s", cfg.performance.rotation_time_s)?;
+    require_positive("performance.flare_time_s", cfg.performance.flare_time_s)?;
+    require_finite("performance.approach_angle_deg", cfg.performance.approach_angle_deg)?;
+    if cfg.performance.approach_angle_deg <= 1.0 || cfg.performance.approach_angle_deg >= 10.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.approach_angle_deg deve estar em \
+             (1.0, 10.0) graus (valor: {})",
+            cfg.performance.approach_angle_deg
+        )));
+    }
+
     // Consistência trem principal: a massa TOTAL do item 'trem_principal'
     // (ambas as pernas) deve ser exatamente 2× a massa de UMA perna
     // (`[gear].mass_main_leg_kg`) — é essa relação que justifica usar
@@ -825,6 +856,13 @@ mod tests {
             [stability]
             sm_min = 0.05
             sm_max = 0.25
+            [performance]
+            mu_brake_paved = 0.40
+            mu_brake_grass = 0.30
+            static_thrust_factor = 0.75
+            rotation_time_s = 1.0
+            flare_time_s = 1.5
+            approach_angle_deg = 3.0
             [control_surfaces]
             aileron_span_start_frac = 0.55
             aileron_span_end_frac = 0.90
@@ -1158,6 +1196,60 @@ mod tests {
     #[test]
     fn rejeita_sm_min_nao_finito() {
         let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    // ─── [performance] (Task 4.7) ────────────────────────────────────────────
+
+    #[test]
+    fn rejeita_mu_brake_paved_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("mu_brake_paved = 0.40", "mu_brake_paved = 0.02");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.mu_brake_paved"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_mu_brake_grass_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("mu_brake_grass = 0.30", "mu_brake_grass = 0.90");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.mu_brake_grass"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_static_thrust_factor_nao_positivo() {
+        let toml = aircraft_toml_valido()
+            .replace("static_thrust_factor = 0.75", "static_thrust_factor = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.static_thrust_factor"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_rotation_time_s_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("rotation_time_s = 1.0", "rotation_time_s = -1.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.rotation_time_s"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_flare_time_s_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("flare_time_s = 1.5", "flare_time_s = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.flare_time_s"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_approach_angle_deg_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("approach_angle_deg = 3.0", "approach_angle_deg = 0.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.approach_angle_deg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_approach_angle_deg_nao_finito() {
+        let toml = aircraft_toml_valido()
+            .replace("approach_angle_deg = 3.0", "approach_angle_deg = nan");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("finito"), "{err}");
     }
