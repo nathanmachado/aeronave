@@ -92,6 +92,39 @@ pub struct EmpennageSpec {
     pub eta_h: f64,
 }
 
+/// Geometria física de UMA superfície de controle (m/m²) — saída de
+/// `agents::control_surfaces::ControlSurfacesAgent`.
+///
+/// Convenção de `span_m`/`area_m2` (ver docstring do módulo do agente para a
+/// dedução completa):
+///   - aileron/flap: `span_m` é a envergadura FÍSICA DE UM LADO (a asa tem
+///     duas, esquerda e direita, idênticas por simetria); `area_m2` já soma
+///     os dois lados.
+///   - profundor/leme: superfície única — `span_m`/`area_m2` já são o total.
+/// `start_m`/`end_m`: posição ao longo da envergadura da superfície-mãe
+/// (asa para aileron/flap, medida a partir da linha de centro; EH/EV para
+/// profundor/leme, medida a partir da raiz), em metros.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceGeom {
+    pub span_m: f64,
+    pub area_m2: f64,
+    pub chord_mean_m: f64,
+    pub start_m: f64,
+    pub end_m: f64,
+}
+
+/// Saída do ControlSurfacesAgent (Task 4.2) — dimensionamento de aileron,
+/// flap, profundor (elevator) e leme (rudder) por razões históricas
+/// (Raymer Tab. 6.5), parametrizadas em `[control_surfaces]` no TOML de
+/// aeronave. Puramente geométrico (não depende de peso/MTOW).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlSurfacesSpec {
+    pub aileron: SurfaceGeom,
+    pub flap: SurfaceGeom,
+    pub elevator: SurfaceGeom,
+    pub rudder: SurfaceGeom,
+}
+
 /// Saída do WeightBalanceAgent (preenchida na Fase seguinte)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeightSpec {
@@ -199,6 +232,7 @@ pub struct AircraftReport {
     pub wing: WingSpec,
     pub propulsion: PropulsionSpec,
     pub empennage: Option<EmpennageSpec>,
+    pub control_surfaces: Option<ControlSurfacesSpec>,
     pub weight: Option<WeightSpec>,
     pub performance: Option<PerformanceSpec>,
     pub structure: Option<StructuralSpec>,

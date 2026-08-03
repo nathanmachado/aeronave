@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+use aeronave::agents::control_surfaces::ControlSurfacesAgent;
 use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::structural::StructuralAgent;
 use aeronave::agents::landing_gear::LandingGearAgent;
@@ -171,6 +172,24 @@ fn main() {
              emp.ar_v, emp.volume_v);
     println!("  Braço (CA asa → CA empenagem): {:.2}m\n", emp.arm_h_m);
 
+    // ── Agente 8: Superfícies de Controle ─────────────────────────────────────
+    // Dimensionamento de aileron/flap/profundor/leme por razões históricas
+    // (Task 4.2, Raymer Tab. 6.5) — puramente geométrico (não depende de
+    // MTOW), calculado uma única vez a partir da asa e da empenagem já
+    // dimensionadas, sem participar do laço de convergência de MTOW.
+    println!("[ AGENTE 8 ] ControlSurfacesAgent — Aileron, Flap, Profundor e Leme");
+    let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
+    println!("  Aileron:  span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m",
+             cs.aileron.span_m, cs.aileron.area_m2, cs.aileron.chord_mean_m,
+             cs.aileron.start_m, cs.aileron.end_m);
+    println!("  Flap:     span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m",
+             cs.flap.span_m, cs.flap.area_m2, cs.flap.chord_mean_m,
+             cs.flap.start_m, cs.flap.end_m);
+    println!("  Profundor: span={:.3}m  área={:.3}m²  corda_média={:.3}m",
+             cs.elevator.span_m, cs.elevator.area_m2, cs.elevator.chord_mean_m);
+    println!("  Leme:      span={:.3}m  área={:.3}m²  corda_média={:.3}m\n",
+             cs.rudder.span_m, cs.rudder.area_m2, cs.rudder.chord_mean_m);
+
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
     let wb = &sized.wb;
@@ -303,6 +322,7 @@ fn main() {
         wing:             wing.clone(),
         propulsion:       prop.clone(),
         empennage:        Some(emp.clone()),
+        control_surfaces: Some(cs.clone()),
         weight:           Some(wb.spec.clone()),
         performance:      Some(perf),
         structure:        Some(struc),

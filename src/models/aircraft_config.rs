@@ -28,6 +28,9 @@ pub struct AircraftConfig {
     /// componente específico da aeronave.
     pub drag: DragCfg,
     pub masses: MassesCfg,
+    /// Frações históricas (Raymer Tab. 6.5) que dimensionam aileron, flap,
+    /// profundor e leme — consumidas por `agents::control_surfaces`.
+    pub control_surfaces: ControlSurfacesCfg,
 }
 
 /// Parâmetros do laço de convergência de MTOW (`orchestrator::size_aircraft`,
@@ -168,6 +171,38 @@ pub struct DragCfg {
     pub cd0_misc: f64,
 }
 
+/// Frações históricas (Raymer Tab. 6.5, monomotor GA) que dimensionam
+/// aileron, flap, profundor (elevator) e leme (rudder) — ver
+/// `agents::control_surfaces::ControlSurfacesAgent` para a geometria
+/// derivada a partir destes valores.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlSurfacesCfg {
+    /// Início do aileron, fração da semi-envergadura da asa (η = y/(b/2)).
+    pub aileron_span_start_frac: f64,
+    /// Fim do aileron, fração da semi-envergadura da asa.
+    pub aileron_span_end_frac: f64,
+    /// Corda do aileron, fração da corda local da asa.
+    pub aileron_chord_frac: f64,
+    /// Início do flap (da raiz para fora), fração da semi-envergadura.
+    pub flap_span_start_frac: f64,
+    /// Fim do flap, fração da semi-envergadura — deve ser ≤
+    /// `aileron_span_start_frac` (flap e aileron não podem se sobrepor).
+    pub flap_span_end_frac: f64,
+    /// Corda do flap, fração da corda local da asa.
+    pub flap_chord_frac: f64,
+    /// Envergadura do profundor, fração da envergadura TOTAL do
+    /// estabilizador horizontal (`EmpennageSpec::span_h_m`).
+    pub elevator_span_frac: f64,
+    /// Corda do profundor, fração da corda local do estabilizador
+    /// horizontal.
+    pub elevator_chord_frac: f64,
+    /// Envergadura do leme, fração da envergadura da deriva
+    /// (`EmpennageSpec::span_v_m`).
+    pub rudder_span_frac: f64,
+    /// Corda do leme, fração da corda local da deriva.
+    pub rudder_chord_frac: f64,
+}
+
 /// Um item de massa do orçamento de peso vazio (OEW), com o braço de
 /// momento expresso por REFERÊNCIA a uma entrada de `[arms]` (ou de
 /// `[wing]`/`[gear]`, ver `weight_balance::ArmConfig::by_name`) mais um
@@ -293,6 +328,22 @@ pub mod test_fixtures {
                     MassItemCfg { name: "portas_vidros".into(),      mass_kg: 26.0,  arm_ref: "pax_front".into(),       arm_offset_m: 0.0 },
                     MassItemCfg { name: "antepara_firewall".into(),  mass_kg: 11.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.9 },
                 ],
+            },
+            // Frações levemente diferentes do baseline real
+            // (config/aircraft/baseline_4seat.toml) — mesma justificativa de
+            // "nenhum destes números coincide com o baseline real" usada nas
+            // demais seções desta fixture.
+            control_surfaces: ControlSurfacesCfg {
+                aileron_span_start_frac: 0.58,
+                aileron_span_end_frac: 0.92,
+                aileron_chord_frac: 0.24,
+                flap_span_start_frac: 0.12,
+                flap_span_end_frac: 0.48,
+                flap_chord_frac: 0.28,
+                elevator_span_frac: 0.88,
+                elevator_chord_frac: 0.33,
+                rudder_span_frac: 0.85,
+                rudder_chord_frac: 0.32,
             },
         }
     }

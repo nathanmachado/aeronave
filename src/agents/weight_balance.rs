@@ -50,6 +50,23 @@ pub fn mac_spanwise_pos(span_m: f64, taper: f64) -> f64 {
     (span_m / 6.0) * (1.0 + 2.0 * taper) / (1.0 + taper)
 }
 
+/// Corda local de uma superfície trapezoidal numa estação intermediária
+/// qualquer da semi-envergadura — generaliza `chord_root`/`chord_tip` (que
+/// são os casos particulares η=0 e η=1) para qualquer η ∈ [0,1]:
+///
+///   c(η) = c_raiz · (1 − (1−λ)·η),   η = y / (b/2)
+///
+/// Usada por `agents::control_surfaces` para a corda local nas bordas de
+/// aileron/flap/profundor/leme (Task 4.2). Note que, seguindo a mesma
+/// convenção de `chord_root`/`chord_tip`, `η` é medido contra QUALQUER
+/// referência de "meia-envergadura" que o chamador tenha usado para chegar
+/// em `chord_root` — para a asa (mirrored, duas semi-asas) isso é
+/// `wing.span_m/2`; para a deriva (painel único, sem espelhamento) é a
+/// própria `span_v_m` inteira (ver docstring de `control_surfaces.rs`).
+pub fn chord_at(eta: f64, chord_root: f64, taper: f64) -> f64 {
+    chord_root * (1.0 - (1.0 - taper) * eta)
+}
+
 // ─── COMPONENTES DE PESO E BRAÇOS DE MOMENTO ─────────────────────────────────
 
 /// Componente de peso com braço de momento (distância do datum ao CG do item)
@@ -405,6 +422,30 @@ mod tests {
         // S=14.2m², b=11.94m, λ=0.45 → c_r ≈ 1.64m
         let cr = chord_root(14.2, 11.94, 0.45);
         assert!((cr - 1.64).abs() < 0.05, "c_r = {cr:.3} m (esperado ~1.64 m)");
+    }
+
+    /// Hand-check (mesmos valores usados no hand-check do aileron em
+    /// `agents::control_surfaces`, b=11.94m, c_r=1.6403m, λ=0.45):
+    ///   c(0.55) = c_r·(1−0.55·0.55) = c_r·0.6975 ≈ 1.1441 m
+    ///   c(0.90) = c_r·(1−0.55·0.90) = c_r·0.5050 ≈ 0.8284 m
+    #[test]
+    fn chord_at_hand_check() {
+        let cr = chord_root(14.2, 11.94, 0.45);
+        let c55 = chord_at(0.55, cr, 0.45);
+        let c90 = chord_at(0.90, cr, 0.45);
+        println!("c_r={cr:.4}  c(0.55)={c55:.4}  c(0.90)={c90:.4}");
+        assert!((c55 - 1.1441).abs() < 0.001, "c(0.55) = {c55:.4} (esperado ≈1.1441)");
+        assert!((c90 - 0.8284).abs() < 0.001, "c(0.90) = {c90:.4} (esperado ≈0.8284)");
+    }
+
+    #[test]
+    fn chord_at_extremos_batem_com_chord_root_e_chord_tip() {
+        let cr = chord_root(14.2, 11.94, 0.45);
+        let ct = chord_tip(cr, 0.45);
+        assert!((chord_at(0.0, cr, 0.45) - cr).abs() < 1e-9,
+            "chord_at(0, ...) deveria ser exatamente chord_root");
+        assert!((chord_at(1.0, cr, 0.45) - ct).abs() < 1e-9,
+            "chord_at(1, ...) deveria ser exatamente chord_tip");
     }
 
     #[test]

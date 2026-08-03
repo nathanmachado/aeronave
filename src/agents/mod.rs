@@ -1,4 +1,5 @@
 pub mod aerodynamics;
+pub mod control_surfaces;
 pub mod empennage;
 pub mod propulsion;
 pub mod weight_balance;

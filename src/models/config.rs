@@ -252,6 +252,18 @@ fn require_non_negative(field: &str, v: f64) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Garante que `v` (fração) é finito e está em (0, 1] — usado pelos dez
+/// campos de `[control_surfaces]` (Task 4.2).
+fn require_frac(field: &str, v: f64) -> Result<(), ConfigError> {
+    require_finite(field, v)?;
+    if v <= 0.0 || v > 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: {field} deve estar em (0, 1] (valor: {v})"
+        )));
+    }
+    Ok(())
+}
+
 /// Valida as invariantes físicas e de consistência de uma `AircraftConfig`
 /// recém-carregada.
 fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
@@ -430,6 +442,43 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
                  StructuralAgent para 'asa', LandingGearAgent para 'trem_principal'/'trem_nariz')"
             )));
         }
+    }
+
+    // [control_surfaces] (Task 4.2) — frações históricas (Raymer Tab. 6.5)
+    // que dimensionam aileron, flap, profundor e leme.
+    let cs = &cfg.control_surfaces;
+    require_frac("control_surfaces.aileron_span_start_frac", cs.aileron_span_start_frac)?;
+    require_frac("control_surfaces.aileron_span_end_frac", cs.aileron_span_end_frac)?;
+    require_frac("control_surfaces.aileron_chord_frac", cs.aileron_chord_frac)?;
+    require_frac("control_surfaces.flap_span_start_frac", cs.flap_span_start_frac)?;
+    require_frac("control_surfaces.flap_span_end_frac", cs.flap_span_end_frac)?;
+    require_frac("control_surfaces.flap_chord_frac", cs.flap_chord_frac)?;
+    require_frac("control_surfaces.elevator_span_frac", cs.elevator_span_frac)?;
+    require_frac("control_surfaces.elevator_chord_frac", cs.elevator_chord_frac)?;
+    require_frac("control_surfaces.rudder_span_frac", cs.rudder_span_frac)?;
+    require_frac("control_surfaces.rudder_chord_frac", cs.rudder_chord_frac)?;
+
+    if cs.aileron_span_start_frac >= cs.aileron_span_end_frac {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: control_surfaces.aileron_span_start_frac ({}) \
+             deve ser menor que control_surfaces.aileron_span_end_frac ({})",
+            cs.aileron_span_start_frac, cs.aileron_span_end_frac
+        )));
+    }
+    if cs.flap_span_start_frac >= cs.flap_span_end_frac {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: control_surfaces.flap_span_start_frac ({}) \
+             deve ser menor que control_surfaces.flap_span_end_frac ({})",
+            cs.flap_span_start_frac, cs.flap_span_end_frac
+        )));
+    }
+    if cs.flap_span_end_frac > cs.aileron_span_start_frac {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: control_surfaces.flap_span_end_frac ({}) não \
+             pode ultrapassar control_surfaces.aileron_span_start_frac ({}) — flap e aileron \
+             não podem se sobrepor na semi-envergadura da asa",
+            cs.flap_span_end_frac, cs.aileron_span_start_frac
+        )));
     }
 
     // Consistência trem principal: a massa TOTAL do item 'trem_principal'
@@ -716,6 +765,17 @@ mod tests {
             design_category = "normal"
             [drag]
             cd0_misc = 0.003
+            [control_surfaces]
+            aileron_span_start_frac = 0.55
+            aileron_span_end_frac = 0.90
+            aileron_chord_frac = 0.25
+            flap_span_start_frac = 0.10
+            flap_span_end_frac = 0.50
+            flap_chord_frac = 0.30
+            elevator_span_frac = 0.90
+            elevator_chord_frac = 0.35
+            rudder_span_frac = 0.90
+            rudder_chord_frac = 0.35
             [[masses.items]]
             name = "asa"
             mass_kg = 100.0
@@ -912,6 +972,55 @@ mod tests {
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("trem_principal"), "{err}");
         assert!(err.to_string().contains("mass_main_leg_kg"), "{err}");
+    }
+
+    // ─── SUPERFÍCIES DE CONTROLE (Task 4.2) ─────────────────────────────────
+
+    #[test]
+    fn rejeita_fracao_de_superficie_de_controle_fora_de_0_1() {
+        let toml = aircraft_toml_valido()
+            .replace("aileron_chord_frac = 0.25", "aileron_chord_frac = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("aileron_chord_frac"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_fracao_de_superficie_de_controle_nao_positiva() {
+        let toml = aircraft_toml_valido()
+            .replace("rudder_chord_frac = 0.35", "rudder_chord_frac = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("rudder_chord_frac"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_aileron_start_maior_ou_igual_ao_end() {
+        let toml = aircraft_toml_valido()
+            .replace("aileron_span_start_frac = 0.55", "aileron_span_start_frac = 0.95");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("aileron_span_start_frac"), "{err}");
+        assert!(err.to_string().contains("aileron_span_end_frac"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_flap_start_maior_ou_igual_ao_end() {
+        let toml = aircraft_toml_valido()
+            .replace("flap_span_start_frac = 0.10", "flap_span_start_frac = 0.60");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("flap_span_start_frac"), "{err}");
+        assert!(err.to_string().contains("flap_span_end_frac"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_sobreposicao_entre_flap_e_aileron() {
+        // flap_span_end_frac (0.50) fica ACIMA de aileron_span_start_frac
+        // (0.45 após a alteração) — as duas superfícies passam a se
+        // sobrepor na semi-envergadura da asa.
+        let toml = aircraft_toml_valido()
+            .replace("aileron_span_start_frac = 0.55", "aileron_span_start_frac = 0.45");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("flap_span_end_frac"), "{err}");
+        assert!(err.to_string().contains("aileron_span_start_frac"), "{err}");
+        assert!(err.to_string().contains("sobrepor"), "{err}");
     }
 
     // ─── MISSÃO (REQUISITOS) ────────────────────────────────────────────────

@@ -86,6 +86,21 @@ design_category = "normal"    # normal | utility | acrobatic → n_lim 3.8/4.4/6
 [drag]
 cd0_misc = 0.003
 
+# Superfícies de controle (Task 4.2) — frações históricas (Raymer Tab. 6.5,
+# monomotor GA) que dimensionam aileron, flap, profundor e leme a partir da
+# asa (aileron/flap) e da empenagem (profundor/leme) já dimensionadas.
+[control_surfaces]
+aileron_span_start_frac = 0.55   # fração da semi-envergadura da asa
+aileron_span_end_frac   = 0.90
+aileron_chord_frac      = 0.25   # fração da corda local da asa
+flap_span_start_frac    = 0.10   # após a fuselagem
+flap_span_end_frac      = 0.50   # deve ser ≤ aileron_span_start_frac (sem sobreposição)
+flap_chord_frac         = 0.30
+elevator_span_frac      = 0.90   # fração da envergadura do EH
+elevator_chord_frac     = 0.35
+rudder_span_frac        = 0.90   # fração da envergadura do EV
+rudder_chord_frac       = 0.35
+
 # Itens de massa do OEW (motor vem do EngineSpec, não daqui).
 # arm_ref referencia uma entrada de [arms] (ou "wing_le_root" de [wing],
 # "gear_main"/"gear_nose" de [gear]) — arm_offset_m é opcional (default 0).
