@@ -123,6 +123,18 @@ pub fn excess_power_kw(
 
 /// Razão de subida máxima (m/s) — varre velocidades para encontrar o pico
 /// RC = P_excess / W
+///
+/// Nota de modelo (pré-existente, não introduzida por esta função): a
+/// referência de estol usa `wing.cl_max`, que é o CL_max COM FLAP
+/// (`cl_max_flaps` — ver `WingSpec::cl_max`/`aerodynamics.rs`), não o CL_max
+/// limpo. Já `excess_power_kw`→`drag_level_n` usa a polar de arrasto
+/// (`wing.cd0`) SEM nenhum incremento de arrasto de flap — não existe modelo
+/// de flap na polar deste crate. O resultado é um híbrido "CL de estol
+/// flapado + arrasto limpo", não uma condição limpa nem uma condição de
+/// decolagem/pouso fisicamente consistente. Documentado como limitação
+/// conhecida do gate CS 23.65 (`ConstraintChecker`), que consome
+/// `climb_gradient_pct` calculado sobre este mesmo híbrido (ver
+/// `best_climb_angle_ms` abaixo).
 pub fn climb_rate_ms(
     mass_kg: f64,
     altitude_m: f64,
@@ -173,6 +185,16 @@ pub fn climb_rate_ms(
 ///
 /// Retorna `(gradiente_max, Vx_kmh)` — gradiente como FRAÇÃO adimensional
 /// (RC/V, não %); `PerformanceAgent::run` converte para `climb_gradient_pct`.
+///
+/// Mesma nota de modelo de `climb_rate_ms`: a referência de estol usa
+/// `wing.cl_max` — CL_max COM FLAP, não limpo — enquanto o arrasto somado
+/// (via `excess_power_kw`) não tem nenhum incremento de flap. É um híbrido
+/// "CL de estol flapado + arrasto limpo" herdado de `climb_rate_ms`/Vy, não
+/// uma condição de decolagem CS 23.65 fisicamente consistente (que exigiria
+/// flap de decolagem tanto no CL_max de referência quanto no CD0). O
+/// gradiente resultante (`climb_gradient_pct`) é checado contra o piso de
+/// 8,3% da CS 23.65 sobre ESTE híbrido — ver limitação documentada em
+/// `task-4.7-report.md`.
 pub fn best_climb_angle_ms(
     mass_kg: f64,
     altitude_m: f64,

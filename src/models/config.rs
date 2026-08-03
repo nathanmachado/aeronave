@@ -554,6 +554,14 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         )));
     }
     require_positive("performance.static_thrust_factor", cfg.performance.static_thrust_factor)?;
+    if cfg.performance.static_thrust_factor > 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.static_thrust_factor deve estar em \
+             (0, 1.0] — é uma correção que reduz a tração estática IDEAL de Rankine-Froude para \
+             a real (perdas de ponta de pá/rotação de esteira), nunca aumenta (valor: {})",
+            cfg.performance.static_thrust_factor
+        )));
+    }
     require_positive("performance.rotation_time_s", cfg.performance.rotation_time_s)?;
     require_positive("performance.flare_time_s", cfg.performance.flare_time_s)?;
     require_finite("performance.approach_angle_deg", cfg.performance.approach_angle_deg)?;
@@ -1220,6 +1228,19 @@ mod tests {
     fn rejeita_static_thrust_factor_nao_positivo() {
         let toml = aircraft_toml_valido()
             .replace("static_thrust_factor = 0.75", "static_thrust_factor = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.static_thrust_factor"), "{err}");
+    }
+
+    /// `static_thrust_factor` é uma correção que reduz a tração estática
+    /// IDEAL de Rankine-Froude — fisicamente nunca pode ultrapassar 1.0. Sem
+    /// este teto, um erro de digitação (ex.: 7.5 em vez de 0.75) passaria
+    /// silenciosamente e SUBESTIMARIA as distâncias de decolagem (tração
+    /// maior que a ideal é fisicamente impossível para este modelo).
+    #[test]
+    fn rejeita_static_thrust_factor_acima_de_1() {
+        let toml = aircraft_toml_valido()
+            .replace("static_thrust_factor = 0.75", "static_thrust_factor = 7.5");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("performance.static_thrust_factor"), "{err}");
     }

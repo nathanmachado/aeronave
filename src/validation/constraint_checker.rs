@@ -429,4 +429,64 @@ mod tests {
             "não deveria haver aviso de divergência de diâmetro quando a folga governa, \
              obteve: {:?}", report.warnings);
     }
+
+    // ─── Task 4.7: gradiente de subida (CS 23.65) ───────────────────────────
+
+    /// `PerformanceSpec` sintética mínima para os testes de violação de
+    /// gradiente abaixo — literal construída à mão (não via `PerformanceAgent`)
+    /// para isolar exatamente a checagem #13 de `ConstraintChecker::verify`,
+    /// sem depender do resultado real de nenhum outro agente. Só
+    /// `climb_gradient_pct`/`vx_kmh` importam para essa checagem; os demais
+    /// campos recebem valores plausíveis arbitrários.
+    fn performance_spec_com_gradiente(climb_gradient_pct: f64) -> PerformanceSpec {
+        PerformanceSpec {
+            v_cruise_kmh: 300.0,
+            v_stall_kmh: 100.0,
+            rc_sl_ms: 5.0,
+            rc_cruise_alt_ms: 4.0,
+            service_ceiling_m: 5_000.0,
+            to_distance_paved_m: 300.0,
+            to_distance_grass_m: 360.0,
+            landing_distance_m: 400.0,
+            range_km: 2_000.0,
+            endurance_h: 8.0,
+            vx_kmh: 120.0,
+            vy_kmh: 150.0,
+            best_glide_kmh: 170.0,
+            glide_ratio: 15.0,
+            climb_gradient_pct,
+            to_50ft_paved_m: 400.0,
+            to_50ft_grass_m: 450.0,
+            ldg_50ft_m: 550.0,
+        }
+    }
+
+    #[test]
+    fn violacao_de_gradiente_aparece_quando_abaixo_de_8_3_por_cento() {
+        let (req, wing, prop, engine, wb, propeller, _perf) = setup();
+        let perf = performance_spec_com_gradiente(6.0);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf);
+
+        assert!(report.violations.iter().any(|v| v.contains("Gradiente de subida")),
+            "esperava violação de gradiente de subida, obteve: {:?}", report.violations);
+        // A mensagem deve citar o gradiente observado e o piso da CS 23.65.
+        assert!(report.violations.iter().any(|v| v.contains("6.0") && v.contains("8.3")),
+            "violação deveria citar o gradiente observado (6.0%) e o mínimo CS 23.65 \
+             (8.3%): {:?}", report.violations);
+    }
+
+    #[test]
+    fn sem_violacao_de_gradiente_quando_maior_ou_igual_a_8_3_por_cento() {
+        let (req, wing, prop, engine, wb, propeller, _perf) = setup();
+        let perf = performance_spec_com_gradiente(9.0);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Gradiente de subida")),
+            "não deveria haver violação de gradiente quando climb_gradient_pct (9.0%) >= \
+             8.3%, obteve: {:?}", report.violations);
+    }
 }
