@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::path::PathBuf;
+
+use clap::Parser;
 
 use aeronave::agents::aerodynamics::AerodynamicsAgent;
 use aeronave::agents::propulsion::PropulsionAgent;
@@ -13,17 +15,57 @@ use aeronave::validation::constraint_checker::ConstraintChecker;
 
 fn sep() { println!("{}", "─".repeat(64)); }
 
+/// Modelagem matemática de aeronave experimental — motor, célula e missão
+/// são arquivos TOML: trocar qualquer combinação é trocar um caminho, não
+/// recompilar o binário.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// Caminho do TOML de especificação do motor.
+    #[arg(long, default_value = "config/engines/default.toml")]
+    engine: PathBuf,
+
+    /// Caminho do TOML de configuração da célula (aeronave-base).
+    #[arg(long, default_value = "config/aircraft/baseline_4seat.toml")]
+    aircraft: PathBuf,
+
+    /// Caminho do TOML de requisitos de missão.
+    #[arg(long, default_value = "config/missions/default.toml")]
+    mission: PathBuf,
+
+    /// Caminho do JSON de saída com o relatório final da aeronave.
+    #[arg(long, default_value = "aircraft_spec.json")]
+    out: PathBuf,
+
+    /// Preço do diesel S-10 em R$/L, usado na estimativa de custo operacional.
+    #[arg(long, default_value_t = 6.5)]
+    fuel_price_brl: f64,
+
+    /// Preço do AVGAS em R$/L, usado na estimativa de custo operacional
+    /// equivalente (comparação diesel vs. avgas).
+    #[arg(long, default_value_t = 18.0)]
+    avgas_price_brl: f64,
+}
+
 fn main() {
+    let cli = Cli::parse();
+
     // Motor, célula e missão: carregados de TOML — trocar de motor, de
-    // aeronave-base ou de missão é trocar um arquivo, não o código. Caminhos
-    // hardcoded por enquanto; parametrização via CLI é escopo de uma task
-    // futura.
-    let engine = load_engine(Path::new("config/engines/toyota_1gd_ftv.toml"))
-        .expect("falha ao carregar configuração do motor");
-    let cfg = load_aircraft(Path::new("config/aircraft/baseline_4seat.toml"))
-        .expect("falha ao carregar configuração da aeronave");
-    let req = load_mission(Path::new("config/missions/default.toml"))
-        .expect("falha ao carregar requisitos de missão");
+    // aeronave-base ou de missão é trocar um arquivo (ou um argumento de
+    // linha de comando), não o código. Erros de carregamento imprimem a
+    // mensagem em português do loader e saem com código != 0, sem panic.
+    let engine = load_engine(&cli.engine).unwrap_or_else(|e| {
+        eprintln!("Erro ao carregar configuração do motor: {e}");
+        std::process::exit(1);
+    });
+    let cfg = load_aircraft(&cli.aircraft).unwrap_or_else(|e| {
+        eprintln!("Erro ao carregar configuração da aeronave: {e}");
+        std::process::exit(1);
+    });
+    let req = load_mission(&cli.mission).unwrap_or_else(|e| {
+        eprintln!("Erro ao carregar requisitos de missão: {e}");
+        std::process::exit(1);
+    });
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║   AERONAVE — Modelagem Matemática v3.0  (6 Agentes)         ║");
@@ -172,8 +214,11 @@ fn main() {
     // ── Economia ──────────────────────────────────────────────────────────────
     println!();
     println!("[ ECONOMIA ] Custo operacional estimado:");
-    let custo_h = prop.fc_cruise_lph * 6.5;
-    let avgas_h = prop.fc_cruise_lph * 1.67 * 18.0;
+    let custo_h = prop.fc_cruise_lph * cli.fuel_price_brl;
+    // 1.67: fator volumétrico diesel→avgas-equivalente (mesma energia por
+    // litro de diesel consome ~1.67x em litros de avgas, dada a menor
+    // densidade energética do avgas) — mantido inline, não é um preço.
+    let avgas_h = prop.fc_cruise_lph * 1.67 * cli.avgas_price_brl;
     println!("  Diesel S-10:  R$ {:.0}/h  |  AVGAS equiv: R$ {:.0}/h  |  Economia: R$ {:.0}/h",
              custo_h, avgas_h, avgas_h - custo_h);
     println!("  Economia/100h de voo: R$ {:.0}", (avgas_h - custo_h) * 100.0);
@@ -193,10 +238,10 @@ fn main() {
 
     let json = serde_json::to_string_pretty(&report_final)
         .expect("Falha ao serializar");
-    std::fs::write("aircraft_spec.json", &json)
-        .expect("Falha ao escrever aircraft_spec.json");
+    std::fs::write(&cli.out, &json)
+        .unwrap_or_else(|e| panic!("Falha ao escrever '{}': {e}", cli.out.display()));
 
-    println!("\n[ SAÍDA ] aircraft_spec.json v3.0 gerado — 6 agentes completos.");
+    println!("\n[ SAÍDA ] {} v3.0 gerado — 6 agentes completos.", cli.out.display());
     println!("\nPróximas etapas:");
     println!("  Fase 3 — CAD: FreeCad + Agente Python (socket localhost:9999)");
     println!("  Fase 4 — Plano de construção, BOM e documentação ANAC");
