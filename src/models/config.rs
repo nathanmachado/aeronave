@@ -339,7 +339,9 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     }
 
     // [propeller]
-    require_positive("propeller.diameter_m", cfg.propeller.diameter_m)?;
+    if let Some(d) = cfg.propeller.diameter_m {
+        require_positive("propeller.diameter_m", d)?;
+    }
     if cfg.propeller.blades < 1 {
         return Err(ConfigError::Validation(
             "configuração de aeronave inválida: propeller.blades deve ser >= 1".to_string(),
@@ -357,6 +359,32 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::Validation(format!(
             "configuração de aeronave inválida: propeller.psru_efficiency deve estar em (0, 1] (valor: {})",
             cfg.propeller.psru_efficiency
+        )));
+    }
+    // Task 4.5: altura do eixo, limites de Mach de ponta e folga mínima de solo.
+    require_positive("propeller.shaft_height_m", cfg.propeller.shaft_height_m)?;
+    require_finite("propeller.tip_mach_max_static", cfg.propeller.tip_mach_max_static)?;
+    if cfg.propeller.tip_mach_max_static <= 0.5 || cfg.propeller.tip_mach_max_static >= 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.tip_mach_max_static deve estar em \
+             (0.5, 1.0) (valor: {})",
+            cfg.propeller.tip_mach_max_static
+        )));
+    }
+    require_finite("propeller.tip_mach_max_cruise", cfg.propeller.tip_mach_max_cruise)?;
+    if cfg.propeller.tip_mach_max_cruise <= 0.5 || cfg.propeller.tip_mach_max_cruise >= 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.tip_mach_max_cruise deve estar em \
+             (0.5, 1.0) (valor: {})",
+            cfg.propeller.tip_mach_max_cruise
+        )));
+    }
+    require_finite("propeller.ground_clearance_min_m", cfg.propeller.ground_clearance_min_m)?;
+    if cfg.propeller.ground_clearance_min_m < 0.18 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.ground_clearance_min_m deve ser >= \
+             0.18 m (CS 23.925) (valor: {})",
+            cfg.propeller.ground_clearance_min_m
         )));
     }
 
@@ -762,6 +790,10 @@ mod tests {
             blades = 2
             psru_ratio = 1.5
             psru_efficiency = 0.95
+            shaft_height_m = 1.20
+            tip_mach_max_static = 0.85
+            tip_mach_max_cruise = 0.80
+            ground_clearance_min_m = 0.23
             [fuel_system]
             capacity_l = 200.0
             [gear]
@@ -853,6 +885,54 @@ mod tests {
         let toml = aircraft_toml_valido().replace("psru_ratio = 1.5", "psru_ratio = 0.8");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("psru_ratio"), "{err}");
+    }
+
+    // ─── [propeller] (Task 4.5) ─────────────────────────────────────────────
+
+    #[test]
+    fn aceita_diameter_m_omitido() {
+        let base = aircraft_toml_valido();
+        let toml = base.replace("diameter_m = 1.8\n", "");
+        let cfg = parse_aircraft(&toml).expect("diameter_m omitido deveria ser válido (derivado)");
+        assert!(cfg.propeller.diameter_m.is_none());
+    }
+
+    #[test]
+    fn rejeita_diameter_m_nao_positivo_quando_presente() {
+        let toml = aircraft_toml_valido().replace("diameter_m = 1.8", "diameter_m = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.diameter_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_shaft_height_m_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("shaft_height_m = 1.20", "shaft_height_m = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.shaft_height_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tip_mach_max_static_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("tip_mach_max_static = 0.85", "tip_mach_max_static = 1.2");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.tip_mach_max_static"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tip_mach_max_cruise_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("tip_mach_max_cruise = 0.80", "tip_mach_max_cruise = 0.3");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.tip_mach_max_cruise"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_ground_clearance_min_m_abaixo_de_0_18() {
+        let toml = aircraft_toml_valido()
+            .replace("ground_clearance_min_m = 0.23", "ground_clearance_min_m = 0.10");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.ground_clearance_min_m"), "{err}");
     }
 
     #[test]

@@ -291,6 +291,37 @@ pub struct GearSpec {
     pub total_weight_kg: f64,
 }
 
+/// Saída do PropellerAgent (Task 4.5) — dimensionamento/validação da hélice
+/// por Mach de ponta de pá (estático e cruzeiro) e folga de solo (CS
+/// 23.925). Quando `[propeller].diameter_m` está presente na configuração,
+/// `diameter_m` ecoa esse valor (`source = "config"`); quando omitido, é o
+/// maior diâmetro que respeita simultaneamente os dois limites de Mach e a
+/// folga mínima de solo, com margem de segurança (`source = "derivado"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PropellerSpec {
+    pub diameter_m: f64,
+    pub blades: u32,
+    /// `"config"` quando `diameter_m` vem direto do TOML, `"derivado"`
+    /// quando calculado pelo `PropellerAgent`.
+    pub source: String,
+    /// Mach de ponta de pá em condição ESTÁTICA (rpm nominal do motor via
+    /// PSRU, V=0, no aeródromo).
+    pub tip_mach_static: f64,
+    /// Mach de ponta de pá em CRUZEIRO (composição helicoidal: velocidade
+    /// tangencial da ponta + velocidade de avanço).
+    pub tip_mach_cruise_helical: f64,
+    /// Folga entre a ponta da pá e o solo (m) — `shaft_height_m − diameter_m/2`.
+    pub ground_clearance_m: f64,
+    /// Maior diâmetro (m) que respeita AMBOS os limites de Mach de ponta
+    /// (estático e cruzeiro) — o menor dos dois máximos individuais.
+    pub diameter_max_by_mach_m: f64,
+    /// Maior diâmetro (m) que respeita a folga mínima de solo.
+    pub diameter_max_by_clearance_m: f64,
+    pub ok_mach_static: bool,
+    pub ok_mach_cruise: bool,
+    pub ok_clearance: bool,
+}
+
 /// Relatório completo de validação — saída do Orchestrator
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AircraftReport {
@@ -305,5 +336,6 @@ pub struct AircraftReport {
     pub vn_diagram: Option<VnDiagramSpec>,
     pub structure: Option<StructuralSpec>,
     pub landing_gear: Option<GearSpec>,
+    pub propeller: Option<PropellerSpec>,
     pub violations: Vec<String>,
 }

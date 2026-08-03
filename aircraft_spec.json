@@ -202,6 +202,19 @@
     "actuator_power_w": 18.4932,
     "total_weight_kg": 97.0
   },
+  "propeller": {
+    "diameter_m": 1.95,
+    "blades": 2,
+    "source": "config",
+    "tip_mach_static": 0.5464063368639801,
+    "tip_mach_cruise_helical": 0.4961090043997642,
+    "ground_clearance_m": 0.275,
+    "diameter_max_by_mach_m": 3.0334567668321357,
+    "diameter_max_by_clearance_m": 2.04,
+    "ok_mach_static": true,
+    "ok_mach_cruise": true,
+    "ok_clearance": true
+  },
   "violations": [
     "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.708; x_cg=2.921m, limites em x: [3.491m, 3.741m])",
     "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.659; x_cg=2.981m, limites em x: [3.491m, 3.741m])",

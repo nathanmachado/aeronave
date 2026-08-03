@@ -8,3 +8,4 @@ pub mod structural;
 pub mod landing_gear;
 pub mod constraint_diagram;
 pub mod vn_diagram;
+pub mod propeller;

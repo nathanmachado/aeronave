@@ -2,7 +2,7 @@
 /// os requisitos do projeto e reporta violações com detalhamento.
 
 use crate::agents::weight_balance::WeightBalanceOutput;
-use crate::models::{engine::EngineSpec, requirements::Requirements, specs::{WingSpec, PropulsionSpec}};
+use crate::models::{engine::EngineSpec, requirements::Requirements, specs::{WingSpec, PropulsionSpec, PropellerSpec}};
 
 #[derive(Debug)]
 pub struct ConstraintReport {
@@ -26,6 +26,7 @@ impl ConstraintChecker {
         mtow_kg: f64,
         engine: &EngineSpec,
         wb: &WeightBalanceOutput,
+        propeller: &PropellerSpec,
     ) -> ConstraintReport {
         let mut violations = Vec::new();
         let mut warnings   = Vec::new();
@@ -141,6 +142,31 @@ impl ConstraintChecker {
             }
         }
 
+        // 11. Mach de ponta de pá e folga de solo (Task 4.5) — estático,
+        // cruzeiro e folga, cada um reportado com o diâmetro (config ou
+        // derivado) que produziu o resultado.
+        if !propeller.ok_mach_static {
+            violations.push(format!(
+                "Hélice: Mach de ponta ESTÁTICO {:.3} acima do admissível \
+                 (diâmetro {:.2}m, fonte: {})",
+                propeller.tip_mach_static, propeller.diameter_m, propeller.source
+            ));
+        }
+        if !propeller.ok_mach_cruise {
+            violations.push(format!(
+                "Hélice: Mach de ponta em CRUZEIRO (helicoidal) {:.3} acima do admissível \
+                 (diâmetro {:.2}m, fonte: {})",
+                propeller.tip_mach_cruise_helical, propeller.diameter_m, propeller.source
+            ));
+        }
+        if !propeller.ok_clearance {
+            violations.push(format!(
+                "Hélice: folga de solo {:.3}m abaixo do mínimo exigido \
+                 (diâmetro {:.2}m, fonte: {})",
+                propeller.ground_clearance_m, propeller.diameter_m, propeller.source
+            ));
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -152,19 +178,20 @@ mod tests {
     use super::*;
     use crate::agents::aerodynamics::AerodynamicsAgent;
     use crate::agents::empennage::EmpennageAgent;
+    use crate::agents::propeller::PropellerAgent;
     use crate::agents::propulsion::PropulsionAgent;
     use crate::agents::weight_balance::WeightBalanceAgent;
     use crate::models::aircraft_state::AircraftState;
     use crate::models::engine::test_fixtures::motor_generico_teste;
 
     /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec,
-    /// WeightBalanceOutput)` coerente via os agentes reais (motor sintético
-    /// de teste — não um motor real), para servir de base às asserções de
-    /// violação isolada abaixo. Os testes sobrescrevem apenas os campos de
-    /// `PropulsionSpec`/`WeightBalanceOutput` relevantes à violação
-    /// isolada em questão, para não depender do resultado real dos demais
-    /// agentes (já testados em seus próprios módulos).
-    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput) {
+    /// WeightBalanceOutput, PropellerSpec)` coerente via os agentes reais
+    /// (motor sintético de teste — não um motor real), para servir de base
+    /// às asserções de violação isolada abaixo. Os testes sobrescrevem
+    /// apenas os campos relevantes à violação isolada em questão, para não
+    /// depender do resultado real dos demais agentes (já testados em seus
+    /// próprios módulos).
+    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec) {
         let cfg    = crate::models::aircraft_config::test_fixtures::config_teste();
         let state  = AircraftState::from_config(&cfg);
         let req    = crate::models::requirements::test_fixtures::requisitos_teste();
@@ -173,19 +200,20 @@ mod tests {
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
         let emp    = EmpennageAgent::run(&wing, &cfg);
         let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
-        (req, wing, prop, engine, wb)
+        let propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
+        (req, wing, prop, engine, wb, propeller)
     }
 
     #[test]
     fn violacao_cruzeiro_inviavel_aparece_quando_infeasible() {
-        let (req, wing, mut prop, engine, wb) = setup();
+        let (req, wing, mut prop, engine, wb, propeller) = setup();
         // Força a inviabilidade independentemente do resultado real da busca
         // de rpm, para testar isoladamente a violação #9.
         prop.cruise_feasible = false;
         prop.p_req_cruise_kw = 150.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
 
         assert!(report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "esperava violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -196,12 +224,12 @@ mod tests {
 
     #[test]
     fn sem_violacao_cruzeiro_quando_feasible() {
-        let (req, wing, mut prop, engine, wb) = setup();
+        let (req, wing, mut prop, engine, wb, propeller) = setup();
         prop.cruise_feasible = true;
         prop.p_req_cruise_kw = 90.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
 
         assert!(!report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "não deveria haver violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -217,12 +245,12 @@ mod tests {
     /// fora do envelope, citando o nome do cenário e os limites em %MAC.
     #[test]
     fn violacao_de_envelope_aparece_quando_cenario_esta_fora() {
-        let (req, wing, prop, engine, wb) = setup();
+        let (req, wing, prop, engine, wb, propeller) = setup();
         assert!(wb.scenarios.iter().any(|s| !s.inside_envelope),
             "pré-condição do teste: fixture sintética deveria ter ao menos um \
              cenário fora do envelope (achado honesto, replicado do baseline real)");
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
 
         assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
             "esperava violação de envelope de CG, obteve: {:?}", report.violations);
@@ -236,14 +264,65 @@ mod tests {
     /// dentro do envelope, nenhuma violação de envelope deve aparecer.
     #[test]
     fn sem_violacao_de_envelope_quando_todos_os_cenarios_estao_dentro() {
-        let (req, wing, prop, engine, mut wb) = setup();
+        let (req, wing, prop, engine, mut wb, propeller) = setup();
         for sc in &mut wb.scenarios {
             sc.inside_envelope = true;
         }
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
 
         assert!(!report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
             "não deveria haver violação de envelope de CG, obteve: {:?}", report.violations);
+    }
+
+    // ─── Task 4.5: hélice (Mach de ponta / folga de solo) ──────────────────
+
+    #[test]
+    fn violacao_de_helice_aparece_quando_algum_ok_e_falso() {
+        let (req, wing, prop, engine, wb, mut propeller) = setup();
+        propeller.ok_mach_static = false;
+        propeller.tip_mach_static = 0.99;
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
+
+        assert!(report.violations.iter().any(|v| v.contains("Mach de ponta ESTÁTICO")),
+            "esperava violação de Mach de ponta estático, obteve: {:?}", report.violations);
+        assert!(report.violations.iter().any(|v| v.contains("0.990")),
+            "violação deveria citar o Mach observado: {:?}", report.violations);
+    }
+
+    /// Achado honesto da fixture sintética (mesma filosofia da fixture de
+    /// envelope de CG, Task 4.4): `config_teste()` usa `shaft_height_m=1.15`,
+    /// `diameter_m=Some(1.90)`, `ground_clearance_min_m=0.25` — folga real =
+    /// 1,15 − 0,95 = 0,20 m < 0,25 m, então a checagem de folga de solo falha
+    /// naturalmente (não precisa de override) para esta fixture.
+    #[test]
+    fn violacao_de_folga_de_solo_aparece_naturalmente_na_fixture_sintetica() {
+        let (req, wing, prop, engine, wb, propeller) = setup();
+        assert!(!propeller.ok_clearance,
+            "pré-condição do teste: fixture sintética (shaft_height_m=1.15, diameter=1.90, \
+             ground_clearance_min_m=0.25) deveria falhar na folga de solo — obtido \
+             ground_clearance_m={:.3}", propeller.ground_clearance_m);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
+
+        assert!(report.violations.iter().any(|v| v.contains("folga de solo")),
+            "esperava violação de folga de solo, obteve: {:?}", report.violations);
+    }
+
+    /// Sanidade inversa: se TODOS os `ok_*` estiverem artificialmente
+    /// verdadeiros (mesmo padrão de `sem_violacao_de_envelope_...` acima),
+    /// nenhuma violação de hélice deve aparecer.
+    #[test]
+    fn sem_violacao_de_helice_quando_todos_ok_forcado() {
+        let (req, wing, prop, engine, wb, mut propeller) = setup();
+        propeller.ok_mach_static = true;
+        propeller.ok_mach_cruise = true;
+        propeller.ok_clearance = true;
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Hélice:")),
+            "não deveria haver violação de hélice, obteve: {:?}", report.violations);
     }
 }

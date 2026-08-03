@@ -65,7 +65,24 @@ impl AircraftState {
             mtow_kg: cfg.sizing.mtow_initial_guess_kg,
 
             psru_ratio: cfg.propeller.psru_ratio,
-            prop_diameter_m: cfg.propeller.diameter_m,
+            // Quando `[propeller].diameter_m` está presente, usa-o
+            // diretamente (comportamento inalterado). Quando OMITIDO, usa
+            // como palpite provisório o maior diâmetro que respeita a folga
+            // de solo (`agents::propeller::diameter_max_by_clearance_m`,
+            // única restrição calculável aqui sem `EngineSpec`/
+            // `Requirements`, que `from_config` não recebe) — o valor
+            // AUTORITATIVO, que também respeita os limites de Mach de ponta
+            // (estático e cruzeiro, usando o rpm de cruzeiro real da busca
+            // de BSFC), é calculado por `agents::propeller::PropellerAgent`,
+            // rodado após o laço de convergência de MTOW (ver `main.rs`).
+            prop_diameter_m: cfg.propeller.diameter_m.unwrap_or_else(|| {
+                crate::agents::propeller::round_down_cm(
+                    crate::agents::propeller::diameter_max_by_clearance_m(
+                        cfg.propeller.shaft_height_m,
+                        cfg.propeller.ground_clearance_min_m,
+                    ) - 0.02,
+                )
+            }),
             fuel_capacity_l: cfg.fuel_system.capacity_l,
 
             gear_retractable: cfg.gear.retractable,

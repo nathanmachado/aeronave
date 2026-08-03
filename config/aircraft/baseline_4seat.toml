@@ -46,6 +46,16 @@ diameter_m = 1.95
 blades = 2
 psru_ratio = 1.867
 psru_efficiency = 0.97
+# Altura do eixo da hélice ao solo (trem estendido, m) — baseline elevado a
+# partir da estimativa anterior (~1.20 m) para dar margem de folga de solo
+# (Task 4.5, decisão de projeto do controller).
+shaft_height_m = 1.25
+# Limites de Mach de ponta de pá (Task 4.5) — verificação de compressibilidade.
+tip_mach_max_static = 0.85
+tip_mach_max_cruise = 0.80
+# Folga mínima ponta de pá → solo (m). CS 23.925 exige >= 0.18 m (7 pol);
+# usamos 0.23 m (9 pol) de margem de projeto.
+ground_clearance_min_m = 0.23
 
 [fuel_system]
 # 260 L: dimensionado pela convergência de MTOW (Task 3.1) — no MTOW

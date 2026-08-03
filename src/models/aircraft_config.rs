@@ -110,12 +110,35 @@ pub struct EmpennageCfg {
     pub eta_h: f64,
 }
 
+/// Configuração da hélice — dimensionamento/validação em
+/// `agents::propeller::PropellerAgent` (Task 4.5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropellerCfg {
-    pub diameter_m: f64,
+    /// Diâmetro da hélice (m). Quando OMITIDO do TOML (`None`), o modelo
+    /// deriva o maior diâmetro que respeita simultaneamente os limites de
+    /// Mach de ponta (estático e cruzeiro) e a folga mínima de solo — ver
+    /// `agents::propeller::PropellerAgent::run` (`PropellerSpec::source`
+    /// reporta `"config"` ou `"derivado"` conforme o caso).
+    #[serde(default)]
+    pub diameter_m: Option<f64>,
     pub blades: u32,
     pub psru_ratio: f64,
     pub psru_efficiency: f64,
+    /// Altura do eixo da hélice ao solo (m, trem estendido) — usada na
+    /// checagem de folga de solo (CS 23.925).
+    pub shaft_height_m: f64,
+    /// Mach de ponta de pá máximo admissível em condição ESTÁTICA (rpm
+    /// nominal do motor via PSRU, V=0) — tipicamente mais restritivo que o
+    /// limite de cruzeiro por não ter o alívio da velocidade de avanço na
+    /// composição vetorial helicoidal.
+    pub tip_mach_max_static: f64,
+    /// Mach de ponta de pá máximo admissível em CRUZEIRO (composição
+    /// helicoidal: velocidade tangencial da ponta + velocidade de avanço).
+    pub tip_mach_max_cruise: f64,
+    /// Folga mínima entre a ponta da pá e o solo (m). CS 23.925 exige
+    /// ≥ 0,18 m (7 pol); o baseline usa 0,23 m (9 pol) como margem de
+    /// projeto.
+    pub ground_clearance_min_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -305,10 +328,14 @@ pub mod test_fixtures {
                 eta_h: 0.92,
             },
             propeller: PropellerCfg {
-                diameter_m: 1.90,
+                diameter_m: Some(1.90),
                 blades: 2,
                 psru_ratio: 2.0,
                 psru_efficiency: 0.965,
+                shaft_height_m: 1.15,
+                tip_mach_max_static: 0.83,
+                tip_mach_max_cruise: 0.78,
+                ground_clearance_min_m: 0.25,
             },
             fuel_system: FuelSystemCfg { capacity_l: 220.0 },
             gear: GearCfg {

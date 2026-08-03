@@ -4,6 +4,7 @@ use clap::Parser;
 
 use aeronave::agents::control_surfaces::ControlSurfacesAgent;
 use aeronave::agents::performance::PerformanceAgent;
+use aeronave::agents::propeller::PropellerAgent;
 use aeronave::agents::structural::StructuralAgent;
 use aeronave::agents::landing_gear::LandingGearAgent;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
@@ -159,6 +160,24 @@ fn main() {
     println!("  Autonomia: {:.2}h  |  Alcance: {:.0}km\n",
              prop.endurance_h, prop.range_km);
 
+    // ── Agente 9: Hélice ──────────────────────────────────────────────────────
+    // Dimensionamento/validação da hélice (Task 4.5) — Mach de ponta de pá
+    // (estático e cruzeiro) e folga de solo (CS 23.925). Roda logo após a
+    // propulsão porque precisa de `prop.prop_rpm_cruise` (rpm de cruzeiro já
+    // escolhido pela busca de BSFC do PropulsionAgent).
+    println!("[ AGENTE 9 ] PropellerAgent — Mach de Ponta e Folga de Solo");
+    let propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
+    println!("  Diâmetro: {:.2}m ({})  |  Pás: {}",
+             propeller.diameter_m, propeller.source, propeller.blades);
+    println!("  Mach de ponta: {:.3} estático / {:.3} cruzeiro (helicoidal)  |  Folga de solo: {:.3}m",
+             propeller.tip_mach_static, propeller.tip_mach_cruise_helical, propeller.ground_clearance_m);
+    println!("  D_máx por Mach: {:.2}m  |  D_máx por folga: {:.2}m",
+             propeller.diameter_max_by_mach_m, propeller.diameter_max_by_clearance_m);
+    println!("  {} Mach estático  {} Mach cruzeiro  {} Folga de solo\n",
+             if propeller.ok_mach_static { "✓" } else { "✗" },
+             if propeller.ok_mach_cruise { "✓" } else { "✗" },
+             if propeller.ok_clearance { "✓" } else { "✗" });
+
     // ── Empenagem ──────────────────────────────────────────────────────────────
     // Dimensionada por coeficiente de volume (Task 4.1) — geometria pura,
     // consumida pelo NP dentro do AGENTE 3 abaixo.
@@ -309,7 +328,7 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb);
+    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb, &propeller);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -317,7 +336,7 @@ fn main() {
     let nose_ok = gear.nose_load_fraction_pct >= 8.0 && gear.nose_load_fraction_pct <= 25.0;
 
     let checks = [
-        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG"),
+        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice"),
         (perf.v_cruise_kmh >= 280.0,          "V_cruzeiro ≥ 280 km/h"),
         (prop.endurance_h  >= 8.0,            "Autonomia ≥ 8 h"),
         (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar"),
@@ -368,6 +387,7 @@ fn main() {
         vn_diagram:       Some(vn.clone()),
         structure:        Some(struc),
         landing_gear:     Some(gear),
+        propeller:        Some(propeller),
         violations:       report.violations,
     };
 
