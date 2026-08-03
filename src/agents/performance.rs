@@ -311,7 +311,7 @@ impl PerformanceAgent {
 
         PerformanceSpec {
             v_cruise_kmh:         v_max_cruise_ms * 3.6,
-            v_stall_kmh:          wing.stall_speed_kmh,
+            v_stall_kmh:          wing.stall_speed_flaps_kmh,
             rc_sl_ms:             rc_sl,
             rc_cruise_alt_ms:     rc_cruise_alt,
             service_ceiling_m:    ceiling,

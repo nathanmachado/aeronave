@@ -65,8 +65,9 @@ pub fn drag_total_n(q: f64, wing_area_m2: f64, cd: f64) -> f64 {
     q * wing_area_m2 * cd
 }
 
-/// Velocidade de stall (voo nivelado, configuração limpa):
+/// Velocidade de stall (voo nivelado):
 /// V_s = sqrt(2·W / (ρ·S·CL_max))
+/// Genérica — o chamador escolhe CL_max limpo (VS1) ou com flap (VS0).
 pub fn stall_speed_ms(weight_n: f64, rho: f64, wing_area_m2: f64, cl_max: f64) -> f64 {
     (2.0 * weight_n / (rho * wing_area_m2 * cl_max)).sqrt()
 }
@@ -120,8 +121,11 @@ impl AerodynamicsAgent {
         let cd_cruise = cd0 + cdi;
         let ld = ld_ratio(cl_cruise, cd_cruise);
 
-        // Velocidade de stall ao nível do mar (condição mais crítica)
-        let v_stall_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, CL_MAX_23015);
+        // Velocidades de stall ao nível do mar (condição mais crítica).
+        // VS0 — configuração com flap/pouso (CL_max maior → V_stall MENOR).
+        let v_stall_flaps_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, CL_MAX_23015);
+        // VS1 — configuração limpa/cruzeiro (CL_max menor → V_stall MAIOR).
+        let v_stall_clean_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, CL_MAX_CLEAN);
 
         WingSpec {
             span_m:           state.wing_span_m,
@@ -133,8 +137,10 @@ impl AerodynamicsAgent {
             cd0,
             cl_cruise,
             cd_cruise,
-            cl_max:           CL_MAX_23015,
-            stall_speed_kmh:  v_stall_ms * 3.6,
+            cl_max:                 CL_MAX_23015,
+            cl_max_clean:           CL_MAX_CLEAN,
+            stall_speed_flaps_kmh:  v_stall_flaps_ms * 3.6,
+            stall_speed_clean_kmh:  v_stall_clean_ms * 3.6,
             ld_ratio_cruise:  ld,
         }
     }
@@ -160,11 +166,36 @@ mod tests {
 
     #[test]
     fn stall_speed_fisica() {
-        // Aeronave de 1.461 kg, S=14.2m², CLmax=1.72 → V_stall ~ 98-105 km/h
+        // Aeronave de 1.461 kg, S=14.2m², CLmax=1.72 (flapada) → V_stall ~ 90-115 km/h
         let vs = stall_speed_ms(1_461.0 * G, RHO_SL, 14.2, CL_MAX_23015);
         let vs_kmh = vs * 3.6;
         assert!(vs_kmh > 90.0 && vs_kmh < 115.0,
             "V_stall esperada 90-115 km/h, obtida {vs_kmh:.1} km/h");
+    }
+
+    #[test]
+    fn vs0_flapada_menor_que_vs1_limpa() {
+        // Task 0.5: VS0 (com flap, CL_max=1.72) deve ser MENOR que VS1 (limpa,
+        // CL_max=1.45) — flap aumenta CL_max, o que reduz a velocidade de stall.
+        let state = AircraftState::initial();
+        let req = Requirements::project_default();
+        let wing = AerodynamicsAgent::run(&state, &req);
+
+        println!("VS0 (flap) = {:.1} km/h | VS1 (limpa) = {:.1} km/h",
+                 wing.stall_speed_flaps_kmh, wing.stall_speed_clean_kmh);
+
+        assert!(wing.stall_speed_flaps_kmh < wing.stall_speed_clean_kmh,
+            "VS0 (flap) {:.1} km/h deveria ser menor que VS1 (limpa) {:.1} km/h",
+            wing.stall_speed_flaps_kmh, wing.stall_speed_clean_kmh);
+
+        // Faixas físicas para MTOW=1.461kg, S=14.2m², ρ_SL=1.225, g=9.807:
+        // VS0 (CL=1.72) ≈ 111 km/h; VS1 (CL=1.45) ≈ 121 km/h.
+        assert!(wing.stall_speed_flaps_kmh > 100.0 && wing.stall_speed_flaps_kmh < 118.0,
+            "VS0 {:.1} km/h fora da faixa esperada (100-118 km/h)",
+            wing.stall_speed_flaps_kmh);
+        assert!(wing.stall_speed_clean_kmh > 115.0 && wing.stall_speed_clean_kmh < 128.0,
+            "VS1 {:.1} km/h fora da faixa esperada (115-128 km/h)",
+            wing.stall_speed_clean_kmh);
     }
 
     #[test]

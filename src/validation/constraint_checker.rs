@@ -38,12 +38,12 @@ impl ConstraintChecker {
             ));
         }
 
-        // 2. Velocidade de stall: CS-23 exige V_s ≤ V_cruise / 1.8
+        // 2. Velocidade de stall: CS-23 exige V_s0 (pouso, com flap) ≤ V_cruise / 1.8
         let v_stall_limit = req.cruise_speed_min_kmh / 1.8;
-        if wing.stall_speed_kmh > v_stall_limit {
+        if wing.stall_speed_flaps_kmh > v_stall_limit {
             violations.push(format!(
-                "V_stall {:.1} km/h excede limite CS-23 de {:.1} km/h (= V_cruise/1.8)",
-                wing.stall_speed_kmh, v_stall_limit
+                "V_stall (VS0) {:.1} km/h excede limite CS-23 de {:.1} km/h (= V_cruise/1.8)",
+                wing.stall_speed_flaps_kmh, v_stall_limit
             ));
         }
 
@@ -63,11 +63,12 @@ impl ConstraintChecker {
             ));
         }
 
-        // 5. Stall em boa margem: V_stall deve ser < 115 km/h para operação em grama/terra
-        if wing.stall_speed_kmh > 115.0 {
+        // 5. Stall em boa margem: V_s0 (pouso, com flap) deve ser < 115 km/h
+        //    para operação em grama/terra
+        if wing.stall_speed_flaps_kmh > 115.0 {
             warnings.push(format!(
-                "V_stall {:.1} km/h acima de 115 km/h — distâncias de pouso em grama aumentam",
-                wing.stall_speed_kmh
+                "V_stall (VS0) {:.1} km/h acima de 115 km/h — distâncias de pouso em grama aumentam",
+                wing.stall_speed_flaps_kmh
             ));
         }
 

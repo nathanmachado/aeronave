@@ -12,8 +12,15 @@ pub struct WingSpec {
     pub cd0: f64,
     pub cl_cruise: f64,
     pub cd_cruise: f64,
+    /// CL_max com flap/slat (configuração de pouso/decolagem) — usado nas
+    /// distâncias de decolagem/pouso (performance.rs).
     pub cl_max: f64,
-    pub stall_speed_kmh: f64,
+    /// CL_max em configuração limpa (cruzeiro, sem flap).
+    pub cl_max_clean: f64,
+    /// VS0 — velocidade de stall com flap (configuração de pouso), km/h.
+    pub stall_speed_flaps_kmh: f64,
+    /// VS1 — velocidade de stall em configuração limpa, km/h.
+    pub stall_speed_clean_kmh: f64,
     pub ld_ratio_cruise: f64,
 }
 
@@ -92,6 +99,8 @@ pub struct StructuralSpec {
     pub flutter_speed_kmh: f64,
     /// Velocidade de mergulho de projeto VD (km/h)
     pub design_dive_speed_kmh: f64,
+    /// Velocidade de manobra VA (km/h) — CS 23.335, calculada com VS1 (limpa)
+    pub va_kmh: f64,
     /// Vida em fadiga estimada (ciclos de voo)
     pub fatigue_life_cycles: f64,
     /// Verificação: flutter OK?

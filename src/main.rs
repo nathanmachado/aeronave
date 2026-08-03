@@ -31,9 +31,10 @@ fn main() {
              wing.span_m, wing.area_m2, wing.aspect_ratio);
     println!("  Perfil: {}  |  e={:.3}  |  L/D={:.1}",
              wing.airfoil, wing.oswald_efficiency, wing.ld_ratio_cruise);
-    println!("  CD0={:.4}  CL_cruise={:.3}  CD_cruise={:.4}  CL_max={:.2}",
-             wing.cd0, wing.cl_cruise, wing.cd_cruise, wing.cl_max);
-    println!("  V_stall (SL): {:.1} km/h\n", wing.stall_speed_kmh);
+    println!("  CD0={:.4}  CL_cruise={:.3}  CD_cruise={:.4}  CL_max(flap)={:.2}  CL_max(limpa)={:.2}",
+             wing.cd0, wing.cl_cruise, wing.cd_cruise, wing.cl_max, wing.cl_max_clean);
+    println!("  VS0 (flap, SL): {:.1} km/h  |  VS1 (limpa, SL): {:.1} km/h\n",
+             wing.stall_speed_flaps_kmh, wing.stall_speed_clean_kmh);
 
     // ── Agente 2: Propulsão ───────────────────────────────────────────────────
     println!("[ AGENTE 2 ] PropulsionAgent — Toyota 1GD-FTV 2.8T + PSRU");
@@ -90,8 +91,8 @@ fn main() {
              struc.spar_web_thickness_mm);
     println!("  Pele mín: {:.1}mm  |  Cavernas: {}mm",
              struc.skin_min_thickness_mm, struc.frame_spacing_mm as u32);
-    println!("  VD: {:.0}km/h  |  V_flutter: {:.0}km/h  |  Flutter OK: {}",
-             struc.design_dive_speed_kmh, struc.flutter_speed_kmh,
+    println!("  VD: {:.0}km/h  |  VA (VS1 limpa): {:.0}km/h  |  V_flutter: {:.0}km/h  |  Flutter OK: {}",
+             struc.design_dive_speed_kmh, struc.va_kmh, struc.flutter_speed_kmh,
              if struc.flutter_ok { "✓" } else { "✗ RISCO" });
     println!("  Vida fadiga: {:.2e} ciclos\n", struc.fatigue_life_cycles);
 

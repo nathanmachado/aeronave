@@ -62,8 +62,10 @@ pub fn vd_ms(vc_ms: f64) -> f64 { 1.25 * vc_ms }
 
 /// Velocidade de manobra VA (m/s) — CS 23.335:
 /// VA = VS1 × √n_lim   (não exceder abaixo desta velocidade)
-pub fn va_ms(v_stall_ms: f64) -> f64 {
-    v_stall_ms * load_factor_limit().sqrt()
+/// IMPORTANTE: usa VS1 (stall em configuração LIMPA, wing.stall_speed_clean_kmh),
+/// não VS0 (stall com flap) — CS 23.335 define VA a partir do stall limpo.
+pub fn va_ms(v_stall_clean_ms: f64) -> f64 {
+    v_stall_clean_ms * load_factor_limit().sqrt()
 }
 
 // ─── MOMENTO FLETOR NA RAIZ DA ASA ────────────────────────────────────────────
@@ -263,6 +265,10 @@ impl StructuralAgent {
         let vf   = flutter_speed_ms(vd, wing.area_m2, wing.span_m, chord_root_m, h_spar, wing_mass_kg);
         let fl_ok = flutter_check(vf, vd);
 
+        // Velocidade de manobra VA — CS 23.335, a partir de VS1 (stall limpa)
+        let vs1_ms = wing.stall_speed_clean_kmh / 3.6;
+        let va = va_ms(vs1_ms);
+
         // Tensão operacional na longarina (1g nivelado — base para fadiga)
         // M / W = Pa; dividir por 1e6 para converter a MPa (unidade de fatigue_life_cycles)
         let m_1g = wing_root_bending_nm(1.0, mtow_kg, wing.span_m,
@@ -285,6 +291,7 @@ impl StructuralAgent {
             frame_spacing_mm:            300.0, // espaçamento de cavernas da fuselagem
             flutter_speed_kmh:           vf * 3.6,
             design_dive_speed_kmh:       vd * 3.6,
+            va_kmh:                      va * 3.6,
             fatigue_life_cycles:         cycles,
             flutter_ok:                  fl_ok,
         }
@@ -372,6 +379,28 @@ mod tests {
         let vida_baixa_tensao = fatigue_life_cycles(80.0, 40.0);
         assert!(vida_alta_tensao < 1e7, "alta tensão deveria dar vida finita < 10⁷");
         assert!(vida_baixa_tensao >= 1e9, "baixa tensão deveria dar vida quase infinita");
+    }
+
+    #[test]
+    fn va_usa_vs1_limpa_nao_vs0_flapada() {
+        // Task 0.5: VA deve ser derivada de VS1 (limpa), que é MAIOR que VS0
+        // (flapada) — logo VA calculada corretamente deve ser MAIOR do que
+        // seria se (incorretamente) derivada de VS0.
+        let w = wing();
+        let struc = StructuralAgent::run(&w, 1_527.0, 130.0);
+
+        let va_esperada_kmh = w.stall_speed_clean_kmh * load_factor_limit().sqrt();
+        let va_se_fosse_vs0_kmh = w.stall_speed_flaps_kmh * load_factor_limit().sqrt();
+
+        println!("VA (VS1 correta) = {:.1} km/h | VA (se fosse VS0, incorreta) = {:.1} km/h",
+                 struc.va_kmh, va_se_fosse_vs0_kmh);
+
+        assert!((struc.va_kmh - va_esperada_kmh).abs() < 0.1,
+            "VA {:.1} km/h não corresponde a VS1×√3.8 = {:.1} km/h",
+            struc.va_kmh, va_esperada_kmh);
+        assert!(struc.va_kmh > va_se_fosse_vs0_kmh,
+            "VA {:.1} km/h deveria ser maior que a VA calculada (incorretamente) com VS0 {:.1} km/h",
+            struc.va_kmh, va_se_fosse_vs0_kmh);
     }
 
     #[test]
