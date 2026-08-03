@@ -16,6 +16,7 @@
 
 use crate::models::{
     aircraft_state::AircraftState,
+    engine::EngineSpec,
     specs::{WingSpec, WeightSpec},
 };
 
@@ -115,12 +116,10 @@ impl ArmConfig {
 /// Retorna os itens de peso do avião vazio operacional (OEW).
 /// Baseado em estimativas de Raymer (Tabela 6.1) e dados de aeronaves similares
 /// em construção composta (fiberglass + reforço carbono nas longarinas).
-pub fn oew_items(arms: &ArmConfig, fuel_capacity_l: f64) -> Vec<MassItem> {
+pub fn oew_items(arms: &ArmConfig, fuel_capacity_l: f64, engine: &EngineSpec) -> Vec<MassItem> {
     let _ = fuel_capacity_l; // reservado para variante com tanques maiores
     vec![
-        // Motor + acessórios: massa ainda hardcoded (195 kg) — integração
-        // com EngineSpec::mass_kg é escopo da Task 1.5.
-        MassItem { name: "Motor + acessórios",     mass_kg: 195.0, arm_m: arms.engine_cg_m },
+        MassItem { name: "Motor + acessórios",     mass_kg: engine.mass_kg, arm_m: arms.engine_cg_m },
         MassItem { name: "PSRU + hélice + capô",  mass_kg:  65.0, arm_m: arms.engine_cg_m + 0.3 },
         MassItem { name: "Sistema de resfriamento",mass_kg: 18.0, arm_m: arms.engine_cg_m + 0.5 },
         MassItem { name: "Aviônicos + elétrica",   mass_kg: 60.0, arm_m: arms.avionics_m },
@@ -237,7 +236,7 @@ pub struct ScenarioResult {
 }
 
 impl WeightBalanceAgent {
-    pub fn run(state: &AircraftState, wing: &WingSpec) -> WeightBalanceOutput {
+    pub fn run(state: &AircraftState, wing: &WingSpec, engine: &EngineSpec) -> WeightBalanceOutput {
         let arms = ArmConfig::default_layout();
 
         // Geometria da asa
@@ -253,7 +252,7 @@ impl WeightBalanceAgent {
         let x_np = neutral_point_m(arms.wing_le_root_m, mac, wing.span_m, 8.2);
 
         // Peso vazio operacional
-        let oew_items = oew_items(&arms, state.fuel_capacity_l);
+        let oew_items = oew_items(&arms, state.fuel_capacity_l, engine);
         let (oew_kg, x_cg_oew) = cg_from_items(&oew_items);
 
         // Peso dos passageiros (90 kg cada)
@@ -359,6 +358,7 @@ mod tests {
     use super::*;
     use crate::models::aircraft_state::AircraftState;
     use crate::agents::aerodynamics::AerodynamicsAgent;
+    use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
     use crate::models::requirements::Requirements;
 
     #[test]
@@ -379,21 +379,25 @@ mod tests {
 
     #[test]
     fn oew_dentro_do_orcamento() {
-        let state = AircraftState::initial();
-        let arms  = ArmConfig::default_layout();
-        let items = oew_items(&arms, state.fuel_capacity_l);
+        let state  = AircraftState::initial();
+        let arms   = ArmConfig::default_layout();
+        let engine = engine_teste();
+        let items  = oew_items(&arms, state.fuel_capacity_l, &engine);
         let (oew, _) = cg_from_items(&items);
-        // OEW deve ficar entre 830 e 1.050 kg (aeronave 4 lugares composta, motor diesel)
-        assert!(oew > 830.0 && oew < 1_050.0,
-            "OEW = {oew:.1} kg fora do intervalo esperado (830–1.050 kg)");
+        // Fixture sintética de teste (motor_generico_teste, 150 kg) — 45 kg
+        // mais leve que o Toyota 1GD-FTV real (195 kg) usado em produção.
+        // Faixa deslocada de [830, 1.050] para [785, 1.005] kg.
+        assert!(oew > 785.0 && oew < 1_005.0,
+            "OEW = {oew:.1} kg fora do intervalo esperado (785–1.005 kg)");
     }
 
     #[test]
     fn todos_os_cenarios_estaveis() {
-        let state = AircraftState::initial();
-        let req   = Requirements::project_default();
-        let wing  = AerodynamicsAgent::run(&state, &req);
-        let wb    = WeightBalanceAgent::run(&state, &wing);
+        let state  = AircraftState::initial();
+        let req    = Requirements::project_default();
+        let wing   = AerodynamicsAgent::run(&state, &req);
+        let engine = engine_teste();
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine);
 
         for sc in &wb.scenarios {
             assert!(sc.stable,
@@ -404,14 +408,17 @@ mod tests {
 
     #[test]
     fn mtow_dentro_do_limite_projeto() {
-        let state = AircraftState::initial();
-        let req   = Requirements::project_default();
-        let wing  = AerodynamicsAgent::run(&state, &req);
-        let wb    = WeightBalanceAgent::run(&state, &wing);
+        let state  = AircraftState::initial();
+        let req    = Requirements::project_default();
+        let wing   = AerodynamicsAgent::run(&state, &req);
+        let engine = engine_teste();
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine);
 
-        // MTOW calculado deve ficar entre 1.350 e 1.600 kg
+        // MTOW calculado deve ficar entre 1.305 e 1.555 kg (faixa original
+        // 1.350–1.600 kg deslocada em -45 kg pela fixture sintética de teste,
+        // 45 kg mais leve que o Toyota real usado em produção).
         let mtow = wb.spec.mtow_kg;
-        assert!(mtow > 1_350.0 && mtow < 1_600.0,
-            "MTOW = {mtow:.1} kg fora do intervalo (1.350–1.600 kg)");
+        assert!(mtow > 1_305.0 && mtow < 1_555.0,
+            "MTOW = {mtow:.1} kg fora do intervalo (1.305–1.555 kg)");
     }
 }

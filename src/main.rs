@@ -60,7 +60,7 @@ fn main() {
 
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
-    let wb = WeightBalanceAgent::run(&state, &wing);
+    let wb = WeightBalanceAgent::run(&state, &wing, &engine);
     println!("  Corda: raiz {:.3}m  ponta {:.3}m  MAC {:.3}m",
              wb.chord_root_m, wb.chord_tip_m, wb.mac_m);
     println!("  OEW: {:.1}kg  |  MTOW: {:.1}kg  |  NP: {:.3}m do nariz",

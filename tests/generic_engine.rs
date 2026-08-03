@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use aeronave::agents::aerodynamics::AerodynamicsAgent;
 use aeronave::agents::performance::max_level_speed_ms;
 use aeronave::agents::propulsion::PropulsionAgent;
+use aeronave::agents::weight_balance::WeightBalanceAgent;
 use aeronave::models::aircraft_state::AircraftState;
 use aeronave::models::config::load_engine;
 use aeronave::models::requirements::Requirements;
@@ -55,6 +56,48 @@ fn trocar_motor_muda_resultado_sem_mudar_codigo() {
     assert!(!p_rotax.cruise_feasible,
         "Rotax 915iS (~70 kW de pico) não deveria sustentar 280 km/h com esta célula \
          dimensionada para o Toyota (~150 kW) — física honesta, não um bug");
+}
+
+/// Task 1.5: a massa do motor no orçamento de peso (`WeightBalanceAgent`)
+/// vem de `EngineSpec::mass_kg`, não de um valor hardcoded em `src/`.
+/// Trocar o motor Toyota (195 kg) pelo Rotax (84 kg) deve reduzir o OEW em
+/// ~111 kg e deslocar o CG para trás (motor mais leve no nariz).
+#[test]
+fn massa_do_motor_afeta_oew_e_cg() {
+    let state = AircraftState::initial();
+    let req   = Requirements::project_default();
+    let wing  = AerodynamicsAgent::run(&state, &req);
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let rotax  = load_engine(&config_path("config/engines/rotax_915is.toml")).unwrap();
+
+    println!("Toyota mass_kg = {:.1} | Rotax mass_kg = {:.1}", toyota.mass_kg, rotax.mass_kg);
+
+    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota);
+    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax);
+
+    println!(
+        "OEW Toyota = {:.1} kg | OEW Rotax = {:.1} kg | delta = {:.1} kg",
+        wb_toyota.oew_kg, wb_rotax.oew_kg, wb_toyota.oew_kg - wb_rotax.oew_kg
+    );
+
+    let mass_delta = toyota.mass_kg - rotax.mass_kg;
+    assert!((wb_toyota.oew_kg - wb_rotax.oew_kg - mass_delta).abs() < 0.5,
+        "delta de OEW ({:.1} kg) deveria refletir exatamente o delta de massa \
+         do motor ({:.1} kg) — a massa do item 'Motor + acessórios' flui direto \
+         do EngineSpec para o item de peso, sem outros termos dependentes dela",
+        wb_toyota.oew_kg - wb_rotax.oew_kg, mass_delta);
+    assert!((wb_toyota.oew_kg - wb_rotax.oew_kg - 111.0).abs() < 5.0,
+        "delta de OEW esperado ~111 kg (195 kg Toyota - 84 kg Rotax), obtido {:.1} kg",
+        wb_toyota.oew_kg - wb_rotax.oew_kg);
+
+    // Cenários alinhados por índice (mesma ordem/definição em ambas as rodadas)
+    for (sc_toyota, sc_rotax) in wb_toyota.scenarios.iter().zip(wb_rotax.scenarios.iter()) {
+        assert_eq!(sc_toyota.name, sc_rotax.name);
+        assert!(sc_rotax.x_cg_m > sc_toyota.x_cg_m,
+            "Cenário '{}': motor mais leve no nariz (Rotax {:.1} kg vs Toyota {:.1} kg) \
+             deveria deslocar o CG para trás — x_cg Toyota={:.3}m, Rotax={:.3}m",
+            sc_toyota.name, rotax.mass_kg, toyota.mass_kg, sc_toyota.x_cg_m, sc_rotax.x_cg_m);
+    }
 }
 
 // Histórico (Task 0.3 → Task 1.4): corrigir load_fraction para referenciar

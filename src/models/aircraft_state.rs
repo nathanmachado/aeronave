@@ -14,7 +14,6 @@ pub struct AircraftState {
     pub oew_kg: f64,
 
     // --- Propulsão ---
-    pub engine_power_hp: f64,
     pub psru_ratio: f64,
     pub prop_diameter_m: f64,
     pub fuel_capacity_l: f64,
@@ -36,7 +35,6 @@ impl AircraftState {
             mtow_kg: 1_461.0,
             oew_kg: 1_021.0,
 
-            engine_power_hp: 204.0,
             psru_ratio: 1.867,
             prop_diameter_m: 1.95,
             fuel_capacity_l: 240.0,  // 240L: 8.18h autonomia @ 26.4 L/h (margem de +11 min)
