@@ -149,11 +149,31 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// Caminho feliz explícito (Task 3.1): roda o motor padrão via `--engine`
 /// explícito (não apenas o default do `clap`) com `--out` apontando para um
 /// arquivo temporário, e confirma que o sizing converge e o JSON é gerado
-/// com sucesso — uma rede de segurança independente do teste "sem
-/// argumentos" acima, para o caso de algum default do `clap` mudar sem que
-/// o pipeline de sizing em si esteja quebrado.
+/// — uma rede de segurança independente do teste "sem argumentos" acima,
+/// para o caso de algum default do `clap` mudar sem que o pipeline de
+/// sizing em si esteja quebrado.
+///
+/// NOTA (Task 4.4 — achado honesto de projeto, NÃO um bug deste código): com
+/// o envelope de CG ADMISSÍVEL (limites vindos de `[stability]`
+/// sm_min=0.05/sm_max=0.25, não mais apenas `SM > 0.03` isolado), a
+/// aeronave-base real fica com `validation_status: FAIL`. O ponto neutro
+/// calculado pelo modelo de área de cauda (Task 4.1, x_np≈3,803m,
+/// MAC≈1,2463m) resulta num limite dianteiro do envelope em ~47,5% MAC —
+/// bem ATRÁS de todos os 6 cenários de carga reais (que ficam entre ~1,7%
+/// e ~29,4% MAC). Ou seja: pelo critério de autoridade de profundor
+/// (sm_max), a aeronave-base é excessivamente estável/nose-heavy — toda
+/// combinação de carga real fica à FRENTE do limite dianteiro admissível.
+/// Isso é uma descoberta de engenharia real sobre o layout atual de braços
+/// (não um erro de implementação da Task 4.4) — decisão de projeto para
+/// revisão humana futura: mover o bordo de ataque da asa mais para trás
+/// (`wing.le_root_x_m`), revisar os braços de `[arms]`, ou reexaminar a
+/// fidelidade do modelo de NP (`eta_h`/inclinação de sustentação) da
+/// empenagem dimensionada na Task 4.1. O binário ainda sai com código 0
+/// (não há `process::exit` condicionado a `validation_status`) — apenas o
+/// conteúdo do relatório reflete a falha, honestamente. Ver
+/// task-4.4-report.md para a tabela completa por cenário.
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_converge_com_sucesso() {
+fn engine_padrao_explicito_com_out_tempfile_converge_mas_reporta_fail_honesto_de_envelope_cg() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -173,15 +193,21 @@ fn engine_padrao_explicito_com_out_tempfile_converge_com_sucesso() {
         .expect("falha ao executar o binário aeronave");
 
     assert!(output.status.success(),
-        "binário deveria convergir e sair com sucesso com o motor/aeronave/missão reais \
-         passados explicitamente: stderr={}",
+        "binário deveria convergir e sair com sucesso (código 0) com o motor/aeronave/missão \
+         reais passados explicitamente — o achado do envelope de CG (ver nota acima) aparece \
+         no CONTEÚDO do relatório, não no código de saída: stderr={}",
         String::from_utf8_lossy(&output.stderr));
 
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    assert!(json.contains("\"validation_status\": \"PASS\""),
-        "JSON de saída deveria reportar validation_status PASS:\n{json}");
+    // Achado honesto (Task 4.4, ver nota acima): validation_status É FAIL —
+    // não mascarar isso re-testando por PASS.
+    assert!(json.contains("\"validation_status\": \"FAIL\""),
+        "JSON de saída deveria reportar validation_status FAIL (achado honesto do envelope \
+         de CG — ver comentário da task-4.4-report.md):\n{json}");
+    assert!(json.contains("fora do envelope de CG admissível"),
+        "violations do JSON deveriam citar cenários fora do envelope de CG admissível:\n{json}");
 
     let _ = std::fs::remove_file(&out_path);
 }

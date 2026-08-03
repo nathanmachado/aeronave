@@ -146,9 +146,22 @@ pub struct WeightSpec {
     pub mtow_kg: f64,
     pub payload_kg: f64,
     pub fuel_mass_kg: f64,
+    /// CG mais dianteiro OBSERVADO entre os cenários de carga (%MAC) — não
+    /// confundir com `cg_limit_fwd_pct_mac`, que é o limite ADMISSÍVEL
+    /// (Task 4.4).
     pub cg_mac_fwd_pct: f64,
+    /// CG mais traseiro OBSERVADO entre os cenários de carga (%MAC) — não
+    /// confundir com `cg_limit_aft_pct_mac`, que é o limite ADMISSÍVEL.
     pub cg_mac_aft_pct: f64,
     pub static_margin_pct: f64,
+    /// Limite DIANTEIRO do envelope de CG admissível (%MAC) — vem de
+    /// `stability.sm_max` (proxy de autoridade de profundor). CG à frente
+    /// deste limite excede a margem estática máxima aceitável.
+    pub cg_limit_fwd_pct_mac: f64,
+    /// Limite TRASEIRO do envelope de CG admissível (%MAC) — vem de
+    /// `stability.sm_min` (piso de estabilidade estática). CG atrás deste
+    /// limite fica abaixo da margem estática mínima aceitável.
+    pub cg_limit_aft_pct_mac: f64,
 }
 
 /// Saída do PerformanceAgent (preenchida na Fase seguinte)

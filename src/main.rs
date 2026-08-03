@@ -199,12 +199,26 @@ fn main() {
              wb.chord_root_m, wb.chord_tip_m, wb.mac_m);
     println!("  OEW: {:.1}kg  |  MTOW (cenário estrutural, tanque cheio): {:.1}kg  |  NP: {:.3}m do nariz",
              wb.oew_kg, wb.spec.mtow_kg, wb.x_np_m);
-    println!("  Envelope CG: {:.1}%–{:.1}% MAC  |  SM mín: {:.1}%",
+    println!("  CG observado nos cenários: {:.1}%–{:.1}% MAC  |  SM mín: {:.1}%",
              wb.spec.cg_mac_fwd_pct, wb.spec.cg_mac_aft_pct,
              wb.spec.static_margin_pct);
     let all_stable = wb.scenarios.iter().all(|s| s.stable);
-    println!("  Todos os cenários estáveis: {}\n",
+    println!("  Todos os cenários estáveis (SM>3%): {}",
              if all_stable { "✓ SIM" } else { "✗ NÃO" });
+
+    // Envelope de CG ADMISSÍVEL (Task 4.4) — limites vindos de
+    // `[stability]` (sm_min/sm_max), não dos extremos observados acima.
+    println!("  Envelope de CG ADMISSÍVEL: {:.1}%–{:.1}% MAC  (sm_min={:.2}, sm_max={:.2})",
+             wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
+             cfg.stability.sm_min, cfg.stability.sm_max);
+    for sc in &wb.scenarios {
+        println!("    {} {:30} CG={:5.1}% MAC  SM={:.3}",
+                 if sc.inside_envelope { "✓" } else { "✗" },
+                 sc.name, sc.cg_pct_mac, sc.static_margin);
+    }
+    let all_inside_envelope = wb.scenarios.iter().all(|s| s.inside_envelope);
+    println!("  Todos os cenários dentro do envelope admissível: {}\n",
+             if all_inside_envelope { "✓ SIM" } else { "✗ NÃO" });
 
     // ── Diagrama V-n completo com rajadas (Task 4.3, CS 23.333/.341) ───────────
     // Roda após o WeightBalanceAgent (precisa do MTOW de envelope e da massa
@@ -295,7 +309,7 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine);
+    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -303,7 +317,7 @@ fn main() {
     let nose_ok = gear.nose_load_fraction_pct >= 8.0 && gear.nose_load_fraction_pct <= 25.0;
 
     let checks = [
-        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall"),
+        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG"),
         (perf.v_cruise_kmh >= 280.0,          "V_cruzeiro ≥ 280 km/h"),
         (prop.endurance_h  >= 8.0,            "Autonomia ≥ 8 h"),
         (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar"),
@@ -311,7 +325,8 @@ fn main() {
         (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)"),
         (tip_ok,                              "Anti-tombamento < 55°"),
         (nose_ok,                             "Carga nariz 8–25%"),
-        (all_stable,                          "Estabilidade longitudinal (todos cenários)"),
+        (all_stable,                          "Estabilidade longitudinal (todos cenários, SM>3%, referência)"),
+        (all_inside_envelope,                 "Envelope de CG admissível (todos cenários, Task 4.4)"),
     ];
 
     let all_ok = checks.iter().all(|(ok, _)| *ok);

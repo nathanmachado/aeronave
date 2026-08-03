@@ -410,6 +410,31 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // [drag]
     require_non_negative("drag.cd0_misc", cfg.drag.cd0_misc)?;
 
+    // [stability] (Task 4.4) — limites de estabilidade que definem o
+    // envelope de CG admissível: 0 < sm_min < sm_max < 0.5.
+    require_finite("stability.sm_min", cfg.stability.sm_min)?;
+    require_finite("stability.sm_max", cfg.stability.sm_max)?;
+    if cfg.stability.sm_min <= 0.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.sm_min deve ser positivo (valor: {})",
+            cfg.stability.sm_min
+        )));
+    }
+    if cfg.stability.sm_min >= cfg.stability.sm_max {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.sm_min ({}) deve ser menor que \
+             stability.sm_max ({})",
+            cfg.stability.sm_min, cfg.stability.sm_max
+        )));
+    }
+    if cfg.stability.sm_max >= 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.sm_max deve ser menor que 0.5 \
+             (valor: {})",
+            cfg.stability.sm_max
+        )));
+    }
+
     // [[masses.items]]
     if cfg.masses.items.is_empty() {
         return Err(ConfigError::Validation(
@@ -765,6 +790,9 @@ mod tests {
             design_category = "normal"
             [drag]
             cd0_misc = 0.003
+            [stability]
+            sm_min = 0.05
+            sm_max = 0.25
             [control_surfaces]
             aileron_span_start_frac = 0.55
             aileron_span_end_frac = 0.90
@@ -1021,6 +1049,37 @@ mod tests {
         assert!(err.to_string().contains("flap_span_end_frac"), "{err}");
         assert!(err.to_string().contains("aileron_span_start_frac"), "{err}");
         assert!(err.to_string().contains("sobrepor"), "{err}");
+    }
+
+    // ─── [stability] (Task 4.4) ─────────────────────────────────────────────
+
+    #[test]
+    fn rejeita_sm_min_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.sm_min"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_sm_min_maior_ou_igual_a_sm_max() {
+        let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = 0.30");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.sm_min"), "{err}");
+        assert!(err.to_string().contains("stability.sm_max"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_sm_max_maior_ou_igual_a_0_5() {
+        let toml = aircraft_toml_valido().replace("sm_max = 0.25", "sm_max = 0.55");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.sm_max"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_sm_min_nao_finito() {
+        let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
     }
 
     // ─── MISSÃO (REQUISITOS) ────────────────────────────────────────────────

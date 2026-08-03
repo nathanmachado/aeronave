@@ -86,6 +86,14 @@ design_category = "normal"    # normal | utility | acrobatic → n_lim 3.8/4.4/6
 [drag]
 cd0_misc = 0.003
 
+# Envelope de CG admissível (Task 4.4) — limites de estabilidade estática
+# que definem o CG mais traseiro (sm_min) e mais dianteiro (sm_max)
+# aceitáveis, em contraste com os extremos apenas OBSERVADOS entre os
+# cenários de carga (ver weight_balance::cg_limit_fwd_m/cg_limit_aft_m).
+[stability]
+sm_min = 0.05   # margem estática mínima — limite TRASEIRO do CG
+sm_max = 0.25   # proxy de autoridade de profundor (flare) — limite DIANTEIRO do CG
+
 # Superfícies de controle (Task 4.2) — frações históricas (Raymer Tab. 6.5,
 # monomotor GA) que dimensionam aileron, flap, profundor e leme a partir da
 # asa (aileron/flap) e da empenagem (profundor/leme) já dimensionadas.

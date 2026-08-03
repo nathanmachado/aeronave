@@ -1,6 +1,7 @@
 /// ConstraintChecker — verifica se os resultados dos agentes satisfazem
 /// os requisitos do projeto e reporta violações com detalhamento.
 
+use crate::agents::weight_balance::WeightBalanceOutput;
 use crate::models::{engine::EngineSpec, requirements::Requirements, specs::{WingSpec, PropulsionSpec}};
 
 #[derive(Debug)]
@@ -24,6 +25,7 @@ impl ConstraintChecker {
         prop: &PropulsionSpec,
         mtow_kg: f64,
         engine: &EngineSpec,
+        wb: &WeightBalanceOutput,
     ) -> ConstraintReport {
         let mut violations = Vec::new();
         let mut warnings   = Vec::new();
@@ -114,6 +116,31 @@ impl ConstraintChecker {
             ));
         }
 
+        // 10. Envelope de CG admissível (Task 4.4): critério de aceite
+        // substitui a antiga checagem isolada `sm > 0.03` — agora TODO
+        // cenário de carga precisa ter o CG dentro de
+        // [cg_limit_fwd_pct_mac, cg_limit_aft_pct_mac], os limites vindos
+        // dos critérios de estabilidade de `[stability]` (sm_min/sm_max),
+        // não apenas os extremos observados entre os cenários.
+        // Limites físicos (m do nariz), reconstruídos a partir de
+        // `cg_limit_fwd/aft_pct_mac` — inverso de `weight_balance::cg_pct_mac`
+        // (%MAC = (x−x_mac_le)/MAC×100) contra `wb.mac_le_x_m`/`wb.mac_m`.
+        let x_limit_fwd_m = wb.mac_le_x_m + wb.spec.cg_limit_fwd_pct_mac / 100.0 * wb.mac_m;
+        let x_limit_aft_m = wb.mac_le_x_m + wb.spec.cg_limit_aft_pct_mac / 100.0 * wb.mac_m;
+        for sc in &wb.scenarios {
+            if !sc.inside_envelope {
+                violations.push(format!(
+                    "Cenário '{}': CG {:.1}% MAC fora do envelope de CG admissível \
+                     [{:.1}%–{:.1}%] (SM={:.3}; x_cg={:.3}m, limites em x: \
+                     [{:.3}m, {:.3}m])",
+                    sc.name, sc.cg_pct_mac,
+                    wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
+                    sc.static_margin, sc.x_cg_m,
+                    x_limit_fwd_m, x_limit_aft_m,
+                ));
+            }
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -124,36 +151,41 @@ impl ConstraintChecker {
 mod tests {
     use super::*;
     use crate::agents::aerodynamics::AerodynamicsAgent;
+    use crate::agents::empennage::EmpennageAgent;
     use crate::agents::propulsion::PropulsionAgent;
+    use crate::agents::weight_balance::WeightBalanceAgent;
     use crate::models::aircraft_state::AircraftState;
     use crate::models::engine::test_fixtures::motor_generico_teste;
 
-    /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec)` coerente
-    /// via os agentes reais (motor sintético de teste — não um motor real),
-    /// para servir de base às asserções de violação isolada abaixo. Os
-    /// testes sobrescrevem apenas os campos de `PropulsionSpec` relevantes à
-    /// violação #9, para não depender do resultado real de
-    /// `search_cruise_rpm` (que já é testado em `propulsion.rs`).
-    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec) {
+    /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec,
+    /// WeightBalanceOutput)` coerente via os agentes reais (motor sintético
+    /// de teste — não um motor real), para servir de base às asserções de
+    /// violação isolada abaixo. Os testes sobrescrevem apenas os campos de
+    /// `PropulsionSpec`/`WeightBalanceOutput` relevantes à violação
+    /// isolada em questão, para não depender do resultado real dos demais
+    /// agentes (já testados em seus próprios módulos).
+    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput) {
         let cfg    = crate::models::aircraft_config::test_fixtures::config_teste();
         let state  = AircraftState::from_config(&cfg);
         let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = motor_generico_teste();
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
-        (req, wing, prop, engine)
+        let emp    = EmpennageAgent::run(&wing, &cfg);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
+        (req, wing, prop, engine, wb)
     }
 
     #[test]
     fn violacao_cruzeiro_inviavel_aparece_quando_infeasible() {
-        let (req, wing, mut prop, engine) = setup();
+        let (req, wing, mut prop, engine, wb) = setup();
         // Força a inviabilidade independentemente do resultado real da busca
         // de rpm, para testar isoladamente a violação #9.
         prop.cruise_feasible = false;
         prop.p_req_cruise_kw = 150.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
 
         assert!(report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "esperava violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -164,14 +196,54 @@ mod tests {
 
     #[test]
     fn sem_violacao_cruzeiro_quando_feasible() {
-        let (req, wing, mut prop, engine) = setup();
+        let (req, wing, mut prop, engine, wb) = setup();
         prop.cruise_feasible = true;
         prop.p_req_cruise_kw = 90.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
 
         assert!(!report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "não deveria haver violação de cruzeiro inviável, obteve: {:?}", report.violations);
+    }
+
+    // ─── Task 4.4: envelope de CG admissível ─────────────────────────────
+
+    /// Com a fixture sintética `config_teste()` (mesmo achado honesto do
+    /// baseline real — ver `weight_balance::tests` e task-4.4-report.md), os
+    /// cenários de carga ficam à frente do limite dianteiro do envelope
+    /// (modelo de NP resulta em SM observada bem acima de `sm_max`).
+    /// `ConstraintChecker::verify` deve reportar uma violação por cenário
+    /// fora do envelope, citando o nome do cenário e os limites em %MAC.
+    #[test]
+    fn violacao_de_envelope_aparece_quando_cenario_esta_fora() {
+        let (req, wing, prop, engine, wb) = setup();
+        assert!(wb.scenarios.iter().any(|s| !s.inside_envelope),
+            "pré-condição do teste: fixture sintética deveria ter ao menos um \
+             cenário fora do envelope (achado honesto, replicado do baseline real)");
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
+
+        assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+            "esperava violação de envelope de CG, obteve: {:?}", report.violations);
+        // A mensagem deve citar os limites do envelope em %MAC, não só um rótulo.
+        assert!(report.violations.iter().any(|v|
+                v.contains(&format!("{:.1}%", wb.spec.cg_limit_fwd_pct_mac))),
+            "violação deveria citar o limite dianteiro do envelope: {:?}", report.violations);
+    }
+
+    /// Sanidade inversa: se TODOS os cenários estiverem artificialmente
+    /// dentro do envelope, nenhuma violação de envelope deve aparecer.
+    #[test]
+    fn sem_violacao_de_envelope_quando_todos_os_cenarios_estao_dentro() {
+        let (req, wing, prop, engine, mut wb) = setup();
+        for sc in &mut wb.scenarios {
+            sc.inside_envelope = true;
+        }
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb);
+
+        assert!(!report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+            "não deveria haver violação de envelope de CG, obteve: {:?}", report.violations);
     }
 }

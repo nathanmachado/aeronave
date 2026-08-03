@@ -251,6 +251,35 @@ pub fn cg_pct_mac(x_cg: f64, x_mac_le: f64, mac: f64) -> f64 {
     (x_cg - x_mac_le) / mac * 100.0
 }
 
+// ─── ENVELOPE DE CG ADMISSÍVEL (Task 4.4) ────────────────────────────────────
+//
+// Em contraste com `cg_fwd`/`cg_aft` (WeightSpec::cg_mac_fwd_pct/aft_pct),
+// que são os extremos apenas OBSERVADOS entre os cenários de carga, as duas
+// funções abaixo calculam os LIMITES admissíveis a partir de critérios de
+// estabilidade — invertendo `static_margin`: SM = (x_np − x_cg)/MAC, logo
+// x_cg = x_np − SM·MAC. Como SM É DECRESCENTE em x_cg (CG mais atrás → SM
+// menor), o SM MÍNIMO aceitável corresponde ao CG MAIS ATRÁS aceitável
+// (limite traseiro) e o SM MÁXIMO aceitável corresponde ao CG MAIS À FRENTE
+// aceitável (limite dianteiro).
+
+/// Limite TRASEIRO do envelope de CG — posição do CG mais atrás admissível
+/// antes de violar a margem estática mínima (`sm_min`, piso de estabilidade
+/// longitudinal, tipicamente 0.05):
+///
+///   x_cg_aft = x_np − sm_min·MAC
+pub fn cg_limit_aft_m(x_np: f64, sm_min: f64, mac: f64) -> f64 {
+    x_np - sm_min * mac
+}
+
+/// Limite DIANTEIRO do envelope de CG — posição do CG mais à frente
+/// admissível antes de violar a margem estática máxima (`sm_max`, proxy de
+/// autoridade de profundor em flare/pouso, tipicamente 0.25):
+///
+///   x_cg_fwd = x_np − sm_max·MAC
+pub fn cg_limit_fwd_m(x_np: f64, sm_max: f64, mac: f64) -> f64 {
+    x_np - sm_max * mac
+}
+
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
 
 pub struct WeightBalanceAgent;
@@ -275,7 +304,16 @@ pub struct ScenarioResult {
     pub x_cg_m: f64,
     pub cg_pct_mac: f64,
     pub static_margin: f64,
+    /// Estável = NP atrás do CG (SM > 0.03, piso puramente de sinal/robustez
+    /// numérica). Mantido por referência/regressão — NÃO é mais o critério
+    /// de aceite do projeto: use `inside_envelope`, que verifica o CG
+    /// contra os limites de `[stability]` (Task 4.4).
     pub stable: bool,
+    /// Verdadeiro quando o CG do cenário está DENTRO do envelope admissível
+    /// definido por `[stability]` (sm_min ≤ SM ≤ sm_max), equivalentemente
+    /// `cg_limit_fwd_m ≤ x_cg_m ≤ cg_limit_aft_m` — critério de aceite do
+    /// projeto (Task 4.4), substitui o antigo `sm > 0.03` isolado.
+    pub inside_envelope: bool,
 }
 
 impl WeightBalanceAgent {
@@ -325,6 +363,12 @@ impl WeightBalanceAgent {
             LoadScenario { name: "4 pax + bagagem vazio",   pax_front: 2, pax_rear: 2, baggage_kg: 80.0, fuel_fraction: 0.1 },
         ];
 
+        // Envelope de CG admissível (Task 4.4) — limites físicos (m do
+        // nariz), derivados dos critérios de estabilidade de `[stability]`,
+        // não dos cenários de carga observados.
+        let x_cg_limit_aft = cg_limit_aft_m(x_np, cfg.stability.sm_min, mac);
+        let x_cg_limit_fwd = cg_limit_fwd_m(x_np, cfg.stability.sm_max, mac);
+
         let mut scenario_results = Vec::new();
         let mut mtow_max: f64 = 0.0;
 
@@ -368,6 +412,11 @@ impl WeightBalanceAgent {
 
             if total_mass > mtow_max { mtow_max = total_mass; }
 
+            // Dentro do envelope (Task 4.4): x_cg entre o limite dianteiro
+            // (sm_max) e o traseiro (sm_min) — equivalente a
+            // sm_min ≤ sm ≤ sm_max.
+            let inside_envelope = x_cg >= x_cg_limit_fwd && x_cg <= x_cg_limit_aft;
+
             scenario_results.push(ScenarioResult {
                 name:          sc.name,
                 total_mass_kg: total_mass,
@@ -375,15 +424,24 @@ impl WeightBalanceAgent {
                 cg_pct_mac:    cg_pct,
                 static_margin: sm,
                 // Estável = NP atrás do CG (SM > 0). CG muito à frente (SM > 30%)
-            // é problema de autoridade de profundor, não de instabilidade.
-            stable:        sm > 0.03,
+                // é problema de autoridade de profundor, não de instabilidade.
+                // Mantido por referência — critério de aceite é
+                // `inside_envelope` (Task 4.4).
+                stable:        sm > 0.03,
+                inside_envelope,
             });
         }
 
-        // CG mais à frente e mais atrás observados
+        // CG mais à frente e mais atrás observados (extremos dos cenários —
+        // distinto do envelope ADMISSÍVEL calculado acima)
         let cg_fwd = scenario_results.iter().map(|s| s.cg_pct_mac).fold(f64::INFINITY,  f64::min);
         let cg_aft = scenario_results.iter().map(|s| s.cg_pct_mac).fold(f64::NEG_INFINITY, f64::max);
-        let sm_min = scenario_results.iter().map(|s| s.static_margin).fold(f64::INFINITY, f64::min);
+        let sm_min_observado = scenario_results.iter().map(|s| s.static_margin).fold(f64::INFINITY, f64::min);
+
+        // Envelope admissível em %MAC — mesma conversão usada para os
+        // cenários (`cg_pct_mac`), aplicada aos limites físicos.
+        let cg_limit_fwd_pct = cg_pct_mac(x_cg_limit_fwd, x_mac_le, mac);
+        let cg_limit_aft_pct = cg_pct_mac(x_cg_limit_aft, x_mac_le, mac);
 
         WeightBalanceOutput {
             spec: crate::models::specs::WeightSpec {
@@ -393,7 +451,9 @@ impl WeightBalanceAgent {
                 fuel_mass_kg:     fuel_mass_full,
                 cg_mac_fwd_pct:   cg_fwd,
                 cg_mac_aft_pct:   cg_aft,
-                static_margin_pct: sm_min * 100.0,
+                static_margin_pct: sm_min_observado * 100.0,
+                cg_limit_fwd_pct_mac: cg_limit_fwd_pct,
+                cg_limit_aft_pct_mac: cg_limit_aft_pct,
             },
             oew_kg,
             chord_root_m:  c_r,
@@ -551,6 +611,121 @@ mod tests {
         assert!(x_np_maior > x_np_base,
             "NP deveria recuar (aumentar x) quando v_h aumenta: base={x_np_base:.4}m \
              maior={x_np_maior:.4}m");
+    }
+
+    /// Hand-check (mesmos valores do baseline real, ver task-4.1-report.md):
+    ///   x_np=3.803m, MAC=1.2463m
+    ///   sm_min=0.05 → x_cg_aft = 3.803 − 0.05·1.2463 = 3.803 − 0.062315 = 3.740685 m
+    ///   sm_max=0.25 → x_cg_fwd = 3.803 − 0.25·1.2463 = 3.803 − 0.311575 = 3.491425 m
+    #[test]
+    fn cg_limit_aft_hand_check() {
+        let aft = cg_limit_aft_m(3.803, 0.05, 1.2463);
+        println!("cg_limit_aft_m = {aft:.6}");
+        assert!((aft - 3.740685).abs() < 1e-4, "aft = {aft:.6} (esperado ≈3.740685)");
+    }
+
+    #[test]
+    fn cg_limit_fwd_hand_check() {
+        let fwd = cg_limit_fwd_m(3.803, 0.25, 1.2463);
+        println!("cg_limit_fwd_m = {fwd:.6}");
+        assert!((fwd - 3.491425).abs() < 1e-4, "fwd = {fwd:.6} (esperado ≈3.491425)");
+    }
+
+    /// O limite dianteiro (SM_max, mais restritivo/maior SM) deve SEMPRE
+    /// ficar à frente (x menor) do limite traseiro (SM_min) — dado que
+    /// SM = (x_np − x_cg)/MAC é decrescente em x_cg, SM maior → x_cg menor.
+    #[test]
+    fn cg_limit_fwd_fica_a_frente_do_cg_limit_aft() {
+        let fwd = cg_limit_fwd_m(3.803, 0.25, 1.2463);
+        let aft = cg_limit_aft_m(3.803, 0.05, 1.2463);
+        assert!(fwd < aft, "limite dianteiro ({fwd:.4}) deveria ficar à frente do traseiro ({aft:.4})");
+    }
+
+    /// Propriedade: aumentar `sm_min` torna o critério de estabilidade
+    /// mínima mais exigente — o limite TRASEIRO deve avançar (mover para a
+    /// frente, x menor), reduzindo o envelope admissível por trás.
+    #[test]
+    fn aumentar_sm_min_move_limite_traseiro_para_frente() {
+        let aft_base  = cg_limit_aft_m(3.803, 0.05, 1.2463);
+        let aft_maior = cg_limit_aft_m(3.803, 0.10, 1.2463);
+        assert!(aft_maior < aft_base,
+            "aft com sm_min maior ({aft_maior:.4}) deveria ser MENOR (mais à frente) que \
+             aft base ({aft_base:.4})");
+    }
+
+    /// Propriedade simétrica: aumentar `sm_max` RELAXA o critério de
+    /// autoridade de profundor (permite SM mais alta, i.e. CG ainda mais à
+    /// frente, antes de violar o limite) — o limite DIANTEIRO deve avançar
+    /// mais para a frente ainda (x menor), alargando o envelope admissível
+    /// pela frente. (x_cg_fwd = x_np − sm_max·MAC é decrescente em sm_max.)
+    #[test]
+    fn aumentar_sm_max_move_limite_dianteiro_mais_para_frente() {
+        let fwd_base  = cg_limit_fwd_m(3.803, 0.25, 1.2463);
+        let fwd_maior = cg_limit_fwd_m(3.803, 0.35, 1.2463);
+        assert!(fwd_maior < fwd_base,
+            "fwd com sm_max maior ({fwd_maior:.4}) deveria ser MENOR (mais à frente, \
+             envelope mais permissivo) que fwd base ({fwd_base:.4})");
+    }
+
+    /// Task 4.4 — critério cenário-vs-envelope, testado diretamente sobre
+    /// `MassItem`/`cg_from_items` (não a pipeline completa de agentes: o NP
+    /// real da célula-base hoje coloca o envelope bem atrás de todos os 6
+    /// cenários reais — achado honesto documentado em
+    /// `todos_os_cenarios_estaveis` e no relatório da Task 4.4). Cenário
+    /// sintético "bagagem no limite do compartimento + tanque cheio":
+    ///   items: OEW simplificado (700kg @3.55m) + bagagem no limite
+    ///   (30kg @5.6m, arm do compartimento) + tanque cheio (50kg @3.6m).
+    ///   x_cg = (700·3.55 + 30·5.6 + 50·3.6) / 780 = 2833/780 = 3.6321 m
+    /// Com x_np=3.803m, MAC=1.2463m, sm_min=0.05/sm_max=0.25 (mesmos valores
+    /// do baseline real): envelope = [3.4914m, 3.7407m] — x_cg cai DENTRO.
+    #[test]
+    fn cenario_bagagem_no_limite_e_tanque_cheio_fica_dentro_do_envelope() {
+        let (x_np, mac, sm_min, sm_max) = (3.803, 1.2463, 0.05, 0.25);
+        let x_cg_limit_fwd = cg_limit_fwd_m(x_np, sm_max, mac);
+        let x_cg_limit_aft = cg_limit_aft_m(x_np, sm_min, mac);
+
+        let items = vec![
+            MassItem { name: "OEW simplificado".to_string(), mass_kg: 700.0, arm_m: 3.55 },
+            MassItem { name: "Bagagem (limite)".to_string(),  mass_kg: 30.0,  arm_m: 5.6 },
+            MassItem { name: "Tanque cheio".to_string(),      mass_kg: 50.0,  arm_m: 3.6 },
+        ];
+        let (_, x_cg) = cg_from_items(&items);
+        println!("x_cg={x_cg:.4}m  envelope=[{x_cg_limit_fwd:.4}, {x_cg_limit_aft:.4}]m");
+
+        assert!(x_cg >= x_cg_limit_fwd && x_cg <= x_cg_limit_aft,
+            "x_cg={x_cg:.4}m deveria estar DENTRO do envelope [{x_cg_limit_fwd:.4}, \
+             {x_cg_limit_aft:.4}]m", );
+    }
+
+    /// Teste negativo, MESMO cenário do teste acima acrescido de lastro no
+    /// nariz (arm próximo do datum): o lastro puxa o CG para a frente do
+    /// limite DIANTEIRO do envelope (sm_max) — violação por excesso de
+    /// autoridade de profundor exigida, não por instabilidade (SM continua
+    /// positiva/alta, o problema é justamente SM alta demais).
+    ///   items + lastro (60kg @0.3m):
+    ///   x_cg = (2833 + 60·0.3) / (780+60) = 2851/840 = 3.3940 m < 3.4914 m
+    #[test]
+    fn lastro_no_nariz_viola_o_limite_dianteiro_do_envelope() {
+        let (x_np, mac, sm_min, sm_max) = (3.803, 1.2463, 0.05, 0.25);
+        let x_cg_limit_fwd = cg_limit_fwd_m(x_np, sm_max, mac);
+        let x_cg_limit_aft = cg_limit_aft_m(x_np, sm_min, mac);
+
+        let items = vec![
+            MassItem { name: "OEW simplificado".to_string(), mass_kg: 700.0, arm_m: 3.55 },
+            MassItem { name: "Bagagem (limite)".to_string(),  mass_kg: 30.0,  arm_m: 5.6 },
+            MassItem { name: "Tanque cheio".to_string(),      mass_kg: 50.0,  arm_m: 3.6 },
+            MassItem { name: "Lastro no nariz".to_string(),   mass_kg: 60.0,  arm_m: 0.3 },
+        ];
+        let (_, x_cg) = cg_from_items(&items);
+        println!("x_cg={x_cg:.4}m  envelope=[{x_cg_limit_fwd:.4}, {x_cg_limit_aft:.4}]m");
+
+        assert!(x_cg < x_cg_limit_fwd,
+            "x_cg={x_cg:.4}m deveria ficar À FRENTE (menor) do limite dianteiro \
+             {x_cg_limit_fwd:.4}m — lastro no nariz deveria violar o envelope");
+        // Confirma que a violação é especificamente DIANTEIRA (não traseira).
+        assert!(x_cg < x_cg_limit_aft,
+            "sanidade: x_cg={x_cg:.4}m deveria estar bem longe do limite traseiro \
+             {x_cg_limit_aft:.4}m também (violação é pela frente)");
     }
 
     #[test]

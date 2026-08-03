@@ -24,6 +24,10 @@ pub struct AircraftConfig {
     pub gear: GearCfg,
     pub arms: ArmsCfg,
     pub structure: StructureCfg,
+    /// Limites de estabilidade estática que definem o envelope de CG
+    /// admissível (Task 4.4) — consumidos por
+    /// `weight_balance::cg_limit_fwd_m`/`cg_limit_aft_m`.
+    pub stability: StabilityCfg,
     /// CD0 residual (antenas, juntas, imperfeições) — não pertence a nenhum
     /// componente específico da aeronave.
     pub drag: DragCfg,
@@ -171,6 +175,31 @@ pub struct DragCfg {
     pub cd0_misc: f64,
 }
 
+/// Limites de estabilidade estática (Task 4.4) que definem o envelope de CG
+/// ADMISSÍVEL da aeronave — em contraste com `WeightSpec::cg_mac_fwd_pct`/
+/// `cg_mac_aft_pct`, que são os extremos OBSERVADOS entre os cenários de
+/// carga. O envelope vem de dois critérios físicos independentes:
+///
+///   - `sm_min`: margem estática mínima aceitável — abaixo dela a aeronave
+///     fica perigosamente próxima da instabilidade estática longitudinal.
+///     Define o limite TRASEIRO do CG (CG mais atrás permitido): SM cai
+///     quando o CG recua, então SM = sm_min é o pior caso traseiro.
+///   - `sm_max`: proxy de autoridade de profundor em flare/pouso — margem
+///     estática ALTA demais (CG muito à frente) exige mais deflexão de
+///     profundor do que a superfície consegue entregar. Define o limite
+///     DIANTEIRO do CG: SM = sm_max é o pior caso dianteiro.
+///
+/// Ver `weight_balance::cg_limit_fwd_m`/`cg_limit_aft_m` para a conversão em
+/// posição física (metros do datum no nariz).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StabilityCfg {
+    /// Margem estática mínima admissível — define o limite TRASEIRO do CG.
+    pub sm_min: f64,
+    /// Margem estática máxima admissível (autoridade de profundor) — define
+    /// o limite DIANTEIRO do CG.
+    pub sm_max: f64,
+}
+
 /// Frações históricas (Raymer Tab. 6.5, monomotor GA) que dimensionam
 /// aileron, flap, profundor (elevator) e leme (rudder) — ver
 /// `agents::control_surfaces::ControlSurfacesAgent` para a geometria
@@ -310,6 +339,10 @@ pub mod test_fixtures {
                 design_category: "normal".to_string(),
             },
             drag: DragCfg { cd0_misc: 0.0032 },
+            // Levemente diferente do baseline real (0.05/0.25) — mesma
+            // justificativa de "nenhum destes números coincide com o
+            // baseline real" usada nas demais seções desta fixture.
+            stability: StabilityCfg { sm_min: 0.06, sm_max: 0.28 },
             masses: MassesCfg {
                 items: vec![
                     MassItemCfg { name: "psru_helice_capo".into(),   mass_kg: 62.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.3 },
