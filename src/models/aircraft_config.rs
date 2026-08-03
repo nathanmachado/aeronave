@@ -79,9 +79,28 @@ pub struct FuselageCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmpennageCfg {
     pub cd0: f64,
-    /// Braço da empenagem (CA asa → CA empenagem, m) — usado em
-    /// `weight_balance::neutral_point_m`.
+    /// Braço da empenagem (CA asa → CA empenagem, m) — usado tanto no
+    /// dimensionamento por coeficiente de volume (`agents::empennage`)
+    /// quanto em `weight_balance::neutral_point_m`.
     pub tail_arm_m: f64,
+    /// Coeficiente de volume da empenagem horizontal V_h = S_h·l_h/(S_w·MAC)
+    /// — Raymer Tab. 6.4, monomotor GA (típico 0.5–0.9). Fonte única do
+    /// dimensionamento de S_h em `agents::empennage::EmpennageAgent`.
+    pub v_h: f64,
+    /// Coeficiente de volume da empenagem vertical V_v = S_v·l_v/(S_w·b) —
+    /// Raymer Tab. 6.4, monomotor GA (típico 0.02–0.05).
+    pub v_v: f64,
+    /// Alongamento (aspect ratio) da empenagem horizontal.
+    pub ar_h: f64,
+    /// Alongamento (aspect ratio) da empenagem vertical.
+    pub ar_v: f64,
+    /// Afilamento (taper ratio) da empenagem horizontal.
+    pub taper_h: f64,
+    /// Afilamento (taper ratio) da empenagem vertical.
+    pub taper_v: f64,
+    /// Eficiência de pressão dinâmica na empenagem horizontal (q_t/q_∞) —
+    /// usada em `weight_balance::neutral_point_m`.
+    pub eta_h: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +232,13 @@ pub mod test_fixtures {
             empennage: EmpennageCfg {
                 cd0: 0.0042,
                 tail_arm_m: 4.70,
+                v_h: 0.65,
+                v_v: 0.045,
+                ar_h: 4.5,
+                ar_v: 1.6,
+                taper_h: 0.45,
+                taper_v: 0.45,
+                eta_h: 0.92,
             },
             propeller: PropellerCfg {
                 diameter_m: 1.90,

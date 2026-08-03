@@ -41,6 +41,25 @@
     "p_shaft_cruise_kw": 122.88722938820213,
     "cruise_feasible": true
   },
+  "empennage": {
+    "s_horizontal_m2": 2.5809129985152786,
+    "s_vertical_m2": 1.4129,
+    "arm_h_m": 4.8,
+    "arm_v_m": 4.8,
+    "span_h_m": 3.213044038612156,
+    "span_v_m": 1.4557987498277363,
+    "chord_h_root_m": 1.0710146795373854,
+    "chord_h_tip_m": 0.5355073397686927,
+    "chord_v_root_m": 1.2940433331802101,
+    "chord_v_tip_m": 0.6470216665901051,
+    "ar_h": 4.0,
+    "ar_v": 1.5,
+    "taper_h": 0.5,
+    "taper_v": 0.5,
+    "volume_h": 0.7,
+    "volume_v": 0.04,
+    "eta_h": 0.9
+  },
   "weight": {
     "oew_kg": 885.0,
     "mtow_kg": 1543.4,
@@ -48,7 +67,7 @@
     "fuel_mass_kg": 218.4,
     "cg_mac_fwd_pct": 1.6815099454598386,
     "cg_mac_aft_pct": 29.373075431609326,
-    "static_margin_pct": 60.44514978413294
+    "static_margin_pct": 43.084570198582206
   },
   "performance": {
     "v_cruise_kmh": 308.599033447643,

@@ -158,6 +158,19 @@ fn main() {
     println!("  Autonomia: {:.2}h  |  Alcance: {:.0}km\n",
              prop.endurance_h, prop.range_km);
 
+    // ── Empenagem ──────────────────────────────────────────────────────────────
+    // Dimensionada por coeficiente de volume (Task 4.1) — geometria pura,
+    // consumida pelo NP dentro do AGENTE 3 abaixo.
+    println!("[ EMPENAGEM ] EmpennageAgent — dimensionamento por coeficiente de volume");
+    let emp = &sized.emp;
+    println!("  Horizontal: S={:.2}m²  b={:.2}m  c_raiz={:.2}m  c_ponta={:.2}m  AR={:.1}  V_h={:.2}",
+             emp.s_horizontal_m2, emp.span_h_m, emp.chord_h_root_m, emp.chord_h_tip_m,
+             emp.ar_h, emp.volume_h);
+    println!("  Vertical:   S={:.2}m²  b={:.2}m  c_raiz={:.2}m  c_ponta={:.2}m  AR={:.1}  V_v={:.2}",
+             emp.s_vertical_m2, emp.span_v_m, emp.chord_v_root_m, emp.chord_v_tip_m,
+             emp.ar_v, emp.volume_v);
+    println!("  Braço (CA asa → CA empenagem): {:.2}m\n", emp.arm_h_m);
+
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
     let wb = &sized.wb;
@@ -289,6 +302,7 @@ fn main() {
         validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
         wing:             wing.clone(),
         propulsion:       prop.clone(),
+        empennage:        Some(emp.clone()),
         weight:           Some(wb.spec.clone()),
         performance:      Some(perf),
         structure:        Some(struc),

@@ -297,6 +297,34 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // [empennage]
     require_non_negative("empennage.cd0", cfg.empennage.cd0)?;
     require_positive("empennage.tail_arm_m", cfg.empennage.tail_arm_m)?;
+    require_finite("empennage.v_h", cfg.empennage.v_h)?;
+    if cfg.empennage.v_h <= 0.2 || cfg.empennage.v_h >= 1.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.v_h deve estar em (0.2, 1.5) \
+             (valor: {})",
+            cfg.empennage.v_h
+        )));
+    }
+    require_finite("empennage.v_v", cfg.empennage.v_v)?;
+    if cfg.empennage.v_v <= 0.01 || cfg.empennage.v_v >= 0.15 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.v_v deve estar em (0.01, 0.15) \
+             (valor: {})",
+            cfg.empennage.v_v
+        )));
+    }
+    require_positive("empennage.ar_h", cfg.empennage.ar_h)?;
+    require_positive("empennage.ar_v", cfg.empennage.ar_v)?;
+    require_positive("empennage.taper_h", cfg.empennage.taper_h)?;
+    require_positive("empennage.taper_v", cfg.empennage.taper_v)?;
+    require_finite("empennage.eta_h", cfg.empennage.eta_h)?;
+    if cfg.empennage.eta_h <= 0.5 || cfg.empennage.eta_h > 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.eta_h deve estar em (0.5, 1.0] \
+             (valor: {})",
+            cfg.empennage.eta_h
+        )));
+    }
 
     // [propeller]
     require_positive("propeller.diameter_m", cfg.propeller.diameter_m)?;
@@ -648,6 +676,13 @@ mod tests {
             [empennage]
             cd0 = 0.004
             tail_arm_m = 4.5
+            v_h = 0.70
+            v_v = 0.04
+            ar_h = 4.0
+            ar_v = 1.5
+            taper_h = 0.5
+            taper_v = 0.5
+            eta_h = 0.90
             [propeller]
             diameter_m = 1.8
             blades = 2
@@ -764,6 +799,55 @@ mod tests {
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("arm_ref"), "{err}");
         assert!(err.to_string().contains("lugar_nenhum"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_v_h_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("v_h = 0.70", "v_h = 1.6");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.v_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_v_h_muito_baixo() {
+        let toml = aircraft_toml_valido().replace("v_h = 0.70", "v_h = 0.1");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.v_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_v_v_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("v_v = 0.04", "v_v = 0.2");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.v_v"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_eta_h_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("eta_h = 0.90", "eta_h = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.eta_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_eta_h_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("eta_h = 0.90", "eta_h = 0.3");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.eta_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_ar_h_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("ar_h = 4.0", "ar_h = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.ar_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_taper_v_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("taper_v = 0.5", "taper_v = -0.1");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.taper_v"), "{err}");
     }
 
     #[test]

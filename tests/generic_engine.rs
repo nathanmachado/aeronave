@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 
 use aeronave::agents::aerodynamics::AerodynamicsAgent;
+use aeronave::agents::empennage::EmpennageAgent;
 use aeronave::agents::performance::max_level_speed_ms;
 use aeronave::agents::propulsion::PropulsionAgent;
 use aeronave::agents::weight_balance::WeightBalanceAgent;
@@ -83,8 +84,9 @@ fn massa_do_motor_afeta_oew_e_cg() {
 
     println!("Toyota mass_kg = {:.1} | Rotax mass_kg = {:.1}", toyota.mass_kg, rotax.mass_kg);
 
-    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg, &req);
-    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax, &cfg, &req);
+    let emp = EmpennageAgent::run(&wing, &cfg);
+    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg, &req, &emp);
+    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax, &cfg, &req, &emp);
 
     println!(
         "OEW Toyota = {:.1} kg | OEW Rotax = {:.1} kg | delta = {:.1} kg",

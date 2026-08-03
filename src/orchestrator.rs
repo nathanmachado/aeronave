@@ -17,13 +17,14 @@
 
 use crate::agents::aerodynamics::AerodynamicsAgent;
 use crate::agents::constraint_diagram::{wing_loading_limits, WingLoadingReport};
+use crate::agents::empennage::EmpennageAgent;
 use crate::agents::propulsion::PropulsionAgent;
 use crate::agents::weight_balance::{WeightBalanceAgent, WeightBalanceOutput};
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
-use crate::models::specs::{PropulsionSpec, WingSpec};
+use crate::models::specs::{EmpennageSpec, PropulsionSpec, WingSpec};
 
 /// Número máximo de iterações do laço de ponto fixo antes de desistir.
 const MAX_ITERATIONS: u32 = 50;
@@ -54,6 +55,11 @@ pub struct SizedAircraft {
     /// "4 pax + bagagem + tanque cheio" (envelope estrutural, distinto do
     /// MTOW de missão em `state.mtow_kg` — ver docstring do módulo).
     pub wb: WeightBalanceOutput,
+    /// Empenagem dimensionada por coeficiente de volume (Task 4.1) —
+    /// puramente geométrica (não depende de MTOW), mas recalculada a cada
+    /// iteração junto com a asa por simplicidade; idêntica em todas as
+    /// iterações, já que `wing`/`cfg.empennage` não mudam com o MTOW.
+    pub emp: EmpennageSpec,
     /// Massa de combustível (kg) requerida pela missão (autonomia mínima +
     /// reserva) no MTOW convergido — não é o tanque cheio.
     pub mission_fuel_kg: f64,
@@ -162,6 +168,10 @@ pub(crate) fn size_aircraft_with_max_iters(
         state.mtow_kg = mtow;
 
         let wing = AerodynamicsAgent::run(&state, req);
+        // Dimensionamento da empenagem (Task 4.1) — geometria pura (depende
+        // só de `wing`/`cfg.empennage`, não de MTOW), calculada logo após a
+        // asa e usada pelo NP dentro do WeightBalanceAgent abaixo.
+        let emp = EmpennageAgent::run(&wing, cfg);
         let prop = PropulsionAgent::run(&state, req, &wing, engine);
 
         // Combustível exigido pela MISSÃO (autonomia mínima requerida, com
@@ -173,7 +183,7 @@ pub(crate) fn size_aircraft_with_max_iters(
             prop.fc_cruise_lph * req.endurance_min_h / (1.0 - req.fuel_reserve_fraction);
         let fuel_kg = fuel_req_l * engine.fuel.density_kg_per_l;
 
-        let wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req);
+        let wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req, &emp);
 
         let novo = wb.oew_kg + req.payload_kg() + fuel_kg;
 
@@ -215,6 +225,7 @@ pub(crate) fn size_aircraft_with_max_iters(
                 wing,
                 prop,
                 wb,
+                emp,
                 mission_fuel_kg: fuel_kg,
                 iterations,
                 constraints,

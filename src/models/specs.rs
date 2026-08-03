@@ -59,6 +59,39 @@ pub struct PropulsionSpec {
     pub cruise_feasible: bool,
 }
 
+/// Saída do EmpennageAgent — dimensionamento de S_h/S_v por coeficiente de
+/// volume (Raymer Tab. 6.4). Consumida por `weight_balance::neutral_point_m`
+/// (Task 4.1) e ecoada no relatório final.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmpennageSpec {
+    pub s_horizontal_m2: f64,
+    pub s_vertical_m2: f64,
+    /// Braço da empenagem horizontal (CA asa → CA empenagem, m).
+    pub arm_h_m: f64,
+    /// Braço da empenagem vertical (CA asa → CA empenagem, m).
+    pub arm_v_m: f64,
+    pub span_h_m: f64,
+    pub span_v_m: f64,
+    pub chord_h_root_m: f64,
+    pub chord_h_tip_m: f64,
+    pub chord_v_root_m: f64,
+    pub chord_v_tip_m: f64,
+    pub ar_h: f64,
+    pub ar_v: f64,
+    pub taper_h: f64,
+    pub taper_v: f64,
+    /// Coeficiente de volume horizontal usado no dimensionamento — ecoa
+    /// `[empennage].v_h` da configuração, para o relatório.
+    pub volume_h: f64,
+    /// Coeficiente de volume vertical usado no dimensionamento — ecoa
+    /// `[empennage].v_v` da configuração.
+    pub volume_v: f64,
+    /// Eficiência de pressão dinâmica na empenagem horizontal (q_t/q_∞) —
+    /// ecoa `[empennage].eta_h`; usada por `weight_balance::neutral_point_m`
+    /// sem que essa função precise acessar `AircraftConfig` diretamente.
+    pub eta_h: f64,
+}
+
 /// Saída do WeightBalanceAgent (preenchida na Fase seguinte)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeightSpec {
@@ -165,6 +198,7 @@ pub struct AircraftReport {
     pub validation_status: String,
     pub wing: WingSpec,
     pub propulsion: PropulsionSpec,
+    pub empennage: Option<EmpennageSpec>,
     pub weight: Option<WeightSpec>,
     pub performance: Option<PerformanceSpec>,
     pub structure: Option<StructuralSpec>,

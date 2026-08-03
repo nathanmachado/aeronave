@@ -19,7 +19,7 @@ use crate::models::{
     aircraft_state::AircraftState,
     engine::EngineSpec,
     requirements::Requirements,
-    specs::{WingSpec, WeightSpec},
+    specs::{EmpennageSpec, WingSpec},
 };
 
 const G: f64 = 9.807; // m/s²
@@ -177,40 +177,46 @@ pub fn cg_from_items(items: &[MassItem]) -> (f64, f64) {
 
 // ─── PONTO NEUTRO E ESTABILIDADE ─────────────────────────────────────────────
 
-/// Posição do Ponto Neutro (NP) da aeronave — método simplificado de Raymer.
-/// Considera contribuição da asa e da empenagem horizontal.
+/// Inclinação de sustentação (lift-curve slope) de uma superfície de asa
+/// finita — teoria de Prandtl/DATCOM simplificada (Anderson, "Fundamentals
+/// of Aerodynamics", cap. 5; Raymer, cap. 12):
 ///
-/// x_np = x_ac_wing + (CL_α_tail / CL_α_wing) · (S_tail/S_wing) · l_tail · η_tail
+///   a = 2πAR / (2 + √(4 + AR²))         [1/rad]
 ///
-/// Para estimativa preliminar, usa-se:
-///   x_np ≈ x_ac_wing + 0.10·MAC  (margem típica para configuração convencional)
+/// Válida para asa/empenagem sem enflechamento; usada tanto para a asa
+/// (a_w) quanto para a empenagem horizontal (a_t) em `neutral_point_m`.
+pub fn lift_curve_slope(aspect_ratio: f64) -> f64 {
+    2.0 * std::f64::consts::PI * aspect_ratio / (2.0 + (4.0 + aspect_ratio * aspect_ratio).sqrt())
+}
+
+/// Posição do Ponto Neutro (NP) da aeronave — método da área de cauda de
+/// Raymer, com a empenagem REALMENTE dimensionada (`EmpennageAgent`, Task
+/// 4.1) em vez dos antigos `s_ratio`/`a_t/a_w` hardcoded.
 ///
-/// Refined: NP = x_ac_wing + Δ_stab
-///   onde Δ_stab = (a_t/a_w)·(S_t/S_w)·(l_t/MAC)·η_t · MAC
+/// x_np = x_ac_wing + Δ_stab
+///   onde Δ_stab = (a_t/a_w)·(S_h/S_w)·(l_h/MAC)·η_h · MAC
+///
+/// a_w, a_t vêm de `lift_curve_slope` aplicada ao AR da asa e ao AR da
+/// empenagem horizontal (`emp.ar_h`), respectivamente. S_h, l_h, η_h vêm de
+/// `emp` (saída do `EmpennageAgent`, dimensionada por coeficiente de
+/// volume) — nenhum dos quatro é mais uma constante hardcoded aqui.
 pub fn neutral_point_m(
     wing_le_root_m: f64,
     mac_m: f64,
-    span_m: f64,
-    fuselage_length_m: f64,
-    tail_arm_m: f64,
+    wing_ar: f64,
+    emp: &EmpennageSpec,
+    wing_area_m2: f64,
 ) -> f64 {
-    // CA da asa: bordo de ataque do MAC + 25% MAC
-    let x_ac_wing = wing_le_root_m
-        + (span_m / 6.0 * (1.0 + 2.0 * 0.45) / (1.0 + 0.45)).tan_estimate()
-        + 0.25 * mac_m;
+    // CA da asa: bordo de ataque do MAC + 25% MAC (asa sem enflechamento —
+    // y_MAC não desloca x_ac longitudinalmente nesse caso).
+    let x_ac_wing = wing_le_root_m + 0.25 * mac_m;
 
-    // Contribuição estabilizadora da empenagem horizontal (método da área de cauda)
-    // Parâmetros típicos para aeronave leve: η_t = 0.90, a_t/a_w = 0.85
-    // S_t/S_w = 0.22 (área da empenagem horizontal / asa)
-    // l_t = distância CA asa → CA empenagem, de `[empennage].tail_arm_m`
-    let s_ratio = 0.22_f64;   // S_tail / S_wing
-    let l_tail  = tail_arm_m; // m — braço da empenagem
-    let eta_t   = 0.90_f64;   // eficiência dinâmica da empenagem
-    let at_aw   = 0.85_f64;   // razão de inclinações de CL
+    let a_w = lift_curve_slope(wing_ar);
+    let a_t = lift_curve_slope(emp.ar_h);
 
-    let delta_stab = at_aw * s_ratio * (l_tail / mac_m) * eta_t * mac_m;
+    let s_ratio = emp.s_horizontal_m2 / wing_area_m2; // S_h / S_w
+    let delta_stab = (a_t / a_w) * s_ratio * (emp.arm_h_m / mac_m) * emp.eta_h * mac_m;
 
-    let _ = fuselage_length_m; // usado em revisão futura (efeito de corpo)
     x_ac_wing + delta_stab
 }
 
@@ -226,15 +232,6 @@ pub fn static_margin(x_np: f64, x_cg: f64, mac: f64) -> f64 {
 /// %MAC = (x_cg - x_mac_le) / MAC × 100
 pub fn cg_pct_mac(x_cg: f64, x_mac_le: f64, mac: f64) -> f64 {
     (x_cg - x_mac_le) / mac * 100.0
-}
-
-// ─── TRAIT AUXILIAR ──────────────────────────────────────────────────────────
-trait TanEstimate {
-    fn tan_estimate(self) -> f64;
-}
-impl TanEstimate for f64 {
-    // Para taper ratio 0.45 sem enflechamento: contribuição ≈ 0
-    fn tan_estimate(self) -> f64 { 0.0 }
 }
 
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
@@ -271,6 +268,7 @@ impl WeightBalanceAgent {
         engine: &EngineSpec,
         cfg: &AircraftConfig,
         req: &Requirements,
+        emp: &EmpennageSpec,
     ) -> WeightBalanceOutput {
         let arms = ArmConfig::from_config(cfg);
 
@@ -283,10 +281,10 @@ impl WeightBalanceAgent {
         // Bordo de ataque do MAC (estimativa para asa sem enflechamento)
         let x_mac_le = arms.wing_le_root_m + y_mac * 0.0; // sem sweep = constante
 
-        // Ponto neutro
+        // Ponto neutro — usa a empenagem REALMENTE dimensionada (Task 4.1),
+        // não mais `s_ratio`/`l_tail`/`eta_t`/`at_aw` hardcoded.
         let x_np = neutral_point_m(
-            arms.wing_le_root_m, mac, wing.span_m,
-            cfg.fuselage.length_m, cfg.empennage.tail_arm_m,
+            arms.wing_le_root_m, mac, wing.aspect_ratio, emp, wing.area_m2,
         );
 
         // Peso vazio operacional
@@ -399,6 +397,7 @@ mod tests {
     use crate::models::aircraft_state::AircraftState;
     use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::agents::aerodynamics::AerodynamicsAgent;
+    use crate::agents::empennage::EmpennageAgent;
     use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
 
     #[test]
@@ -437,8 +436,9 @@ mod tests {
         let state  = AircraftState::from_config(&cfg);
         let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
+        let emp    = EmpennageAgent::run(&wing, &cfg);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
 
         for sc in &wb.scenarios {
             assert!(sc.stable,
@@ -453,8 +453,9 @@ mod tests {
         let state  = AircraftState::from_config(&cfg);
         let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
+        let emp    = EmpennageAgent::run(&wing, &cfg);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
 
         println!("MTOW (fixture sintética) = {:.1} kg", wb.spec.mtow_kg);
         // Faixa ampla ao redor do MTOW observado empiricamente (~1.415 kg)
@@ -464,6 +465,51 @@ mod tests {
         let mtow = wb.spec.mtow_kg;
         assert!(mtow > 1_300.0 && mtow < 1_500.0,
             "MTOW = {mtow:.1} kg fora do intervalo (1.300–1.500 kg)");
+    }
+
+    /// Hand-check: a = 2πAR/(2+√(4+AR²))
+    ///   AR=10 → a = 2π·10/(2+√104)      = 62.832/12.198  ≈ 5.151
+    ///   AR=4  → a = 2π·4/(2+√20)        = 25.133/6.472   ≈ 3.883
+    #[test]
+    fn lift_curve_slope_hand_check() {
+        let a10 = lift_curve_slope(10.0);
+        let a4  = lift_curve_slope(4.0);
+        println!("a(AR=10) = {a10:.4}  a(AR=4) = {a4:.4}");
+        assert!((a10 - 5.15).abs() < 0.05, "a(10) = {a10:.4} (esperado 5.15 ±0.05)");
+        assert!((a4  - 3.88).abs() < 0.05, "a(4)  = {a4:.4} (esperado 3.88 ±0.05)");
+    }
+
+    /// Propriedade: aumentar V_h (coeficiente de volume da empenagem
+    /// horizontal) aumenta S_h, que por sua vez AUMENTA a contribuição
+    /// estabilizadora da empenagem (Δ_stab) — o NP deve recuar (mover para
+    /// trás/aft) estritamente. Constrói uma config modificada em vez de usar
+    /// um valor mágico, para testar a relação física, não um número fixo.
+    #[test]
+    fn np_recua_quando_v_h_aumenta() {
+        let cfg    = config_teste();
+        let state  = AircraftState::from_config(&cfg);
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing   = AerodynamicsAgent::run(&state, &req);
+
+        let emp_base = EmpennageAgent::run(&wing, &cfg);
+        let c_r = chord_root(wing.area_m2, wing.span_m, wing.taper_ratio);
+        let mac = mean_aerodynamic_chord(c_r, wing.taper_ratio);
+        let x_np_base = neutral_point_m(
+            cfg.wing.le_root_x_m, mac, wing.aspect_ratio, &emp_base, wing.area_m2,
+        );
+
+        let mut cfg_maior = cfg.clone();
+        cfg_maior.empennage.v_h *= 1.3;
+        let emp_maior = EmpennageAgent::run(&wing, &cfg_maior);
+        let x_np_maior = neutral_point_m(
+            cfg_maior.wing.le_root_x_m, mac, wing.aspect_ratio, &emp_maior, wing.area_m2,
+        );
+
+        println!("x_np base (v_h={:.3}) = {x_np_base:.4}m | x_np maior (v_h={:.3}) = {x_np_maior:.4}m",
+            cfg.empennage.v_h, cfg_maior.empennage.v_h);
+        assert!(x_np_maior > x_np_base,
+            "NP deveria recuar (aumentar x) quando v_h aumenta: base={x_np_base:.4}m \
+             maior={x_np_maior:.4}m");
     }
 
     #[test]
