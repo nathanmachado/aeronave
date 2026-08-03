@@ -206,6 +206,29 @@ fn main() {
     println!("  Todos os cenários estáveis: {}\n",
              if all_stable { "✓ SIM" } else { "✗ NÃO" });
 
+    // ── Diagrama V-n completo com rajadas (Task 4.3, CS 23.333/.341) ───────────
+    // Roda após o WeightBalanceAgent (precisa do MTOW de envelope e da massa
+    // do cenário mais LEVE dentre os cenários de carga) e antes do
+    // StructuralAgent (que consome `n_design` — o fator de carga que governa
+    // o dimensionamento, manobra OU rajada, o que for maior).
+    println!("[ V-n ] VnDiagramAgent — Diagrama V-n completo com rajadas (CS 23.333/.341)");
+    let mass_light_kg = wb.scenarios.iter()
+        .map(|s| s.total_mass_kg)
+        .fold(f64::INFINITY, f64::min);
+    let vn = aeronave::agents::vn_diagram::VnDiagramAgent::run(
+        wing, envelope_mtow_kg, mass_light_kg, &req, &cfg.structure.design_category,
+    );
+    println!("  VA={:.0}km/h  VB={:.0}km/h  VC={:.0}km/h  VD={:.0}km/h",
+             vn.va_kmh, vn.vb_kmh, vn.vc_kmh, vn.vd_kmh);
+    println!("  n_lim: +{:.2}g / {:.2}g (manobra, CS 23.337)  |  n_gust_vc: {:.2}g (envelope, {:.0}kg)  |  n_gust_vc_light: {:.2}g (leve, {:.0}kg)",
+             vn.n_lim_pos, vn.n_lim_neg, vn.n_gust_vc, envelope_mtow_kg, vn.n_gust_vc_light, mass_light_kg);
+    if vn.n_design > vn.n_lim_pos + 1e-9 {
+        println!("  ⚠ Rajada governa: n_design = {:.2}g > n_manobra = {:.2}g\n",
+                 vn.n_design, vn.n_lim_pos);
+    } else {
+        println!("  Manobra governa: n_design = {:.2}g (= n_manobra)\n", vn.n_design);
+    }
+
     // ── Agente 4: Desempenho ──────────────────────────────────────────────────
     println!("[ AGENTE 4 ] PerformanceAgent");
     let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req);
@@ -225,8 +248,8 @@ fn main() {
         .expect("item de massa 'asa' ausente na configuração da aeronave");
     // Estrutura dimensiona para o pior caso de carga LEGAL (envelope), não
     // para o MTOW de missão — ver comentário do bloco [ SIZING ] acima.
-    let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure);
-    println!("  Fator de carga: {:.1}g limite  |  {:.1}g último (CS-23 Normal)",
+    let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
+    println!("  Fator de carga: {:.2}g projeto (n_design, manobra ou rajada)  |  {:.2}g último",
              struc.design_load_factor_g, struc.ultimate_load_factor_g);
     println!("  M_raiz (limite): {:.0}N·m  |  (último): {:.0}N·m",
              struc.wing_root_bending_limit_nm, struc.wing_root_bending_ult_nm);
@@ -327,6 +350,7 @@ fn main() {
         control_surfaces: Some(cs.clone()),
         weight:           Some(wb.spec.clone()),
         performance:      Some(perf),
+        vn_diagram:       Some(vn.clone()),
         structure:        Some(struc),
         landing_gear:     Some(gear),
         violations:       report.violations,

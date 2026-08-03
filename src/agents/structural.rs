@@ -98,6 +98,20 @@ pub fn load_factor_ultimate(design_category: &str) -> f64 {
     load_factor_limit(design_category) * 1.5
 }
 
+/// Fator de carga limite de manobra NEGATIVO (CS 23.337):
+/// Normal/Utility = −0.4 × n_lim_pos | Acrobático = −0.5 × n_lim_pos.
+/// Recebe `n_lim_pos` já calculado (em vez de recalcular via
+/// `load_factor_limit`) para que o chamador (`agents::vn_diagram`) possa
+/// reaproveitar o mesmo `n_lim_pos` sem uma segunda chamada — fonte única
+/// do mapeamento categoria→multiplicador continua sendo esta função.
+pub fn load_factor_limit_neg(design_category: &str, n_lim_pos: f64) -> f64 {
+    let mult = match design_category {
+        "acrobatic" => -0.5,
+        _ => -0.4,
+    };
+    mult * n_lim_pos
+}
+
 /// Velocidade de projeto de cruzeiro VC (m/s):
 /// VC = V_cruise_cruise (velocidade de cruzeiro especificada)
 pub fn vc_ms(v_cruise_kmh: f64) -> f64 { v_cruise_kmh / 3.6 }
@@ -284,12 +298,24 @@ pub fn fatigue_life_cycles(
 pub struct StructuralAgent;
 
 impl StructuralAgent {
+    /// `n_design`: fator de carga que governa o dimensionamento estrutural
+    /// — saída de `agents::vn_diagram::VnDiagramAgent` (Task 4.3):
+    /// `max(n_lim_pos, n_gust_vc, n_gust_vc_light)`. Substituiu o antigo
+    /// `load_factor_limit(&structure_cfg.design_category)` interno: bending,
+    /// cisalhamento (alma da longarina) e fadiga agora escalam com
+    /// `n_design`, que pode exceder o fator de manobra quando a condição de
+    /// rajada em carga alar baixa governa (CS 23.341) — ver docstring do
+    /// módulo `vn_diagram`. VA continua calculada a partir do fator de
+    /// MANOBRA (`load_factor_limit`), não de `n_design`: é uma velocidade
+    /// definida por norma (CS 23.335) a partir do fator de manobra, não do
+    /// fator de projeto que governa a estrutura.
     pub fn run(
         wing: &WingSpec,
         mtow_kg: f64,
         wing_mass_kg: f64,  // massa da asa estrutural (item "asa" de [masses])
         req: &Requirements,
         structure_cfg: &StructureCfg,
+        n_design: f64,
     ) -> StructuralSpec {
         let material = material_by_name(&structure_cfg.spar_material).unwrap_or_else(|| {
             panic!(
@@ -300,10 +326,11 @@ impl StructuralAgent {
         });
 
         let n_lim = load_factor_limit(&structure_cfg.design_category);
-        let n_ult = load_factor_ultimate(&structure_cfg.design_category);
+        let n_ult = n_design * 1.5;
 
-        // Momento fletor na raiz
-        let m_limit = wing_root_bending_nm(n_lim, mtow_kg, wing.span_m,
+        // Momento fletor na raiz — usa n_design (rajada pode governar sobre
+        // manobra, CS 23.341), não mais n_lim fixo por categoria.
+        let m_limit = wing_root_bending_nm(n_design, mtow_kg, wing.span_m,
                                             wing.taper_ratio, wing_mass_kg);
         let m_ult   = m_limit * 1.5;
 
@@ -313,7 +340,7 @@ impl StructuralAgent {
         let sigma_allow = material.sigma_allow_mpa();
         let w_req   = required_section_modulus_cm3(m_ult, sigma_allow);
         let a_flange = spar_flange_area_cm2(w_req, h_spar * 100.0); // h em cm
-        let t_web   = spar_web_thickness_mm(n_lim, mtow_kg, h_spar, material.sigma_yield_mpa);
+        let t_web   = spar_web_thickness_mm(n_design, mtow_kg, h_spar, material.sigma_yield_mpa);
 
         // Pele
         let t_skin = skin_thickness_mm(m_limit, chord_root_m, h_spar);
@@ -326,6 +353,7 @@ impl StructuralAgent {
         let fl_ok = flutter_check(vf, vd);
 
         // Velocidade de manobra VA — CS 23.335, a partir de VS1 (stall limpa)
+        // e do fator de MANOBRA (n_lim), não de n_design — ver docstring acima.
         let vs1_ms = wing.stall_speed_clean_kmh / 3.6;
         let va = va_ms(vs1_ms, n_lim);
 
@@ -339,7 +367,7 @@ impl StructuralAgent {
         let cycles = fatigue_life_cycles(sigma_max_mpa, sigma_1g_mpa, material.sigma_ult_mpa);
 
         StructuralSpec {
-            design_load_factor_g:        n_lim,
+            design_load_factor_g:        n_design,
             ultimate_load_factor_g:      n_ult,
             wing_root_bending_limit_nm:  m_limit,
             wing_root_bending_ult_nm:    m_ult,
@@ -423,7 +451,7 @@ mod tests {
     fn longarina_dimensionada_com_material_adequado() {
         let w = wing();
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
-        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste(), load_factor_limit("normal"));
         println!("Longarina raiz ({}): h={:.0}mm, A_flange={:.1}cm², t_alma={:.1}mm",
                  struc.spar_material,
                  struc.spar_height_root_m * 1000.0,
@@ -444,7 +472,7 @@ mod tests {
     fn flutter_acima_de_1_2_vd() {
         let w = wing();
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
-        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste(), load_factor_limit("normal"));
         let vc = vc_ms(req.cruise_speed_min_kmh);
         let vd = vd_ms(vc);
         println!("VD={:.0} km/h  V_flutter={:.0} km/h  OK={}",
@@ -482,7 +510,7 @@ mod tests {
         // seria se (incorretamente) derivada de VS0.
         let w = wing();
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
-        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste(), load_factor_limit("normal"));
 
         let va_esperada_kmh = w.stall_speed_clean_kmh * load_factor_limit("normal").sqrt();
         let va_se_fosse_vs0_kmh = w.stall_speed_flaps_kmh * load_factor_limit("normal").sqrt();
@@ -502,7 +530,7 @@ mod tests {
     fn fadiga_acima_de_10000_voos() {
         let w = wing();
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
-        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste(), load_factor_limit("normal"));
         let ciclos = struc.fatigue_life_cycles;
         println!("Vida em fadiga: {ciclos:.2e} ciclos");
         // Aeronave com ciclos de pressurização leve deve durar > 10.000 voos

@@ -169,9 +169,13 @@ pub struct PerformanceSpec {
 /// Saída do StructuralAgent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructuralSpec {
-    /// Fator de carga limite de projeto (CS-23 Normal = 3.8g)
+    /// Fator de carga de PROJETO usado para dimensionar a estrutura —
+    /// `VnDiagramSpec::n_design` (Task 4.3): `max(n_lim_pos, n_gust_vc,
+    /// n_gust_vc_light)`. Pode SUPERAR o fator de manobra da categoria
+    /// CS-23 (Normal = 3.8g) quando a condição de rajada em carga alar
+    /// baixa (CS 23.341) governa — ver `agents::vn_diagram`.
     pub design_load_factor_g: f64,
-    /// Fator último = 1.5 × limite
+    /// Fator último = 1.5 × `design_load_factor_g`
     pub ultimate_load_factor_g: f64,
     /// Momento fletor na raiz da asa — carga limite (N·m)
     pub wing_root_bending_limit_nm: f64,
@@ -199,6 +203,42 @@ pub struct StructuralSpec {
     pub fatigue_life_cycles: f64,
     /// Verificação: flutter OK?
     pub flutter_ok: bool,
+}
+
+/// Saída do VnDiagramAgent (Task 4.3) — diagrama V-n completo com rajadas
+/// (CS 23.333/.335/.337/.341). `n_design` é o fator de carga que governa o
+/// dimensionamento estrutural: `max(n_lim_pos, n_gust_vc, n_gust_vc_light)`
+/// — pode exceder o fator de manobra quando a condição de rajada em carga
+/// alar baixa (cenário mais leve) governa (ver docstring do módulo
+/// `agents::vn_diagram`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VnDiagramSpec {
+    /// Velocidade de manobra VA (km/h) — CS 23.335, VS1×√n_lim_pos.
+    pub va_kmh: f64,
+    /// Velocidade de rajada de projeto VB (km/h) — simplificação de projeto
+    /// preliminar, ver docstring de `VnDiagramAgent::run`.
+    pub vb_kmh: f64,
+    /// Velocidade de cruzeiro de projeto VC (km/h) — do requisito de missão.
+    pub vc_kmh: f64,
+    /// Velocidade de mergulho de projeto VD (km/h) — 1.25×VC.
+    pub vd_kmh: f64,
+    /// Fator de carga limite de manobra positivo (CS 23.337).
+    pub n_lim_pos: f64,
+    /// Fator de carga limite de manobra negativo (CS 23.337).
+    pub n_lim_neg: f64,
+    /// Fator de carga de rajada em VC, massa de envelope (CS 23.341).
+    pub n_gust_vc: f64,
+    /// Fator de carga de rajada em VD, massa de envelope (CS 23.341).
+    pub n_gust_vd: f64,
+    /// Fator de carga de rajada em VC, massa do cenário MAIS LEVE — carga
+    /// alar baixa pode fazer a rajada governar (CS 23.341).
+    pub n_gust_vc_light: f64,
+    /// Fator de carga de PROJETO — o que efetivamente dimensiona a
+    /// estrutura: `max(n_lim_pos, n_gust_vc, n_gust_vc_light)`.
+    pub n_design: f64,
+    /// Polígono do envelope [V_kmh, n] para plotagem/CAD — ver docstring de
+    /// `envelope_polygon` em `agents::vn_diagram` para a convenção exata.
+    pub points: Vec<[f64; 2]>,
 }
 
 /// Saída do LandingGearAgent
@@ -249,6 +289,7 @@ pub struct AircraftReport {
     pub control_surfaces: Option<ControlSurfacesSpec>,
     pub weight: Option<WeightSpec>,
     pub performance: Option<PerformanceSpec>,
+    pub vn_diagram: Option<VnDiagramSpec>,
     pub structure: Option<StructuralSpec>,
     pub landing_gear: Option<GearSpec>,
     pub violations: Vec<String>,
