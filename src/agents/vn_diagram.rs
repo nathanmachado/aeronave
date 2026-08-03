@@ -390,9 +390,9 @@ mod tests {
             "n mínimo do polígono ({n_min:.3}) deveria ser n_lim_neg ({:.3})", vn.n_lim_neg);
     }
 
-    // ── Integração: baseline real (Toyota + config_teste NÃO usados aqui —
-    // pins calculados a partir dos dados sintéticos de config_teste, único
-    // fixture disponível a este nível) ────────────────────────────────────
+    // ── Integração: config real de referência (motor + config_teste NÃO
+    // usados aqui — pins calculados a partir dos dados sintéticos de
+    // config_teste, único fixture disponível a este nível) ────────────────
     #[test]
     fn n_design_e_no_minimo_n_lim_pos() {
         let w = wing();

@@ -232,14 +232,14 @@ mod tests {
 
     // ─── Hand-check baseline (Task 4.5, controller) ─────────────────────────
     //
-    // D=1.95m, PSRU=1.867, motor rpm_rated=3.400 (Toyota real):
+    // D=1.95m, PSRU=1.867, motor rpm_rated=3.400 (motor baseline real):
     //   rpm_static = 3.400/1.867 = 1.821,1 rpm → n_rps=30,35 → tip=185,9 m/s
     //   a(0,0)=340,3 m/s → M_static = 185,9/340,3 = 0,546
     //   prop_rpm_cruise = 2.640/1.867 = 1.414,0 rpm → n_rps=23,57 → tip=144,4 m/s
     //   V=77,78 m/s → helical=164,0 m/s; a(2500,0)=330,6 → M_cruise=0,496
     //   clearance = 1,25 − 0,975 = 0,275 ≥ 0,23 ✓
     #[test]
-    fn hand_check_baseline_toyota() {
+    fn hand_check_baseline_real() {
         let mut cfg = config_teste();
         cfg.propeller.diameter_m = Some(1.95);
         cfg.propeller.psru_ratio = 1.867;
