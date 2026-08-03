@@ -72,8 +72,55 @@ fn validate_engine(engine: &EngineSpec) -> Result<(), ConfigError> {
         )));
     }
 
+    // Valida mass_kg é finito
+    if !engine.mass_kg.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: mass_kg deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+
+    // Valida rpm_idle é finito
+    if !engine.rpm_idle.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: rpm_idle deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+
+    // Valida rpm_rated é finito
+    if !engine.rpm_rated.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: rpm_rated deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+
+    // Valida rpm_redline é finito
+    if !engine.rpm_redline.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: rpm_redline deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+
+    // Valida rpm_max_continuous é finito
+    if !engine.rpm_max_continuous.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: rpm_max_continuous deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+
     let mut rpm_anterior: Option<f64> = None;
     for (i, [rpm, torque]) in engine.torque_curve.iter().enumerate() {
+        // Valida RPM é finito
+        if !rpm.is_finite() {
+            return Err(ConfigError::Validation(format!(
+                "curva de torque inválida: rpm deve ser finitos no ponto {i} (valores NaN/infinito não permitidos)"
+            )));
+        }
+        // Valida torque é finito
+        if !torque.is_finite() {
+            return Err(ConfigError::Validation(format!(
+                "curva de torque inválida: torque deve ser finitos no ponto {i} (valores NaN/infinito não permitidos)"
+            )));
+        }
         if *rpm < 0.0 {
             return Err(ConfigError::Validation(format!(
                 "curva de torque inválida: rpm negativo no ponto {i} ({rpm})"
@@ -92,6 +139,50 @@ fn validate_engine(engine: &EngineSpec) -> Result<(), ConfigError> {
             }
         }
         rpm_anterior = Some(*rpm);
+    }
+
+    // Valida BSFC fields são finitos
+    if !engine.bsfc.bsfc_min_gkwh.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: bsfc_min_gkwh deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+    if !engine.bsfc.rpm_optimal.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: bsfc.rpm_optimal deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+    if !engine.bsfc.load_optimal.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: bsfc.load_optimal deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+    if !engine.bsfc.rpm_penalty_gkwh.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: bsfc.rpm_penalty_gkwh deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+    if !engine.bsfc.load_penalty_gkwh.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: bsfc.load_penalty_gkwh deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+    if !engine.bsfc.bsfc_max_gkwh.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: bsfc_max_gkwh deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+
+    // Valida fuel fields são finitos
+    if !engine.fuel.density_kg_per_l.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: fuel.density_kg_per_l deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
+    }
+    if !engine.fuel.lhv_mj_per_kg.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração inválida: fuel.lhv_mj_per_kg deve ser finitos (valores NaN/infinito não permitidos)"
+        )));
     }
 
     if engine.rpm_max_continuous > engine.rpm_redline {
@@ -147,5 +238,60 @@ mod tests {
         "#;
         let err = parse_engine(toml_ruim).unwrap_err();
         assert!(err.to_string().contains("pelo menos 2 pontos"));
+    }
+
+    #[test]
+    fn rejeita_valores_nao_finitos_na_curva() {
+        let toml_com_nan = r#"
+            name = "X"
+            mass_kg = 1.0
+            rpm_idle = 700.0
+            rpm_rated = 3000.0
+            rpm_redline = 3500.0
+            rpm_max_continuous = 2800.0
+            torque_curve = [[nan, 200.0], [1600.0, 500.0]]
+            induction = "naturally_aspirated"
+            [bsfc]
+            bsfc_min_gkwh = 200.0
+            rpm_optimal = 2200.0
+            load_optimal = 0.7
+            rpm_penalty_gkwh = 18.0
+            load_penalty_gkwh = 22.0
+            bsfc_max_gkwh = 380.0
+            [fuel]
+            name = "d"
+            density_kg_per_l = 0.84
+            lhv_mj_per_kg = 42.5
+        "#;
+        let err = parse_engine(toml_com_nan).unwrap_err();
+        assert!(err.to_string().contains("finitos"));
+        assert!(err.to_string().contains("NaN") || err.to_string().contains("nan") || err.to_string().contains("infinito"));
+    }
+
+    #[test]
+    fn rejeita_valores_infinitos() {
+        let toml_com_inf = r#"
+            name = "X"
+            mass_kg = inf
+            rpm_idle = 700.0
+            rpm_rated = 3000.0
+            rpm_redline = 3500.0
+            rpm_max_continuous = 2800.0
+            torque_curve = [[700.0, 200.0], [1600.0, 500.0]]
+            induction = "naturally_aspirated"
+            [bsfc]
+            bsfc_min_gkwh = 200.0
+            rpm_optimal = 2200.0
+            load_optimal = 0.7
+            rpm_penalty_gkwh = 18.0
+            load_penalty_gkwh = 22.0
+            bsfc_max_gkwh = 380.0
+            [fuel]
+            name = "d"
+            density_kg_per_l = 0.84
+            lhv_mj_per_kg = 42.5
+        "#;
+        let err = parse_engine(toml_com_inf).unwrap_err();
+        assert!(err.to_string().contains("finitos") || err.to_string().contains("infinito"));
     }
 }
