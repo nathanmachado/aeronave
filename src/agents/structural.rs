@@ -229,8 +229,19 @@ pub fn skin_thickness_mm(m_bending_nm: f64, chord_m: f64, spar_height_m: f64) ->
 ///   V_flutter ≈ K_f × b × √(GJ / (ρ × I_α))
 ///   K_f ≈ 0.55–0.65 (constante empírica para perfis NACA série 4 e 5)
 ///
-/// Aproximação prática conservadora (Raymer p.461):
-///   V_flutter = 2.0 × VD   (meta de projeto — garantida por design e teste)
+/// Implementação abaixo (Finding 6d da revisão final — docstring
+/// anteriormente desatualizado): NÃO calcula `V_flutter = 2.0 × VD` — essa
+/// era uma meta de projeto típica de referência (Raymer p.461, aproximação
+/// prática conservadora), não o método usado aqui. O cálculo real é um
+/// método de energia: rigidez torsional da longarina (GJ, estimada da
+/// seção equivalente) contra o momento de inércia de massa em torção da
+/// asa (I_α, distribuído por envergadura), com `K_f = 0.60`. `V_flutter =
+/// 2.0 × VD` NÃO é garantido por construção — é só o alvo que
+/// `flutter_check` (CS 23.629, ≥ 1.20×VD) verifica a POSTERIORI contra o
+/// valor calculado; uma longarina subdimensionada reprova naturalmente
+/// (ver teste `flutter_reprova_com_longarina_fraca`). Meta de projeto
+/// típica ~2.0×VD citada só como referência de literatura, não como
+/// garantia.
 ///   Pré-verificação: frequência de torção > 10 Hz para esta classe
 ///
 /// Retorna V_flutter estimado em m/s — estimativa física sem piso artificial.

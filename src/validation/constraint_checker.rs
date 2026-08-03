@@ -64,22 +64,38 @@ impl ConstraintChecker {
             ));
         }
 
-        // 3. Autonomia da missão (Task 5.1: gate honesto sobre
-        // `mission.block_time_h` — tempo de bloco da análise por segmentos,
-        // subida+cruzeiro Breguet+descida — em vez de `prop.endurance_h`,
-        // que é o modelo antigo de consumo constante a TANQUE CHEIO
-        // (achado da revisão desta task, Finding 1: o gate lia o modelo
-        // superado). `prop.endurance_h` continua em `PropulsionSpec` como
-        // campo INFORMATIVO — ver seu doc-comment.
-        if mission.block_time_h < req.endurance_min_h {
-            violations.push(format!(
-                "Autonomia da missão (tempo de bloco, subida+cruzeiro+descida) {:.2} h \
-                 abaixo do requisito de {:.1} h",
-                mission.block_time_h, req.endurance_min_h
-            ));
-        }
+        // (Finding 4 da revisão final — checagens VAZIAS removidas do array
+        // de aceite/reprovação, `report.violations`)
+        //
+        // Duas checagens antigas deste bloco eram VAZIAS por construção —
+        // garantidas pela própria matemática de `MissionAgent::run`, não
+        // por nenhuma propriedade física da célula/motor/missão candidata —
+        // e portanto nunca conseguiam pegar uma regressão real:
+        //
+        //   - "block_time_h ≥ endurance_min_h" (antiga checagem #3): dado
+        //     `MissionAgent::run` retornando `Ok`, `block_time_h` SEMPRE
+        //     atende (a subida/descida usam velocidades ≤ V_cruzeiro, então
+        //     o tempo de bloco nunca fica abaixo do tempo que a mesma
+        //     distância levaria inteira em cruzeiro — ver dedução completa
+        //     no comentário de `mission_block_time_h_atende_autonomia_
+        //     minima_no_mtow_convergido`, `tests/generic_engine.rs`).
+        //   - "range_no_wind_km ≥ range_req" (antiga checagem #7):
+        //     `range_no_wind_km` é DEFINIDO em `MissionAgent::run` como a
+        //     soma dos três segmentos de distância que FECHA exatamente
+        //     `cruise_speed_min_kmh · endurance_min_h` (ver docstring de
+        //     `MissionSpec::range_no_wind_km`) — uma identidade algébrica,
+        //     não uma checagem.
+        //
+        // As duas invariantes continuam guardadas por teste (não removidas
+        // silenciosamente — só tiradas do array de aceite/reprovação):
+        // `tests/generic_engine.rs::mission_block_time_h_atende_autonomia_
+        // minima_no_mtow_convergido` (block_time_h) e
+        // `tests/generic_engine.rs::margem_de_combustivel_no_mtow_
+        // convergido` (identidade de `range_no_wind_km`, tolerância 1e-6).
+        // `block_time_h`/`range_no_wind_km` continuam impressos no
+        // relatório (`main.rs`) como informação de missão.
 
-        // 4. Razão de aspecto: AR > 8 para eficiência em cruzeiro de longa distância
+        // 3. Razão de aspecto: AR > 8 para eficiência em cruzeiro de longa distância
         if wing.aspect_ratio < 8.0 {
             warnings.push(format!(
                 "AR {:.1} abaixo de 8 — considerar aumentar envergadura para melhor eficiência",
@@ -87,7 +103,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 5. Stall em boa margem: V_s0 (pouso, com flap) deve ser < 115 km/h
+        // 4. Stall em boa margem: V_s0 (pouso, com flap) deve ser < 115 km/h
         //    para operação em grama/terra
         if wing.stall_speed_flaps_kmh > 115.0 {
             warnings.push(format!(
@@ -96,7 +112,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 6. Consumo: alerta se acima de 35 L/h (degrada autonomia)
+        // 5. Consumo: alerta se acima de 35 L/h (degrada autonomia)
         if prop.fc_cruise_lph > 35.0 {
             violations.push(format!(
                 "Consumo cruzeiro {:.1} L/h acima do limite de 35 L/h para autonomia de 8h",
@@ -104,23 +120,31 @@ impl ConstraintChecker {
             ));
         }
 
-        // 7. Alcance mínimo da missão (Task 5.1: gate honesto sobre o
-        // alcance ALCANÇÁVEL — soma dos três segmentos de distância,
-        // subida+cruzeiro+descida, `mission.range_no_wind_km` — em vez de
-        // `prop.range_km`, o modelo antigo de consumo constante a TANQUE
-        // CHEIO. Mesmo achado da checagem #3 acima (Finding 1 da revisão).
-        // `prop.range_km` continua em `PropulsionSpec` como campo
-        // INFORMATIVO.
+        // 6. Alcance Breguet com TANQUE CHEIO (Finding 4 da revisão final —
+        // substitui a antiga checagem #7, vazia por construção, ver
+        // comentário acima). Checa uma quantidade GENUINAMENTE FALSEÁVEL:
+        // `mission.breguet_range_full_tank_km` (Breguet puro de cruzeiro,
+        // ZFW → ZFW+tanque cheio, INDEPENDENTE da distância de
+        // subida/descida da missão real — ver `MissionAgent::run`) precisa
+        // cobrir o alcance mínimo exigido pela missão. Ao contrário da
+        // checagem antiga, isto NÃO é garantido pela álgebra de
+        // `MissionAgent::run`: a orquestração só garante que o combustível
+        // da missão MÍNIMA cabe no tanque (`SizingError::
+        // CombustivelInsuficiente`), não que o alcance Breguet do tanque
+        // CHEIO cubra `range_req` — uma célula/motor pode, em tese,
+        // convergir com folga de combustível pequena o bastante para que
+        // esta checagem falhe mesmo com `Ok(sized)`.
         let range_req = req.cruise_speed_min_kmh * req.endurance_min_h;
-        if mission.range_no_wind_km < range_req {
+        if mission.breguet_range_full_tank_km < range_req {
             violations.push(format!(
-                "Alcance da missão (subida+cruzeiro+descida) {:.0} km abaixo do requisito \
-                 de {:.0} km",
-                mission.range_no_wind_km, range_req
+                "Alcance Breguet com tanque cheio {:.0} km abaixo do requisito de {:.0} km \
+                 (a missão mínima cabe no tanque, mas o alcance Breguet do tanque cheio não \
+                 cobre a distância exigida)",
+                mission.breguet_range_full_tank_km, range_req
             ));
         }
 
-        // 8. MTOW razoável para a potência do motor instalado (fator de carga de potência)
+        // 7. MTOW razoável para a potência do motor instalado (fator de carga de potência)
         let power_hp = engine.power_kw_max() / 0.7457;
         let hp_per_tonne = power_hp / (mtow_kg / 1_000.0);
         if hp_per_tonne < 100.0 {
@@ -130,7 +154,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 9. Viabilidade de cruzeiro: o rpm de cruzeiro escolhido pela busca
+        // 8. Viabilidade de cruzeiro: o rpm de cruzeiro escolhido pela busca
         // (PropulsionAgent) precisa entregar potência de eixo >= potência
         // requerida em voo nivelado. Se não entregar (motor genuinamente
         // incapaz de sustentar a velocidade de cruzeiro exigida com esta
@@ -144,7 +168,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 10. Envelope de CG admissível (Task 4.4): critério de aceite
+        // 9. Envelope de CG admissível (Task 4.4): critério de aceite
         // substitui a antiga checagem isolada `sm > 0.03` — agora TODO
         // cenário de carga precisa ter o CG dentro de
         // [cg_limit_fwd_pct_mac, cg_limit_aft_pct_mac], os limites vindos
@@ -169,7 +193,7 @@ impl ConstraintChecker {
             }
         }
 
-        // 11. Mach de ponta de pá e folga de solo (Task 4.5) — estático,
+        // 10. Mach de ponta de pá e folga de solo (Task 4.5) — estático,
         // cruzeiro e folga, cada um reportado com o diâmetro (config ou
         // derivado) que produziu o resultado.
         if !propeller.ok_mach_static {
@@ -194,7 +218,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 12. Diâmetro derivado × provisório (mitigação pós-revisão da Task
+        // 11. Diâmetro derivado × provisório (mitigação pós-revisão da Task
         // 4.5): quando `[propeller].diameter_m` está omitido, o resultado de
         // propulsão foi calculado com um diâmetro PROVISÓRIO (só folga de
         // solo — ver `agents::propeller::diameter_mismatch_warning`), que
@@ -207,7 +231,7 @@ impl ConstraintChecker {
             warnings.push(aviso);
         }
 
-        // 13. Gradiente de subida (Task 4.7, CS 23.65): a categoria exige um
+        // 12. Gradiente de subida (Task 4.7, CS 23.65): a categoria exige um
         // gradiente mínimo de 8.3% (avaliado em Vx, ao nível do mar, MTOW —
         // ver `agents::performance::best_climb_angle_ms`).
         if perf.climb_gradient_pct < CLIMB_GRADIENT_MIN_PCT {
@@ -218,7 +242,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 14. Orçamento elétrico — carga CONTÍNUA (Task 5.2): não pode
+        // 13. Orçamento elétrico — carga CONTÍNUA (Task 5.2): não pode
         // ultrapassar 80% da capacidade do alternador (regra de margem de
         // projeto — reserva para degradação/temperatura/transientes não
         // capturados no orçamento contínuo).
@@ -231,7 +255,7 @@ impl ConstraintChecker {
             ));
         }
 
-        // 15. Orçamento elétrico — carga de PICO (Task 5.2): se o pico
+        // 14. Orçamento elétrico — carga de PICO (Task 5.2): se o pico
         // "pior caso, tudo ligado" excede a capacidade do alternador, isto é
         // um AVISO, não violação — o banco de baterias da aeronave cobre
         // transientes que o alternador sozinho não sustenta (situação

@@ -27,9 +27,11 @@ fn manifest_dir() -> PathBuf {
 /// `tests/generic_engine.rs`,
 /// `orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l`), o Rotax
 /// 915iS — motor fraco demais para sustentar 280 km/h com esta célula —
-/// falha por combustível insuficiente (precisa de ~409 L, o tanque tem
+/// falha por combustível insuficiente (precisa de ~393,3 L, o tanque tem
 /// 260 L — não é uma borda de alguns litros como o caso Toyota original,
-/// é ~1,57×) ANTES de gerar o JSON (que só é escrito após o sizing
+/// é ~1,51×; valor pinado em
+/// `tests/generic_engine.rs::orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l`)
+/// ANTES de gerar o JSON (que só é escrito após o sizing
 /// convergir). O teste verifica os dois pontos honestos: (1) `--engine`
 /// trocou qual motor é usado (visível no cabeçalho impresso em stdout antes
 /// do erro) — ponto real da Task 2.3; (2) o binário sai com erro e uma
@@ -58,7 +60,7 @@ fn engine_flag_troca_motor_e_rotax_falha_honestamente_por_combustivel() {
          usado, mesmo que o sizing falhe depois — ver comentário acima):\n{stdout}");
 
     assert!(!output.status.success(),
-        "binário deveria sair com erro: o Rotax 915iS precisa de ~409 L contra os 260 L do \
+        "binário deveria sair com erro: o Rotax 915iS precisa de ~393 L contra os 260 L do \
          tanque configurado — inviável por uma margem grande, não um caso de borda");
 
     let stderr = String::from_utf8_lossy(&output.stderr);

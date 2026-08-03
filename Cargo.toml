@@ -2,7 +2,7 @@
 name = "aeronave"
 version = "0.1.0"
 edition = "2021"
-description = "Modelagem matemática de aeronave experimental 4 lugares — Toyota 1GD-FTV"
+description = "Modelagem parametrica de aeronave experimental 4 lugares — motor, celula e missao configuraveis por TOML"
 
 [dependencies]
 clap = { version = "4.6.5", features = ["derive"] }

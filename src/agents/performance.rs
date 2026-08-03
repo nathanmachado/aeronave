@@ -21,8 +21,7 @@ use crate::models::atmosphere::Isa;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
 use crate::models::specs::{WingSpec, PropulsionSpec, PerformanceSpec};
-use crate::agents::propulsion::{prop_rpm, prop_efficiency, advance_ratio, thrust_n,
-                                  PSRU_EFFICIENCY};
+use crate::agents::propulsion::{prop_rpm, prop_efficiency, advance_ratio, thrust_n};
 use crate::models::aircraft_state::AircraftState;
 use crate::models::aircraft_config::PerformanceCfg;
 
@@ -31,8 +30,14 @@ const G: f64 = 9.807;   // m/s²
 // ─── POTÊNCIA E TRAÇÃO DISPONÍVEIS ────────────────────────────────────────────
 
 /// Potência de eixo disponível em altitude a RPM de cruzeiro (kW)
-pub fn shaft_power_kw(engine: &EngineSpec, engine_rpm: f64, altitude_m: f64) -> f64 {
-    engine.power_kw_at(engine_rpm, altitude_m) * PSRU_EFFICIENCY
+///
+/// `psru_efficiency`: eficiência mecânica do PSRU (`AircraftState::
+/// psru_efficiency`, dado de configuração — `[propeller].psru_efficiency`).
+/// Finding 1 da revisão final: antes vinha de um `const PSRU_EFFICIENCY`
+/// hardcoded em `agents::propulsion` que ignorava este campo do TOML.
+pub fn shaft_power_kw(engine: &EngineSpec, engine_rpm: f64, altitude_m: f64,
+                       psru_efficiency: f64) -> f64 {
+    engine.power_kw_at(engine_rpm, altitude_m) * psru_efficiency
 }
 
 /// Tração estática IDEAL (Rankine-Froude, disco atuador) — sem correção
@@ -40,8 +45,8 @@ pub fn shaft_power_kw(engine: &EngineSpec, engine_rpm: f64, altitude_m: f64) -> 
 /// modelar perdas de ponta de pá, rotação de esteira e não-uniformidade da
 /// distribuição de carga ao longo da pá.
 fn static_thrust_ideal_n(engine: &EngineSpec, engine_rpm: f64, prop_diam_m: f64,
-                          altitude_m: f64, isa_delta_c: f64) -> f64 {
-    let p_w = shaft_power_kw(engine, engine_rpm, altitude_m) * 1_000.0;
+                          altitude_m: f64, isa_delta_c: f64, psru_efficiency: f64) -> f64 {
+    let p_w = shaft_power_kw(engine, engine_rpm, altitude_m, psru_efficiency) * 1_000.0;
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     let disk_area = std::f64::consts::PI * (prop_diam_m / 2.0).powi(2);
     (2.0 * rho * disk_area * p_w * p_w).powf(1.0 / 3.0)
@@ -66,17 +71,19 @@ pub fn thrust_available_n(
     altitude_m: f64,
     isa_delta_c: f64,
     static_thrust_factor: f64,
+    psru_efficiency: f64,
 ) -> f64 {
     if v_ms < 0.5 {
         // Tração estática (solo): estimativa por impulso de disco
         // (Rankine-Froude) × fator empírico de correção.
-        return static_thrust_ideal_n(engine, engine_rpm, prop_diam_m, altitude_m, isa_delta_c)
+        return static_thrust_ideal_n(engine, engine_rpm, prop_diam_m, altitude_m, isa_delta_c,
+                                      psru_efficiency)
             * static_thrust_factor;
     }
     let n_prop = prop_rpm(engine_rpm, psru_ratio);
     let j = advance_ratio(v_ms, n_prop, prop_diam_m);
     let eta = prop_efficiency(j);
-    let p_shaft_w = shaft_power_kw(engine, engine_rpm, altitude_m) * 1_000.0;
+    let p_shaft_w = shaft_power_kw(engine, engine_rpm, altitude_m, psru_efficiency) * 1_000.0;
     thrust_n(eta, p_shaft_w, v_ms)
 }
 
@@ -112,11 +119,13 @@ pub fn excess_power_kw(
     altitude_m: f64,
     isa_delta_c: f64,
     static_thrust_factor: f64,
+    psru_efficiency: f64,
 ) -> f64 {
     let drag   = drag_level_n(v_ms, mass_kg, rho, wing);
     let p_req  = power_required_kw(v_ms, drag);
     let thrust = thrust_available_n(v_ms, engine, engine_rpm, psru_ratio, prop_diam_m,
-                                     altitude_m, isa_delta_c, static_thrust_factor);
+                                     altitude_m, isa_delta_c, static_thrust_factor,
+                                     psru_efficiency);
     let p_avail = thrust * v_ms / 1_000.0;
     p_avail - p_req
 }
@@ -164,7 +173,7 @@ pub fn climb_rate_ms(
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
-                                   static_thrust_factor);
+                                   static_thrust_factor, state.psru_efficiency);
         let rc = pex * 1_000.0 / (mass_kg * G);
         if rc > best_rc {
             best_rc = rc;
@@ -222,7 +231,7 @@ pub fn best_climb_angle_ms(
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
-                                   static_thrust_factor);
+                                   static_thrust_factor, state.psru_efficiency);
         let rc = pex * 1_000.0 / (mass_kg * G);
         let grad = rc / v;
         if grad > best_grad {
@@ -308,6 +317,7 @@ fn takeoff_ground_roll_m(
         0.0, // nível do mar
         isa_delta_c,
         static_thrust_factor,
+        state.psru_efficiency,
     );
     w * w / (G * rho * wing.area_m2 * cl_to * t_avg)
 }
@@ -371,7 +381,7 @@ pub fn takeoff_distance_50ft_m(
     let engine_rpm_to = engine.rpm_max_continuous;
     let pex = excess_power_kw(v_climb, mass_kg, rho, wing, engine, engine_rpm_to,
                                state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
-                               perf_cfg.static_thrust_factor);
+                               perf_cfg.static_thrust_factor, state.psru_efficiency);
     let rc = pex * 1_000.0 / (mass_kg * G);
     if rc <= 0.0 {
         // Não consegue sustentar subida nesta condição — obstáculo
@@ -468,7 +478,7 @@ pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, isa_delta_c: f64, wing:
     let (lo, hi) = (1.2 * v_stall, 200.0);
     let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine, engine_rpm,
                                        state.psru_ratio, state.prop_diameter_m, altitude_m,
-                                       isa_delta_c, static_thrust_factor);
+                                       isa_delta_c, static_thrust_factor, state.psru_efficiency);
 
     // Varredura grosseira: 100 passos (101 amostras) sobre [lo, hi]
     const STEPS: usize = 100;
@@ -531,9 +541,16 @@ impl PerformanceAgent {
         let (gradient_sl, vx_sl_kmh) = best_climb_angle_ms(mtow_kg, 0.0, isa_delta_c, wing, state,
                                                              engine, stf);
 
-        // Razão de subida a 2.500 m (cruzeiro parcialmente queimado — ~1.350 kg)
+        // Razão de subida na altitude de CRUZEIRO DA MISSÃO (Finding 2 da
+        // revisão final: antes hardcoded em 2.500 m, ignorando
+        // `req.cruise_altitude_m` — coincidia com a missão de projeto
+        // padrão, mas divergia silenciosamente para qualquer missão com
+        // outra altitude de cruzeiro, ex. uma missão de traslado a 2.000 m
+        // em vez dos 2.500 m padrão — ver `config/missions/*.toml`). Massa:
+        // cruzeiro parcialmente queimado (~35% do combustível gasto).
         let mass_mid = mtow_kg - (prop.fuel_capacity_l * fuel_density * 0.35); // 35% do combustível gasto
-        let (rc_cruise_alt, _) = climb_rate_ms(mass_mid, 2_500.0, isa_delta_c, wing, state, engine, stf);
+        let (rc_cruise_alt, _) =
+            climb_rate_ms(mass_mid, req.cruise_altitude_m, isa_delta_c, wing, state, engine, stf);
 
         // Teto de serviço
         let ceiling = service_ceiling_m(mass_mid, isa_delta_c, wing, state, engine, stf);
@@ -558,8 +575,11 @@ impl PerformanceAgent {
         // Melhor planeio (Task 4.7) — MTOW, nível do mar, motor cortado.
         let (v_bg_kmh, ld_max) = best_glide(mtow_kg, rho_sl, wing);
 
-        // Velocidade máxima nivelada em cruzeiro (2.500 m, rpm nominal do motor)
-        let v_max_cruise_ms = max_level_speed_ms(mtow_kg, 2_500.0, isa_delta_c, wing, state, engine, stf);
+        // Velocidade máxima nivelada em cruzeiro (altitude de cruzeiro da
+        // missão, rpm nominal do motor — Finding 2 da revisão final, mesma
+        // razão do `rc_cruise_alt` acima).
+        let v_max_cruise_ms =
+            max_level_speed_ms(mtow_kg, req.cruise_altitude_m, isa_delta_c, wing, state, engine, stf);
 
         PerformanceSpec {
             v_cruise_kmh:         v_max_cruise_ms * 3.6,
@@ -687,11 +707,14 @@ mod tests {
     fn fator_de_tracao_estatica_e_proporcao_exata() {
         let (state, _wing, _prop, engine, _req, _perf_cfg) = setup();
         let t_ideal = static_thrust_ideal_n(&engine, engine.rpm_max_continuous,
-                                             state.prop_diameter_m, 0.0, 0.0);
+                                             state.prop_diameter_m, 0.0, 0.0,
+                                             state.psru_efficiency);
         let t_075 = thrust_available_n(0.0, &engine, engine.rpm_max_continuous,
-                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, 0.75);
+                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, 0.75,
+                                        state.psru_efficiency);
         let t_100 = thrust_available_n(0.0, &engine, engine.rpm_max_continuous,
-                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, 1.0);
+                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, 1.0,
+                                        state.psru_efficiency);
         println!("T_ideal={t_ideal:.1}N  T(factor=0.75)={t_075:.1}N  T(factor=1.0)={t_100:.1}N");
         // factor=1.0 deve reproduzir exatamente o valor IDEAL (sem correção).
         assert!((t_100 - t_ideal).abs() < 1e-6,
@@ -786,7 +809,16 @@ mod tests {
         // honesta esperada da task (documentada no brief), não uma
         // regressão do resolvedor: 306.9014368061 km/h → 303.5154833612 km/h
         // (-3,386 km/h, -1,10%).
-        let v_max_observado_kmh = 303.5154833612;
+        //
+        // ATUALIZAÇÃO (Finding 1 da revisão final): `state.psru_efficiency`
+        // passa a alimentar `shaft_power_kw`/`thrust_available_n` (antes
+        // hardcoded em `agents::propulsion::PSRU_EFFICIENCY = 0.97`, agora
+        // removido — ver `AircraftState::psru_efficiency`). A fixture
+        // sintética `config_teste()` usa 0,965 (deliberadamente distinto de
+        // 0,97 — ver seu doc-comment), levemente abaixo do valor antigo
+        // implícito: menos potência de eixo disponível, V_max cai:
+        // 303.5154833612 km/h → 302.9220524587 km/h (-0,593 km/h, -0,20%).
+        let v_max_observado_kmh = 302.9220524587;
         assert!((v_max_kmh - v_max_observado_kmh).abs() < 0.5,
             "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor observado \
              {v_max_observado_kmh:.2} km/h em mais de 0.5 km/h — possível \

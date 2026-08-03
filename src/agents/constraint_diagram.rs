@@ -120,7 +120,7 @@ pub fn wing_loading_limits(
 
     // ── P/W atual (potência máxima contínua no eixo, SL) ────────────────
     let p_shaft_max_continuous_w =
-        shaft_power_kw(engine, engine.rpm_max_continuous, 0.0) * 1_000.0;
+        shaft_power_kw(engine, engine.rpm_max_continuous, 0.0, state.psru_efficiency) * 1_000.0;
     let pw_actual_w_n = p_shaft_max_continuous_w / weight_n;
 
     // ── Recomendação de área ────────────────────────────────────────────

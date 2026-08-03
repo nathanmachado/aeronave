@@ -315,18 +315,35 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // missão (`cruise_speed_min_kmh · endurance_min_h`) — por construção,
     // já que `cruise_distance_km` é definido como o que falta para fechar
     // essa soma (ver docstring de `MissionSpec::range_no_wind_km`).
+    //
+    // ATUALIZAÇÃO (Finding 4 da revisão final): esta identidade era, até
+    // então, também uma checagem de aceite em `ConstraintChecker::verify`
+    // (antiga #7) — removida de lá por ser vazia por construção (sempre
+    // verdadeira dado `MissionAgent::run` `Ok`, não uma propriedade da
+    // célula/motor/missão candidata). O assert abaixo é agora o ÚNICO
+    // guarda-corpo desta identidade — se algum refactor futuro de
+    // `MissionAgent` quebrar a construção (`cruise_distance_m` deixar de
+    // fechar exatamente a distância exigida), é este teste que pega.
     let alcance_exigido_km = req.cruise_speed_min_kmh * req.endurance_min_h;
     assert!((sized.mission.range_no_wind_km - alcance_exigido_km).abs() < 1e-6,
         "range_no_wind_km {:.6} km deveria bater EXATAMENTE o alcance exigido {:.6} km",
         sized.mission.range_no_wind_km, alcance_exigido_km);
 }
 
-/// Finding 1 da revisão da Task 5.1: o gate de autonomia do projeto
-/// (`ConstraintChecker::verify` #3, `main.rs` headline) passou a usar
-/// `mission.block_time_h` (tempo de bloco da análise por segmentos —
+/// Finding 1 da revisão da Task 5.1: o gate de autonomia do projeto passou a
+/// usar `mission.block_time_h` (tempo de bloco da análise por segmentos —
 /// subida+cruzeiro+descida) em vez de `prop.endurance_h` (modelo antigo de
-/// consumo constante a tanque cheio, que virou informativo). Este teste
-/// cobre esse gate honesto diretamente contra o baseline real.
+/// consumo constante a tanque cheio, que virou informativo).
+///
+/// ATUALIZAÇÃO (Finding 4 da revisão final): `block_time_h ≥
+/// endurance_min_h` NÃO é mais uma checagem de aceite em
+/// `ConstraintChecker::verify` (era a antiga #3, removida por ser vazia por
+/// construção — dado `MissionAgent::run` `Ok`, a subida/descida sempre
+/// voam a velocidade ≤ V_cruzeiro, então o tempo de bloco nunca fica abaixo
+/// do tempo que a mesma distância levaria inteira em cruzeiro). Este teste
+/// é agora o ÚNICO guarda-corpo dessa invariante — cobre o gate honesto
+/// diretamente contra o baseline real, sem depender de `ConstraintChecker`
+/// reafirmá-la.
 #[test]
 fn mission_block_time_h_atende_autonomia_minima_no_mtow_convergido() {
     let cfg    = baseline_state();

@@ -9,7 +9,7 @@
 //!
 //! Desvio deliberado do texto literal do brief da Task 6.2 ("ambos
 //! executam"): o Rotax 915 iS genuinely não sustenta a missão de projeto
-//! completa (280 km/h / 8 h — precisa de ~409 L contra os 260 L do tanque;
+//! completa (280 km/h / 8 h — precisa de ~393,3 L contra os 260 L do tanque;
 //! ver `tests/cli.rs::engine_flag_troca_motor_e_rotax_falha_honestamente_por_combustivel`).
 //! Essa é a resposta honesta do modelo, não um bug — então o critério de
 //! aceitação vira: (a) Toyota roda a missão completa até um spec completo;

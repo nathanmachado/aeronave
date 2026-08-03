@@ -22,8 +22,6 @@ use crate::models::{
     specs::{EmpennageSpec, WingSpec},
 };
 
-const G: f64 = 9.807; // m/s²
-
 // ─── GEOMETRIA DA ASA ─────────────────────────────────────────────────────────
 
 /// Corda na raiz da asa trapezoidal:
@@ -344,7 +342,10 @@ impl WeightBalanceAgent {
 
         // Peso vazio operacional
         let oew_items = oew_items(cfg, engine);
-        let (oew_kg, x_cg_oew) = cg_from_items(&oew_items);
+        // `x_cg_oew` (CG do OEW isolado) não é consumido por este agente —
+        // só a lista de itens (`oew_items`) importa daqui pra frente, cada
+        // cenário de carga recalcula seu próprio CG a partir dela.
+        let (oew_kg, _x_cg_oew) = cg_from_items(&oew_items);
 
         // Peso dos passageiros — massa por passageiro vem de `req.pax_mass_kg`
         // (mission.toml), não mais hardcoded.

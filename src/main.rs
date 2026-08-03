@@ -70,8 +70,14 @@ fn main() {
         std::process::exit(1);
     });
 
+    // Finding 6b da revisão final: banner estava travado em "v3.0 (6
+    // Agentes)" — desatualizado desde a Task 6.1 (schema v4) e sempre
+    // desatualizado quanto à contagem real de agentes (9: Aerodinâmica,
+    // Propulsão, Missão, Peso/Balanceamento, Desempenho, Estrutura, Trem de
+    // Pouso, Superfícies de Controle, Hélice — ver os blocos `[ AGENTE N ]`
+    // abaixo). Versão agora lida de `SCHEMA_VERSION` (fonte única).
     println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║   AERONAVE — Modelagem Matemática v3.0  (6 Agentes)         ║");
+    println!("║   AERONAVE — Dimensionamento Paramétrico v{SCHEMA_VERSION} (9 Agentes)      ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
     println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
@@ -388,21 +394,32 @@ fn main() {
     let tip_ok  = gear.tipover_angle_deg < 55.0;
     let nose_ok = gear.nose_load_fraction_pct >= 8.0 && gear.nose_load_fraction_pct <= 25.0;
 
-    let checks = [
-        (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65"),
-        (perf.v_cruise_kmh >= 280.0,          "V_cruzeiro ≥ 280 km/h"),
+    // Finding 3 da revisão final: literais de requisito hardcoded (280 km/h,
+    // "≥ 8 h") divergiam de `req.*` para qualquer missão diferente da
+    // missão de projeto padrão — o gate de V_cruzeiro chegava a marcar
+    // "requisito não satisfeito" para missões que pedem uma velocidade
+    // menor (ex.: uma missão de traslado a 200 km/h), mesmo quando a
+    // aeronave sustentava com folga o requisito REAL daquela missão.
+    // Rótulos agora formatados com `req.cruise_speed_min_kmh`/
+    // `req.endurance_min_h` — corretos para qualquer `mission.toml`.
+    let checks: [(bool, String); 10] = [
+        (report.all_satisfied(),
+            "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65".to_string()),
+        (perf.v_cruise_kmh >= req.cruise_speed_min_kmh,
+            format!("V_cruzeiro ≥ {:.0} km/h", req.cruise_speed_min_kmh)),
         // Task 5.1 (achado da revisão, Finding 1): gate honesto sobre o
         // tempo de bloco da missão por segmentos, não mais o endurance a
         // tanque cheio/consumo constante (`prop.endurance_h`, agora
         // informativo — ver seu doc-comment em `specs.rs`).
-        (mission.block_time_h >= req.endurance_min_h, "Autonomia da missão (block_time_h) ≥ 8 h"),
-        (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar"),
-        (ceil_ok,                             "Teto de serviço ≥ 3.000 m"),
-        (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)"),
-        (tip_ok,                              "Anti-tombamento < 55°"),
-        (nose_ok,                             "Carga nariz 8–25%"),
-        (all_stable,                          "Estabilidade longitudinal (todos cenários, SM>3%, referência)"),
-        (all_inside_envelope,                 "Envelope de CG admissível (todos cenários, Task 4.4)"),
+        (mission.block_time_h >= req.endurance_min_h,
+            format!("Autonomia da missão (block_time_h) ≥ {:.1} h", req.endurance_min_h)),
+        (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar".to_string()),
+        (ceil_ok,                             "Teto de serviço ≥ 3.000 m".to_string()),
+        (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)".to_string()),
+        (tip_ok,                              "Anti-tombamento < 55°".to_string()),
+        (nose_ok,                             "Carga nariz 8–25%".to_string()),
+        (all_stable,                          "Estabilidade longitudinal (todos cenários, SM>3%, referência)".to_string()),
+        (all_inside_envelope,                 "Envelope de CG admissível (todos cenários, Task 4.4)".to_string()),
     ];
 
     let all_ok = checks.iter().all(|(ok, _)| *ok);
@@ -420,16 +437,33 @@ fn main() {
     for w in &report.warnings { println!("  ⚠ {w}"); }
 
     // ── Economia ──────────────────────────────────────────────────────────────
+    // Finding 6c da revisão final: o rótulo "Diesel S-10" e a comparação
+    // com AVGAS (fator 1,67) eram hardcoded — corretos só para um motor a
+    // diesel, mas enganosos para qualquer motor a gasolina de aviação (que
+    // já USA avgas — a "comparação" não faz sentido nesse caso). O
+    // combustível agora é identificado por `engine.fuel.name` (dado de
+    // config, `[fuel]` do TOML do motor); o fator 1,67 diesel→avgas só é
+    // aplicado quando o combustível instalado é denso o bastante para ser
+    // plausivelmente diesel (heurística: densidade > 0,8 kg/L — gasolina de
+    // aviação fica tipicamente em ~0,72 kg/L, diesel ~0,83–0,85 kg/L).
+    // Caso contrário, imprime só o custo por hora do combustível instalado,
+    // sem inventar uma comparação.
     println!();
     println!("[ ECONOMIA ] Custo operacional estimado:");
     let custo_h = prop.fc_cruise_lph * cli.fuel_price_brl;
-    // 1.67: fator volumétrico diesel→avgas-equivalente (mesma energia por
-    // litro de diesel consome ~1.67x em litros de avgas, dada a menor
-    // densidade energética do avgas) — mantido inline, não é um preço.
-    let avgas_h = prop.fc_cruise_lph * 1.67 * cli.avgas_price_brl;
-    println!("  Diesel S-10:  R$ {:.0}/h  |  AVGAS equiv: R$ {:.0}/h  |  Economia: R$ {:.0}/h",
-             custo_h, avgas_h, avgas_h - custo_h);
-    println!("  Economia/100h de voo: R$ {:.0}", (avgas_h - custo_h) * 100.0);
+    if engine.fuel.density_kg_per_l > 0.8 {
+        // 1.67: fator volumétrico diesel→avgas-equivalente (mesma energia
+        // por litro de diesel consome ~1.67x em litros de avgas, dada a
+        // menor densidade energética do avgas) — mantido inline, não é um
+        // preço.
+        let avgas_h = prop.fc_cruise_lph * 1.67 * cli.avgas_price_brl;
+        println!("  {}:  R$ {:.0}/h  |  AVGAS equiv: R$ {:.0}/h  |  Economia: R$ {:.0}/h",
+                 engine.fuel.name, custo_h, avgas_h, avgas_h - custo_h);
+        println!("  Economia/100h de voo: R$ {:.0}", (avgas_h - custo_h) * 100.0);
+    } else {
+        println!("  {}:  R$ {:.0}/h  |  R$ {:.0}/100h de voo",
+                 engine.fuel.name, custo_h, custo_h * 100.0);
+    }
 
     // ── Geometria consolidada p/ CAD (Task 6.1) ─────────────────────────────────
     // Campos que já existiam internamente (`wb`, `cfg`) mas não eram

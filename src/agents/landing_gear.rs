@@ -187,7 +187,15 @@ impl LandingGearAgent {
         let wheelbase = x_main_m - x_nose_m;
 
         // Cargas
-        let f_main_static = mtow_kg * G * (1.0 - f_nose_frac) / 2.0; // por perna
+        // `f_main_static` (carga estática por perna do trem principal) não
+        // alimenta nenhum campo de `GearSpec` hoje — só a carga de IMPACTO
+        // (`f_main_impact`, abaixo) é reportada/dimensionada para o trem
+        // principal (a carga de impacto governa o dimensionamento do
+        // amortecedor, sempre maior que a estática). Mantida no cálculo
+        // (não removida) por simetria com `f_nose_static`, que É consumida
+        // por `f_nose_impact`, e como documentação explícita da carga
+        // estática de referência.
+        let _f_main_static = mtow_kg * G * (1.0 - f_nose_frac) / 2.0; // por perna
         let f_nose_static = mtow_kg * G * f_nose_frac;
 
         // Curso do amortecedor principal

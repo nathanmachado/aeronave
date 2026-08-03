@@ -40,6 +40,15 @@ pub struct AircraftState {
 
     // --- Propulsão ---
     pub psru_ratio: f64,
+    /// Eficiência mecânica do PSRU (correia/engrenagens, `[propeller]
+    /// psru_efficiency` do TOML) — Finding 1 da revisão final: antes vinha de
+    /// um `const PSRU_EFFICIENCY = 0.97` hardcoded em `agents::propulsion`
+    /// que IGNORAVA este campo (validado por `models::config` mas nunca
+    /// lido pela física). Agora é dado de configuração de ponta a ponta —
+    /// todo cálculo que envolve perdas mecânicas do PSRU (busca de rpm de
+    /// cruzeiro, consumo, potência de eixo em `agents::performance`, Breguet
+    /// em `agents::mission`, P/W do diagrama de restrições) lê este campo.
+    pub psru_efficiency: f64,
     pub prop_diameter_m: f64,
     pub fuel_capacity_l: f64,
 
@@ -70,6 +79,7 @@ impl AircraftState {
             mtow_kg: cfg.sizing.mtow_initial_guess_kg,
 
             psru_ratio: cfg.propeller.psru_ratio,
+            psru_efficiency: cfg.propeller.psru_efficiency,
             // Quando `[propeller].diameter_m` está presente, usa-o
             // diretamente (comportamento inalterado). Quando OMITIDO, usa
             // como palpite provisório o maior diâmetro que respeita a folga

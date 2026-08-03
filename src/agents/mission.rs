@@ -52,8 +52,9 @@
 //! ```
 //!
 //! e a potência no VIRABREQUIM (pré-PSRU) é MAIOR que `P_hélice` pelas
-//! perdas mecânicas do PSRU (correia/engrenagens, `η_PSRU` — ver
-//! `agents::propulsion::PSRU_EFFICIENCY`):
+//! perdas mecânicas do PSRU (correia/engrenagens, `η_PSRU` — dado de
+//! configuração, `AircraftState::psru_efficiency` / `[propeller]
+//! psru_efficiency` do TOML):
 //!
 //! ```text
 //!   P_virabrequim = P_hélice / η_PSRU
@@ -101,7 +102,8 @@
 //!
 //! `BsfcModel::bsfc_gkwh` modela o consumo específico do MOTOR — medido no
 //! virabrequim, ANTES das perdas mecânicas do PSRU (correia/engrenagem,
-//! `η_PSRU = 0,97`). `shaft_power_kw`/`p_req_cruise_kw` (usados na subida e
+//! `η_PSRU`, tipicamente ~0,97, dado de configuração —
+//! `AircraftState::psru_efficiency`). `shaft_power_kw`/`p_req_cruise_kw` (usados na subida e
 //! no cálculo de `fc_cruise_lph` em `agents::propulsion`) já são potências
 //! PÓS-PSRU (potência de eixo entregue à hélice). Multiplicar BSFC
 //! diretamente por uma potência pós-PSRU subestima o consumo de
@@ -149,7 +151,6 @@
 //! revisão", não mais o valor autoritativo.)
 
 use crate::agents::performance::{climb_rate_ms, shaft_power_kw};
-use crate::agents::propulsion::PSRU_EFFICIENCY;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
@@ -305,13 +306,14 @@ impl MissionAgent {
             // (rpm_max_continuous) na altitude do passo, e BSFC nesse mesmo
             // ponto a carga ≈ 100% (subida é regime de potência plena, não
             // de cruzeiro).
-            let p_shaft_kw = shaft_power_kw(engine, engine.rpm_max_continuous, alt_m);
+            let p_shaft_kw = shaft_power_kw(engine, engine.rpm_max_continuous, alt_m,
+                                             state.psru_efficiency);
             let bsfc_gkwh = engine.bsfc.bsfc_gkwh(engine.rpm_max_continuous, 1.0);
             // BSFC referencia o VIRABREQUIM (pré-PSRU) — ver "BSFC
             // referencia o virabrequim" no docstring do módulo (Finding 2
             // da revisão): recupera a potência de virabrequim dividindo a
             // potência de eixo pós-PSRU por η_PSRU antes de aplicar o BSFC.
-            let p_crankshaft_kw = p_shaft_kw / PSRU_EFFICIENCY;
+            let p_crankshaft_kw = p_shaft_kw / state.psru_efficiency;
             // massa[g] = P[kW]·bsfc[g/kWh]·t[h]  →  massa[kg] = /1000
             let step_fuel_kg = p_crankshaft_kw * bsfc_gkwh * dt_h / 1_000.0;
 
@@ -359,7 +361,7 @@ impl MissionAgent {
 
         let mass_start_cruise_kg = mass_kg; // massa após táxi + subida
         let fuel_cruise_kg = breguet_fuel_burn_kg(
-            mass_start_cruise_kg, cruise_distance_m, prop.prop_efficiency, PSRU_EFFICIENCY,
+            mass_start_cruise_kg, cruise_distance_m, prop.prop_efficiency, state.psru_efficiency,
             wing.ld_ratio_cruise, prop.bsfc_cruise_gkwh,
         );
 
@@ -395,8 +397,8 @@ impl MissionAgent {
         let full_tank_fuel_kg = state.fuel_capacity_l * density;
         let w0_full_tank_kg = zfw_kg + full_tank_fuel_kg;
         let breguet_range_full_tank_km = breguet_range_m(
-            w0_full_tank_kg, zfw_kg, prop.prop_efficiency, PSRU_EFFICIENCY, wing.ld_ratio_cruise,
-            prop.bsfc_cruise_gkwh,
+            w0_full_tank_kg, zfw_kg, prop.prop_efficiency, state.psru_efficiency,
+            wing.ld_ratio_cruise, prop.bsfc_cruise_gkwh,
         ) / 1_000.0;
 
         let cruise_time_h = (cruise_distance_m / 1_000.0) / req.cruise_speed_min_kmh;
@@ -454,9 +456,12 @@ mod tests {
 
     // ─── Breguet: sanidade dimensional ──────────────────────────────────
 
-    /// η_PSRU de teste — mesmo valor de `agents::propulsion::PSRU_EFFICIENCY`
-    /// (0,97), literal aqui para que os testes de sanidade abaixo não
-    /// dependam silenciosamente de um valor de produção que poderia mudar.
+    /// η_PSRU de teste — valor típico de correia dentada (0,97, mesmo
+    /// literal do antigo `[propeller] psru_efficiency` do baseline real),
+    /// literal aqui para que os testes de sanidade abaixo não dependam
+    /// silenciosamente de `state.psru_efficiency`/`config_teste()` (que usa
+    /// 0,965, um valor sintético deliberadamente distinto — ver
+    /// `aircraft_config::test_fixtures::config_teste`).
     const ETA_PSRU_TESTE: f64 = 0.97;
 
     #[test]
@@ -582,9 +587,10 @@ mod tests {
             let (rc_ms, _vy) = climb_rate_ms(mass_kg, alt_m, req.isa_delta_c, &wing, &state, &engine, 1.0);
             assert!(rc_ms > RC_MIN_MS, "fixture sintética deveria ter subida viável em todo o perfil");
             let dt_s = step_m / rc_ms;
-            let p_shaft_kw = shaft_power_kw(&engine, engine.rpm_max_continuous, alt_m);
+            let p_shaft_kw = shaft_power_kw(&engine, engine.rpm_max_continuous, alt_m,
+                                             state.psru_efficiency);
             let bsfc_gkwh = engine.bsfc.bsfc_gkwh(engine.rpm_max_continuous, 1.0);
-            let p_crankshaft_kw = p_shaft_kw / PSRU_EFFICIENCY;
+            let p_crankshaft_kw = p_shaft_kw / state.psru_efficiency;
             let step_fuel_kg = p_crankshaft_kw * bsfc_gkwh * (dt_s / 3_600.0) / 1_000.0;
             mass_kg -= step_fuel_kg;
             massas.push(mass_kg);

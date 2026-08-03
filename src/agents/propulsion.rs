@@ -25,10 +25,6 @@ pub fn prop_rpm(engine_rpm: f64, psru_ratio: f64) -> f64 {
     engine_rpm / psru_ratio
 }
 
-/// Eficiência do PSRU (correia dentada de alta performance ou engrenagens)
-/// Correia: 97% | Engrenagens: 95-96%
-pub const PSRU_EFFICIENCY: f64 = 0.97;
-
 // ─── HÉLICE ──────────────────────────────────────────────────────────────────
 
 /// Razão de avanço J = V / (n·D)
@@ -72,8 +68,9 @@ pub fn thrust_n(eta: f64, power_shaft_w: f64, v_ms: f64) -> f64 {
 /// (pré-PSRU), a mesma referência de `bsfc_gkwh` (`BsfcModel::bsfc_gkwh`
 /// modela o motor, medido no virabrequim). Achado da revisão da Task 5.1
 /// (Finding 2): potências de EIXO pós-PSRU (`p_req_cruise_kw`/
-/// `shaft_power_kw`, já reduzidas por `PSRU_EFFICIENCY`) precisam ser
-/// divididas por `PSRU_EFFICIENCY` ANTES de chegar aqui — ver o único
+/// `shaft_power_kw`, já reduzidas por `state.psru_efficiency` — Finding 1
+/// da revisão final, `AircraftState::psru_efficiency`) precisam ser
+/// divididas por essa mesma eficiência ANTES de chegar aqui — ver o único
 /// caller (`PropulsionAgent::run`) e a dedução em
 /// `agents::mission` ("BSFC referencia o virabrequim").
 /// bsfc_gkwh: consumo específico (g/kWh) — de `engine.bsfc.bsfc_gkwh(...)`
@@ -115,6 +112,7 @@ fn search_cruise_rpm(
     engine: &EngineSpec,
     v_cruise_ms: f64,
     psru_ratio: f64,
+    psru_efficiency: f64,
     prop_diameter_m: f64,
     altitude_m: f64,
     drag_n: f64,
@@ -130,7 +128,7 @@ fn search_cruise_rpm(
         let prop_rpm_c = prop_rpm(engine_rpm, psru_ratio);
         let j = advance_ratio(v_cruise_ms, prop_rpm_c, prop_diameter_m);
         let eta = prop_efficiency(j);
-        let p_shaft_kw = engine.power_kw_at(engine_rpm, altitude_m) * PSRU_EFFICIENCY;
+        let p_shaft_kw = engine.power_kw_at(engine_rpm, altitude_m) * psru_efficiency;
         let p_req_kw = if eta > 0.0 {
             drag_n * v_cruise_ms / (eta * 1_000.0)
         } else {
@@ -212,17 +210,17 @@ impl PropulsionAgent {
         // nivelado exigido, dentro da faixa ao redor do rpm ótimo de BSFC do
         // motor (ver `search_cruise_rpm`).
         let (cp, cruise_feasible) = search_cruise_rpm(
-            engine, v_cruise_ms, state.psru_ratio, state.prop_diameter_m,
+            engine, v_cruise_ms, state.psru_ratio, state.psru_efficiency, state.prop_diameter_m,
             req.cruise_altitude_m, drag_n,
         );
 
         // `cp.p_req_kw` é potência de EIXO (pós-PSRU, na hélice) — BSFC
         // referencia o VIRABREQUIM (pré-PSRU). Achado da revisão da Task
-        // 5.1 (Finding 2): sem dividir por `PSRU_EFFICIENCY`, o consumo era
-        // subestimado em ~3% (`1/0,97 − 1`) — ver doc de
+        // 5.1 (Finding 2): sem dividir por `state.psru_efficiency`, o consumo
+        // era subestimado em ~3% (`1/0,97 − 1`) — ver doc de
         // `fuel_consumption_lph` e a dedução em `agents::mission`.
         let fc_lph = fuel_consumption_lph(
-            cp.p_req_kw / PSRU_EFFICIENCY, cp.bsfc_gkwh, engine.fuel.density_kg_per_l,
+            cp.p_req_kw / state.psru_efficiency, cp.bsfc_gkwh, engine.fuel.density_kg_per_l,
         );
 
         // Tração em cruzeiro (por construção, iguala o arrasto em regime
