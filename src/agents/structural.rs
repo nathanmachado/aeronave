@@ -364,7 +364,7 @@ impl StructuralAgent {
 mod tests {
     use super::*;
     use crate::models::aircraft_config::test_fixtures::config_teste;
-    use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+    use crate::models::aircraft_state::AircraftState;
     use crate::agents::aerodynamics::AerodynamicsAgent;
 
     // MTOW/massa de asa sintéticos usados nos testes que não passam pelo
@@ -376,7 +376,7 @@ mod tests {
     fn wing() -> WingSpec {
         let cfg = config_teste();
         let s = AircraftState::from_config(&cfg);
-        AerodynamicsAgent::run(&s, &Requirements::project_default())
+        AerodynamicsAgent::run(&s, &crate::models::requirements::test_fixtures::requisitos_teste())
     }
 
     fn structure_cfg_teste() -> StructureCfg {
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn longarina_dimensionada_com_material_adequado() {
         let w = wing();
-        let req = Requirements::project_default();
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
         println!("Longarina raiz ({}): h={:.0}mm, A_flange={:.1}cm², t_alma={:.1}mm",
                  struc.spar_material,
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn flutter_acima_de_1_2_vd() {
         let w = wing();
-        let req = Requirements::project_default();
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
         let vc = vc_ms(req.cruise_speed_min_kmh);
         let vd = vd_ms(vc);
@@ -481,7 +481,7 @@ mod tests {
         // (flapada) — logo VA calculada corretamente deve ser MAIOR do que
         // seria se (incorretamente) derivada de VS0.
         let w = wing();
-        let req = Requirements::project_default();
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
 
         let va_esperada_kmh = w.stall_speed_clean_kmh * load_factor_limit("normal").sqrt();
@@ -501,7 +501,7 @@ mod tests {
     #[test]
     fn fadiga_acima_de_10000_voos() {
         let w = wing();
-        let req = Requirements::project_default();
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
         let ciclos = struc.fatigue_life_cycles;
         println!("Vida em fadiga: {ciclos:.2e} ciclos");

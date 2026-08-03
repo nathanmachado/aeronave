@@ -184,7 +184,7 @@ mod tests {
         // aumenta CL_max, o que reduz a velocidade de stall.
         let cfg = config_teste();
         let state = AircraftState::from_config(&cfg);
-        let req = Requirements::project_default();
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing = AerodynamicsAgent::run(&state, &req);
 
         println!("VS0 (flap) = {:.1} km/h | VS1 (limpa) = {:.1} km/h",
@@ -221,7 +221,7 @@ mod tests {
         // após code review — ver task-2.1-report.md, correção pós-review).
         let cfg = config_teste();
         let state = AircraftState::from_config(&cfg);
-        let req = Requirements::project_default();
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing = AerodynamicsAgent::run(&state, &req);
         println!("L/D cruzeiro (fixture sintética) = {:.1}", wing.ld_ratio_cruise);
         assert!(wing.ld_ratio_cruise > 12.0,

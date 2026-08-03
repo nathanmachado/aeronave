@@ -137,7 +137,7 @@ mod tests {
     fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec) {
         let cfg    = crate::models::aircraft_config::test_fixtures::config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = motor_generico_teste();
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);

@@ -7,21 +7,23 @@ use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::structural::StructuralAgent;
 use aeronave::agents::landing_gear::LandingGearAgent;
 use aeronave::models::aircraft_state::AircraftState;
-use aeronave::models::config::{load_aircraft, load_engine};
-use aeronave::models::requirements::Requirements;
+use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::AircraftReport;
 use aeronave::validation::constraint_checker::ConstraintChecker;
 
 fn sep() { println!("{}", "─".repeat(64)); }
 
 fn main() {
-    // Motor e célula: carregados de TOML — trocar de motor ou de aeronave-
-    // base é trocar um arquivo, não o código. Caminhos hardcoded por
-    // enquanto; parametrização via CLI é escopo de uma task futura.
+    // Motor, célula e missão: carregados de TOML — trocar de motor, de
+    // aeronave-base ou de missão é trocar um arquivo, não o código. Caminhos
+    // hardcoded por enquanto; parametrização via CLI é escopo de uma task
+    // futura.
     let engine = load_engine(Path::new("config/engines/toyota_1gd_ftv.toml"))
         .expect("falha ao carregar configuração do motor");
     let cfg = load_aircraft(Path::new("config/aircraft/baseline_4seat.toml"))
         .expect("falha ao carregar configuração da aeronave");
+    let req = load_mission(Path::new("config/missions/default.toml"))
+        .expect("falha ao carregar requisitos de missão");
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║   AERONAVE — Modelagem Matemática v3.0  (6 Agentes)         ║");
@@ -29,7 +31,6 @@ fn main() {
     println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
     let state = AircraftState::from_config(&cfg);
-    let req   = Requirements::project_default();
 
     // ── Agente 1: Aerodinâmica ────────────────────────────────────────────────
     println!("[ AGENTE 1 ] AerodynamicsAgent");
@@ -62,7 +63,7 @@ fn main() {
 
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
-    let wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg);
+    let wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req);
     println!("  Corda: raiz {:.3}m  ponta {:.3}m  MAC {:.3}m",
              wb.chord_root_m, wb.chord_tip_m, wb.mac_m);
     println!("  OEW: {:.1}kg  |  MTOW: {:.1}kg  |  NP: {:.3}m do nariz",

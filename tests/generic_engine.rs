@@ -13,7 +13,7 @@ use aeronave::agents::performance::max_level_speed_ms;
 use aeronave::agents::propulsion::PropulsionAgent;
 use aeronave::agents::weight_balance::WeightBalanceAgent;
 use aeronave::models::aircraft_state::AircraftState;
-use aeronave::models::config::{load_aircraft, load_engine};
+use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::requirements::Requirements;
 
 fn config_path(rel: &str) -> PathBuf {
@@ -24,11 +24,15 @@ fn baseline_state() -> aeronave::models::aircraft_config::AircraftConfig {
     load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap()
 }
 
+fn baseline_mission() -> Requirements {
+    load_mission(&config_path("config/missions/default.toml")).unwrap()
+}
+
 #[test]
 fn trocar_motor_muda_resultado_sem_mudar_codigo() {
     let cfg   = baseline_state();
     let state = AircraftState::from_config(&cfg);
-    let req   = Requirements::project_default();
+    let req   = baseline_mission();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let rotax  = load_engine(&config_path("config/engines/rotax_915is.toml")).unwrap();
@@ -71,15 +75,15 @@ fn trocar_motor_muda_resultado_sem_mudar_codigo() {
 fn massa_do_motor_afeta_oew_e_cg() {
     let cfg   = baseline_state();
     let state = AircraftState::from_config(&cfg);
-    let req   = Requirements::project_default();
+    let req   = baseline_mission();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let rotax  = load_engine(&config_path("config/engines/rotax_915is.toml")).unwrap();
 
     println!("Toyota mass_kg = {:.1} | Rotax mass_kg = {:.1}", toyota.mass_kg, rotax.mass_kg);
 
-    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg);
-    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax, &cfg);
+    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg, &req);
+    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax, &cfg, &req);
 
     println!(
         "OEW Toyota = {:.1} kg | OEW Rotax = {:.1} kg | delta = {:.1} kg",
@@ -142,7 +146,7 @@ fn massa_do_motor_afeta_oew_e_cg() {
 fn autonomia_minima_8_horas() {
     let cfg   = baseline_state();
     let state = AircraftState::from_config(&cfg);
-    let req   = Requirements::project_default();
+    let req   = baseline_mission();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let prop  = PropulsionAgent::run(&state, &req, &wing, &toyota);
@@ -174,7 +178,7 @@ fn autonomia_minima_8_horas() {
 fn toyota_v_max_regressao_310kmh() {
     let cfg   = baseline_state();
     let state = AircraftState::from_config(&cfg);
-    let req   = Requirements::project_default();
+    let req   = baseline_mission();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
 
@@ -204,11 +208,11 @@ fn toyota_v_max_regressao_310kmh() {
 fn golden_toyota_baseline_regressao_task_2_1() {
     let cfg    = baseline_state();
     let state  = AircraftState::from_config(&cfg);
-    let req    = Requirements::project_default();
+    let req    = baseline_mission();
     let wing   = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let prop   = PropulsionAgent::run(&state, &req, &wing, &toyota);
-    let wb     = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg);
+    let wb     = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg, &req);
 
     println!(
         "golden: endurance_h={:.6} fc_cruise_lph={:.6} oew_kg={:.6}",

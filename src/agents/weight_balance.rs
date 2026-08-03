@@ -18,6 +18,7 @@ use crate::models::{
     aircraft_config::AircraftConfig,
     aircraft_state::AircraftState,
     engine::EngineSpec,
+    requirements::Requirements,
     specs::{WingSpec, WeightSpec},
 };
 
@@ -269,6 +270,7 @@ impl WeightBalanceAgent {
         wing: &WingSpec,
         engine: &EngineSpec,
         cfg: &AircraftConfig,
+        req: &Requirements,
     ) -> WeightBalanceOutput {
         let arms = ArmConfig::from_config(cfg);
 
@@ -291,8 +293,9 @@ impl WeightBalanceAgent {
         let oew_items = oew_items(cfg, engine);
         let (oew_kg, x_cg_oew) = cg_from_items(&oew_items);
 
-        // Peso dos passageiros (90 kg cada)
-        let pax_mass = 90.0_f64;
+        // Peso dos passageiros — massa por passageiro vem de `req.pax_mass_kg`
+        // (mission.toml), não mais hardcoded.
+        let pax_mass = req.pax_mass_kg;
         // Combustível total (densidade do combustível do motor instalado —
         // não hardcoded, para não divergir silenciosamente ao trocar motor)
         let fuel_mass_full = state.fuel_capacity_l * engine.fuel.density_kg_per_l;
@@ -371,7 +374,7 @@ impl WeightBalanceAgent {
             spec: crate::models::specs::WeightSpec {
                 oew_kg,
                 mtow_kg:          mtow_max,
-                payload_kg:       (4.0 * pax_mass) + 80.0,
+                payload_kg:       req.payload_kg(),
                 fuel_mass_kg:     fuel_mass_full,
                 cg_mac_fwd_pct:   cg_fwd,
                 cg_mac_aft_pct:   cg_aft,
@@ -397,7 +400,6 @@ mod tests {
     use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::agents::aerodynamics::AerodynamicsAgent;
     use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
-    use crate::models::requirements::Requirements;
 
     #[test]
     fn chord_root_coerente() {
@@ -433,10 +435,10 @@ mod tests {
     fn todos_os_cenarios_estaveis() {
         let cfg    = config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req);
 
         for sc in &wb.scenarios {
             assert!(sc.stable,
@@ -449,10 +451,10 @@ mod tests {
     fn mtow_dentro_do_limite_projeto() {
         let cfg    = config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req);
 
         println!("MTOW (fixture sintética) = {:.1} kg", wb.spec.mtow_kg);
         // Faixa ampla ao redor do MTOW observado empiricamente (~1.415 kg)

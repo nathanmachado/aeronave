@@ -289,12 +289,12 @@ mod tests {
     #[test]
     fn run_com_motor_generico_produz_especificacao_coerente() {
         use crate::agents::aerodynamics::AerodynamicsAgent;
-        use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+        use crate::models::aircraft_state::AircraftState;
         use crate::models::aircraft_config::test_fixtures::config_teste;
 
         let cfg    = config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
 
@@ -311,12 +311,12 @@ mod tests {
     #[test]
     fn motor_fraco_marca_cruzeiro_inviavel() {
         use crate::agents::aerodynamics::AerodynamicsAgent;
-        use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+        use crate::models::aircraft_state::AircraftState;
         use crate::models::aircraft_config::test_fixtures::config_teste;
 
         let cfg    = config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_fraco_teste();
 
@@ -330,12 +330,12 @@ mod tests {
     #[test]
     fn motor_forte_marca_cruzeiro_viavel() {
         use crate::agents::aerodynamics::AerodynamicsAgent;
-        use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+        use crate::models::aircraft_state::AircraftState;
         use crate::models::aircraft_config::test_fixtures::config_teste;
 
         let cfg    = config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
 

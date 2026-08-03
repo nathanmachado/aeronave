@@ -1,0 +1,14 @@
+# Missão baseline — requisitos do projeto originados das premissas do
+# cliente. Antes da Task 2.2, estes valores eram constantes hardcoded em
+# `Requirements::project_default()` (src/models/requirements.rs). Trocar de
+# missão agora é trocar este arquivo, não o código.
+
+passengers = 4
+pax_mass_kg = 90.0
+baggage_kg = 80.0
+cruise_speed_min_kmh = 280.0
+endurance_min_h = 8.0
+fuel_reserve_fraction = 0.10   # 10% + 45 min embutidos no endurance
+cruise_altitude_m = 2500.0
+airfield_altitude_m = 0.0
+isa_delta_c = 0.0

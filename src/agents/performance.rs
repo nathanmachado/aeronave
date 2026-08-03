@@ -336,7 +336,7 @@ impl PerformanceAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+    use crate::models::aircraft_state::AircraftState;
     use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
     use crate::agents::{aerodynamics::AerodynamicsAgent, propulsion::PropulsionAgent};
@@ -344,7 +344,7 @@ mod tests {
     fn setup() -> (AircraftState, WingSpec, PropulsionSpec, EngineSpec) {
         let cfg    = config_teste();
         let state  = AircraftState::from_config(&cfg);
-        let req    = Requirements::project_default();
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);

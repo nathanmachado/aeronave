@@ -5,6 +5,7 @@ use std::path::Path;
 
 use super::aircraft_config::AircraftConfig;
 use super::engine::EngineSpec;
+use super::requirements::Requirements;
 
 /// Erros de carregamento/validação de configuração de motor.
 #[derive(Debug)]
@@ -415,6 +416,115 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
+// ─── MISSÃO (REQUISITOS) ──────────────────────────────────────────────────────
+
+/// Faz o parse de requisitos de missão a partir de uma string TOML,
+/// validando as invariantes físicas e de consistência (altitudes, frações,
+/// desvio ISA).
+pub fn parse_mission(toml_str: &str) -> Result<Requirements, ConfigError> {
+    let req: Requirements = toml::from_str(toml_str)?;
+    validate_mission(&req)?;
+    Ok(req)
+}
+
+/// Lê e faz o parse de requisitos de missão a partir de um arquivo TOML no
+/// disco.
+pub fn load_mission(path: &Path) -> Result<Requirements, ConfigError> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        ConfigError::Io(std::io::Error::new(
+            e.kind(),
+            format!("não foi possível ler o arquivo de missão '{}': {e}", path.display()),
+        ))
+    })?;
+    parse_mission(&content)
+}
+
+/// Garante que `v` é finito, com mensagem em português nomeando o campo —
+/// mesmo padrão de `require_finite`, mas com prefixo "missão" em vez de
+/// "aeronave" (mensagens de erro devem nomear o arquivo de configuração
+/// certo, não um genérico compartilhado entre os três loaders).
+fn require_finite_missao(field: &str, v: f64) -> Result<(), ConfigError> {
+    if !v.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: {field} deve ser finito (valores NaN/infinito não permitidos)"
+        )));
+    }
+    Ok(())
+}
+
+fn require_positive_missao(field: &str, v: f64) -> Result<(), ConfigError> {
+    require_finite_missao(field, v)?;
+    if v <= 0.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: {field} deve ser positivo (valor: {v})"
+        )));
+    }
+    Ok(())
+}
+
+fn require_non_negative_missao(field: &str, v: f64) -> Result<(), ConfigError> {
+    require_finite_missao(field, v)?;
+    if v < 0.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: {field} não pode ser negativo (valor: {v})"
+        )));
+    }
+    Ok(())
+}
+
+/// Valida as invariantes físicas e de consistência de uma `Requirements`
+/// recém-carregada.
+fn validate_mission(req: &Requirements) -> Result<(), ConfigError> {
+    if req.passengers < 1 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: passengers deve ser >= 1 (valor: {})",
+            req.passengers
+        )));
+    }
+
+    require_positive_missao("pax_mass_kg", req.pax_mass_kg)?;
+    require_non_negative_missao("baggage_kg", req.baggage_kg)?;
+    require_positive_missao("cruise_speed_min_kmh", req.cruise_speed_min_kmh)?;
+    require_positive_missao("endurance_min_h", req.endurance_min_h)?;
+
+    require_finite_missao("fuel_reserve_fraction", req.fuel_reserve_fraction)?;
+    if req.fuel_reserve_fraction < 0.0 || req.fuel_reserve_fraction > 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: fuel_reserve_fraction deve estar em [0, 0.5] \
+             (valor: {})",
+            req.fuel_reserve_fraction
+        )));
+    }
+
+    require_non_negative_missao("cruise_altitude_m", req.cruise_altitude_m)?;
+    if req.cruise_altitude_m > 10_000.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: cruise_altitude_m deve estar em [0, 10000] \
+             (valor: {})",
+            req.cruise_altitude_m
+        )));
+    }
+
+    require_non_negative_missao("airfield_altitude_m", req.airfield_altitude_m)?;
+    if req.airfield_altitude_m > req.cruise_altitude_m {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: airfield_altitude_m ({}) não pode ser maior \
+             que cruise_altitude_m ({})",
+            req.airfield_altitude_m, req.cruise_altitude_m
+        )));
+    }
+
+    require_finite_missao("isa_delta_c", req.isa_delta_c)?;
+    if req.isa_delta_c < -40.0 || req.isa_delta_c > 40.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: isa_delta_c deve estar em [-40, 40] (valor: {})",
+            req.isa_delta_c
+        )));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,5 +847,121 @@ mod tests {
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("trem_principal"), "{err}");
         assert!(err.to_string().contains("mass_main_leg_kg"), "{err}");
+    }
+
+    // ─── MISSÃO (REQUISITOS) ────────────────────────────────────────────────
+
+    /// TOML de missão mínimo porém válido, usado como base para os testes de
+    /// validação abaixo (cada teste sobrescreve um trecho para violar
+    /// exatamente uma invariante).
+    fn mission_toml_valido() -> String {
+        r#"
+            passengers = 4
+            pax_mass_kg = 90.0
+            baggage_kg = 80.0
+            cruise_speed_min_kmh = 280.0
+            endurance_min_h = 8.0
+            fuel_reserve_fraction = 0.10
+            cruise_altitude_m = 2500.0
+            airfield_altitude_m = 0.0
+            isa_delta_c = 0.0
+        "#
+        .to_string()
+    }
+
+    #[test]
+    fn carrega_missao_default_do_disco_campo_a_campo() {
+        let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
+        assert_eq!(req.passengers, 4);
+        assert_eq!(req.pax_mass_kg, 90.0);
+        assert_eq!(req.baggage_kg, 80.0);
+        assert_eq!(req.cruise_speed_min_kmh, 280.0);
+        assert_eq!(req.endurance_min_h, 8.0);
+        assert_eq!(req.fuel_reserve_fraction, 0.10);
+        assert_eq!(req.cruise_altitude_m, 2500.0);
+        assert_eq!(req.airfield_altitude_m, 0.0);
+        assert_eq!(req.isa_delta_c, 0.0);
+    }
+
+    #[test]
+    fn payload_kg_respeita_pax_mass_kg_configurado() {
+        let req = parse_mission(&mission_toml_valido()).unwrap();
+        // 4 pax × 90 kg + 80 kg bagagem = 440 kg
+        assert_eq!(req.payload_kg(), 440.0);
+
+        let req_leve = parse_mission(&mission_toml_valido().replace("pax_mass_kg = 90.0", "pax_mass_kg = 70.0"))
+            .unwrap();
+        // 4 pax × 70 kg + 80 kg bagagem = 360 kg — muda com pax_mass_kg
+        assert_eq!(req_leve.payload_kg(), 360.0);
+    }
+
+    #[test]
+    fn mission_toml_valido_carrega_sem_erro() {
+        parse_mission(&mission_toml_valido()).expect("TOML de missão de teste deveria ser válido");
+    }
+
+    #[test]
+    fn rejeita_zero_passageiros() {
+        let toml = mission_toml_valido().replace("passengers = 4", "passengers = 0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("passengers"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_pax_mass_kg_nao_finito() {
+        let toml = mission_toml_valido().replace("pax_mass_kg = 90.0", "pax_mass_kg = nan");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("pax_mass_kg"), "{err}");
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_reserva_de_combustivel_acima_de_0_5() {
+        let toml = mission_toml_valido().replace("fuel_reserve_fraction = 0.10", "fuel_reserve_fraction = 0.9");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("fuel_reserve_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_altitude_de_aerodromo_acima_da_altitude_de_cruzeiro() {
+        let toml = mission_toml_valido().replace("airfield_altitude_m = 0.0", "airfield_altitude_m = 3000.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("airfield_altitude_m"), "{err}");
+        assert!(err.to_string().contains("cruise_altitude_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_isa_delta_fora_de_40() {
+        let toml = mission_toml_valido().replace("isa_delta_c = 0.0", "isa_delta_c = 55.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("isa_delta_c"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_baggage_kg_negativo() {
+        let toml = mission_toml_valido().replace("baggage_kg = 80.0", "baggage_kg = -10.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("baggage_kg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cruise_speed_nao_positivo() {
+        let toml = mission_toml_valido().replace("cruise_speed_min_kmh = 280.0", "cruise_speed_min_kmh = 0.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("cruise_speed_min_kmh"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_endurance_nao_positivo() {
+        let toml = mission_toml_valido().replace("endurance_min_h = 8.0", "endurance_min_h = 0.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("endurance_min_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cruise_altitude_acima_de_10000() {
+        let toml = mission_toml_valido().replace("cruise_altitude_m = 2500.0", "cruise_altitude_m = 12000.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("cruise_altitude_m"), "{err}");
     }
 }
