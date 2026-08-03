@@ -482,7 +482,8 @@ fn main() {
         "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de \
          autoridade/eficiência de controle)".into());
     fidelity.insert("weight".into(),
-        "semi-empirical (soma de itens de massa configurados + braços de momento)".into());
+        "preliminary (soma de itens de massa configurados não pesados — validar \
+         na balança antes da fabricação)".into());
     fidelity.insert("performance".into(),
         "computed (equações de desempenho em forma fechada, atmosfera ISA padrão)".into());
     fidelity.insert("vn_diagram".into(),

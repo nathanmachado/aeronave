@@ -302,7 +302,7 @@
     "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
     "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
     "vn_diagram": "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)",
-    "weight": "semi-empirical (soma de itens de massa configurados + braços de momento)",
+    "weight": "preliminary (soma de itens de massa configurados não pesados — validar na balança antes da fabricação)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [

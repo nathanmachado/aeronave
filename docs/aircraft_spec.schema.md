@@ -81,7 +81,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `geometry` | computed (derivado da configuração + `WeightBalanceAgent`) | — |
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
-| `weight` | semi-empirical (soma de itens de massa configurados + braços de momento) | — |
+| `weight` | preliminary (soma de itens de massa configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — a aritmética é exata, mas os valores de entrada são estimativas de catálogo/projeto, não massas medidas; erros aqui se propagam para MTOW/estrutura/trem de pouso |
 | `performance` | computed (equações fechadas, atmosfera ISA padrão) | — |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |

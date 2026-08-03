@@ -195,6 +195,19 @@ fn round_trip_serde_preserva_campos_chave() {
     let json = serde_json::to_string(&report).expect("deveria serializar");
     let back: AircraftReport = serde_json::from_str(&json).expect("deveria desserializar de volta");
 
+    // Cobertura do OBJETO INTEIRO (achado da revisão: os asserts abaixo só
+    // comparavam alguns campos escolhidos a dedo — control_surfaces,
+    // propeller, landing_gear, performance e vn_diagram nunca eram
+    // checados). Reserializar `back` e comparar a string JSON byte a byte
+    // contra a original cobre TODOS os blocos de uma vez — só é exato
+    // graças à feature `float_roundtrip` do serde_json (Cargo.toml),
+    // sem a qual esta asserção falharia por ruído de último-bit em
+    // pontos flutuantes mesmo com dados logicamente idênticos.
+    let json2 = serde_json::to_string(&back).expect("deveria reserializar");
+    assert_eq!(json, json2,
+        "reserializar o AircraftReport desserializado deveria produzir o \
+         MESMO JSON byte a byte (round-trip completo, todos os blocos)");
+
     assert_eq!(back.schema_version, report.schema_version);
     assert_eq!(back.revision, report.revision);
     assert_eq!(back.validation_status, report.validation_status);
