@@ -214,15 +214,18 @@ mod tests {
 
     #[test]
     fn ld_ratio_razoavel() {
-        // L/D esperado > 10 em cruzeiro para esta classe de aeronave (fixture
-        // sintética, AR menor que o baseline real — L/D um pouco mais baixo)
+        // L/D esperado > 12 em cruzeiro para esta classe de aeronave.
+        // Medido empiricamente para a fixture sintética (config_teste()):
+        // ~12.3 — ainda satisfaz o limiar original de 12.0 (a Task 2.1 tinha
+        // baixado este piso para 10.0 sem necessidade; corrigido de volta
+        // após code review — ver task-2.1-report.md, correção pós-review).
         let cfg = config_teste();
         let state = AircraftState::from_config(&cfg);
         let req = Requirements::project_default();
         let wing = AerodynamicsAgent::run(&state, &req);
         println!("L/D cruzeiro (fixture sintética) = {:.1}", wing.ld_ratio_cruise);
-        assert!(wing.ld_ratio_cruise > 10.0,
-            "L/D {:.1} abaixo do mínimo de 10", wing.ld_ratio_cruise);
+        assert!(wing.ld_ratio_cruise > 12.0,
+            "L/D {:.1} abaixo do mínimo de 12", wing.ld_ratio_cruise);
     }
 
     #[test]

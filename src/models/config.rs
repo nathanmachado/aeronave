@@ -379,6 +379,39 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         }
     }
 
+    // Itens de massa que o código de produção resolve por nome (main.rs,
+    // ao montar StructuralAgent::run/LandingGearAgent::run) — sem estes, o
+    // pipeline passa da validação e só quebra (panic) no meio da execução,
+    // depois de já ter impresso parte do relatório. Exigir aqui é mais
+    // barato que descobrir isso em produção.
+    for nome_obrigatorio in ["asa", "trem_principal", "trem_nariz"] {
+        if cfg.masses.item_mass(nome_obrigatorio).is_none() {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: masses.items não contém o item \
+                 obrigatório '{nome_obrigatorio}' (usado por nome no código de produção — \
+                 StructuralAgent para 'asa', LandingGearAgent para 'trem_principal'/'trem_nariz')"
+            )));
+        }
+    }
+
+    // Consistência trem principal: a massa TOTAL do item 'trem_principal'
+    // (ambas as pernas) deve ser exatamente 2× a massa de UMA perna
+    // (`[gear].mass_main_leg_kg`) — é essa relação que justifica usar
+    // `mass_main_leg_kg` (não um valor independente) no dimensionamento do
+    // atuador de retração em `landing_gear.rs`. Ver task-2.1-report.md
+    // ("bug fix: actuator_power_w agora usa a massa de perna real").
+    if let Some(trem_principal_kg) = cfg.masses.item_mass("trem_principal") {
+        let esperado = 2.0 * cfg.gear.mass_main_leg_kg;
+        if (trem_principal_kg - esperado).abs() > 1e-6 {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: masses.items 'trem_principal' \
+                 ({trem_principal_kg} kg) deveria ser exatamente 2× gear.mass_main_leg_kg \
+                 ({} kg × 2 = {esperado} kg) — as duas pernas do trem principal",
+                cfg.gear.mass_main_leg_kg
+            )));
+        }
+    }
+
     Ok(())
 }
 
@@ -549,6 +582,10 @@ mod tests {
             name = "trem_principal"
             mass_kg = 50.0
             arm_ref = "gear_main"
+            [[masses.items]]
+            name = "trem_nariz"
+            mass_kg = 20.0
+            arm_ref = "gear_nose"
         "#
         .to_string()
     }
@@ -666,5 +703,39 @@ mod tests {
         let toml = format!("{head}\n[masses]\nitems = []\n");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("masses.items"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_item_de_massa_asa_ausente() {
+        let toml = aircraft_toml_valido().replace(r#"name = "asa""#, r#"name = "asa_renomeada""#);
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("'asa'"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_item_de_massa_trem_principal_ausente() {
+        let toml = aircraft_toml_valido()
+            .replace(r#"name = "trem_principal""#, r#"name = "trem_principal_renomeado""#);
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("'trem_principal'"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_item_de_massa_trem_nariz_ausente() {
+        let toml = aircraft_toml_valido()
+            .replace(r#"name = "trem_nariz""#, r#"name = "trem_nariz_renomeado""#);
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("'trem_nariz'"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_massa_trem_principal_inconsistente_com_mass_main_leg_kg() {
+        // trem_principal = 50 kg no template, mas mass_main_leg_kg passa a
+        // valer 30 kg (2×30=60 ≠ 50) — deve ser rejeitado.
+        let toml = aircraft_toml_valido()
+            .replace("mass_main_leg_kg = 25.0", "mass_main_leg_kg = 30.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("trem_principal"), "{err}");
+        assert!(err.to_string().contains("mass_main_leg_kg"), "{err}");
     }
 }

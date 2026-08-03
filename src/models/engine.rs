@@ -136,9 +136,10 @@ pub(crate) mod test_fixtures {
     /// Nota sobre os valores: a banda de torque plano (520 Nm) e o fator de
     /// perda do turbo (0.10/1.000m) foram calibrados — via medição empírica,
     /// não estimativa — para que este motor sustente o cruzeiro de 280 km/h
-    /// exigido pelo projeto com a célula/hélice/PSRU padrão
-    /// (`AircraftState::initial()`) com margem folgada (`p_shaft_cruise_kw`
-    /// bem acima de `p_req_cruise_kw`, não empatado por uma casa decimal),
+    /// exigido pelo projeto com a célula/hélice/PSRU sintética de teste
+    /// (`AircraftState::from_config(&aircraft_config::test_fixtures::config_teste())`)
+    /// com margem positiva (`p_shaft_cruise_kw`
+    /// acima de `p_req_cruise_kw`, não empatado por uma casa decimal),
     /// já que o rpm de cruzeiro fica restrito a `[rpm_optimal·0.8,
     /// rpm_optimal·1.2]` = [1.600, 2.400] rpm — abaixo do pico de potência
     /// real da curva (perto de `rpm_rated`). Nenhum destes números coincide
@@ -180,8 +181,10 @@ pub(crate) mod test_fixtures {
 
     /// Motor sintético "fraco" — potência de pico muito abaixo da necessária
     /// para sustentar o cruzeiro exigido pelo projeto com a célula/hélice/
-    /// PSRU padrão (`AircraftState::initial()`), usado para exercitar o
-    /// caminho de inviabilidade de `search_cruise_rpm`/`cruise_feasible`.
+    /// PSRU sintética de teste
+    /// (`AircraftState::from_config(&aircraft_config::test_fixtures::config_teste())`),
+    /// usado para exercitar o caminho de inviabilidade de
+    /// `search_cruise_rpm`/`cruise_feasible`.
     pub(crate) fn motor_generico_fraco_teste() -> EngineSpec {
         EngineSpec {
             name: "Motor Sintético Fraco de Teste".into(),

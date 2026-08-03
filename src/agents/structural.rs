@@ -430,8 +430,12 @@ mod tests {
                  struc.spar_flange_area_cm2,
                  struc.spar_web_thickness_mm);
         assert_eq!(struc.spar_material, "AA6061-T6");
-        assert!(struc.spar_height_root_m > 0.08 && struc.spar_height_root_m < 0.30,
-            "Altura da longarina {:.0}mm fora de 80–300mm", struc.spar_height_root_m * 1000.0);
+        // Piso original 0.10 m — medido empiricamente para esta fixture:
+        // ~0.137 m, folgadamente acima. A Task 2.1 tinha baixado este piso
+        // para 0.08 m sem necessidade; corrigido de volta após code review
+        // (ver task-2.1-report.md, correção pós-review).
+        assert!(struc.spar_height_root_m > 0.10 && struc.spar_height_root_m < 0.30,
+            "Altura da longarina {:.0}mm fora de 100–300mm", struc.spar_height_root_m * 1000.0);
         assert!(struc.spar_flange_area_cm2 > 0.5,
             "Área de mesa {:.1}cm² muito pequena", struc.spar_flange_area_cm2);
     }
