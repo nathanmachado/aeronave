@@ -217,21 +217,59 @@ pub fn landing_distance_m(
 // ─── VELOCIDADE MÁXIMA NIVELADA ───────────────────────────────────────────────
 
 /// Velocidade máxima em voo nivelado: maior V com P_disp(V) ≥ P_req(V).
-/// Bissecção entre 1.2·Vs e 200 m/s (720 km/h) sobre f(V) = P_excesso(V).
+///
+/// P_req(V) tem formato em U (arrasto induzido domina perto do estol), então
+/// bissecção ingênua sobre [1.2·Vs, 200 m/s] não é segura: um excesso de
+/// potência negativo no limite inferior não prova inviabilidade em toda a
+/// faixa (pode haver uma velocidade de cruzeiro válida mais à frente), e uma
+/// função com múltiplas trocas de sinal não garante que a bissecção simples
+/// convirja para a raiz mais à direita (a velocidade máxima real).
+///
+/// Estratégia em duas etapas — varredura grosseira seguida de refinamento:
+///   1. Amostra P_excesso(V) em passos uniformes sobre [1.2·Vs, 200 m/s] e
+///      localiza a amostra de MAIOR V com excesso > 0.
+///      - Nenhuma amostra positiva → inviável em toda a faixa modelada,
+///        retorna 1.2·Vs (limite inferior).
+///      - A última amostra do grid é positiva → voo nivelado sustentado até
+///        o teto do modelo, retorna 200 m/s.
+///   2. Caso contrário, bissecta dentro do subintervalo [V_k, V_{k+1}]
+///      imediatamente após a última amostra positiva, refinando a raiz mais
+///      à direita nesse intervalo (onde P_excesso muda de + para -).
 pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, wing: &WingSpec,
                           state: &AircraftState, engine_rpm: f64) -> f64 {
     let rho = isa_density(altitude_m);
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
-    let (mut lo, mut hi) = (1.2 * v_stall, 200.0);
+    let (lo, hi) = (1.2 * v_stall, 200.0);
     let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine_rpm,
                                        state.psru_ratio, state.prop_diameter_m, altitude_m);
-    if pex(hi) > 0.0 { return hi; }        // limitado pelo teto do modelo
-    if pex(lo) <= 0.0 { return lo; }       // não sustenta nem o mínimo — inviável
-    for _ in 0..60 {
-        let mid = 0.5 * (lo + hi);
-        if pex(mid) > 0.0 { lo = mid; } else { hi = mid; }
+
+    // Varredura grosseira: 100 passos (101 amostras) sobre [lo, hi]
+    const STEPS: usize = 100;
+    let dv = (hi - lo) / STEPS as f64;
+    let mut last_positive: Option<usize> = None;
+    for i in 0..=STEPS {
+        let v = lo + i as f64 * dv;
+        if pex(v) > 0.0 {
+            last_positive = Some(i);
+        }
     }
-    0.5 * (lo + hi)
+
+    let k = match last_positive {
+        None => return lo,   // inviável em toda a faixa modelada
+        Some(k) => k,
+    };
+    if k == STEPS {
+        return hi;            // sustentado até o teto do modelo
+    }
+
+    // Refinamento: bissecta [V_k, V_{k+1}], a raiz mais à direita
+    let mut v_lo = lo + k as f64 * dv;
+    let mut v_hi = lo + (k + 1) as f64 * dv;
+    for _ in 0..40 {
+        let mid = 0.5 * (v_lo + v_hi);
+        if pex(mid) > 0.0 { v_lo = mid; } else { v_hi = mid; }
+    }
+    0.5 * (v_lo + v_hi)
 }
 
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
@@ -356,9 +394,37 @@ mod tests {
         let (state, wing, _) = setup();
         let v_max = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, 3_400.0);
         let v_max_kmh = v_max * 3.6;
+        println!("V_max nivelada = {v_max_kmh:.2} km/h");
         // Deve ser um número resolvido (não o requisito ecoado) e > requisito
         assert!(v_max_kmh > 280.0 && v_max_kmh < 400.0,
             "V_max nivelada {v_max_kmh:.0} km/h implausível");
+        // O refinamento em duas etapas não deve alterar o resultado obtido
+        // pela bissecção simples anterior (310.25 km/h, medido antes do
+        // refactor de coarse-to-fine) para os dados atuais do projeto.
+        let v_max_pre_refactor_kmh = 310.25137319753946;
+        assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
+            "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pré-refactor \
+             {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
+    }
+
+    #[test]
+    fn velocidade_maxima_inviavel_com_massa_absurda() {
+        // Massa absurdamente alta (20 t) para uma aeronave leve: nenhuma
+        // amostra da varredura terá excesso de potência positivo, então a
+        // função deve retornar o limite inferior (1.2·Vs) em vez de um
+        // resultado espúrio ou o teto do modelo (200 m/s).
+        let (state, wing, _) = setup();
+        let rho = isa_density(2_500.0);
+        let mass_kg = 20_000.0;
+        let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+        let v_lo_esperado = 1.2 * v_stall;
+
+        let v_max = max_level_speed_ms(mass_kg, 2_500.0, &wing, &state, 3_400.0);
+        println!("V_max (massa inviável) = {:.2} m/s, esperado ≈ {v_lo_esperado:.2} m/s",
+                  v_max);
+        assert!((v_max - v_lo_esperado).abs() < 1e-6,
+            "Caso inviável deveria retornar 1.2·Vs ({v_lo_esperado:.2} m/s), \
+             obteve {v_max:.2} m/s");
     }
 
     #[test]

@@ -43,7 +43,7 @@
     "static_margin_pct": 60.6958470994048
   },
   "performance": {
-    "v_cruise_kmh": 308.74399257533094,
+    "v_cruise_kmh": 308.74399257533076,
     "v_stall_kmh": 111.41258586018864,
     "rc_sl_ms": 4.976913533640004,
     "rc_cruise_alt_ms": 4.500491451561861,
