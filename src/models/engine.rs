@@ -83,6 +83,26 @@ impl EngineSpec {
             .map(|r| self.power_kw(r as f64))
             .fold(0.0, f64::max)
     }
+
+    pub fn altitude_factor(&self, altitude_m: f64) -> f64 {
+        match self.induction {
+            Induction::NaturallyAspirated => {
+                let sigma = crate::agents::aerodynamics::isa_density(altitude_m) / 1.225;
+                (1.132 * sigma - 0.132).clamp(0.0, 1.0) // Gagg-Ferrar
+            }
+            Induction::Turbocharged { critical_altitude_m, power_loss_per_1000m } => {
+                if altitude_m <= critical_altitude_m { 1.0 }
+                else {
+                    (1.0 - power_loss_per_1000m
+                         * (altitude_m - critical_altitude_m) / 1_000.0).max(0.0)
+                }
+            }
+        }
+    }
+
+    pub fn power_kw_at(&self, rpm: f64, altitude_m: f64) -> f64 {
+        self.power_kw(rpm) * self.altitude_factor(altitude_m)
+    }
 }
 
 #[cfg(test)]
@@ -151,5 +171,22 @@ mod tests {
         // Torque curve peaks at 3400 rpm with 420 Nm → ~149.5 kW
         // Scan step_by(50) should find peak near this value
         assert!(p_max > 145.0 && p_max < 155.0, "peak power should be ~149-151 kW from fixture curve");
+    }
+
+    #[test]
+    fn turbo_mantem_potencia_ate_altitude_critica() {
+        let e = engine_teste(); // turbo, crítica 2.000 m, 10%/1.000 m acima
+        assert!((e.altitude_factor(0.0) - 1.0).abs() < 1e-9);
+        assert!((e.altitude_factor(2_000.0) - 1.0).abs() < 1e-9);
+        assert!((e.altitude_factor(3_000.0) - 0.90).abs() < 0.01);
+    }
+
+    #[test]
+    fn aspirado_perde_potencia_por_gagg_ferrar() {
+        let mut e = engine_teste();
+        e.induction = Induction::NaturallyAspirated;
+        // Gagg-Ferrar: P/P0 = 1.132σ − 0.132; a 2.500 m σ≈0.781 → fator ≈ 0.752
+        let f = e.altitude_factor(2_500.0);
+        assert!((f - 0.752).abs() < 0.02, "fator aspirado a 2.500 m = {f:.3}");
     }
 }
