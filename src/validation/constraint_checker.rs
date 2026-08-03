@@ -135,7 +135,8 @@ mod tests {
     /// violação #9, para não depender do resultado real de
     /// `search_cruise_rpm` (que já é testado em `propulsion.rs`).
     fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec) {
-        let state  = AircraftState::initial();
+        let cfg    = crate::models::aircraft_config::test_fixtures::config_teste();
+        let state  = AircraftState::from_config(&cfg);
         let req    = Requirements::project_default();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = motor_generico_teste();

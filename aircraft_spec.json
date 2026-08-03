@@ -7,6 +7,7 @@
     "aspect_ratio": 10.03969014084507,
     "airfoil": "NACA 23015",
     "taper_ratio": 0.45,
+    "thickness_ratio": 0.15,
     "oswald_efficiency": 0.7555832290782708,
     "cd0": 0.022,
     "cl_cruise": 0.34880230570551995,
@@ -66,9 +67,9 @@
     "ultimate_load_factor_g": 5.699999999999999,
     "wing_root_bending_limit_nm": 73010.78999702066,
     "wing_root_bending_ult_nm": 109516.18499553099,
-    "spar_material": "AA 7075-T6",
+    "spar_material": "AA7075-T6",
     "spar_height_root_m": 0.1476347253508924,
-    "spar_flange_area_cm2": 19.521185557487314,
+    "spar_flange_area_cm2": 19.45292966392967,
     "spar_web_thickness_mm": 2.0,
     "skin_min_thickness_mm": 1.5,
     "frame_spacing_mm": 300.0,
@@ -93,7 +94,7 @@
     "tire_pressure_psi": 45.0,
     "max_sink_rate_ms": 2.5,
     "retraction_time_s": 7.0,
-    "actuator_power_w": 18.82944,
+    "actuator_power_w": 18.4932,
     "total_weight_kg": 97.0
   },
   "violations": []

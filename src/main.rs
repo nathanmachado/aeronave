@@ -7,7 +7,7 @@ use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::structural::StructuralAgent;
 use aeronave::agents::landing_gear::LandingGearAgent;
 use aeronave::models::aircraft_state::AircraftState;
-use aeronave::models::config::load_engine;
+use aeronave::models::config::{load_aircraft, load_engine};
 use aeronave::models::requirements::Requirements;
 use aeronave::models::specs::AircraftReport;
 use aeronave::validation::constraint_checker::ConstraintChecker;
@@ -15,18 +15,20 @@ use aeronave::validation::constraint_checker::ConstraintChecker;
 fn sep() { println!("{}", "─".repeat(64)); }
 
 fn main() {
-    // Motor: carregado de TOML — trocar de motor é trocar este arquivo, não
-    // o código. Caminho hardcoded por enquanto; parametrização via CLI é
-    // escopo de uma task futura.
+    // Motor e célula: carregados de TOML — trocar de motor ou de aeronave-
+    // base é trocar um arquivo, não o código. Caminhos hardcoded por
+    // enquanto; parametrização via CLI é escopo de uma task futura.
     let engine = load_engine(Path::new("config/engines/toyota_1gd_ftv.toml"))
         .expect("falha ao carregar configuração do motor");
+    let cfg = load_aircraft(Path::new("config/aircraft/baseline_4seat.toml"))
+        .expect("falha ao carregar configuração da aeronave");
 
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║   AERONAVE — Modelagem Matemática v3.0  (6 Agentes)         ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
     println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
-    let state = AircraftState::initial();
+    let state = AircraftState::from_config(&cfg);
     let req   = Requirements::project_default();
 
     // ── Agente 1: Aerodinâmica ────────────────────────────────────────────────
@@ -60,7 +62,7 @@ fn main() {
 
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
-    let wb = WeightBalanceAgent::run(&state, &wing, &engine);
+    let wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg);
     println!("  Corda: raiz {:.3}m  ponta {:.3}m  MAC {:.3}m",
              wb.chord_root_m, wb.chord_tip_m, wb.mac_m);
     println!("  OEW: {:.1}kg  |  MTOW: {:.1}kg  |  NP: {:.3}m do nariz",
@@ -87,7 +89,9 @@ fn main() {
 
     // ── Agente 5: Estrutura ───────────────────────────────────────────────────
     println!("[ AGENTE 5 ] StructuralAgent — Longarina e Flutter");
-    let struc = StructuralAgent::run(&wing, wb.spec.mtow_kg, 130.0);
+    let wing_mass_kg = cfg.masses.item_mass("asa")
+        .expect("item de massa 'asa' ausente na configuração da aeronave");
+    let struc = StructuralAgent::run(&wing, wb.spec.mtow_kg, wing_mass_kg, &req, &cfg.structure);
     println!("  Fator de carga: {:.1}g limite  |  {:.1}g último (CS-23 Normal)",
              struc.design_load_factor_g, struc.ultimate_load_factor_g);
     println!("  M_raiz (limite): {:.0}N·m  |  (último): {:.0}N·m",
@@ -107,9 +111,14 @@ fn main() {
     // ── Agente 6: Trem de Pouso ───────────────────────────────────────────────
     println!("[ AGENTE 6 ] LandingGearAgent — Trem Retrátil Elétrico");
     // CG mais traseiro do envelope = cenário "4 pax + bagagem + cheio" (29.1% MAC)
-    // x_cg = x_mac_le + 0.291 × MAC = 2.90 + 0.291 × 1.246 ≈ 3.263m
-    let x_cg_aft = 2.90 + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-    let gear = LandingGearAgent::run(wb.spec.mtow_kg, x_cg_aft, 1.40, 3.85);
+    // x_cg = x_mac_le + 0.291 × MAC — x_mac_le vem de [wing] le_root_x_m
+    // (única fonte da posição do bordo de ataque).
+    let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
+    let mass_main_total = cfg.masses.item_mass("trem_principal")
+        .expect("item de massa 'trem_principal' ausente na configuração da aeronave");
+    let mass_nose = cfg.masses.item_mass("trem_nariz")
+        .expect("item de massa 'trem_nariz' ausente na configuração da aeronave");
+    let gear = LandingGearAgent::run(wb.spec.mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
     println!("  Tipo: {}",     gear.gear_type);
     println!("  Bitola: {:.2}m  |  Empeno: {:.2}m  |  Anti-tombamento: {:.1}°",
              gear.track_width_m, gear.wheelbase_m, gear.tipover_angle_deg);

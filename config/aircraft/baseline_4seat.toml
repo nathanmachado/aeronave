@@ -1,0 +1,153 @@
+# Aeronave baseline — 4 lugares, asa baixa, trem retrátil elétrico.
+# Todos os valores abaixo eram, antes da Task 2.1, constantes hardcoded em
+# src/ (AircraftState::initial(), ArmConfig::default_layout(), oew_items(),
+# constantes NACA 23015 em aerodynamics.rs, Al7075T6 em structural.rs,
+# posições/massas em landing_gear.rs e main.rs). Trocar de célula-base
+# agora é trocar este arquivo, não o código.
+
+mtow_guess_kg = 1461.0   # estimativa inicial (laço de projeto) — não é requisito
+
+[wing]
+span_m = 11.94
+area_m2 = 14.2
+taper_ratio = 0.45
+airfoil = "NACA 23015"
+thickness_ratio = 0.15
+cl_max_clean = 1.45
+cl_max_flaps = 1.72
+cd0_wing = 0.0050
+le_root_x_m = 2.90          # única fonte da posição do bordo de ataque
+
+[fuselage]
+length_m = 8.2
+cabin_width_m = 1.22
+cabin_height_m = 1.20
+cd0 = 0.010
+
+[empennage]
+cd0 = 0.004
+# Fase 4 dimensiona S_h/S_v por coeficiente de volume; braço inicial:
+tail_arm_m = 4.80
+
+[propeller]
+diameter_m = 1.95
+blades = 2
+psru_ratio = 1.867
+psru_efficiency = 0.97
+
+[fuel_system]
+capacity_l = 240.0
+
+[gear]
+retractable = true
+cd0_fixed_increment = 0.008
+h_cg_ground_m = 1.05
+x_nose_m = 1.40
+x_main_m = 3.85
+mass_main_leg_kg = 27.5
+mass_nose_kg = 22.0
+retraction_time_s = 7.0
+actuators_doors_mass_kg = 20.0
+
+[arms]      # braços de momento (m do datum no nariz)
+engine_cg_m = 0.65
+avionics_m = 1.10
+pax_front_m = 3.20
+fuel_cg_m = 3.55
+wing_struct_m = 3.70
+pax_rear_m = 4.55
+fuselage_struct_m = 4.20
+baggage_m = 5.60
+empennage_cg_m = 7.40
+
+[structure]
+spar_material = "AA7075-T6"
+frame_spacing_mm = 300.0
+design_category = "normal"    # normal | utility | acrobatic → n_lim 3.8/4.4/6.0
+
+[drag]
+cd0_misc = 0.003
+
+# Itens de massa do OEW (motor vem do EngineSpec, não daqui).
+# arm_ref referencia uma entrada de [arms] (ou "wing_le_root" de [wing],
+# "gear_main"/"gear_nose" de [gear]) — arm_offset_m é opcional (default 0).
+[[masses.items]]
+name = "psru_helice_capo"
+mass_kg = 65.0
+arm_ref = "engine_cg"
+arm_offset_m = 0.3
+
+[[masses.items]]
+name = "resfriamento"
+mass_kg = 18.0
+arm_ref = "engine_cg"
+arm_offset_m = 0.5
+
+[[masses.items]]
+name = "avionicos"
+mass_kg = 60.0
+arm_ref = "avionics"
+
+[[masses.items]]
+name = "painel_comandos"
+mass_kg = 25.0
+arm_ref = "pax_front"
+arm_offset_m = -0.3
+
+[[masses.items]]
+name = "fuselagem"
+mass_kg = 160.0
+arm_ref = "fuselage_struct"
+
+[[masses.items]]
+name = "asa"
+mass_kg = 130.0
+arm_ref = "wing_struct"
+
+[[masses.items]]
+name = "emp_horizontal"
+mass_kg = 22.0
+arm_ref = "empennage_cg"
+
+[[masses.items]]
+name = "emp_vertical"
+mass_kg = 16.0
+arm_ref = "empennage_cg"
+arm_offset_m = -0.2
+
+[[masses.items]]
+name = "trem_principal"
+mass_kg = 55.0
+arm_ref = "gear_main"
+
+[[masses.items]]
+name = "trem_nariz"
+mass_kg = 22.0
+arm_ref = "gear_nose"
+
+[[masses.items]]
+name = "mobiliario"
+mass_kg = 45.0
+arm_ref = "pax_front"
+arm_offset_m = 0.5
+
+[[masses.items]]
+name = "tanques"
+mass_kg = 12.0
+arm_ref = "fuel_cg"
+
+[[masses.items]]
+name = "cabos_hidraulico"
+mass_kg = 20.0
+arm_ref = "fuselage_struct"
+
+[[masses.items]]
+name = "portas_vidros"
+mass_kg = 28.0
+arm_ref = "pax_front"
+
+[[masses.items]]
+name = "antepara_firewall"
+mass_kg = 12.0
+arm_ref = "engine_cg"
+arm_offset_m = 0.9

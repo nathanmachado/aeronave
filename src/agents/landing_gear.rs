@@ -22,6 +22,7 @@
 
 const G: f64 = 9.807; // m/s²
 
+use crate::models::aircraft_config::GearCfg;
 use crate::models::specs::GearSpec;
 
 // ─── GEOMETRIA DO TREM ────────────────────────────────────────────────────────
@@ -142,25 +143,32 @@ pub struct LandingGearAgent;
 impl LandingGearAgent {
     /// Executa o dimensionamento completo do trem de pouso.
     ///
-    /// Parâmetros do layout longitudinal (do WeightBalanceAgent):
-    ///   x_cg_m:   posição do CG a 4 pax + full fuel (pior caso para nariz)
-    ///   x_nose_m: posição do eixo do trem de nariz
-    ///   x_main_m: posição do eixo do trem principal
+    /// Parâmetros do layout longitudinal (do WeightBalanceAgent) e da
+    /// geometria/massas do trem (`[gear]` do TOML de aeronave, mais as
+    /// massas totais das pernas de `[[masses.items]]`, que são a fonte
+    /// única do peso total do sistema — `gear_cfg.mass_main_leg_kg` é só o
+    /// dado de "uma perna" usado no dimensionamento do atuador):
+    ///   x_cg_aft_m: CG mais traseiro (maior carga no nariz)
+    ///   gear_cfg:   geometria/parâmetros do trem
+    ///   main_gear_total_mass_kg: massa TOTAL do trem principal (ambas as
+    ///     pernas) — item `trem_principal` de `[[masses.items]]`
+    ///   nose_gear_mass_kg: massa do trem de nariz — item `trem_nariz`
     pub fn run(
         mtow_kg: f64,
-        x_cg_aft_m: f64,   // CG mais traseiro (maior carga no nariz)
-        x_nose_m: f64,
-        x_main_m: f64,
+        x_cg_aft_m: f64,
+        gear_cfg: &GearCfg,
+        main_gear_total_mass_kg: f64,
+        nose_gear_mass_kg: f64,
     ) -> GearSpec {
         let sink_rate  = 2.5_f64; // m/s — CS 23.473
         let n_g_max    = 4.0_f64; // fator de carga no pouso
         let eta_oleo   = 0.75_f64;
         let psi        = 45.0_f64;
 
-        // Altura do CG acima do solo: estimada com trem de nariz menor e principal
-        // trem retratil estendido: pneu 6.00-6 tem diâmetro ~540mm, raio ~270mm
-        // CG em ~1.0m do solo (típico para aeronave desta classe)
-        let h_cg_ground = 1.05_f64; // m
+        // Altura do CG acima do solo (trem estendido) — `[gear] h_cg_ground_m`
+        let h_cg_ground = gear_cfg.h_cg_ground_m;
+        let x_nose_m = gear_cfg.x_nose_m;
+        let x_main_m = gear_cfg.x_main_m;
 
         // Geometria
         let track = min_track_width_m(h_cg_ground).max(2.80); // mínimo 2.80m
@@ -190,14 +198,15 @@ impl LandingGearAgent {
         let _tire_nose_ok = tire_load_ok(f_nose_impact, psi);
 
         // Atuador elétrico (retração leva o trem para a asa/fuselagem)
-        // Massa estimada de cada perna principal: ~28 kg
+        // Massa de uma perna principal: `[gear] mass_main_leg_kg`
         // Δh durante retração: ~0.40 m (levanta perna para baio da asa)
-        let ret_time  = 7.0_f64; // segundos
-        let p_actuator = actuator_power_w(28.0, 0.40, ret_time);
+        let ret_time  = gear_cfg.retraction_time_s;
+        let p_actuator = actuator_power_w(gear_cfg.mass_main_leg_kg, 0.40, ret_time);
 
-        // Peso total do sistema de trem
-        // 2 pernas principais (55 kg) + nariz (22 kg) + atuadores + portas (20 kg)
-        let total_weight = 55.0 + 22.0 + 20.0; // kg (igual ao OEW do WeightBalanceAgent)
+        // Peso total do sistema de trem: massas totais das pernas (de
+        // `[[masses.items]]`) + atuadores/portas (`[gear] actuators_doors_mass_kg`)
+        let total_weight = main_gear_total_mass_kg + nose_gear_mass_kg
+            + gear_cfg.actuators_doors_mass_kg;
 
         GearSpec {
             gear_type:              "Retrátil Triciclo Elétrico".to_string(),
@@ -278,16 +287,33 @@ mod tests {
             "Corrente {corrente:.1}A excede limite do barramento 28V (25A)");
     }
 
+    fn gear_cfg_teste() -> GearCfg {
+        GearCfg {
+            retractable: true,
+            cd0_fixed_increment: 0.008,
+            h_cg_ground_m: 1.05,
+            x_nose_m: 1.40,
+            x_main_m: 3.85,
+            mass_main_leg_kg: 27.5,
+            mass_nose_kg: 22.0,
+            retraction_time_s: 7.0,
+            actuators_doors_mass_kg: 20.0,
+        }
+    }
+
     #[test]
     fn relatorio_completo_trem() {
-        let gear = LandingGearAgent::run(MTOW, 3.263, 1.40, 3.85);
+        let gear_cfg = gear_cfg_teste();
+        let gear = LandingGearAgent::run(MTOW, 3.263, &gear_cfg, 55.0, 22.0);
         println!("Bitola:    {:.2}m", gear.track_width_m);
         println!("Empeno:    {:.2}m", gear.wheelbase_m);
         println!("Tombamento:{:.1}°", gear.tipover_angle_deg);
         println!("Carga nariz:{:.1}%", gear.nose_load_fraction_pct);
         println!("Stroke main:{:.0}mm", gear.main_oleo_stroke_mm);
         println!("F_main:     {:.0}N", gear.main_gear_load_n);
+        println!("Peso total: {:.0}kg", gear.total_weight_kg);
         assert!(gear.tipover_angle_deg < 55.0);
         assert!(gear.nose_load_fraction_pct >= 8.0);
+        assert_eq!(gear.total_weight_kg, 55.0 + 22.0 + 20.0);
     }
 }

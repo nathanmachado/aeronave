@@ -13,16 +13,21 @@ use aeronave::agents::performance::max_level_speed_ms;
 use aeronave::agents::propulsion::PropulsionAgent;
 use aeronave::agents::weight_balance::WeightBalanceAgent;
 use aeronave::models::aircraft_state::AircraftState;
-use aeronave::models::config::load_engine;
+use aeronave::models::config::{load_aircraft, load_engine};
 use aeronave::models::requirements::Requirements;
 
 fn config_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
 }
 
+fn baseline_state() -> aeronave::models::aircraft_config::AircraftConfig {
+    load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap()
+}
+
 #[test]
 fn trocar_motor_muda_resultado_sem_mudar_codigo() {
-    let state = AircraftState::initial();
+    let cfg   = baseline_state();
+    let state = AircraftState::from_config(&cfg);
     let req   = Requirements::project_default();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -64,7 +69,8 @@ fn trocar_motor_muda_resultado_sem_mudar_codigo() {
 /// ~111 kg e deslocar o CG para trás (motor mais leve no nariz).
 #[test]
 fn massa_do_motor_afeta_oew_e_cg() {
-    let state = AircraftState::initial();
+    let cfg   = baseline_state();
+    let state = AircraftState::from_config(&cfg);
     let req   = Requirements::project_default();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -72,8 +78,8 @@ fn massa_do_motor_afeta_oew_e_cg() {
 
     println!("Toyota mass_kg = {:.1} | Rotax mass_kg = {:.1}", toyota.mass_kg, rotax.mass_kg);
 
-    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota);
-    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax);
+    let wb_toyota = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg);
+    let wb_rotax  = WeightBalanceAgent::run(&state, &wing, &rotax, &cfg);
 
     println!(
         "OEW Toyota = {:.1} kg | OEW Rotax = {:.1} kg | delta = {:.1} kg",
@@ -134,7 +140,8 @@ fn massa_do_motor_afeta_oew_e_cg() {
 // melhorou.
 #[test]
 fn autonomia_minima_8_horas() {
-    let state = AircraftState::initial();
+    let cfg   = baseline_state();
+    let state = AircraftState::from_config(&cfg);
     let req   = Requirements::project_default();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -165,11 +172,15 @@ fn autonomia_minima_8_horas() {
 // e o pin do motor real vive apenas aqui, contra o TOML de verdade.
 #[test]
 fn toyota_v_max_regressao_310kmh() {
-    let state = AircraftState::initial();
+    let cfg   = baseline_state();
+    let state = AircraftState::from_config(&cfg);
     let req   = Requirements::project_default();
     let wing  = AerodynamicsAgent::run(&state, &req);
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
 
+    // Massa fixa (1.461 kg) igual ao antigo `AircraftState::initial().mtow_kg`
+    // — mantida como literal para não acoplar este pin de regressão ao
+    // `mtow_guess_kg` do baseline (que poderia mudar por outros motivos).
     let v_max_ms = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, &toyota);
     let v_max_kmh = v_max_ms * 3.6;
     println!("Toyota V_max nivelada = {v_max_kmh:.6} km/h");
@@ -178,4 +189,53 @@ fn toyota_v_max_regressao_310kmh() {
     assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
         "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pré-refactor \
          {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
+}
+
+// ─── REGRESSÃO DE OURO (TASK 2.1) ─────────────────────────────────────────────
+//
+// A Task 2.1 moveu a célula inteira (geometria, braços, massas, material
+// estrutural, trem, hélice) de constantes Rust hardcoded para
+// `config/aircraft/baseline_4seat.toml`. Este teste fixa os números-chave do
+// pipeline Toyota+baseline medidos ANTES do refactor (aircraft_spec.json
+// gerado por `cargo run` no commit pai desta task) — qualquer divergência
+// além de ruído de ponto flutuante é uma regressão real introduzida pela
+// migração para TOML, não uma mudança de física.
+#[test]
+fn golden_toyota_baseline_regressao_task_2_1() {
+    let cfg    = baseline_state();
+    let state  = AircraftState::from_config(&cfg);
+    let req    = Requirements::project_default();
+    let wing   = AerodynamicsAgent::run(&state, &req);
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let prop   = PropulsionAgent::run(&state, &req, &wing, &toyota);
+    let wb     = WeightBalanceAgent::run(&state, &wing, &toyota, &cfg);
+
+    println!(
+        "golden: endurance_h={:.6} fc_cruise_lph={:.6} oew_kg={:.6}",
+        prop.endurance_h, prop.fc_cruise_lph, wb.oew_kg
+    );
+
+    let endurance_pre_refactor_h = 8.065598541161418;
+    let fc_pre_refactor_lph = 26.780405557960833;
+    let oew_pre_refactor_kg = 885.0;
+
+    assert!((prop.endurance_h - endurance_pre_refactor_h).abs() < 1e-6,
+        "Autonomia {:.6} h divergiu do valor pré-Task-2.1 {:.6} h",
+        prop.endurance_h, endurance_pre_refactor_h);
+    assert!((prop.fc_cruise_lph - fc_pre_refactor_lph).abs() < 1e-6,
+        "Consumo cruzeiro {:.6} L/h divergiu do valor pré-Task-2.1 {:.6} L/h",
+        prop.fc_cruise_lph, fc_pre_refactor_lph);
+    assert!((wb.oew_kg - oew_pre_refactor_kg).abs() < 1e-6,
+        "OEW {:.6} kg divergiu do valor pré-Task-2.1 {:.6} kg",
+        wb.oew_kg, oew_pre_refactor_kg);
+
+    // V_max nivelada @ MTOW real calculado (não o guess) — mesmo pipeline
+    // que alimenta `perf.v_cruise_kmh` em `main.rs`.
+    let v_max_ms = max_level_speed_ms(wb.spec.mtow_kg, 2_500.0, &wing, &state, &toyota);
+    let v_max_kmh = v_max_ms * 3.6;
+    println!("golden: v_cruise_kmh={v_max_kmh:.6}");
+    let v_max_pre_refactor_kmh = 308.7214714659072;
+    assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1e-3,
+        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pré-Task-2.1 \
+         {v_max_pre_refactor_kmh:.6} km/h", );
 }

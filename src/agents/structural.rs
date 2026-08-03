@@ -10,7 +10,8 @@
 ///   - Espaçamento de cavernas da fuselagem
 ///   - Estimativa de vida em fadiga
 ///
-/// Material das longarinas: AA 7075-T6 (liga de alta resistência)
+/// Material das longarinas: selecionável por nome via `[structure]
+/// spar_material` do TOML de aeronave (ver `material_by_name`).
 /// Pele: laminado de fibra de vidro E-glass / epóxi com reforços de carbono
 ///
 /// Referências:
@@ -18,24 +19,58 @@
 ///   - Raymer, D. "Aircraft Design: A Conceptual Approach", Cap. 14
 ///   - Niu, M. "Airframe Structural Design", Cap. 4
 
+use crate::models::aircraft_config::StructureCfg;
+use crate::models::requirements::Requirements;
 use crate::models::specs::{WingSpec, StructuralSpec};
 
 const G: f64 = 9.807; // m/s²
 
 // ─── PROPRIEDADES DOS MATERIAIS ───────────────────────────────────────────────
 
-/// Alumínio 7075-T6 (longarinas principais)
-pub struct Al7075T6;
-impl Al7075T6 {
-    pub const SIGMA_YIELD_MPA: f64  = 503.0; // MPa — limite de escoamento
-    pub const SIGMA_ULT_MPA: f64    = 572.0; // MPa — resistência última
-    pub const DENSITY_KGM3: f64     = 2_810.0; // kg/m³
-    pub const E_GPA: f64            = 71.7;  // GPa — módulo de Young
-    /// Tensão admissível de projeto (última / 1.0 — já incluído fator 1.5 na carga)
-    pub const SIGMA_ALLOW_MPA: f64  = 380.0; // σ_ult / 1.5 = 381 MPa (arredondado)
+/// Propriedades físicas de um material de longarina.
+#[derive(Debug, Clone, Copy)]
+pub struct Material {
+    pub sigma_yield_mpa: f64, // MPa — limite de escoamento
+    pub sigma_ult_mpa: f64,   // MPa — resistência última
+    pub density_kgm3: f64,    // kg/m³
+    pub e_gpa: f64,           // GPa — módulo de Young
 }
 
-/// Laminado de fibra de vidro E-glass / epóxi (pele e nervuras)
+impl Material {
+    /// Tensão admissível de projeto (última / 1.5 — margem de segurança
+    /// clássica para material dúctil sem fator de segurança adicional na
+    /// carga, já que esta já vem em carga ÚLTIMA = 1.5 × limite).
+    pub fn sigma_allow_mpa(&self) -> f64 {
+        self.sigma_ult_mpa / 1.5
+    }
+}
+
+/// Resolve um material de longarina cadastrado pelo nome usado em
+/// `[structure] spar_material` do TOML de aeronave. `None` = material
+/// desconhecido (rejeitado na validação de `models::config::load_aircraft`).
+pub fn material_by_name(name: &str) -> Option<Material> {
+    match name {
+        // Alumínio 7075-T6 — alta resistência, longarinas principais.
+        "AA7075-T6" => Some(Material {
+            sigma_yield_mpa: 503.0,
+            sigma_ult_mpa: 572.0,
+            density_kgm3: 2_810.0,
+            e_gpa: 71.7,
+        }),
+        // Alumínio 6061-T6 — mais soldável, resistência moderada.
+        "AA6061-T6" => Some(Material {
+            sigma_yield_mpa: 276.0,
+            sigma_ult_mpa: 310.0,
+            density_kgm3: 2_700.0,
+            e_gpa: 68.9,
+        }),
+        _ => None,
+    }
+}
+
+/// Laminado de fibra de vidro E-glass / epóxi (pele e nervuras) — mesmo
+/// material de pele para toda a família de aeronaves modeladas por este
+/// projeto (não parametrizado pelo TOML — só a longarina é selecionável).
 pub struct FiberglassEpoxy;
 impl FiberglassEpoxy {
     pub const SIGMA_ULT_MPA: f64    = 300.0; // MPa em tração (laminado 0°/90°)
@@ -45,12 +80,23 @@ impl FiberglassEpoxy {
 
 // ─── DIAGRAMA V-n (CS-23 Normal) ──────────────────────────────────────────────
 
-/// Fator de carga limite — CS-23 Normal: n_lim = 3.8g
-/// Para Utility: 4.4g. Para Acrobático: 6.0g.
-pub fn load_factor_limit() -> f64 { 3.8 }
+/// Fator de carga limite por categoria de projeto CS-23:
+/// Normal = 3.8g | Utility = 4.4g | Acrobático = 6.0g.
+/// `design_category` já validado em `models::config::load_aircraft`
+/// (apenas "normal" | "utility" | "acrobatic" passam) — desconhecido cai no
+/// padrão Normal (3.8g), nunca deveria ser alcançado em produção.
+pub fn load_factor_limit(design_category: &str) -> f64 {
+    match design_category {
+        "utility" => 4.4,
+        "acrobatic" => 6.0,
+        _ => 3.8,
+    }
+}
 
 /// Fator de carga último = 1.5 × limite (CS 23.303)
-pub fn load_factor_ultimate() -> f64 { load_factor_limit() * 1.5 }
+pub fn load_factor_ultimate(design_category: &str) -> f64 {
+    load_factor_limit(design_category) * 1.5
+}
 
 /// Velocidade de projeto de cruzeiro VC (m/s):
 /// VC = V_cruise_cruise (velocidade de cruzeiro especificada)
@@ -64,8 +110,9 @@ pub fn vd_ms(vc_ms: f64) -> f64 { 1.25 * vc_ms }
 /// VA = VS1 × √n_lim   (não exceder abaixo desta velocidade)
 /// IMPORTANTE: usa VS1 (stall em configuração LIMPA, wing.stall_speed_clean_kmh),
 /// não VS0 (stall com flap) — CS 23.335 define VA a partir do stall limpo.
-pub fn va_ms(v_stall_clean_ms: f64) -> f64 {
-    v_stall_clean_ms * load_factor_limit().sqrt()
+/// `n_lim` vem de `load_factor_limit(design_category)`.
+pub fn va_ms(v_stall_clean_ms: f64, n_lim: f64) -> f64 {
+    v_stall_clean_ms * n_lim.sqrt()
 }
 
 // ─── MOMENTO FLETOR NA RAIZ DA ASA ────────────────────────────────────────────
@@ -105,9 +152,11 @@ pub fn wing_root_bending_nm(
 
 /// Altura da longarina na raiz da asa.
 /// Posicionada em 30% da corda para capturar espessura máxima do perfil.
-/// Para NACA 23015 (t/c = 0.15): h_spar ≈ 0.60 × t_max = 0.60 × (0.15 × c_r)
-pub fn spar_height_root(chord_root_m: f64) -> f64 {
-    0.60 * 0.15 * chord_root_m // 60% da espessura máxima do perfil
+/// h_spar ≈ 0.60 × t_max = 0.60 × (thickness_ratio × c_r)
+/// `thickness_ratio` (t/c) vem de `[wing] thickness_ratio` do TOML de
+/// aeronave (perfil específico, ex.: 0.15 para NACA 23015).
+pub fn spar_height_root(chord_root_m: f64, thickness_ratio: f64) -> f64 {
+    0.60 * thickness_ratio * chord_root_m // 60% da espessura máxima do perfil
 }
 
 /// Módulo de seção necessário para suportar M_ult:
@@ -201,8 +250,10 @@ pub fn flutter_check(v_flutter_ms: f64, vd_ms: f64) -> bool {
 // ─── FADIGA ───────────────────────────────────────────────────────────────────
 
 /// Vida em fadiga estimada pela relação de Goodman modificada.
-/// Para material Al 7075-T6:
-///   Se = 160 MPa (limite de fadiga — R = 0, base 10⁷ ciclos)
+/// Para ligas de alumínio (7075-T6 e 6061-T6, os materiais cadastrados em
+/// `material_by_name`):
+///   Se = 160 MPa (limite de fadiga — R = 0, base 10⁷ ciclos; aproximação
+///        genérica para liga de Al — não recalibrada por liga específica)
 ///   σ_max = σ_média + σ_amplitude
 ///
 /// Número de voos estimado (simplificado):
@@ -210,8 +261,9 @@ pub fn flutter_check(v_flutter_ms: f64, vd_ms: f64) -> bool {
 pub fn fatigue_life_cycles(
     sigma_max_mpa: f64,  // tensão máxima em voo (limite, sem fator último)
     sigma_min_mpa: f64,  // tensão mínima (carga de 1g)
+    sigma_ult_mpa: f64,  // resistência última do material da longarina (MPa)
 ) -> f64 {
-    const SE_MPA: f64 = 160.0;   // limite de fadiga do Al 7075-T6
+    const SE_MPA: f64 = 160.0;   // limite de fadiga (liga de Al genérica)
     const B: f64 = 5.8;          // expoente de Basquin para Al
     const N_BASE: f64 = 1e7;     // base de referência (10⁷ ciclos)
 
@@ -219,8 +271,7 @@ pub fn fatigue_life_cycles(
     let sigma_m = (sigma_max_mpa + sigma_min_mpa) / 2.0;
 
     // Goodman: σ_a_equiv = σ_a / (1 - σ_m / σ_ult)
-    let sigma_ult = Al7075T6::SIGMA_ULT_MPA;
-    let sigma_equiv = sigma_a / (1.0 - sigma_m / sigma_ult).max(0.01);
+    let sigma_equiv = sigma_a / (1.0 - sigma_m / sigma_ult_mpa).max(0.01);
 
     if sigma_equiv <= SE_MPA {
         return f64::INFINITY; // abaixo do limite de fadiga → vida infinita
@@ -236,10 +287,20 @@ impl StructuralAgent {
     pub fn run(
         wing: &WingSpec,
         mtow_kg: f64,
-        wing_mass_kg: f64,  // massa da asa estrutural (da lista OEW)
+        wing_mass_kg: f64,  // massa da asa estrutural (item "asa" de [masses])
+        req: &Requirements,
+        structure_cfg: &StructureCfg,
     ) -> StructuralSpec {
-        let n_lim = load_factor_limit();
-        let n_ult = load_factor_ultimate();
+        let material = material_by_name(&structure_cfg.spar_material).unwrap_or_else(|| {
+            panic!(
+                "material de longarina desconhecido '{}' — deveria ter sido rejeitado \
+                 por models::config::load_aircraft",
+                structure_cfg.spar_material
+            )
+        });
+
+        let n_lim = load_factor_limit(&structure_cfg.design_category);
+        let n_ult = load_factor_ultimate(&structure_cfg.design_category);
 
         // Momento fletor na raiz
         let m_limit = wing_root_bending_nm(n_lim, mtow_kg, wing.span_m,
@@ -247,48 +308,47 @@ impl StructuralAgent {
         let m_ult   = m_limit * 1.5;
 
         // Longarina raiz
-        let h_spar  = spar_height_root(
-            // chord_root via S e b e taper
-            2.0 * wing.area_m2 / (wing.span_m * (1.0 + wing.taper_ratio))
-        );
-        let w_req   = required_section_modulus_cm3(m_ult, Al7075T6::SIGMA_ALLOW_MPA);
+        let chord_root_m = 2.0 * wing.area_m2 / (wing.span_m * (1.0 + wing.taper_ratio));
+        let h_spar  = spar_height_root(chord_root_m, wing.thickness_ratio);
+        let sigma_allow = material.sigma_allow_mpa();
+        let w_req   = required_section_modulus_cm3(m_ult, sigma_allow);
         let a_flange = spar_flange_area_cm2(w_req, h_spar * 100.0); // h em cm
-        let t_web   = spar_web_thickness_mm(n_lim, mtow_kg, h_spar, Al7075T6::SIGMA_YIELD_MPA);
+        let t_web   = spar_web_thickness_mm(n_lim, mtow_kg, h_spar, material.sigma_yield_mpa);
 
         // Pele
-        let chord_root_m = 2.0 * wing.area_m2 / (wing.span_m * (1.0 + wing.taper_ratio));
         let t_skin = skin_thickness_mm(m_limit, chord_root_m, h_spar);
 
-        // Flutter e velocidades de projeto
-        let vc   = vc_ms(280.0);
+        // Flutter e velocidades de projeto — VC vem do requisito de cruzeiro
+        // do projeto, não de uma constante interna.
+        let vc   = vc_ms(req.cruise_speed_min_kmh);
         let vd   = vd_ms(vc);
         let vf   = flutter_speed_ms(vd, wing.area_m2, wing.span_m, chord_root_m, h_spar, wing_mass_kg);
         let fl_ok = flutter_check(vf, vd);
 
         // Velocidade de manobra VA — CS 23.335, a partir de VS1 (stall limpa)
         let vs1_ms = wing.stall_speed_clean_kmh / 3.6;
-        let va = va_ms(vs1_ms);
+        let va = va_ms(vs1_ms, n_lim);
 
         // Tensão operacional na longarina (1g nivelado — base para fadiga)
         // M / W = Pa; dividir por 1e6 para converter a MPa (unidade de fatigue_life_cycles)
         let m_1g = wing_root_bending_nm(1.0, mtow_kg, wing.span_m,
                                          wing.taper_ratio, wing_mass_kg);
         let w_req_m3 = w_req * 1e-6; // cm³ → m³
-        let sigma_1g_mpa   = (m_1g    / w_req_m3 / 1e6).min(Al7075T6::SIGMA_YIELD_MPA - 50.0);
-        let sigma_max_mpa  = (m_limit / w_req_m3 / 1e6).min(Al7075T6::SIGMA_ALLOW_MPA);
-        let cycles = fatigue_life_cycles(sigma_max_mpa, sigma_1g_mpa);
+        let sigma_1g_mpa   = (m_1g    / w_req_m3 / 1e6).min(material.sigma_yield_mpa - 50.0);
+        let sigma_max_mpa  = (m_limit / w_req_m3 / 1e6).min(sigma_allow);
+        let cycles = fatigue_life_cycles(sigma_max_mpa, sigma_1g_mpa, material.sigma_ult_mpa);
 
         StructuralSpec {
             design_load_factor_g:        n_lim,
             ultimate_load_factor_g:      n_ult,
             wing_root_bending_limit_nm:  m_limit,
             wing_root_bending_ult_nm:    m_ult,
-            spar_material:               "AA 7075-T6".to_string(),
+            spar_material:               structure_cfg.spar_material.clone(),
             spar_height_root_m:          h_spar,
             spar_flange_area_cm2:        a_flange,
             spar_web_thickness_mm:       t_web,
             skin_min_thickness_mm:       t_skin,
-            frame_spacing_mm:            300.0, // espaçamento de cavernas da fuselagem
+            frame_spacing_mm:            structure_cfg.frame_spacing_mm,
             flutter_speed_kmh:           vf * 3.6,
             design_dive_speed_kmh:       vd * 3.6,
             va_kmh:                      va * 3.6,
@@ -303,18 +363,41 @@ impl StructuralAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
     use crate::agents::aerodynamics::AerodynamicsAgent;
 
+    // MTOW/massa de asa sintéticos usados nos testes que não passam pelo
+    // WeightBalanceAgent completo — arbitrários mas plausíveis, iguais aos
+    // valores históricos deste arquivo (não coincidem com o baseline real).
+    const MTOW_TESTE: f64 = 1_400.0;
+    const WING_MASS_TESTE: f64 = 120.0;
+
     fn wing() -> WingSpec {
-        let s = AircraftState::initial();
+        let cfg = config_teste();
+        let s = AircraftState::from_config(&cfg);
         AerodynamicsAgent::run(&s, &Requirements::project_default())
+    }
+
+    fn structure_cfg_teste() -> StructureCfg {
+        config_teste().structure
     }
 
     #[test]
     fn fator_de_carga_cs23() {
-        assert!((load_factor_limit() - 3.8).abs() < 0.01);
-        assert!((load_factor_ultimate() - 5.7).abs() < 0.01);
+        assert!((load_factor_limit("normal") - 3.8).abs() < 0.01);
+        assert!((load_factor_ultimate("normal") - 5.7).abs() < 0.01);
+        assert!((load_factor_limit("utility") - 4.4).abs() < 0.01);
+        assert!((load_factor_limit("acrobatic") - 6.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn material_by_name_resolve_materiais_cadastrados() {
+        let a7075 = material_by_name("AA7075-T6").expect("AA7075-T6 deveria existir");
+        let a6061 = material_by_name("AA6061-T6").expect("AA6061-T6 deveria existir");
+        assert!(a7075.sigma_ult_mpa > a6061.sigma_ult_mpa,
+            "AA7075-T6 deveria ser mais resistente que AA6061-T6");
+        assert!(material_by_name("Unobtainium").is_none());
     }
 
     #[test]
@@ -327,23 +410,28 @@ mod tests {
     #[test]
     fn momento_fletor_raiz_fisicamente_coerente() {
         let w = wing();
-        // M_root a 3.8g deve ser da ordem de 50.000–120.000 N·m
-        let m = wing_root_bending_nm(3.8, 1_527.0, w.span_m, w.taper_ratio, 130.0);
+        // M_root a 3.8g deve ser proporcional a MTOW/span/taper — faixa
+        // ampla o bastante para a fixture sintética (span/taper menores que
+        // o baseline real).
+        let m = wing_root_bending_nm(3.8, MTOW_TESTE, w.span_m, w.taper_ratio, WING_MASS_TESTE);
         println!("M_root @ 3.8g = {:.0} N·m", m);
-        assert!(m > 40_000.0 && m < 130_000.0,
-            "M_root {m:.0} N·m fora do intervalo (40.000–130.000 N·m)");
+        assert!(m > 30_000.0 && m < 100_000.0,
+            "M_root {m:.0} N·m fora do intervalo (30.000–100.000 N·m)");
     }
 
     #[test]
     fn longarina_dimensionada_com_material_adequado() {
         let w = wing();
-        let struc = StructuralAgent::run(&w, 1_527.0, 130.0);
-        println!("Longarina raiz: h={:.0}mm, A_flange={:.1}cm², t_alma={:.1}mm",
+        let req = Requirements::project_default();
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
+        println!("Longarina raiz ({}): h={:.0}mm, A_flange={:.1}cm², t_alma={:.1}mm",
+                 struc.spar_material,
                  struc.spar_height_root_m * 1000.0,
                  struc.spar_flange_area_cm2,
                  struc.spar_web_thickness_mm);
-        assert!(struc.spar_height_root_m > 0.10 && struc.spar_height_root_m < 0.30,
-            "Altura da longarina {:.0}mm fora de 100–300mm", struc.spar_height_root_m * 1000.0);
+        assert_eq!(struc.spar_material, "AA6061-T6");
+        assert!(struc.spar_height_root_m > 0.08 && struc.spar_height_root_m < 0.30,
+            "Altura da longarina {:.0}mm fora de 80–300mm", struc.spar_height_root_m * 1000.0);
         assert!(struc.spar_flange_area_cm2 > 0.5,
             "Área de mesa {:.1}cm² muito pequena", struc.spar_flange_area_cm2);
     }
@@ -351,8 +439,9 @@ mod tests {
     #[test]
     fn flutter_acima_de_1_2_vd() {
         let w = wing();
-        let struc = StructuralAgent::run(&w, 1_527.0, 130.0);
-        let vc = vc_ms(280.0);
+        let req = Requirements::project_default();
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
+        let vc = vc_ms(req.cruise_speed_min_kmh);
         let vd = vd_ms(vc);
         println!("VD={:.0} km/h  V_flutter={:.0} km/h  OK={}",
                  vd * 3.6, struc.flutter_speed_kmh, struc.flutter_ok);
@@ -373,10 +462,11 @@ mod tests {
 
     #[test]
     fn fadiga_alta_tensao_vida_curta() {
+        let sigma_ult = material_by_name("AA7075-T6").unwrap().sigma_ult_mpa;
         // σ_a equivalente acima do limite de fadiga → vida FINITA e menor que 10⁷
-        let vida_alta_tensao = fatigue_life_cycles(300.0, 50.0);
+        let vida_alta_tensao = fatigue_life_cycles(300.0, 50.0, sigma_ult);
         // σ_a equivalente abaixo do limite → vida "infinita" (≥ 10⁹ por convenção)
-        let vida_baixa_tensao = fatigue_life_cycles(80.0, 40.0);
+        let vida_baixa_tensao = fatigue_life_cycles(80.0, 40.0, sigma_ult);
         assert!(vida_alta_tensao < 1e7, "alta tensão deveria dar vida finita < 10⁷");
         assert!(vida_baixa_tensao >= 1e9, "baixa tensão deveria dar vida quase infinita");
     }
@@ -387,10 +477,11 @@ mod tests {
         // (flapada) — logo VA calculada corretamente deve ser MAIOR do que
         // seria se (incorretamente) derivada de VS0.
         let w = wing();
-        let struc = StructuralAgent::run(&w, 1_527.0, 130.0);
+        let req = Requirements::project_default();
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
 
-        let va_esperada_kmh = w.stall_speed_clean_kmh * load_factor_limit().sqrt();
-        let va_se_fosse_vs0_kmh = w.stall_speed_flaps_kmh * load_factor_limit().sqrt();
+        let va_esperada_kmh = w.stall_speed_clean_kmh * load_factor_limit("normal").sqrt();
+        let va_se_fosse_vs0_kmh = w.stall_speed_flaps_kmh * load_factor_limit("normal").sqrt();
 
         println!("VA (VS1 correta) = {:.1} km/h | VA (se fosse VS0, incorreta) = {:.1} km/h",
                  struc.va_kmh, va_se_fosse_vs0_kmh);
@@ -406,7 +497,8 @@ mod tests {
     #[test]
     fn fadiga_acima_de_10000_voos() {
         let w = wing();
-        let struc = StructuralAgent::run(&w, 1_527.0, 130.0);
+        let req = Requirements::project_default();
+        let struc = StructuralAgent::run(&w, MTOW_TESTE, WING_MASS_TESTE, &req, &structure_cfg_teste());
         let ciclos = struc.fatigue_life_cycles;
         println!("Vida em fadiga: {ciclos:.2e} ciclos");
         // Aeronave com ciclos de pressurização leve deve durar > 10.000 voos

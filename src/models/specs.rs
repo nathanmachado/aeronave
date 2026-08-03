@@ -8,6 +8,9 @@ pub struct WingSpec {
     pub aspect_ratio: f64,
     pub airfoil: String,
     pub taper_ratio: f64,
+    /// Espessura relativa do perfil (t/c) — usada no dimensionamento da
+    /// longarina em `structural.rs`.
+    pub thickness_ratio: f64,
     pub oswald_efficiency: f64,
     pub cd0: f64,
     pub cl_cruise: f64,

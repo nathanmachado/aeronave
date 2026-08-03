@@ -1,7 +1,9 @@
-//! Carregamento e validação de especificações de motor a partir de arquivos TOML.
+//! Carregamento e validação de especificações de motor e de célula a partir
+//! de arquivos TOML.
 
 use std::path::Path;
 
+use super::aircraft_config::AircraftConfig;
 use super::engine::EngineSpec;
 
 /// Erros de carregamento/validação de configuração de motor.
@@ -15,8 +17,8 @@ pub enum ConfigError {
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigError::Io(e) => write!(f, "erro ao ler arquivo de configuração do motor: {e}"),
-            ConfigError::Parse(e) => write!(f, "TOML de motor inválido: {e}"),
+            ConfigError::Io(e) => write!(f, "erro ao ler arquivo de configuração: {e}"),
+            ConfigError::Parse(e) => write!(f, "TOML de configuração inválido: {e}"),
             ConfigError::Validation(msg) => write!(f, "{msg}"),
         }
     }
@@ -195,6 +197,191 @@ fn validate_engine(engine: &EngineSpec) -> Result<(), ConfigError> {
     Ok(())
 }
 
+// ─── AERONAVE (CÉLULA) ────────────────────────────────────────────────────────
+
+/// Faz o parse de uma configuração de célula a partir de uma string TOML,
+/// validando as invariantes físicas e de consistência (braços conhecidos,
+/// material estrutural cadastrado, etc).
+pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
+    let cfg: AircraftConfig = toml::from_str(toml_str)?;
+    validate_aircraft(&cfg)?;
+    Ok(cfg)
+}
+
+/// Lê e faz o parse de uma configuração de célula a partir de um arquivo
+/// TOML no disco.
+pub fn load_aircraft(path: &Path) -> Result<AircraftConfig, ConfigError> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        ConfigError::Io(std::io::Error::new(
+            e.kind(),
+            format!("não foi possível ler o arquivo de aeronave '{}': {e}", path.display()),
+        ))
+    })?;
+    parse_aircraft(&content)
+}
+
+/// Garante que `v` é finito (nem NaN nem infinito), com mensagem em
+/// português nomeando o campo — mesmo padrão usado em `validate_engine`.
+fn require_finite(field: &str, v: f64) -> Result<(), ConfigError> {
+    if !v.is_finite() {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: {field} deve ser finito (valores NaN/infinito não permitidos)"
+        )));
+    }
+    Ok(())
+}
+
+fn require_positive(field: &str, v: f64) -> Result<(), ConfigError> {
+    require_finite(field, v)?;
+    if v <= 0.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: {field} deve ser positivo (valor: {v})"
+        )));
+    }
+    Ok(())
+}
+
+fn require_non_negative(field: &str, v: f64) -> Result<(), ConfigError> {
+    require_finite(field, v)?;
+    if v < 0.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: {field} não pode ser negativo (valor: {v})"
+        )));
+    }
+    Ok(())
+}
+
+/// Valida as invariantes físicas e de consistência de uma `AircraftConfig`
+/// recém-carregada.
+fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
+    require_positive("mtow_guess_kg", cfg.mtow_guess_kg)?;
+
+    // [wing]
+    require_positive("wing.span_m", cfg.wing.span_m)?;
+    require_positive("wing.area_m2", cfg.wing.area_m2)?;
+    require_finite("wing.taper_ratio", cfg.wing.taper_ratio)?;
+    if cfg.wing.taper_ratio <= 0.0 || cfg.wing.taper_ratio > 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.taper_ratio deve estar em (0, 1] (valor: {})",
+            cfg.wing.taper_ratio
+        )));
+    }
+    require_positive("wing.thickness_ratio", cfg.wing.thickness_ratio)?;
+    require_positive("wing.cl_max_clean", cfg.wing.cl_max_clean)?;
+    require_positive("wing.cl_max_flaps", cfg.wing.cl_max_flaps)?;
+    if cfg.wing.cl_max_flaps < cfg.wing.cl_max_clean {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.cl_max_flaps ({}) deve ser >= wing.cl_max_clean ({})",
+            cfg.wing.cl_max_flaps, cfg.wing.cl_max_clean
+        )));
+    }
+    require_non_negative("wing.cd0_wing", cfg.wing.cd0_wing)?;
+    require_non_negative("wing.le_root_x_m", cfg.wing.le_root_x_m)?;
+
+    // [fuselage]
+    require_positive("fuselage.length_m", cfg.fuselage.length_m)?;
+    require_positive("fuselage.cabin_width_m", cfg.fuselage.cabin_width_m)?;
+    require_positive("fuselage.cabin_height_m", cfg.fuselage.cabin_height_m)?;
+    require_non_negative("fuselage.cd0", cfg.fuselage.cd0)?;
+
+    // [empennage]
+    require_non_negative("empennage.cd0", cfg.empennage.cd0)?;
+    require_positive("empennage.tail_arm_m", cfg.empennage.tail_arm_m)?;
+
+    // [propeller]
+    require_positive("propeller.diameter_m", cfg.propeller.diameter_m)?;
+    if cfg.propeller.blades < 1 {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: propeller.blades deve ser >= 1".to_string(),
+        ));
+    }
+    require_finite("propeller.psru_ratio", cfg.propeller.psru_ratio)?;
+    if cfg.propeller.psru_ratio < 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.psru_ratio deve ser >= 1 (valor: {})",
+            cfg.propeller.psru_ratio
+        )));
+    }
+    require_positive("propeller.psru_efficiency", cfg.propeller.psru_efficiency)?;
+    if cfg.propeller.psru_efficiency > 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.psru_efficiency deve estar em (0, 1] (valor: {})",
+            cfg.propeller.psru_efficiency
+        )));
+    }
+
+    // [fuel_system]
+    require_positive("fuel_system.capacity_l", cfg.fuel_system.capacity_l)?;
+
+    // [gear]
+    require_non_negative("gear.cd0_fixed_increment", cfg.gear.cd0_fixed_increment)?;
+    require_positive("gear.h_cg_ground_m", cfg.gear.h_cg_ground_m)?;
+    require_non_negative("gear.x_nose_m", cfg.gear.x_nose_m)?;
+    require_non_negative("gear.x_main_m", cfg.gear.x_main_m)?;
+    if cfg.gear.x_main_m <= cfg.gear.x_nose_m {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.x_main_m ({}) deve ser maior que gear.x_nose_m ({})",
+            cfg.gear.x_main_m, cfg.gear.x_nose_m
+        )));
+    }
+    require_positive("gear.mass_main_leg_kg", cfg.gear.mass_main_leg_kg)?;
+    require_positive("gear.mass_nose_kg", cfg.gear.mass_nose_kg)?;
+    require_positive("gear.retraction_time_s", cfg.gear.retraction_time_s)?;
+    require_non_negative("gear.actuators_doors_mass_kg", cfg.gear.actuators_doors_mass_kg)?;
+
+    // [arms] — braços de momento: não-negativos e finitos.
+    require_non_negative("arms.engine_cg_m", cfg.arms.engine_cg_m)?;
+    require_non_negative("arms.avionics_m", cfg.arms.avionics_m)?;
+    require_non_negative("arms.pax_front_m", cfg.arms.pax_front_m)?;
+    require_non_negative("arms.fuel_cg_m", cfg.arms.fuel_cg_m)?;
+    require_non_negative("arms.wing_struct_m", cfg.arms.wing_struct_m)?;
+    require_non_negative("arms.pax_rear_m", cfg.arms.pax_rear_m)?;
+    require_non_negative("arms.fuselage_struct_m", cfg.arms.fuselage_struct_m)?;
+    require_non_negative("arms.baggage_m", cfg.arms.baggage_m)?;
+    require_non_negative("arms.empennage_cg_m", cfg.arms.empennage_cg_m)?;
+
+    // [structure]
+    require_positive("structure.frame_spacing_mm", cfg.structure.frame_spacing_mm)?;
+    if !matches!(cfg.structure.design_category.as_str(), "normal" | "utility" | "acrobatic") {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: structure.design_category '{}' desconhecida \
+             (esperado: normal | utility | acrobatic)",
+            cfg.structure.design_category
+        )));
+    }
+    if crate::agents::structural::material_by_name(&cfg.structure.spar_material).is_none() {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: structure.spar_material '{}' desconhecido \
+             (materiais cadastrados: AA7075-T6, AA6061-T6)",
+            cfg.structure.spar_material
+        )));
+    }
+
+    // [drag]
+    require_non_negative("drag.cd0_misc", cfg.drag.cd0_misc)?;
+
+    // [[masses.items]]
+    if cfg.masses.items.is_empty() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: masses.items não pode ser vazio".to_string(),
+        ));
+    }
+    let arms = crate::agents::weight_balance::ArmConfig::from_config(cfg);
+    for item in &cfg.masses.items {
+        require_positive(&format!("masses.items[{}].mass_kg", item.name), item.mass_kg)?;
+        require_finite(&format!("masses.items[{}].arm_offset_m", item.name), item.arm_offset_m)?;
+        if arms.by_name(&item.arm_ref).is_none() {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: item de massa '{}' referencia arm_ref \
+                 desconhecido '{}'",
+                item.name, item.arm_ref
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +480,191 @@ mod tests {
         "#;
         let err = parse_engine(toml_com_inf).unwrap_err();
         assert!(err.to_string().contains("finitos") || err.to_string().contains("infinito"));
+    }
+
+    // ─── AERONAVE (CÉLULA) ────────────────────────────────────────────────
+
+    /// TOML de aeronave mínimo porém válido, usado como base para os testes
+    /// de validação abaixo (cada teste sobrescreve um trecho para violar
+    /// exatamente uma invariante).
+    fn aircraft_toml_valido() -> String {
+        r#"
+            mtow_guess_kg = 1000.0
+            [wing]
+            span_m = 10.0
+            area_m2 = 12.0
+            taper_ratio = 0.5
+            airfoil = "Teste"
+            thickness_ratio = 0.15
+            cl_max_clean = 1.4
+            cl_max_flaps = 1.6
+            cd0_wing = 0.005
+            le_root_x_m = 2.5
+            [fuselage]
+            length_m = 7.5
+            cabin_width_m = 1.1
+            cabin_height_m = 1.1
+            cd0 = 0.01
+            [empennage]
+            cd0 = 0.004
+            tail_arm_m = 4.5
+            [propeller]
+            diameter_m = 1.8
+            blades = 2
+            psru_ratio = 1.5
+            psru_efficiency = 0.95
+            [fuel_system]
+            capacity_l = 200.0
+            [gear]
+            retractable = true
+            cd0_fixed_increment = 0.008
+            h_cg_ground_m = 1.0
+            x_nose_m = 1.3
+            x_main_m = 3.5
+            mass_main_leg_kg = 25.0
+            mass_nose_kg = 20.0
+            retraction_time_s = 7.0
+            actuators_doors_mass_kg = 18.0
+            [arms]
+            engine_cg_m = 0.6
+            avionics_m = 1.0
+            pax_front_m = 3.0
+            fuel_cg_m = 3.3
+            wing_struct_m = 3.4
+            pax_rear_m = 4.2
+            fuselage_struct_m = 3.9
+            baggage_m = 5.2
+            empennage_cg_m = 7.0
+            [structure]
+            spar_material = "AA7075-T6"
+            frame_spacing_mm = 300.0
+            design_category = "normal"
+            [drag]
+            cd0_misc = 0.003
+            [[masses.items]]
+            name = "asa"
+            mass_kg = 100.0
+            arm_ref = "wing_struct"
+            [[masses.items]]
+            name = "trem_principal"
+            mass_kg = 50.0
+            arm_ref = "gear_main"
+        "#
+        .to_string()
+    }
+
+    #[test]
+    fn carrega_baseline_do_disco_campo_a_campo() {
+        let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
+        assert_eq!(cfg.wing.span_m, 11.94);
+        assert_eq!(cfg.wing.area_m2, 14.2);
+        assert_eq!(cfg.wing.taper_ratio, 0.45);
+        assert_eq!(cfg.wing.airfoil, "NACA 23015");
+        assert_eq!(cfg.wing.cl_max_clean, 1.45);
+        assert_eq!(cfg.wing.cl_max_flaps, 1.72);
+        assert_eq!(cfg.wing.le_root_x_m, 2.90);
+        assert_eq!(cfg.propeller.psru_ratio, 1.867);
+        assert_eq!(cfg.propeller.diameter_m, 1.95);
+        assert_eq!(cfg.fuel_system.capacity_l, 240.0);
+        assert_eq!(cfg.gear.h_cg_ground_m, 1.05);
+        assert_eq!(cfg.gear.x_nose_m, 1.40);
+        assert_eq!(cfg.gear.x_main_m, 3.85);
+        assert_eq!(cfg.arms.engine_cg_m, 0.65);
+        assert_eq!(cfg.arms.empennage_cg_m, 7.40);
+        assert_eq!(cfg.structure.spar_material, "AA7075-T6");
+        assert_eq!(cfg.structure.frame_spacing_mm, 300.0);
+        assert_eq!(cfg.masses.items.len(), 15);
+        assert_eq!(cfg.masses.item_mass("asa"), Some(130.0));
+        assert_eq!(cfg.masses.item_mass("trem_principal"), Some(55.0));
+    }
+
+    #[test]
+    fn aircraft_toml_valido_carrega_sem_erro() {
+        parse_aircraft(&aircraft_toml_valido()).expect("TOML de teste deveria ser válido");
+    }
+
+    #[test]
+    fn rejeita_taper_ratio_fora_de_0_1() {
+        let toml = aircraft_toml_valido().replace("taper_ratio = 0.5", "taper_ratio = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("taper_ratio"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cl_max_flaps_menor_que_cl_max_clean() {
+        let toml = aircraft_toml_valido().replace("cl_max_flaps = 1.6", "cl_max_flaps = 1.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("cl_max_flaps"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_psru_ratio_abaixo_de_1() {
+        let toml = aircraft_toml_valido().replace("psru_ratio = 1.5", "psru_ratio = 0.8");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("psru_ratio"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_capacidade_de_combustivel_nao_positiva() {
+        let toml = aircraft_toml_valido().replace("capacity_l = 200.0", "capacity_l = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("capacity_l"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_material_estrutural_desconhecido() {
+        let toml = aircraft_toml_valido()
+            .replace(r#"spar_material = "AA7075-T6""#, r#"spar_material = "Unobtainium""#);
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("spar_material"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_categoria_de_projeto_desconhecida() {
+        let toml = aircraft_toml_valido()
+            .replace(r#"design_category = "normal""#, r#"design_category = "estranha""#);
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("design_category"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_arm_ref_desconhecido() {
+        let toml = aircraft_toml_valido().replace(
+            r#"arm_ref = "gear_main""#,
+            r#"arm_ref = "lugar_nenhum""#,
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("arm_ref"), "{err}");
+        assert!(err.to_string().contains("lugar_nenhum"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_x_main_nao_maior_que_x_nose() {
+        let toml = aircraft_toml_valido().replace("x_main_m = 3.5", "x_main_m = 1.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("x_main_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_valores_nao_finitos_na_aeronave() {
+        let toml = aircraft_toml_valido().replace("span_m = 10.0", "span_m = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_braco_de_momento_negativo() {
+        let toml = aircraft_toml_valido().replace("engine_cg_m = 0.6", "engine_cg_m = -0.6");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("engine_cg_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_lista_de_massas_vazia() {
+        let base = aircraft_toml_valido();
+        let head = base.split("[[masses.items]]").next().unwrap();
+        let toml = format!("{head}\n[masses]\nitems = []\n");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("masses.items"), "{err}");
     }
 }

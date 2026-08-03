@@ -15,6 +15,7 @@
 ///   - Roskam, J. "Airplane Design Part II", estabilidade estática
 
 use crate::models::{
+    aircraft_config::AircraftConfig,
     aircraft_state::AircraftState,
     engine::EngineSpec,
     specs::{WingSpec, WeightSpec},
@@ -53,7 +54,7 @@ pub fn mac_spanwise_pos(span_m: f64, taper: f64) -> f64 {
 /// Componente de peso com braço de momento (distância do datum ao CG do item)
 #[derive(Debug, Clone)]
 pub struct MassItem {
-    pub name: &'static str,
+    pub name: String,
     pub mass_kg: f64,
     pub arm_m: f64, // distância do nariz (datum)
 }
@@ -74,9 +75,11 @@ pub struct LoadScenario {
     pub fuel_fraction: f64, // fração do tanque cheio (0.0 a 1.0)
 }
 
-/// Geometria longitudinal padrão da aeronave (braços a partir do nariz).
-/// Baseado em aeronave de asa baixa tipo Cirrus SR22 / Lancair IV, 4 lugares.
-/// Comprimento total da fuselagem: 8,2 m
+/// Geometria longitudinal da aeronave (braços a partir do nariz).
+/// Construída a partir de `AircraftConfig` (`[arms]`, mais `wing.le_root_x_m`
+/// e `gear.x_nose_m`/`x_main_m`, que também são braços de momento mas vivem
+/// em suas seções próprias por serem, cada um, fonte única de outro dado —
+/// posição do bordo de ataque e geometria do trem, respectivamente).
 pub struct ArmConfig {
     pub engine_cg_m:       f64, // CG do motor + PSRU (trator, nariz)
     pub wing_le_root_m:    f64, // bordo de ataque da raiz da asa
@@ -93,49 +96,73 @@ pub struct ArmConfig {
 }
 
 impl ArmConfig {
-    pub fn default_layout() -> Self {
+    pub fn from_config(cfg: &AircraftConfig) -> Self {
         Self {
-            engine_cg_m:       0.65,  // motor à frente da antepara corta-fogo
-            avionics_m:        1.10,  // painel + computadores
-            gear_nose_m:       1.40,  // trem de nariz recolhido
-            pax_front_m:       3.20,  // fila da frente (piloto + copiloto)
-            fuel_cg_m:         3.55,  // tanques nas asas — perto do CA
-            wing_le_root_m:    2.90,  // bordo de ataque na raiz
-            wing_struct_m:     3.70,  // CG estrutural da asa
-            gear_main_m:       3.85,  // trem principal (após o CA)
-            pax_rear_m:        4.55,  // fila traseira
-            fuselage_struct_m: 4.20,  // CG da fuselagem
-            baggage_m:         5.60,  // compartimento de bagagem
-            empenagem_cg_m:    7.40,  // empenagem (última seção)
+            engine_cg_m:       cfg.arms.engine_cg_m,
+            avionics_m:        cfg.arms.avionics_m,
+            gear_nose_m:       cfg.gear.x_nose_m,
+            pax_front_m:       cfg.arms.pax_front_m,
+            fuel_cg_m:         cfg.arms.fuel_cg_m,
+            wing_le_root_m:    cfg.wing.le_root_x_m,
+            wing_struct_m:     cfg.arms.wing_struct_m,
+            gear_main_m:       cfg.gear.x_main_m,
+            pax_rear_m:        cfg.arms.pax_rear_m,
+            fuselage_struct_m: cfg.arms.fuselage_struct_m,
+            baggage_m:         cfg.arms.baggage_m,
+            empenagem_cg_m:    cfg.arms.empennage_cg_m,
+        }
+    }
+
+    /// Resolve um braço de momento pelo nome usado em `arm_ref` nos itens de
+    /// `[[masses.items]]` do TOML de aeronave. `None` = nome desconhecido
+    /// (rejeitado na validação de `models::config::load_aircraft`).
+    pub fn by_name(&self, name: &str) -> Option<f64> {
+        match name {
+            "engine_cg"       => Some(self.engine_cg_m),
+            "wing_le_root"    => Some(self.wing_le_root_m),
+            "fuel_cg"         => Some(self.fuel_cg_m),
+            "pax_front"       => Some(self.pax_front_m),
+            "pax_rear"        => Some(self.pax_rear_m),
+            "baggage"         => Some(self.baggage_m),
+            "empennage_cg"    => Some(self.empenagem_cg_m),
+            "gear_main"       => Some(self.gear_main_m),
+            "gear_nose"       => Some(self.gear_nose_m),
+            "avionics"        => Some(self.avionics_m),
+            "fuselage_struct" => Some(self.fuselage_struct_m),
+            "wing_struct"     => Some(self.wing_struct_m),
+            _ => None,
         }
     }
 }
 
 // ─── PESOS POR COMPONENTE (OEW) ───────────────────────────────────────────────
 
-/// Retorna os itens de peso do avião vazio operacional (OEW).
-/// Baseado em estimativas de Raymer (Tabela 6.1) e dados de aeronaves similares
-/// em construção composta (fiberglass + reforço carbono nas longarinas).
-pub fn oew_items(arms: &ArmConfig, fuel_capacity_l: f64, engine: &EngineSpec) -> Vec<MassItem> {
-    let _ = fuel_capacity_l; // reservado para variante com tanques maiores
-    vec![
-        MassItem { name: "Motor + acessórios",     mass_kg: engine.mass_kg, arm_m: arms.engine_cg_m },
-        MassItem { name: "PSRU + hélice + capô",  mass_kg:  65.0, arm_m: arms.engine_cg_m + 0.3 },
-        MassItem { name: "Sistema de resfriamento",mass_kg: 18.0, arm_m: arms.engine_cg_m + 0.5 },
-        MassItem { name: "Aviônicos + elétrica",   mass_kg: 60.0, arm_m: arms.avionics_m },
-        MassItem { name: "Painel + comandos",       mass_kg: 25.0, arm_m: arms.pax_front_m - 0.3 },
-        MassItem { name: "Fuselagem (composto)",    mass_kg:160.0, arm_m: arms.fuselage_struct_m },
-        MassItem { name: "Asa (fiberglass+carbono)",mass_kg:130.0, arm_m: arms.wing_struct_m },
-        MassItem { name: "Empenagem horizontal",    mass_kg: 22.0, arm_m: arms.empenagem_cg_m },
-        MassItem { name: "Empenagem vertical",      mass_kg: 16.0, arm_m: arms.empenagem_cg_m - 0.2 },
-        MassItem { name: "Trem retrátil principal", mass_kg: 55.0, arm_m: arms.gear_main_m },
-        MassItem { name: "Trem de nariz",           mass_kg: 22.0, arm_m: arms.gear_nose_m },
-        MassItem { name: "Mobiliário + acabamento", mass_kg: 45.0, arm_m: arms.pax_front_m + 0.5 },
-        MassItem { name: "Tanques (estrutura)",     mass_kg: 12.0, arm_m: arms.fuel_cg_m },
-        MassItem { name: "Cabos + hidráulico",      mass_kg: 20.0, arm_m: arms.fuselage_struct_m },
-        MassItem { name: "Portas + vidros",         mass_kg: 28.0, arm_m: arms.pax_front_m },
-        MassItem { name: "Antepara + firewall",     mass_kg: 12.0, arm_m: arms.engine_cg_m + 0.9 },
-    ]
+/// Retorna os itens de peso do avião vazio operacional (OEW): o motor (de
+/// `EngineSpec`) mais todos os itens de `[[masses.items]]` da configuração,
+/// com o braço de cada item resolvido via `arm_ref` (+ `arm_offset_m`)
+/// contra `ArmConfig`.
+pub fn oew_items(cfg: &AircraftConfig, engine: &EngineSpec) -> Vec<MassItem> {
+    let arms = ArmConfig::from_config(cfg);
+    let mut items = vec![MassItem {
+        name: "Motor + acessórios".to_string(),
+        mass_kg: engine.mass_kg,
+        arm_m: arms.engine_cg_m,
+    }];
+    for item in &cfg.masses.items {
+        let base_arm = arms.by_name(&item.arm_ref).unwrap_or_else(|| {
+            panic!(
+                "arm_ref desconhecido '{}' no item de massa '{}' — deveria ter sido \
+                 rejeitado por models::config::load_aircraft",
+                item.arm_ref, item.name
+            )
+        });
+        items.push(MassItem {
+            name: item.name.clone(),
+            mass_kg: item.mass_kg,
+            arm_m: base_arm + item.arm_offset_m,
+        });
+    }
+    items
 }
 
 // ─── CÁLCULO DE CG ───────────────────────────────────────────────────────────
@@ -164,6 +191,7 @@ pub fn neutral_point_m(
     mac_m: f64,
     span_m: f64,
     fuselage_length_m: f64,
+    tail_arm_m: f64,
 ) -> f64 {
     // CA da asa: bordo de ataque do MAC + 25% MAC
     let x_ac_wing = wing_le_root_m
@@ -173,9 +201,9 @@ pub fn neutral_point_m(
     // Contribuição estabilizadora da empenagem horizontal (método da área de cauda)
     // Parâmetros típicos para aeronave leve: η_t = 0.90, a_t/a_w = 0.85
     // S_t/S_w = 0.22 (área da empenagem horizontal / asa)
-    // l_t = distância CA asa → CA empenagem ≈ 4,8 m
+    // l_t = distância CA asa → CA empenagem, de `[empennage].tail_arm_m`
     let s_ratio = 0.22_f64;   // S_tail / S_wing
-    let l_tail  = 4.80_f64;   // m — braço da empenagem
+    let l_tail  = tail_arm_m; // m — braço da empenagem
     let eta_t   = 0.90_f64;   // eficiência dinâmica da empenagem
     let at_aw   = 0.85_f64;   // razão de inclinações de CL
 
@@ -236,8 +264,13 @@ pub struct ScenarioResult {
 }
 
 impl WeightBalanceAgent {
-    pub fn run(state: &AircraftState, wing: &WingSpec, engine: &EngineSpec) -> WeightBalanceOutput {
-        let arms = ArmConfig::default_layout();
+    pub fn run(
+        state: &AircraftState,
+        wing: &WingSpec,
+        engine: &EngineSpec,
+        cfg: &AircraftConfig,
+    ) -> WeightBalanceOutput {
+        let arms = ArmConfig::from_config(cfg);
 
         // Geometria da asa
         let c_r = chord_root(wing.area_m2, wing.span_m, wing.taper_ratio);
@@ -249,16 +282,20 @@ impl WeightBalanceAgent {
         let x_mac_le = arms.wing_le_root_m + y_mac * 0.0; // sem sweep = constante
 
         // Ponto neutro
-        let x_np = neutral_point_m(arms.wing_le_root_m, mac, wing.span_m, 8.2);
+        let x_np = neutral_point_m(
+            arms.wing_le_root_m, mac, wing.span_m,
+            cfg.fuselage.length_m, cfg.empennage.tail_arm_m,
+        );
 
         // Peso vazio operacional
-        let oew_items = oew_items(&arms, state.fuel_capacity_l, engine);
+        let oew_items = oew_items(cfg, engine);
         let (oew_kg, x_cg_oew) = cg_from_items(&oew_items);
 
         // Peso dos passageiros (90 kg cada)
         let pax_mass = 90.0_f64;
-        // Bagagem total
-        let fuel_mass_full = state.fuel_capacity_l * 0.840;
+        // Combustível total (densidade do combustível do motor instalado —
+        // não hardcoded, para não divergir silenciosamente ao trocar motor)
+        let fuel_mass_full = state.fuel_capacity_l * engine.fuel.density_kg_per_l;
 
         // Cenários de carga
         let scenarios_def = vec![
@@ -279,7 +316,7 @@ impl WeightBalanceAgent {
             // Passageiros da frente
             if sc.pax_front > 0 {
                 items.push(MassItem {
-                    name: "Pax frente",
+                    name: "Pax frente".to_string(),
                     mass_kg: pax_mass * sc.pax_front as f64,
                     arm_m: arms.pax_front_m,
                 });
@@ -287,7 +324,7 @@ impl WeightBalanceAgent {
             // Passageiros traseiros
             if sc.pax_rear > 0 {
                 items.push(MassItem {
-                    name: "Pax traseiro",
+                    name: "Pax traseiro".to_string(),
                     mass_kg: pax_mass * sc.pax_rear as f64,
                     arm_m: arms.pax_rear_m,
                 });
@@ -295,14 +332,14 @@ impl WeightBalanceAgent {
             // Bagagem
             if sc.baggage_kg > 0.0 {
                 items.push(MassItem {
-                    name: "Bagagem",
+                    name: "Bagagem".to_string(),
                     mass_kg: sc.baggage_kg,
                     arm_m: arms.baggage_m,
                 });
             }
             // Combustível
             items.push(MassItem {
-                name: "Combustível",
+                name: "Combustível".to_string(),
                 mass_kg: fuel_mass_full * sc.fuel_fraction,
                 arm_m: arms.fuel_cg_m,
             });
@@ -357,6 +394,7 @@ impl WeightBalanceAgent {
 mod tests {
     use super::*;
     use crate::models::aircraft_state::AircraftState;
+    use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::agents::aerodynamics::AerodynamicsAgent;
     use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
     use crate::models::requirements::Requirements;
@@ -379,25 +417,26 @@ mod tests {
 
     #[test]
     fn oew_dentro_do_orcamento() {
-        let state  = AircraftState::initial();
-        let arms   = ArmConfig::default_layout();
+        let cfg    = config_teste();
         let engine = engine_teste();
-        let items  = oew_items(&arms, state.fuel_capacity_l, &engine);
+        let items  = oew_items(&cfg, &engine);
         let (oew, _) = cg_from_items(&items);
-        // Fixture sintética de teste (motor_generico_teste, 150 kg) — 45 kg
-        // mais leve que o Toyota 1GD-FTV real (195 kg) usado em produção.
-        // Faixa deslocada de [830, 1.050] para [785, 1.005] kg.
-        assert!(oew > 785.0 && oew < 1_005.0,
-            "OEW = {oew:.1} kg fora do intervalo esperado (785–1.005 kg)");
+        println!("OEW (fixture sintética) = {oew:.1} kg");
+        // Soma dos itens sintéticos de config_teste() (649 kg) + motor
+        // sintético (150 kg) = 799 kg — faixa com folga ao redor deste valor,
+        // testando o pipeline de resolução de arm_ref, não um número mágico.
+        assert!(oew > 750.0 && oew < 850.0,
+            "OEW = {oew:.1} kg fora do intervalo esperado (750–850 kg)");
     }
 
     #[test]
     fn todos_os_cenarios_estaveis() {
-        let state  = AircraftState::initial();
+        let cfg    = config_teste();
+        let state  = AircraftState::from_config(&cfg);
         let req    = Requirements::project_default();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg);
 
         for sc in &wb.scenarios {
             assert!(sc.stable,
@@ -408,17 +447,32 @@ mod tests {
 
     #[test]
     fn mtow_dentro_do_limite_projeto() {
-        let state  = AircraftState::initial();
+        let cfg    = config_teste();
+        let state  = AircraftState::from_config(&cfg);
         let req    = Requirements::project_default();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg);
 
-        // MTOW calculado deve ficar entre 1.305 e 1.555 kg (faixa original
-        // 1.350–1.600 kg deslocada em -45 kg pela fixture sintética de teste,
-        // 45 kg mais leve que o Toyota real usado em produção).
+        println!("MTOW (fixture sintética) = {:.1} kg", wb.spec.mtow_kg);
+        // Faixa ampla ao redor do MTOW observado empiricamente (~1.415 kg)
+        // para a fixture sintética (célula + motor de teste) —
+        // suficientemente apertada para pegar regressões reais no somatório
+        // de peso, mas sem acoplar o teste a um valor exato.
         let mtow = wb.spec.mtow_kg;
-        assert!(mtow > 1_305.0 && mtow < 1_555.0,
-            "MTOW = {mtow:.1} kg fora do intervalo (1.305–1.555 kg)");
+        assert!(mtow > 1_300.0 && mtow < 1_500.0,
+            "MTOW = {mtow:.1} kg fora do intervalo (1.300–1.500 kg)");
+    }
+
+    #[test]
+    fn arm_config_by_name_resolve_todos_os_nomes_usados_em_masses() {
+        let cfg = config_teste();
+        let arms = ArmConfig::from_config(&cfg);
+        for item in &cfg.masses.items {
+            assert!(arms.by_name(&item.arm_ref).is_some(),
+                "arm_ref '{}' do item '{}' não resolveu — teste e validação de \
+                 config devem concordar sobre nomes válidos", item.arm_ref, item.name);
+        }
+        assert!(arms.by_name("nome_que_nao_existe").is_none());
     }
 }

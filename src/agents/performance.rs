@@ -337,11 +337,13 @@ impl PerformanceAgent {
 mod tests {
     use super::*;
     use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+    use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
     use crate::agents::{aerodynamics::AerodynamicsAgent, propulsion::PropulsionAgent};
 
     fn setup() -> (AircraftState, WingSpec, PropulsionSpec, EngineSpec) {
-        let state  = AircraftState::initial();
+        let cfg    = config_teste();
+        let state  = AircraftState::from_config(&cfg);
         let req    = Requirements::project_default();
         let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = engine_teste();
@@ -405,19 +407,20 @@ mod tests {
     #[test]
     fn velocidade_maxima_resolvida_do_equilibrio() {
         let (state, wing, _prop, engine) = setup();
-        let v_max = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, &engine);
+        let v_max = max_level_speed_ms(state.mtow_kg, 2_500.0, &wing, &state, &engine);
         let v_max_kmh = v_max * 3.6;
         println!("V_max nivelada = {v_max_kmh:.2} km/h");
         // Deve ser um número resolvido (não o requisito ecoado) e > requisito
         assert!(v_max_kmh > 280.0 && v_max_kmh < 400.0,
             "V_max nivelada {v_max_kmh:.0} km/h implausível");
         // Regressão do resolvedor coarse-to-fine (bissecção): valor medido
-        // empiricamente para a fixture sintética `motor_generico_teste`
-        // (não é um motor real — o pin contra o motor real de verdade vive
-        // em tests/generic_engine.rs, carregado do TOML de verdade). Este
+        // empiricamente para a fixture sintética `config_teste`/`motor_generico_teste`
+        // (não são dados reais — o pin contra o motor/célula reais vive em
+        // tests/generic_engine.rs, carregado dos TOMLs de verdade). Este
         // teste aqui existe para pegar regressões no algoritmo de busca de
-        // `max_level_speed_ms` em si, não para validar um motor específico.
-        let v_max_observado_kmh = 309.4988370961842;
+        // `max_level_speed_ms` em si, não para validar uma configuração
+        // específica. Valor abaixo recalculado após a Task 2.1 (aircraft.toml).
+        let v_max_observado_kmh = 306.9409599205;
         assert!((v_max_kmh - v_max_observado_kmh).abs() < 0.5,
             "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor observado \
              {v_max_observado_kmh:.2} km/h em mais de 0.5 km/h — possível \

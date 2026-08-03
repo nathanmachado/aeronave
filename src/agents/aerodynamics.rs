@@ -16,13 +16,9 @@ use crate::models::{
 const RHO_SL: f64 = 1.225;      // kg/m³ — densidade ao nível do mar
 const G: f64 = 9.807;            // m/s²
 
-// Parâmetros do perfil NACA 23015
-const CL_MAX_23015: f64 = 1.72;  // com slats simples / flap Fowler parcial
-const CL_MAX_CLEAN: f64 = 1.45;  // asa limpa (cruzeiro)
-const CD0_FUSELAGE: f64 = 0.010; // parcela da fuselagem
-const CD0_EMPENAGEM: f64 = 0.004;// parcela da empenagem
-const CD0_GEAR_RETRACTABLE: f64 = 0.0;   // trem recolhido
-const CD0_MISC: f64 = 0.003;     // antenas, juntas, imperfeições
+// Trem retrátil e recolhido não contribui CD0 — só o trem FIXO soma um
+// incremento (vem de `[gear] cd0_fixed_increment` do TOML de aeronave).
+const CD0_GEAR_RETRACTABLE: f64 = 0.0;
 
 /// Densidade atmosférica ISA em altitude h (metros), aproximação exponencial.
 /// Válida até ~11.000 m (troposfera).
@@ -49,14 +45,24 @@ pub fn cd_induced(cl: f64, aspect_ratio: f64, oswald: f64) -> f64 {
 }
 
 /// CD0 total da aeronave (soma das parcelas de cada componente).
-/// Segue o método de "component drag build-up" (Raymer cap. 12).
-pub fn cd0_total(cd0_wing: f64, gear_retractable: bool) -> f64 {
+/// Segue o método de "component drag build-up" (Raymer cap. 12). Todas as
+/// parcelas vêm de configuração (`[wing]`, `[fuselage]`, `[empennage]`,
+/// `[drag]`, `[gear]` do TOML de aeronave) — nenhuma é constante de perfil
+/// específico.
+pub fn cd0_total(
+    cd0_wing: f64,
+    cd0_fuselage: f64,
+    cd0_empennage: f64,
+    cd0_misc: f64,
+    gear_retractable: bool,
+    cd0_gear_fixed_increment: f64,
+) -> f64 {
     let gear_cd0 = if gear_retractable {
         CD0_GEAR_RETRACTABLE
     } else {
-        0.008  // trem fixo de pista de terra
+        cd0_gear_fixed_increment
     };
-    cd0_wing + CD0_FUSELAGE + CD0_EMPENAGEM + gear_cd0 + CD0_MISC
+    cd0_wing + cd0_fuselage + cd0_empennage + gear_cd0 + cd0_misc
 }
 
 /// Arrasto total em Newton:
@@ -78,12 +84,6 @@ pub fn stall_speed_ms(weight_n: f64, rho: f64, wing_area_m2: f64, cl_max: f64) -
 pub fn oswald_efficiency(aspect_ratio: f64) -> f64 {
     let e = 1.78 * (1.0 - 0.045 * aspect_ratio.powf(0.68)) - 0.64;
     e.clamp(0.70, 0.95)
-}
-
-/// CD0 da asa isolada pelo método de espessura relativa do perfil.
-/// Para NACA 23015 (t/c = 0.15): CD0_asa ≈ 0.0050
-pub fn cd0_wing_naca23015() -> f64 {
-    0.0050
 }
 
 /// Razão L/D em cruzeiro
@@ -113,8 +113,10 @@ impl AerodynamicsAgent {
         let ar = state.aspect_ratio();
         let oswald = oswald_efficiency(ar);
 
-        let cd0_wing = cd0_wing_naca23015();
-        let cd0 = cd0_total(cd0_wing, state.gear_retractable);
+        let cd0 = cd0_total(
+            state.cd0_wing, state.cd0_fuselage, state.cd0_empennage, state.cd0_misc,
+            state.gear_retractable, state.cd0_gear_fixed_increment,
+        );
 
         let cl_cruise = cl_required(weight_n, q_cruise, state.wing_area_m2);
         let cdi = cd_induced(cl_cruise, ar, oswald);
@@ -123,9 +125,9 @@ impl AerodynamicsAgent {
 
         // Velocidades de stall ao nível do mar (condição mais crítica).
         // VS0 — configuração com flap/pouso (CL_max maior → V_stall MENOR).
-        let v_stall_flaps_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, CL_MAX_23015);
+        let v_stall_flaps_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, state.cl_max_flaps);
         // VS1 — configuração limpa/cruzeiro (CL_max menor → V_stall MAIOR).
-        let v_stall_clean_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, CL_MAX_CLEAN);
+        let v_stall_clean_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, state.cl_max_clean);
 
         WingSpec {
             span_m:           state.wing_span_m,
@@ -133,12 +135,13 @@ impl AerodynamicsAgent {
             aspect_ratio:     ar,
             airfoil:          state.airfoil.clone(),
             taper_ratio:      state.taper_ratio,
+            thickness_ratio:  state.thickness_ratio,
             oswald_efficiency: oswald,
             cd0,
             cl_cruise,
             cd_cruise,
-            cl_max:                 CL_MAX_23015,
-            cl_max_clean:           CL_MAX_CLEAN,
+            cl_max:                 state.cl_max_flaps,
+            cl_max_clean:           state.cl_max_clean,
             stall_speed_flaps_kmh:  v_stall_flaps_ms * 3.6,
             stall_speed_clean_kmh:  v_stall_clean_ms * 3.6,
             ld_ratio_cruise:  ld,
@@ -151,6 +154,7 @@ impl AerodynamicsAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::aircraft_config::test_fixtures::config_teste;
 
     #[test]
     fn isa_density_sea_level() {
@@ -166,8 +170,9 @@ mod tests {
 
     #[test]
     fn stall_speed_fisica() {
-        // Aeronave de 1.461 kg, S=14.2m², CLmax=1.72 (flapada) → V_stall ~ 90-115 km/h
-        let vs = stall_speed_ms(1_461.0 * G, RHO_SL, 14.2, CL_MAX_23015);
+        // Aeronave de 1.461 kg, S=14.2m², CLmax=1.72 (flapada, valor literal
+        // de teste — perfil real não é mais constante em src/) → V_stall ~ 90-115 km/h
+        let vs = stall_speed_ms(1_461.0 * G, RHO_SL, 14.2, 1.72);
         let vs_kmh = vs * 3.6;
         assert!(vs_kmh > 90.0 && vs_kmh < 115.0,
             "V_stall esperada 90-115 km/h, obtida {vs_kmh:.1} km/h");
@@ -175,9 +180,10 @@ mod tests {
 
     #[test]
     fn vs0_flapada_menor_que_vs1_limpa() {
-        // Task 0.5: VS0 (com flap, CL_max=1.72) deve ser MENOR que VS1 (limpa,
-        // CL_max=1.45) — flap aumenta CL_max, o que reduz a velocidade de stall.
-        let state = AircraftState::initial();
+        // Task 0.5: VS0 (com flap) deve ser MENOR que VS1 (limpa) — flap
+        // aumenta CL_max, o que reduz a velocidade de stall.
+        let cfg = config_teste();
+        let state = AircraftState::from_config(&cfg);
         let req = Requirements::project_default();
         let wing = AerodynamicsAgent::run(&state, &req);
 
@@ -188,31 +194,35 @@ mod tests {
             "VS0 (flap) {:.1} km/h deveria ser menor que VS1 (limpa) {:.1} km/h",
             wing.stall_speed_flaps_kmh, wing.stall_speed_clean_kmh);
 
-        // Faixas físicas para MTOW=1.461kg, S=14.2m², ρ_SL=1.225, g=9.807:
-        // VS0 (CL=1.72) ≈ 111 km/h; VS1 (CL=1.45) ≈ 121 km/h.
-        assert!(wing.stall_speed_flaps_kmh > 100.0 && wing.stall_speed_flaps_kmh < 118.0,
-            "VS0 {:.1} km/h fora da faixa esperada (100-118 km/h)",
+        // Faixas físicas para a fixture sintética (mtow_guess=1.400kg,
+        // S=13.5m², CL_max_flaps=1.65, CL_max_clean=1.40): valores
+        // observados empiricamente, com folga.
+        assert!(wing.stall_speed_flaps_kmh > 100.0 && wing.stall_speed_flaps_kmh < 125.0,
+            "VS0 {:.1} km/h fora da faixa esperada (100-125 km/h)",
             wing.stall_speed_flaps_kmh);
-        assert!(wing.stall_speed_clean_kmh > 115.0 && wing.stall_speed_clean_kmh < 128.0,
-            "VS1 {:.1} km/h fora da faixa esperada (115-128 km/h)",
+        assert!(wing.stall_speed_clean_kmh > 110.0 && wing.stall_speed_clean_kmh < 135.0,
+            "VS1 {:.1} km/h fora da faixa esperada (110-135 km/h)",
             wing.stall_speed_clean_kmh);
     }
 
     #[test]
     fn cd0_retravel_menor_que_fixo() {
-        let cd0_ret = cd0_total(cd0_wing_naca23015(), true);
-        let cd0_fix = cd0_total(cd0_wing_naca23015(), false);
+        let cd0_ret = cd0_total(0.005, 0.010, 0.004, 0.003, true, 0.008);
+        let cd0_fix = cd0_total(0.005, 0.010, 0.004, 0.003, false, 0.008);
         assert!(cd0_ret < cd0_fix, "CD0 retrátil deve ser menor que fixo");
     }
 
     #[test]
     fn ld_ratio_razoavel() {
-        // L/D esperado > 12 em cruzeiro para esta classe de aeronave
-        let state = AircraftState::initial();
+        // L/D esperado > 10 em cruzeiro para esta classe de aeronave (fixture
+        // sintética, AR menor que o baseline real — L/D um pouco mais baixo)
+        let cfg = config_teste();
+        let state = AircraftState::from_config(&cfg);
         let req = Requirements::project_default();
         let wing = AerodynamicsAgent::run(&state, &req);
-        assert!(wing.ld_ratio_cruise > 12.0,
-            "L/D {:.1} abaixo do mínimo de 12", wing.ld_ratio_cruise);
+        println!("L/D cruzeiro (fixture sintética) = {:.1}", wing.ld_ratio_cruise);
+        assert!(wing.ld_ratio_cruise > 10.0,
+            "L/D {:.1} abaixo do mínimo de 10", wing.ld_ratio_cruise);
     }
 
     #[test]
