@@ -66,7 +66,11 @@ fn vn_diagram_baseline_pin_velocidades_e_n_gust() {
     // convergido de ~1.529,98 kg para ~1.517,54 kg (ver
     // `tests/generic_engine.rs::golden_toyota_baseline_regressao_task_2_1`),
     // reduzindo VS1 e portanto VA: 242.1 km/h → ~241.0 km/h.
-    assert!((vn.va_kmh - 241.0).abs() < 1.0, "VA {:.1} km/h fora do pin (~241.0)", vn.va_kmh);
+    // ATUALIZAÇÃO (Task 5.2): `cooling_drag_fraction` eleva o MTOW de
+    // projeto convergido de volta, de ~1.523,50 kg para ~1.532,33 kg (ver
+    // mesma referência acima) — VS1 (e portanto VA) sobe de novo, proporcional
+    // a √MTOW: ~241.0 km/h → 242.209167 km/h.
+    assert!((vn.va_kmh - 242.209).abs() < 1.0, "VA {:.1} km/h fora do pin (~242.209)", vn.va_kmh);
     assert!((vn.vc_kmh - 280.0).abs() < 0.1, "VC {:.1} km/h fora do pin (280.0, requisito de missão)", vn.vc_kmh);
     assert!((vn.vd_kmh - 350.0).abs() < 0.1, "VD {:.1} km/h fora do pin (350.0 = 1.25×VC)", vn.vd_kmh);
     assert!(vn.vb_kmh > 0.0 && vn.vb_kmh < vn.vd_kmh,

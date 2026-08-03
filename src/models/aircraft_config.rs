@@ -39,6 +39,9 @@ pub struct AircraftConfig {
     /// superfície, fator empírico de tração estática, e tempos/ângulos dos
     /// segmentos de decolagem/pouso sobre obstáculo de 15m (50 ft).
     pub performance: PerformanceCfg,
+    /// Orçamento elétrico (Task 5.2) — barramento, alternador e cargas
+    /// individuais, consumidos por `agents::electrical::ElectricalAgent`.
+    pub electrical: ElectricalCfg,
 }
 
 /// Parâmetros do laço de convergência de MTOW (`orchestrator::size_aircraft`,
@@ -200,6 +203,15 @@ pub struct StructureCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DragCfg {
     pub cd0_misc: f64,
+    /// Fração do arrasto parasita TOTAL (soma asa+fuselagem+empenagem+trem+
+    /// misc) atribuída à refrigeração do motor (entrada de ar do radiador/
+    /// intercooler, dutos, saída de ar quente) — Task 5.2. Típico 3–5% para
+    /// uma instalação a pistão bem carenada (Raymer cap. 12 / Hoerner
+    /// "Fluid-Dynamic Drag", arrasto de resfriamento de motores
+    /// refrigerados a líquido/ar). Aplicado como multiplicador sobre o CD0
+    /// já somado (`cd0_total`), não como uma parcela aditiva independente —
+    /// ver `agents::aerodynamics::cd0_total`.
+    pub cooling_drag_fraction: f64,
 }
 
 /// Limites de estabilidade estática (Task 4.4) que definem o envelope de CG
@@ -289,6 +301,39 @@ pub struct PerformanceCfg {
     /// Ângulo de aproximação padrão de pouso (graus) — define a distância
     /// aérea até a altura de 15m (50 ft) na aproximação final.
     pub approach_angle_deg: f64,
+}
+
+/// Uma carga elétrica individual do orçamento (Task 5.2) — consumida por
+/// `agents::electrical::ElectricalAgent`, que soma `continuous_w`/`peak_w`
+/// de todos os itens de `[electrical].loads`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElectricalLoadCfg {
+    pub name: String,
+    /// Potência contínua/média em operação normal (W).
+    pub continuous_w: f64,
+    /// Potência de PICO — o maior consumo instantâneo do item (ex.: motor
+    /// de atuador em partida, transmissor de rádio transmitindo), não uma
+    /// média. Ver `ElectricalAgent::run` para como `peak_load_w` do
+    /// orçamento total é derivado destes picos individuais (modelo
+    /// conservador: soma de todos os picos, não Σcontínuo + maior pico).
+    pub peak_w: f64,
+}
+
+/// Orçamento elétrico da aeronave (Task 5.2) — barramento, capacidade do
+/// alternador e cargas individuais. Antes desta task não existia um dono
+/// único deste orçamento (potência de atuadores calculada isoladamente em
+/// `landing_gear.rs`, sem comparação contra a capacidade de geração).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElectricalCfg {
+    /// Tensão nominal do barramento (V) — deve ser um padrão aeronáutico
+    /// reconhecido: 12, 14, 24 ou 28 V (±0.1 V de tolerância numérica; ver
+    /// `models::config::validate_aircraft`).
+    pub bus_voltage_v: f64,
+    /// Capacidade do alternador/gerador (W) — ex.: alternador automotivo
+    /// típico de 32 A @ 28 V ≈ 900 W (derateado da placa por margem de
+    /// projeto/temperatura), acoplado ao motor a pistão via correia/PSRU.
+    pub alternator_w: f64,
+    pub loads: Vec<ElectricalLoadCfg>,
 }
 
 /// Um item de massa do orçamento de peso vazio (OEW), com o braço de
@@ -401,7 +446,11 @@ pub mod test_fixtures {
                 frame_spacing_mm: 310.0,
                 design_category: "normal".to_string(),
             },
-            drag: DragCfg { cd0_misc: 0.0032 },
+            // cooling_drag_fraction levemente diferente do baseline real
+            // (0.04) — mesma justificativa de "nenhum destes números
+            // coincide com o baseline real" usada nas demais seções desta
+            // fixture.
+            drag: DragCfg { cd0_misc: 0.0032, cooling_drag_fraction: 0.035 },
             // Levemente diferente do baseline real (0.05/0.25) — mesma
             // justificativa de "nenhum destes números coincide com o
             // baseline real" usada nas demais seções desta fixture.
@@ -451,6 +500,25 @@ pub mod test_fixtures {
                 rotation_time_s: 1.2,
                 flare_time_s: 1.4,
                 approach_angle_deg: 3.2,
+            },
+            // Orçamento elétrico sintético (Task 5.2) — valores levemente
+            // diferentes do baseline real (mesma justificativa de "nenhum
+            // destes números coincide com o baseline real"). trem_retratil
+            // peak_w (480 W) respeita a guarda de consistência: atuador
+            // mecânico calculado para esta fixture (mass_main_leg_kg=26.0,
+            // retraction_time_s=7.5) ≈ 16.3 W, bem abaixo de 480 W.
+            electrical: ElectricalCfg {
+                bus_voltage_v: 28.0,
+                alternator_w: 850.0,
+                loads: vec![
+                    ElectricalLoadCfg { name: "avionicos".into(),          continuous_w: 170.0, peak_w: 210.0 },
+                    ElectricalLoadCfg { name: "luzes_nav_strobe".into(),   continuous_w: 40.0,  peak_w: 85.0 },
+                    ElectricalLoadCfg { name: "bomba_combustivel".into(),  continuous_w: 55.0,  peak_w: 110.0 },
+                    ElectricalLoadCfg { name: "trem_retratil".into(),      continuous_w: 0.0,   peak_w: 480.0 },
+                    ElectricalLoadCfg { name: "flaps".into(),              continuous_w: 0.0,   peak_w: 140.0 },
+                    ElectricalLoadCfg { name: "pitot_aquecido".into(),     continuous_w: 85.0,  peak_w: 85.0 },
+                    ElectricalLoadCfg { name: "radio_transponder".into(),  continuous_w: 50.0,  peak_w: 65.0 },
+                ],
             },
         }
     }

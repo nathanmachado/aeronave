@@ -778,7 +778,15 @@ mod tests {
         // 306.9409599205 km/h → pós-Task-4.6 306.9014368061 km/h (desvio
         // sub-0,1%, mesma origem do desvio documentado em
         // tests/generic_engine.rs).
-        let v_max_observado_kmh = 306.9014368061;
+        //
+        // ATUALIZAÇÃO (Task 5.2): `cooling_drag_fraction` (Task 5.2, agora
+        // um campo obrigatório de `[drag]`, 0.035 nesta fixture sintética —
+        // ver `aircraft_config::test_fixtures::config_teste`) eleva o CD0
+        // total em 3,5%, reduzindo L/D e portanto V_max — consequência
+        // honesta esperada da task (documentada no brief), não uma
+        // regressão do resolvedor: 306.9014368061 km/h → 303.5154833612 km/h
+        // (-3,386 km/h, -1,10%).
+        let v_max_observado_kmh = 303.5154833612;
         assert!((v_max_kmh - v_max_observado_kmh).abs() < 0.5,
             "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor observado \
              {v_max_observado_kmh:.2} km/h em mais de 0.5 km/h — possível \

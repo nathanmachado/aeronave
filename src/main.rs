@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use aeronave::agents::control_surfaces::ControlSurfacesAgent;
+use aeronave::agents::electrical::ElectricalAgent;
 use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::propeller::PropellerAgent;
 use aeronave::agents::structural::StructuralAgent;
@@ -365,11 +366,19 @@ fn main() {
              gear.retraction_time_s, gear.actuator_power_w,
              gear.actuator_power_w / 28.0, gear.total_weight_kg);
 
+    // ── Orçamento Elétrico (Task 5.2) ─────────────────────────────────────────
+    println!("[ ELÉTRICO ] ElectricalAgent — Orçamento de Cargas");
+    let electrical = ElectricalAgent::run(&cfg);
+    println!("  Barramento: {:.0}V  |  Alternador: {:.0}W", electrical.bus_voltage_v, electrical.alternator_w);
+    println!("  Carga contínua: {:.0}W  ({:.1}% de margem sobre o alternador)",
+             electrical.continuous_load_w, electrical.margin_continuous_pct);
+    println!("  Carga de pico (pior caso, todas simultâneas): {:.0}W\n", electrical.peak_load_w);
+
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
     let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
-                                             &propeller, &perf, mission);
+                                             &propeller, &perf, mission, &electrical);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -434,6 +443,7 @@ fn main() {
         landing_gear:     Some(gear),
         propeller:        Some(propeller),
         mission:          Some(mission.clone()),
+        electrical:       Some(electrical.clone()),
         violations:       report.violations,
     };
 

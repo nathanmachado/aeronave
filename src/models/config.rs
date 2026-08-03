@@ -437,6 +437,18 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
 
     // [drag]
     require_non_negative("drag.cd0_misc", cfg.drag.cd0_misc)?;
+    // Task 5.2: fração de arrasto de refrigeração — (0, 0.10], típico
+    // 3–5% (Raymer/Hoerner) para instalação a pistão bem carenada. Um teto
+    // de 10% evita um erro de digitação (ex.: 0.4 em vez de 0.04) passar
+    // silenciosamente e degradar o CD0 em 40%.
+    require_finite("drag.cooling_drag_fraction", cfg.drag.cooling_drag_fraction)?;
+    if cfg.drag.cooling_drag_fraction <= 0.0 || cfg.drag.cooling_drag_fraction > 0.10 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: drag.cooling_drag_fraction deve estar em \
+             (0.0, 0.10] (valor: {})",
+            cfg.drag.cooling_drag_fraction
+        )));
+    }
 
     // [stability] (Task 4.4) — limites de estabilidade que definem o
     // envelope de CG admissível: 0 < sm_min < sm_max < 0.5.
@@ -587,6 +599,72 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
                  ({trem_principal_kg} kg) deveria ser exatamente 2× gear.mass_main_leg_kg \
                  ({} kg × 2 = {esperado} kg) — as duas pernas do trem principal",
                 cfg.gear.mass_main_leg_kg
+            )));
+        }
+    }
+
+    // [electrical] (Task 5.2) — orçamento elétrico: barramento, alternador
+    // e cargas individuais.
+    require_finite("electrical.bus_voltage_v", cfg.electrical.bus_voltage_v)?;
+    const BARRAMENTOS_PADRAO_V: [f64; 4] = [12.0, 14.0, 24.0, 28.0];
+    let bus_reconhecido = BARRAMENTOS_PADRAO_V.iter()
+        .any(|v| (cfg.electrical.bus_voltage_v - v).abs() <= 0.1);
+    if !bus_reconhecido {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: electrical.bus_voltage_v ({}) não corresponde \
+             a nenhum barramento aeronáutico padrão (12, 14, 24 ou 28 V, ±0.1 V)",
+            cfg.electrical.bus_voltage_v
+        )));
+    }
+    require_positive("electrical.alternator_w", cfg.electrical.alternator_w)?;
+
+    if cfg.electrical.loads.is_empty() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: electrical.loads não pode ser vazio"
+                .to_string(),
+        ));
+    }
+    let mut nomes_vistos = std::collections::HashSet::new();
+    for load in &cfg.electrical.loads {
+        require_non_negative(
+            &format!("electrical.loads['{}'].continuous_w", load.name), load.continuous_w,
+        )?;
+        require_non_negative(
+            &format!("electrical.loads['{}'].peak_w", load.name), load.peak_w,
+        )?;
+        if !nomes_vistos.insert(load.name.as_str()) {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: electrical.loads contém nome duplicado \
+                 '{}' — os nomes das cargas devem ser únicos",
+                load.name
+            )));
+        }
+    }
+
+    // Consistência trem retrátil × orçamento elétrico (Task 5.2): a carga
+    // elétrica 'trem_retratil' (pico na retração) não pode subestimar a
+    // potência MECÂNICA do atuador calculada por
+    // `agents::landing_gear::actuator_power_w` — mesma filosofia da guarda
+    // 'trem_principal' × `gear.mass_main_leg_kg` acima (dois lugares que
+    // descrevem o mesmo sistema físico não podem divergir silenciosamente).
+    // Nota: o valor mecânico aqui é só um PISO — o pico elétrico real de um
+    // atuador linear inclui perdas de eficiência do motor/mecanismo e
+    // corrente de partida, tipicamente bem acima do trabalho mecânico
+    // idealizado (ver comentário de `[[electrical.loads]]` 'trem_retratil'
+    // em `config/aircraft/baseline_4seat.toml`).
+    if let Some(carga_trem) = cfg.electrical.loads.iter().find(|l| l.name == "trem_retratil") {
+        let atuador_w = crate::agents::landing_gear::actuator_power_w(
+            cfg.gear.mass_main_leg_kg,
+            crate::agents::landing_gear::GEAR_RETRACTION_DELTA_H_M,
+            cfg.gear.retraction_time_s,
+        );
+        if carga_trem.peak_w < atuador_w {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: electrical.loads 'trem_retratil' peak_w \
+                 ({} W) deve ser >= à potência mecânica do atuador de retração calculada \
+                 ({atuador_w:.1} W, agents::landing_gear::actuator_power_w) — o orçamento \
+                 elétrico não pode subestimar o pico real de retração",
+                carga_trem.peak_w
             )));
         }
     }
@@ -881,6 +959,7 @@ mod tests {
             design_category = "normal"
             [drag]
             cd0_misc = 0.003
+            cooling_drag_fraction = 0.04
             [stability]
             sm_min = 0.05
             sm_max = 0.25
@@ -914,6 +993,37 @@ mod tests {
             name = "trem_nariz"
             mass_kg = 20.0
             arm_ref = "gear_nose"
+            [electrical]
+            bus_voltage_v = 28.0
+            alternator_w = 900.0
+            [[electrical.loads]]
+            name = "avionicos"
+            continuous_w = 180.0
+            peak_w = 220.0
+            [[electrical.loads]]
+            name = "luzes_nav_strobe"
+            continuous_w = 45.0
+            peak_w = 90.0
+            [[electrical.loads]]
+            name = "bomba_combustivel"
+            continuous_w = 60.0
+            peak_w = 120.0
+            [[electrical.loads]]
+            name = "trem_retratil"
+            continuous_w = 0.0
+            peak_w = 520.0
+            [[electrical.loads]]
+            name = "flaps"
+            continuous_w = 0.0
+            peak_w = 150.0
+            [[electrical.loads]]
+            name = "pitot_aquecido"
+            continuous_w = 90.0
+            peak_w = 90.0
+            [[electrical.loads]]
+            name = "radio_transponder"
+            continuous_w = 55.0
+            peak_w = 70.0
         "#
         .to_string()
     }
@@ -1109,7 +1219,14 @@ mod tests {
     fn rejeita_lista_de_massas_vazia() {
         let base = aircraft_toml_valido();
         let head = base.split("[[masses.items]]").next().unwrap();
-        let toml = format!("{head}\n[masses]\nitems = []\n");
+        // A seção [electrical] (Task 5.2) vem DEPOIS de [[masses.items]] no
+        // fixture — precisa ser preservada aqui, senão o TOML fica inválido
+        // por um campo obrigatório ausente em vez da violação isolada que
+        // este teste quer exercitar.
+        let electrical_section = base.split("[electrical]").nth(1)
+            .map(|s| format!("[electrical]{s}"))
+            .expect("fixture deveria conter [electrical]");
+        let toml = format!("{head}\n[masses]\nitems = []\n{electrical_section}");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("masses.items"), "{err}");
     }
@@ -1293,6 +1410,122 @@ mod tests {
             .replace("approach_angle_deg = 3.0", "approach_angle_deg = nan");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    // ─── [drag] cooling_drag_fraction (Task 5.2) ────────────────────────────
+
+    #[test]
+    fn rejeita_cooling_drag_fraction_zero() {
+        let toml = aircraft_toml_valido()
+            .replace("cooling_drag_fraction = 0.04", "cooling_drag_fraction = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("drag.cooling_drag_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cooling_drag_fraction_acima_de_0_10() {
+        let toml = aircraft_toml_valido()
+            .replace("cooling_drag_fraction = 0.04", "cooling_drag_fraction = 0.15");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("drag.cooling_drag_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cooling_drag_fraction_nao_finito() {
+        let toml = aircraft_toml_valido()
+            .replace("cooling_drag_fraction = 0.04", "cooling_drag_fraction = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn aceita_cooling_drag_fraction_no_limite_superior() {
+        let toml = aircraft_toml_valido()
+            .replace("cooling_drag_fraction = 0.04", "cooling_drag_fraction = 0.10");
+        parse_aircraft(&toml).expect("cooling_drag_fraction = 0.10 (limite superior) deveria ser válido");
+    }
+
+    // ─── [electrical] (Task 5.2) ─────────────────────────────────────────────
+
+    #[test]
+    fn rejeita_bus_voltage_fora_dos_padroes() {
+        let toml = aircraft_toml_valido().replace("bus_voltage_v = 28.0", "bus_voltage_v = 19.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("electrical.bus_voltage_v"), "{err}");
+    }
+
+    #[test]
+    fn aceita_bus_voltage_padrao_12v() {
+        let toml = aircraft_toml_valido().replace("bus_voltage_v = 28.0", "bus_voltage_v = 12.0");
+        parse_aircraft(&toml).expect("bus_voltage_v = 12.0 deveria ser um barramento padrão válido");
+    }
+
+    #[test]
+    fn rejeita_alternator_w_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("alternator_w = 900.0", "alternator_w = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("electrical.alternator_w"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_electrical_loads_vazio() {
+        let base = aircraft_toml_valido();
+        let head = base.split("[electrical]").next().unwrap();
+        let toml = format!(
+            "{head}\n[electrical]\nbus_voltage_v = 28.0\nalternator_w = 900.0\nloads = []\n"
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("electrical.loads"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_electrical_load_continuous_w_negativo() {
+        let toml = aircraft_toml_valido()
+            .replace("continuous_w = 180.0", "continuous_w = -5.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("continuous_w"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_electrical_load_peak_w_negativo() {
+        let toml = aircraft_toml_valido()
+            .replace("peak_w = 220.0", "peak_w = -1.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("peak_w"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_electrical_load_nome_duplicado() {
+        let toml = aircraft_toml_valido()
+            .replace(r#"name = "flaps""#, r#"name = "avionicos""#);
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("nome duplicado"), "{err}");
+        assert!(err.to_string().contains("avionicos"), "{err}");
+    }
+
+    /// Guarda de consistência (Task 5.2): peak_w da carga 'trem_retratil'
+    /// deve ser >= à potência mecânica do atuador calculada por
+    /// `agents::landing_gear::actuator_power_w` a partir de
+    /// `gear.mass_main_leg_kg`/`gear.retraction_time_s` — mesmo padrão da
+    /// guarda 'trem_principal' × `mass_main_leg_kg` já existente.
+    #[test]
+    fn rejeita_peak_trem_retratil_abaixo_do_atuador_calculado() {
+        // Atuador calculado para esta fixture (mass_main_leg_kg=25.0,
+        // retraction_time_s=7.0) ≈ 16.8 W — 1.0 W fica abaixo disso.
+        let toml = aircraft_toml_valido().replace("peak_w = 520.0", "peak_w = 1.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("trem_retratil"), "{err}");
+        assert!(err.to_string().contains("atuador"), "{err}");
+    }
+
+    #[test]
+    fn aceita_peak_trem_retratil_acima_do_atuador_calculado() {
+        // Atuador calculado para esta fixture ≈ 16.812 W — 17.0 W fica
+        // acima (não testamos o limite exato de igualdade em ponto
+        // flutuante, que seria frágil a arredondamento entre o literal TOML
+        // e o resultado da mesma conta em Rust).
+        let toml = aircraft_toml_valido().replace("peak_w = 520.0", "peak_w = 17.0");
+        parse_aircraft(&toml).expect("peak_w acima do atuador calculado deveria ser aceito");
     }
 
     // ─── MISSÃO (REQUISITOS) ────────────────────────────────────────────────

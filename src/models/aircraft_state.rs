@@ -30,6 +30,10 @@ pub struct AircraftState {
     pub cd0_misc: f64,
     /// Incremento de CD0 do trem FIXO — só se soma quando `!gear_retractable`.
     pub cd0_gear_fixed_increment: f64,
+    /// Fração do arrasto parasita total atribuída à refrigeração do motor
+    /// (Task 5.2) — aplicada como multiplicador `(1 + fração)` sobre o CD0
+    /// já somado em `agents::aerodynamics::cd0_total`.
+    pub cooling_drag_fraction: f64,
 
     // --- Peso (estimativa inicial para o laço iterativo de projeto) ---
     pub mtow_kg: f64,
@@ -61,6 +65,7 @@ impl AircraftState {
             cd0_empennage: cfg.empennage.cd0,
             cd0_misc: cfg.drag.cd0_misc,
             cd0_gear_fixed_increment: cfg.gear.cd0_fixed_increment,
+            cooling_drag_fraction: cfg.drag.cooling_drag_fraction,
 
             mtow_kg: cfg.sizing.mtow_initial_guess_kg,
 

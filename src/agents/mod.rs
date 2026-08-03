@@ -1,5 +1,6 @@
 pub mod aerodynamics;
 pub mod control_surfaces;
+pub mod electrical;
 pub mod empennage;
 pub mod mission;
 pub mod propulsion;

@@ -37,11 +37,23 @@ pub fn cd_induced(cl: f64, aspect_ratio: f64, oswald: f64) -> f64 {
     cl * cl / (std::f64::consts::PI * aspect_ratio * oswald)
 }
 
-/// CD0 total da aeronave (soma das parcelas de cada componente).
+/// CD0 total da aeronave (soma das parcelas de cada componente, mais o
+/// arrasto de refrigeração — Task 5.2).
 /// Segue o método de "component drag build-up" (Raymer cap. 12). Todas as
 /// parcelas vêm de configuração (`[wing]`, `[fuselage]`, `[empennage]`,
 /// `[drag]`, `[gear]` do TOML de aeronave) — nenhuma é constante de perfil
 /// específico.
+///
+/// `cooling_drag_fraction` (`[drag].cooling_drag_fraction`) modela o
+/// arrasto da entrada de ar do radiador/intercooler, dutos e saída de ar
+/// quente do motor a pistão — aplicado como MULTIPLICADOR `(1 +
+/// fração)` sobre a soma das demais parcelas (asa+fuselagem+empenagem+
+/// trem+misc), não como uma parcela aditiva independente: é uma
+/// PENALIDADE PROPORCIONAL à instalação como um todo (uma célula com mais
+/// arrasto parasita "de base" também tem mais área molhada de duto/saída de
+/// ar de refrigeração), seguindo a convenção usual de projeto preliminar
+/// (Raymer cap. 12 / Hoerner) — não uma estimativa independente da
+/// geometria real do sistema de arrefecimento.
 pub fn cd0_total(
     cd0_wing: f64,
     cd0_fuselage: f64,
@@ -49,13 +61,15 @@ pub fn cd0_total(
     cd0_misc: f64,
     gear_retractable: bool,
     cd0_gear_fixed_increment: f64,
+    cooling_drag_fraction: f64,
 ) -> f64 {
     let gear_cd0 = if gear_retractable {
         CD0_GEAR_RETRACTABLE
     } else {
         cd0_gear_fixed_increment
     };
-    cd0_wing + cd0_fuselage + cd0_empennage + gear_cd0 + cd0_misc
+    let cd0_sem_resfriamento = cd0_wing + cd0_fuselage + cd0_empennage + gear_cd0 + cd0_misc;
+    cd0_sem_resfriamento * (1.0 + cooling_drag_fraction)
 }
 
 /// Arrasto total em Newton:
@@ -115,6 +129,7 @@ impl AerodynamicsAgent {
         let cd0 = cd0_total(
             state.cd0_wing, state.cd0_fuselage, state.cd0_empennage, state.cd0_misc,
             state.gear_retractable, state.cd0_gear_fixed_increment,
+            state.cooling_drag_fraction,
         );
 
         let cl_cruise = cl_required(weight_n, q_cruise, state.wing_area_m2);
@@ -199,9 +214,25 @@ mod tests {
 
     #[test]
     fn cd0_retravel_menor_que_fixo() {
-        let cd0_ret = cd0_total(0.005, 0.010, 0.004, 0.003, true, 0.008);
-        let cd0_fix = cd0_total(0.005, 0.010, 0.004, 0.003, false, 0.008);
+        let cd0_ret = cd0_total(0.005, 0.010, 0.004, 0.003, true, 0.008, 0.04);
+        let cd0_fix = cd0_total(0.005, 0.010, 0.004, 0.003, false, 0.008, 0.04);
         assert!(cd0_ret < cd0_fix, "CD0 retrátil deve ser menor que fixo");
+    }
+
+    /// Task 5.2: `cooling_drag_fraction` deve elevar o CD0 total em
+    /// exatamente `(1 + fração)` sobre a soma das demais parcelas — não uma
+    /// parcela aditiva independente.
+    #[test]
+    fn cooling_drag_fraction_eleva_cd0_pelo_multiplicador_esperado() {
+        let cd0_sem = cd0_total(0.005, 0.010, 0.004, 0.003, true, 0.008, 0.0);
+        let cd0_com = cd0_total(0.005, 0.010, 0.004, 0.003, true, 0.008, 0.04);
+
+        // Soma-base (sem trem fixo, retrátil): 0.005+0.010+0.004+0.003 = 0.022
+        assert!((cd0_sem - 0.022).abs() < 1e-9, "cd0_sem = {cd0_sem}");
+        // Com 4% de arrasto de refrigeração: 0.022 × 1.04 = 0.02288
+        assert!((cd0_com - 0.02288).abs() < 1e-9, "cd0_com = {cd0_com}");
+        assert!(cd0_com > cd0_sem,
+            "cooling_drag_fraction > 0 deveria elevar o CD0 total: {cd0_com} vs {cd0_sem}");
     }
 
     #[test]

@@ -116,6 +116,18 @@ design_category = "normal"    # normal | utility | acrobatic → n_lim 3.8/4.4/6
 
 [drag]
 cd0_misc = 0.003
+# Fração do arrasto parasita TOTAL (asa+fuselagem+empenagem+trem+misc)
+# atribuída à refrigeração do motor a pistão (entrada de ar do
+# radiador/intercooler, dutos, saída de ar quente) — Task 5.2. Típico
+# 3-5% para uma instalação bem carenada (Raymer cap. 12 / Hoerner
+# "Fluid-Dynamic Drag"). Aplicado como multiplicador (1 + fração) sobre a
+# soma das demais parcelas em `agents::aerodynamics::cd0_total` — CD0 total
+# sobe de 0.022 para 0.02288 (+4%). CONSEQUÊNCIA HONESTA: mais arrasto
+# parasita reduz L/D, o que reduz V_max de cruzeiro em alguns km/h e eleva
+# o consumo/combustível de missão — o MTOW convergido sobe (ver
+# `tests/generic_engine.rs`, tabela old→new no comentário de
+# `golden_toyota_baseline_regressao_task_2_1`, atualizada na Task 5.2).
+cooling_drag_fraction = 0.04
 
 # Envelope de CG admissível (Task 4.4) — limites de estabilidade estática
 # que definem o CG mais traseiro (sm_min) e mais dianteiro (sm_max)
@@ -237,3 +249,60 @@ name = "antepara_firewall"
 mass_kg = 12.0
 arm_ref = "engine_cg"
 arm_offset_m = 0.9
+
+# Orçamento elétrico (Task 5.2) — barramento, alternador e cargas
+# individuais. Alimenta `agents::electrical::ElectricalAgent` (soma pura,
+# sem laço de convergência de MTOW).
+[electrical]
+bus_voltage_v = 28.0
+# Alternador automotivo típico ~32A @ 28V ≈ 900W (derateado da placa por
+# margem de projeto/temperatura), acoplado ao motor a pistão via
+# correia/PSRU.
+alternator_w = 900.0
+
+[[electrical.loads]]
+name = "avionicos"
+continuous_w = 180.0
+peak_w = 220.0
+
+[[electrical.loads]]
+name = "luzes_nav_strobe"
+continuous_w = 45.0
+peak_w = 90.0
+
+[[electrical.loads]]
+name = "bomba_combustivel"
+continuous_w = 60.0
+peak_w = 120.0
+
+[[electrical.loads]]
+name = "trem_retratil"
+continuous_w = 0.0
+# Pico só durante a retração/extensão — não é contínuo. 520W é o pico
+# ELÉTRICO estimado de um atuador linear real (perdas de eficiência do
+# motor/mecanismo + corrente de partida) — NÃO o mesmo número que a
+# potência MECÂNICA idealizada calculada por
+# `agents::landing_gear::actuator_power_w` (≈18,5W no baseline: massa de
+# perna 27,5kg, Δh 0,40m, 7,0s de retração — ver
+# `LandingGearAgent::run`). A guarda de consistência em
+# `models::config::validate_aircraft` só exige peak_w >= a potência
+# MECÂNICA (piso físico, não o pico elétrico real esperado) — 520W dá
+# folga generosa em relação a esse piso E é consistente com atuadores
+# lineares elétricos reais de trem de pouso leve (ordem de algumas
+# centenas de watts de pico).
+peak_w = 520.0
+
+[[electrical.loads]]
+name = "flaps"
+continuous_w = 0.0
+peak_w = 150.0
+
+[[electrical.loads]]
+name = "pitot_aquecido"
+continuous_w = 90.0
+peak_w = 90.0
+
+[[electrical.loads]]
+name = "radio_transponder"
+continuous_w = 55.0
+peak_w = 70.0

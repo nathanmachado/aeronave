@@ -25,6 +25,14 @@ const G: f64 = 9.807; // m/s²
 use crate::models::aircraft_config::GearCfg;
 use crate::models::specs::GearSpec;
 
+/// Deslocamento vertical do CG do trem principal durante a retração (m) —
+/// levanta a perna para dentro da asa/fuselagem. Compartilhado com
+/// `models::config::validate_aircraft` (guarda de consistência
+/// `electrical.loads` 'trem_retratil' × este atuador, Task 5.2) para que os
+/// dois lugares nunca divirjam silenciosamente sobre o mesmo pressuposto
+/// geométrico.
+pub const GEAR_RETRACTION_DELTA_H_M: f64 = 0.40;
+
 // ─── GEOMETRIA DO TREM ────────────────────────────────────────────────────────
 
 /// Bitola mínima do trem principal para ângulo anti-tombamento lateral φ < 55°.
@@ -199,9 +207,10 @@ impl LandingGearAgent {
 
         // Atuador elétrico (retração leva o trem para a asa/fuselagem)
         // Massa de uma perna principal: `[gear] mass_main_leg_kg`
-        // Δh durante retração: ~0.40 m (levanta perna para baio da asa)
+        // Δh durante retração: `GEAR_RETRACTION_DELTA_H_M` (~0.40 m, levanta
+        // perna para baixo da asa)
         let ret_time  = gear_cfg.retraction_time_s;
-        let p_actuator = actuator_power_w(gear_cfg.mass_main_leg_kg, 0.40, ret_time);
+        let p_actuator = actuator_power_w(gear_cfg.mass_main_leg_kg, GEAR_RETRACTION_DELTA_H_M, ret_time);
 
         // Peso total do sistema de trem: massas totais das pernas (de
         // `[[masses.items]]`) + atuadores/portas (`[gear] actuators_doors_mass_kg`)

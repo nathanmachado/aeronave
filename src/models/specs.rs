@@ -428,6 +428,29 @@ pub struct MissionSpec {
     pub breguet_range_full_tank_km: f64,
 }
 
+/// Saída do ElectricalAgent (Task 5.2) — orçamento elétrico: soma das
+/// cargas configuradas (`[electrical].loads`) contra a capacidade do
+/// alternador (`[electrical].alternator_w`). Pura soma/derivação — não
+/// depende de MTOW nem de nenhum outro agente.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElectricalSpec {
+    pub bus_voltage_v: f64,
+    pub alternator_w: f64,
+    /// Soma das potências CONTÍNUAS de todas as cargas configuradas (W).
+    pub continuous_load_w: f64,
+    /// Soma das potências de PICO de todas as cargas configuradas (W) —
+    /// modelo conservador de "pior caso, tudo ligado ao mesmo tempo"
+    /// (`Σ peak_w`), não Σcontínuo + maior pico individual. Superestima o
+    /// pico real simultâneo (nem toda carga atinge seu pico ao mesmo
+    /// tempo — ex.: trem retrátil só pica durante a retração, não durante
+    /// cruzeiro com pitot aquecido ligado), de propósito: é uma checagem
+    /// de margem conservadora, não uma previsão de carga instantânea real.
+    pub peak_load_w: f64,
+    /// Margem sobre a capacidade CONTÍNUA do alternador (%):
+    /// `(alternator_w − continuous_load_w) / alternator_w × 100`.
+    pub margin_continuous_pct: f64,
+}
+
 /// Relatório completo de validação — saída do Orchestrator
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AircraftReport {
@@ -449,5 +472,8 @@ pub struct AircraftReport {
     /// convergência de MTOW já exige um `MissionSpec` válido para sequer
     /// convergir).
     pub mission: Option<MissionSpec>,
+    /// Orçamento elétrico (Task 5.2) — `Option` só por simetria com os
+    /// demais campos do relatório; `main.rs` sempre o preenche.
+    pub electrical: Option<ElectricalSpec>,
     pub violations: Vec<String>,
 }
