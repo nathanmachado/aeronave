@@ -32,7 +32,11 @@ pub struct PropulsionSpec {
     pub power_kw: f64,
     pub max_torque_nm: f64,
     pub rated_rpm: f64,
+    /// Massa do motor (kg) — vem de `EngineSpec::mass_kg` (consumido pela Task 1.5).
+    pub engine_mass_kg: f64,
     pub psru_ratio: f64,
+    /// RPM do motor no ponto de cruzeiro escolhido pela busca (ver `search_cruise_rpm`).
+    pub engine_rpm_cruise: f64,
     pub prop_rpm_cruise: f64,
     pub prop_diameter_m: f64,
     pub fuel_type: String,
@@ -43,6 +47,13 @@ pub struct PropulsionSpec {
     pub range_km: f64,
     pub prop_efficiency: f64,
     pub thrust_cruise_n: f64,
+    /// Potência requerida em voo nivelado no rpm/altitude de cruzeiro escolhido (kW).
+    pub p_req_cruise_kw: f64,
+    /// Potência de eixo disponível no rpm/altitude de cruzeiro escolhido (kW).
+    pub p_shaft_cruise_kw: f64,
+    /// true se `p_req_cruise_kw <= p_shaft_cruise_kw` no rpm de cruzeiro escolhido
+    /// pela busca — ou seja, se o motor sustenta a velocidade de cruzeiro exigida.
+    pub cruise_feasible: bool,
 }
 
 /// Saída do WeightBalanceAgent (preenchida na Fase seguinte)

@@ -1,7 +1,7 @@
 /// ConstraintChecker — verifica se os resultados dos agentes satisfazem
 /// os requisitos do projeto e reporta violações com detalhamento.
 
-use crate::models::{requirements::Requirements, specs::{WingSpec, PropulsionSpec}};
+use crate::models::{engine::EngineSpec, requirements::Requirements, specs::{WingSpec, PropulsionSpec}};
 
 #[derive(Debug)]
 pub struct ConstraintReport {
@@ -23,6 +23,7 @@ impl ConstraintChecker {
         wing: &WingSpec,
         prop: &PropulsionSpec,
         mtow_kg: f64,
+        engine: &EngineSpec,
     ) -> ConstraintReport {
         let mut violations = Vec::new();
         let mut warnings   = Vec::new();
@@ -89,12 +90,27 @@ impl ConstraintChecker {
             ));
         }
 
-        // 8. MTOW razoável para 204 hp (fator de carga de potência)
-        let hp_per_tonne = 204.0 / (mtow_kg / 1_000.0);
+        // 8. MTOW razoável para a potência do motor instalado (fator de carga de potência)
+        let power_hp = engine.power_kw_max() / 0.7457;
+        let hp_per_tonne = power_hp / (mtow_kg / 1_000.0);
         if hp_per_tonne < 100.0 {
             warnings.push(format!(
                 "Potência específica {:.0} hp/t abaixo de 100 hp/t — razão de subida pode ser limitada",
                 hp_per_tonne
+            ));
+        }
+
+        // 9. Viabilidade de cruzeiro: o rpm de cruzeiro escolhido pela busca
+        // (PropulsionAgent) precisa entregar potência de eixo >= potência
+        // requerida em voo nivelado. Se não entregar (motor genuinamente
+        // incapaz de sustentar a velocidade de cruzeiro exigida com esta
+        // célula/hélice/PSRU), isto é uma violação de requisito, não um
+        // panic — o motor pode não ser adequado a este projeto.
+        if !prop.cruise_feasible {
+            violations.push(format!(
+                "Cruzeiro inviável: potência requerida {:.1} kW > disponível {:.1} kW \
+                 no rpm de cruzeiro escolhido (motor {})",
+                prop.p_req_cruise_kw, prop.p_shaft_cruise_kw, engine.name
             ));
         }
 

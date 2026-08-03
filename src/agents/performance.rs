@@ -15,10 +15,10 @@
 ///   - RBAC 23 / CS-23 — requisitos de desempenho categoria Normal
 
 use crate::agents::aerodynamics::isa_density;
+use crate::models::engine::EngineSpec;
 use crate::models::specs::{WingSpec, PropulsionSpec, PerformanceSpec};
-use crate::agents::propulsion::{power_kw_altitude, torque_1gd_ftv, prop_rpm,
-                                  prop_efficiency, advance_ratio, thrust_n,
-                                  PSRU_EFFICIENCY, Engine1GdFtv};
+use crate::agents::propulsion::{prop_rpm, prop_efficiency, advance_ratio, thrust_n,
+                                  PSRU_EFFICIENCY};
 use crate::models::aircraft_state::AircraftState;
 
 const G: f64 = 9.807;   // m/s²
@@ -27,14 +27,14 @@ const RHO_SL: f64 = 1.225; // kg/m³
 // ─── POTÊNCIA E TRAÇÃO DISPONÍVEIS ────────────────────────────────────────────
 
 /// Potência de eixo disponível em altitude a RPM de cruzeiro (kW)
-pub fn shaft_power_kw(engine_rpm: f64, altitude_m: f64) -> f64 {
-    power_kw_altitude(engine_rpm, altitude_m) * PSRU_EFFICIENCY
+pub fn shaft_power_kw(engine: &EngineSpec, engine_rpm: f64, altitude_m: f64) -> f64 {
+    engine.power_kw_at(engine_rpm, altitude_m) * PSRU_EFFICIENCY
 }
 
 /// Tração disponível da hélice em função da velocidade e altitude
-/// RPM de subida: usar zona de torque máximo (2.600 rpm)
 pub fn thrust_available_n(
     v_ms: f64,
+    engine: &EngineSpec,
     engine_rpm: f64,
     psru_ratio: f64,
     prop_diam_m: f64,
@@ -42,7 +42,7 @@ pub fn thrust_available_n(
 ) -> f64 {
     if v_ms < 0.5 {
         // Tração estática (solo): estimativa por impulso de disco (Rankine-Froude)
-        let p_w = shaft_power_kw(engine_rpm, altitude_m) * 1_000.0;
+        let p_w = shaft_power_kw(engine, engine_rpm, altitude_m) * 1_000.0;
         let rho = isa_density(altitude_m);
         let disk_area = std::f64::consts::PI * (prop_diam_m / 2.0).powi(2);
         return (2.0 * rho * disk_area * p_w * p_w).powf(1.0 / 3.0);
@@ -50,7 +50,7 @@ pub fn thrust_available_n(
     let n_prop = prop_rpm(engine_rpm, psru_ratio);
     let j = advance_ratio(v_ms, n_prop, prop_diam_m);
     let eta = prop_efficiency(j);
-    let p_shaft_w = shaft_power_kw(engine_rpm, altitude_m) * 1_000.0;
+    let p_shaft_w = shaft_power_kw(engine, engine_rpm, altitude_m) * 1_000.0;
     thrust_n(eta, p_shaft_w, v_ms)
 }
 
@@ -79,6 +79,7 @@ pub fn excess_power_kw(
     mass_kg: f64,
     rho: f64,
     wing: &WingSpec,
+    engine: &EngineSpec,
     engine_rpm: f64,
     psru_ratio: f64,
     prop_diam_m: f64,
@@ -86,7 +87,7 @@ pub fn excess_power_kw(
 ) -> f64 {
     let drag   = drag_level_n(v_ms, mass_kg, rho, wing);
     let p_req  = power_required_kw(v_ms, drag);
-    let thrust = thrust_available_n(v_ms, engine_rpm, psru_ratio, prop_diam_m, altitude_m);
+    let thrust = thrust_available_n(v_ms, engine, engine_rpm, psru_ratio, prop_diam_m, altitude_m);
     let p_avail = thrust * v_ms / 1_000.0;
     p_avail - p_req
 }
@@ -98,9 +99,11 @@ pub fn climb_rate_ms(
     altitude_m: f64,
     wing: &WingSpec,
     state: &AircraftState,
+    engine: &EngineSpec,
 ) -> (f64, f64) {
     let rho = isa_density(altitude_m);
-    let engine_rpm_climb = 2_800.0; // rpm — topo da banda de torque plano
+    // RPM de subida: máximo contínuo do motor (uso prolongado, não redline).
+    let engine_rpm_climb = engine.rpm_max_continuous;
 
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
 
@@ -115,7 +118,7 @@ pub fn climb_rate_ms(
 
     for i in 0..=steps {
         let v = v_min + i as f64 * dv;
-        let pex = excess_power_kw(v, mass_kg, rho, wing,
+        let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m);
         let rc = pex * 1_000.0 / (mass_kg * G);
@@ -132,11 +135,12 @@ pub fn service_ceiling_m(
     mass_kg: f64,
     wing: &WingSpec,
     state: &AircraftState,
+    engine: &EngineSpec,
 ) -> f64 {
     let mut alt = 0.0_f64;
     let step = 100.0_f64;
     loop {
-        let (rc, _) = climb_rate_ms(mass_kg, alt, wing, state);
+        let (rc, _) = climb_rate_ms(mass_kg, alt, wing, state, engine);
         if rc <= 0.5 || alt > 8_000.0 {
             return alt;
         }
@@ -161,15 +165,18 @@ pub fn takeoff_distance_m(
     wing: &WingSpec,
     state: &AircraftState,
     surface_factor: f64,
+    engine: &EngineSpec,
 ) -> f64 {
     let w = mass_kg * G;
     let cl_to = 0.80 * wing.cl_max; // flap parcial na decolagem
     // V_liftoff = 1.1 · V_stall
     let v_lo = 1.10 * ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
-    // Tração média no roll (80% da tração a V_lo/2)
+    // Tração média no roll (80% da tração a V_lo/2), RPM de decolagem =
+    // máximo contínuo do motor.
     let t_avg = thrust_available_n(
         v_lo * 0.5,
-        2_800.0, // RPM de decolagem
+        engine,
+        engine.rpm_max_continuous,
         state.psru_ratio,
         state.prop_diameter_m,
         0.0, // nível do mar
@@ -236,11 +243,12 @@ pub fn landing_distance_m(
 ///      imediatamente após a última amostra positiva, refinando a raiz mais
 ///      à direita nesse intervalo (onde P_excesso muda de + para -).
 pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, wing: &WingSpec,
-                          state: &AircraftState, engine_rpm: f64) -> f64 {
+                          state: &AircraftState, engine: &EngineSpec) -> f64 {
     let rho = isa_density(altitude_m);
+    let engine_rpm = engine.rpm_rated;
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
     let (lo, hi) = (1.2 * v_stall, 200.0);
-    let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine_rpm,
+    let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine, engine_rpm,
                                        state.psru_ratio, state.prop_diameter_m, altitude_m);
 
     // Varredura grosseira: 100 passos (101 amostras) sobre [lo, hi]
@@ -282,32 +290,31 @@ impl PerformanceAgent {
         wing: &WingSpec,
         prop: &PropulsionSpec,
         mtow_kg: f64,
+        engine: &EngineSpec,
     ) -> PerformanceSpec {
         let rho_sl = RHO_SL;
-        let rho_cruise = isa_density(2_500.0);
+        let fuel_density = engine.fuel.density_kg_per_l;
 
         // Razão de subida ao nível do mar (MTOW cheio)
-        let (rc_sl, vy_sl_kmh) = climb_rate_ms(mtow_kg, 0.0, wing, state);
+        let (rc_sl, _vy_sl_kmh) = climb_rate_ms(mtow_kg, 0.0, wing, state, engine);
 
         // Razão de subida a 2.500 m (cruzeiro parcialmente queimado — ~1.350 kg)
-        let mass_mid = mtow_kg - (prop.fuel_capacity_l * 0.840 * 0.35); // 35% do combustível gasto
-        let (rc_cruise_alt, _) = climb_rate_ms(mass_mid, 2_500.0, wing, state);
+        let mass_mid = mtow_kg - (prop.fuel_capacity_l * fuel_density * 0.35); // 35% do combustível gasto
+        let (rc_cruise_alt, _) = climb_rate_ms(mass_mid, 2_500.0, wing, state, engine);
 
         // Teto de serviço
-        let ceiling = service_ceiling_m(mass_mid, wing, state);
+        let ceiling = service_ceiling_m(mass_mid, wing, state, engine);
 
         // Distâncias de decolagem
-        let d_to_paved = takeoff_distance_m(mtow_kg, rho_sl, wing, state, 1.00);
-        let d_to_grass  = takeoff_distance_m(mtow_kg, rho_sl, wing, state, 1.20);
+        let d_to_paved = takeoff_distance_m(mtow_kg, rho_sl, wing, state, 1.00, engine);
+        let d_to_grass  = takeoff_distance_m(mtow_kg, rho_sl, wing, state, 1.20, engine);
 
         // Distância de pouso (massa de pouso ≈ MTOW - 60% combustível)
-        let mass_ldg = mtow_kg - prop.fuel_capacity_l * 0.840 * 0.60;
+        let mass_ldg = mtow_kg - prop.fuel_capacity_l * fuel_density * 0.60;
         let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, 1.00);
 
-        // Velocidade máxima nivelada em cruzeiro (2.500 m, rpm máximo contínuo)
-        // rpm máximo contínuo = rated rpm por enquanto (parametrizado na Fase 1)
-        let v_max_cruise_ms = max_level_speed_ms(mtow_kg, 2_500.0, wing, state,
-                                                  Engine1GdFtv::RPM_RATED);
+        // Velocidade máxima nivelada em cruzeiro (2.500 m, rpm nominal do motor)
+        let v_max_cruise_ms = max_level_speed_ms(mtow_kg, 2_500.0, wing, state, engine);
 
         PerformanceSpec {
             v_cruise_kmh:         v_max_cruise_ms * 3.6,
@@ -330,20 +337,63 @@ impl PerformanceAgent {
 mod tests {
     use super::*;
     use crate::models::{aircraft_state::AircraftState, requirements::Requirements};
+    use crate::models::engine::{BsfcModel, FuelSpec, Induction};
     use crate::agents::{aerodynamics::AerodynamicsAgent, propulsion::PropulsionAgent};
 
-    fn setup() -> (AircraftState, WingSpec, PropulsionSpec) {
-        let state = AircraftState::initial();
-        let req   = Requirements::project_default();
-        let wing  = AerodynamicsAgent::run(&state, &req);
-        let prop  = PropulsionAgent::run(&state, &req, &wing);
-        (state, wing, prop)
+    /// Motor fictício de teste (mesma forma do fixture usado em propulsion.rs
+    /// e engine.rs) — sem referenciar nenhum motor real por nome. Os campos
+    /// numéricos reproduzem a forma física de um motor turbo diesel típico
+    /// desta classe (mesma banda de torque, rpm nominal e fator de altitude
+    /// turbo do modelo original desta aeronave), o que preserva os
+    /// intervalos físicos das asserções herdadas.
+    fn engine_teste() -> EngineSpec {
+        EngineSpec {
+            name: "Motor Genérico Teste".into(),
+            mass_kg: 195.0,
+            rpm_idle: 700.0,
+            rpm_rated: 3_400.0,
+            rpm_redline: 3_800.0,
+            rpm_max_continuous: 3_000.0,
+            torque_curve: vec![
+                [700.0, 200.0],
+                [1_600.0, 500.0],
+                [2_800.0, 500.0],
+                [3_400.0, 420.0],
+                [3_800.0, 0.0],
+            ],
+            bsfc: BsfcModel {
+                bsfc_min_gkwh: 200.0,
+                rpm_optimal: 2_200.0,
+                load_optimal: 0.70,
+                rpm_penalty_gkwh: 18.0,
+                load_penalty_gkwh: 22.0,
+                bsfc_max_gkwh: 380.0,
+            },
+            induction: Induction::Turbocharged {
+                critical_altitude_m: 2_000.0,
+                power_loss_per_1000m: 50.0 / 300.0,
+            },
+            fuel: FuelSpec {
+                name: "Diesel de teste".into(),
+                density_kg_per_l: 0.840,
+                lhv_mj_per_kg: 42.5,
+            },
+        }
+    }
+
+    fn setup() -> (AircraftState, WingSpec, PropulsionSpec, EngineSpec) {
+        let state  = AircraftState::initial();
+        let req    = Requirements::project_default();
+        let wing   = AerodynamicsAgent::run(&state, &req);
+        let engine = engine_teste();
+        let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
+        (state, wing, prop, engine)
     }
 
     #[test]
     fn razao_subida_positiva_no_solo() {
-        let (state, wing, prop) = setup();
-        let (rc, vy) = climb_rate_ms(state.mtow_kg, 0.0, &wing, &state);
+        let (state, wing, _prop, engine) = setup();
+        let (rc, vy) = climb_rate_ms(state.mtow_kg, 0.0, &wing, &state, &engine);
         println!("RC SL = {rc:.2} m/s = {:.0} fpm, Vy = {vy:.1} km/h",
                  rc * 196.85);
         assert!(rc > 0.0, "RC SL deve ser positiva");
@@ -351,28 +401,28 @@ mod tests {
 
     #[test]
     fn razao_subida_decresce_com_altitude() {
-        let (state, wing, _) = setup();
-        let (rc0, _) = climb_rate_ms(state.mtow_kg, 0.0,     &wing, &state);
-        let (rc2, _) = climb_rate_ms(state.mtow_kg, 2_500.0, &wing, &state);
-        let (rc5, _) = climb_rate_ms(state.mtow_kg, 5_000.0, &wing, &state);
+        let (state, wing, _prop, engine) = setup();
+        let (rc0, _) = climb_rate_ms(state.mtow_kg, 0.0,     &wing, &state, &engine);
+        let (rc2, _) = climb_rate_ms(state.mtow_kg, 2_500.0, &wing, &state, &engine);
+        let (rc5, _) = climb_rate_ms(state.mtow_kg, 5_000.0, &wing, &state, &engine);
         println!("RC SL={rc0:.2} | RC 2500m={rc2:.2} | RC 5000m={rc5:.2} m/s");
         assert!(rc0 > rc2 && rc2 > rc5, "RC deve diminuir com a altitude");
     }
 
     #[test]
     fn teto_de_servico_razoavel() {
-        let (state, wing, _) = setup();
-        let ceiling = service_ceiling_m(state.mtow_kg * 0.85, &wing, &state);
+        let (state, wing, _prop, engine) = setup();
+        let ceiling = service_ceiling_m(state.mtow_kg * 0.85, &wing, &state, &engine);
         println!("Teto de serviço: {ceiling:.0} m ({:.0} ft)", ceiling * 3.2808);
-        // Para 204 hp diesel com turbo automotivo: teto esperado 3.500–8.000 m
+        // Para motor desta classe (turbo automotivo ~200hp): teto esperado 3.500–8.000 m
         assert!(ceiling > 3_500.0 && ceiling < 8_000.0,
             "Teto {ceiling:.0} m fora do intervalo esperado (3.500–8.000 m)");
     }
 
     #[test]
     fn distancia_decolagem_plausivel() {
-        let (state, wing, prop) = setup();
-        let d = takeoff_distance_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0);
+        let (state, wing, _prop, engine) = setup();
+        let d = takeoff_distance_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine);
         println!("Decolagem pista pavimentada: {d:.0} m");
         // CS-23 limita 580 m para categoria Normal MTOW < 1.500 kg
         assert!(d > 200.0 && d < 700.0,
@@ -381,8 +431,8 @@ mod tests {
 
     #[test]
     fn distancia_pouso_plausivel() {
-        let (state, wing, prop) = setup();
-        let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * 0.840 * 0.60;
+        let (state, wing, prop, engine) = setup();
+        let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
         let d = landing_distance_m(mass_ldg, RHO_SL, &wing, 1.0);
         println!("Pouso pista pavimentada: {d:.0} m");
         assert!(d > 300.0 && d < 700.0,
@@ -391,8 +441,8 @@ mod tests {
 
     #[test]
     fn velocidade_maxima_resolvida_do_equilibrio() {
-        let (state, wing, _) = setup();
-        let v_max = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, 3_400.0);
+        let (state, wing, _prop, engine) = setup();
+        let v_max = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, &engine);
         let v_max_kmh = v_max * 3.6;
         println!("V_max nivelada = {v_max_kmh:.2} km/h");
         // Deve ser um número resolvido (não o requisito ecoado) e > requisito
@@ -400,7 +450,9 @@ mod tests {
             "V_max nivelada {v_max_kmh:.0} km/h implausível");
         // O refinamento em duas etapas não deve alterar o resultado obtido
         // pela bissecção simples anterior (310.25 km/h, medido antes do
-        // refactor de coarse-to-fine) para os dados atuais do projeto.
+        // refactor de coarse-to-fine) para os dados equivalentes ao motor
+        // original deste projeto (mesma forma de curva/física, agora via
+        // fixture genérico em vez de constantes hardcoded).
         let v_max_pre_refactor_kmh = 310.25137319753946;
         assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
             "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pré-refactor \
@@ -413,13 +465,13 @@ mod tests {
         // amostra da varredura terá excesso de potência positivo, então a
         // função deve retornar o limite inferior (1.2·Vs) em vez de um
         // resultado espúrio ou o teto do modelo (200 m/s).
-        let (state, wing, _) = setup();
+        let (state, wing, _prop, engine) = setup();
         let rho = isa_density(2_500.0);
         let mass_kg = 20_000.0;
         let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
         let v_lo_esperado = 1.2 * v_stall;
 
-        let v_max = max_level_speed_ms(mass_kg, 2_500.0, &wing, &state, 3_400.0);
+        let v_max = max_level_speed_ms(mass_kg, 2_500.0, &wing, &state, &engine);
         println!("V_max (massa inviável) = {:.2} m/s, esperado ≈ {v_lo_esperado:.2} m/s",
                   v_max);
         assert!((v_max - v_lo_esperado).abs() < 1e-6,
@@ -429,8 +481,8 @@ mod tests {
 
     #[test]
     fn velocidade_cruzeiro_acima_do_requisito() {
-        let (state, wing, prop) = setup();
-        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg);
+        let (state, wing, prop, engine) = setup();
+        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine);
         println!("V_cruise = {:.1} km/h", perf.v_cruise_kmh);
         assert!(perf.v_cruise_kmh >= 280.0,
             "V_cruise {:.1} km/h abaixo do requisito de 280 km/h", perf.v_cruise_kmh);

@@ -1,25 +1,30 @@
-mod agents;
-mod models;
-mod validation;
+use std::path::Path;
 
-use agents::aerodynamics::AerodynamicsAgent;
-use agents::propulsion::PropulsionAgent;
-use agents::weight_balance::WeightBalanceAgent;
-use agents::performance::PerformanceAgent;
-use agents::structural::StructuralAgent;
-use agents::landing_gear::LandingGearAgent;
-use models::aircraft_state::AircraftState;
-use models::requirements::Requirements;
-use models::specs::AircraftReport;
-use validation::constraint_checker::ConstraintChecker;
+use aeronave::agents::aerodynamics::AerodynamicsAgent;
+use aeronave::agents::propulsion::PropulsionAgent;
+use aeronave::agents::weight_balance::WeightBalanceAgent;
+use aeronave::agents::performance::PerformanceAgent;
+use aeronave::agents::structural::StructuralAgent;
+use aeronave::agents::landing_gear::LandingGearAgent;
+use aeronave::models::aircraft_state::AircraftState;
+use aeronave::models::config::load_engine;
+use aeronave::models::requirements::Requirements;
+use aeronave::models::specs::AircraftReport;
+use aeronave::validation::constraint_checker::ConstraintChecker;
 
 fn sep() { println!("{}", "─".repeat(64)); }
 
 fn main() {
+    // Motor: carregado de TOML — trocar de motor é trocar este arquivo, não
+    // o código. Caminho hardcoded por enquanto; parametrização via CLI é
+    // escopo de uma task futura.
+    let engine = load_engine(Path::new("config/engines/toyota_1gd_ftv.toml"))
+        .expect("falha ao carregar configuração do motor");
+
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║   AERONAVE — Modelagem Matemática v3.0  (6 Agentes)         ║");
-    println!("║   Motor: Toyota 1GD-FTV 2.8T  |  Trem: Retrátil Elétrico   ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
+    println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
     let state = AircraftState::initial();
     let req   = Requirements::project_default();
@@ -37,13 +42,16 @@ fn main() {
              wing.stall_speed_flaps_kmh, wing.stall_speed_clean_kmh);
 
     // ── Agente 2: Propulsão ───────────────────────────────────────────────────
-    println!("[ AGENTE 2 ] PropulsionAgent — Toyota 1GD-FTV 2.8T + PSRU");
-    let prop = PropulsionAgent::run(&state, &req, &wing);
+    println!("[ AGENTE 2 ] PropulsionAgent — {} + PSRU", engine.name);
+    let prop = PropulsionAgent::run(&state, &req, &wing, &engine);
     println!("  {:.0} hp / {:.1} kW  |  {:.0} Nm  |  PSRU {:.3}:1",
              prop.power_hp, prop.power_kw, prop.max_torque_nm, prop.psru_ratio);
-    println!("  Hélice {:.0} rpm  Ø{:.2}m  η={:.1}%  Tração: {:.0}N",
-             prop.prop_rpm_cruise, prop.prop_diameter_m,
+    println!("  Motor {:.0} rpm (cruzeiro)  |  Hélice {:.0} rpm  Ø{:.2}m  η={:.1}%  Tração: {:.0}N",
+             prop.engine_rpm_cruise, prop.prop_rpm_cruise, prop.prop_diameter_m,
              prop.prop_efficiency * 100.0, prop.thrust_cruise_n);
+    println!("  Cruzeiro viável: {}  |  P_req {:.1}kW  vs  P_disp {:.1}kW",
+             if prop.cruise_feasible { "✓ SIM" } else { "✗ NÃO" },
+             prop.p_req_cruise_kw, prop.p_shaft_cruise_kw);
     println!("  {}  |  {:.0}L  |  {:.1}L/h  |  BSFC {:.0}g/kWh",
              prop.fuel_type, prop.fuel_capacity_l,
              prop.fc_cruise_lph, prop.bsfc_cruise_gkwh);
@@ -66,7 +74,7 @@ fn main() {
 
     // ── Agente 4: Desempenho ──────────────────────────────────────────────────
     println!("[ AGENTE 4 ] PerformanceAgent");
-    let perf = PerformanceAgent::run(&state, &wing, &prop, wb.spec.mtow_kg);
+    let perf = PerformanceAgent::run(&state, &wing, &prop, wb.spec.mtow_kg, &engine);
     println!("  V_cruzeiro: {:.1}km/h  |  V_stall: {:.1}km/h",
              perf.v_cruise_kmh, perf.v_stall_kmh);
     println!("  RC (SL/MTOW): {:.2}m/s ({:.0}fpm)  |  RC (2500m): {:.2}m/s",
@@ -118,7 +126,7 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, &wing, &prop, wb.spec.mtow_kg);
+    let report  = ConstraintChecker::verify(&req, &wing, &prop, wb.spec.mtow_kg, &engine);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;

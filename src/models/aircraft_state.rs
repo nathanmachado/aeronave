@@ -25,7 +25,7 @@ pub struct AircraftState {
 }
 
 impl AircraftState {
-    /// Ponto de partida do projeto v2.0 (motor Toyota 1GD-FTV, trem retrátil)
+    /// Ponto de partida do projeto v2.0 (motor turbo diesel ~204hp, trem retrátil)
     pub fn initial() -> Self {
         Self {
             wing_span_m: 11.94,

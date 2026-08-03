@@ -118,7 +118,9 @@ impl ArmConfig {
 pub fn oew_items(arms: &ArmConfig, fuel_capacity_l: f64) -> Vec<MassItem> {
     let _ = fuel_capacity_l; // reservado para variante com tanques maiores
     vec![
-        MassItem { name: "Motor Toyota 1GD-FTV",  mass_kg: 195.0, arm_m: arms.engine_cg_m },
+        // Motor + acessórios: massa ainda hardcoded (195 kg) — integração
+        // com EngineSpec::mass_kg é escopo da Task 1.5.
+        MassItem { name: "Motor + acessórios",     mass_kg: 195.0, arm_m: arms.engine_cg_m },
         MassItem { name: "PSRU + hélice + capô",  mass_kg:  65.0, arm_m: arms.engine_cg_m + 0.3 },
         MassItem { name: "Sistema de resfriamento",mass_kg: 18.0, arm_m: arms.engine_cg_m + 0.5 },
         MassItem { name: "Aviônicos + elétrica",   mass_kg: 60.0, arm_m: arms.avionics_m },

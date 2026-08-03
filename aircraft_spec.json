@@ -1,6 +1,6 @@
 {
   "revision": "3.0",
-  "validation_status": "FAIL",
+  "validation_status": "PASS",
   "wing": {
     "span_m": 11.94,
     "area_m2": 14.2,
@@ -18,22 +18,27 @@
     "ld_ratio_cruise": 12.86850116344789
   },
   "propulsion": {
-    "engine_model": "Toyota 1GD-FTV 2.8T Turbo Diesel",
-    "power_hp": 204.0,
-    "power_kw": 150.2,
+    "engine_model": "Toyota 1GD-FTV 2.8 Turbo Diesel",
+    "power_hp": 200.81701732749562,
+    "power_kw": 149.7492498211135,
     "max_torque_nm": 500.0,
     "rated_rpm": 3400.0,
+    "engine_mass_kg": 195.0,
     "psru_ratio": 1.867,
-    "prop_rpm_cruise": 1285.4847348687733,
+    "engine_rpm_cruise": 2610.0,
+    "prop_rpm_cruise": 1397.964649169791,
     "prop_diameter_m": 1.95,
-    "fuel_type": "Diesel S-10 / Jet-A",
+    "fuel_type": "Diesel S-10",
     "fuel_capacity_l": 240.0,
-    "fc_cruise_lph": 28.93993339219418,
-    "bsfc_cruise_gkwh": 220.6903243149553,
-    "endurance_h": 7.463735215723079,
-    "range_km": 2089.845860402462,
-    "prop_efficiency": 0.786177183017995,
-    "thrust_cruise_n": 1113.4184795893555
+    "fc_cruise_lph": 26.93728536116344,
+    "bsfc_cruise_gkwh": 211.13412417004707,
+    "endurance_h": 8.018625377574825,
+    "range_km": 2245.2151057209508,
+    "prop_efficiency": 0.8080519332046874,
+    "thrust_cruise_n": 1113.4184795893555,
+    "p_req_cruise_kw": 107.17035814235922,
+    "p_shaft_cruise_kw": 121.49078359969982,
+    "cruise_feasible": true
   },
   "weight": {
     "oew_kg": 885.0,
@@ -45,16 +50,16 @@
     "static_margin_pct": 60.6958470994048
   },
   "performance": {
-    "v_cruise_kmh": 308.74399257533076,
+    "v_cruise_kmh": 308.7214714659072,
     "v_stall_kmh": 111.41258586018864,
-    "rc_sl_ms": 4.976913533640004,
-    "rc_cruise_alt_ms": 4.500491451561861,
+    "rc_sl_ms": 5.008528683094576,
+    "rc_cruise_alt_ms": 4.536372376142891,
     "service_ceiling_m": 5200.0,
-    "to_distance_paved_m": 294.48055063240423,
-    "to_distance_grass_m": 353.37666075888507,
+    "to_distance_paved_m": 293.18801485013773,
+    "to_distance_grass_m": 351.8256178201653,
     "landing_distance_m": 398.4942545639284,
-    "range_km": 2089.845860402462,
-    "endurance_h": 7.463735215723079
+    "range_km": 2245.2151057209508,
+    "endurance_h": 8.018625377574825
   },
   "structure": {
     "design_load_factor_g": 3.8,
@@ -91,8 +96,5 @@
     "actuator_power_w": 18.82944,
     "total_weight_kg": 97.0
   },
-  "violations": [
-    "Autonomia 7.46 h abaixo do requisito de 8.0 h",
-    "Alcance 2090 km abaixo do requisito de 2240 km"
-  ]
+  "violations": []
 }

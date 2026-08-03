@@ -77,6 +77,14 @@ impl EngineSpec {
         self.torque_nm(rpm) * rpm * 2.0 * std::f64::consts::PI / 60_000.0
     }
 
+    /// Torque máximo (Nm) ao longo de toda a curva — usado para relatório
+    /// (não é o torque no rpm de cruzeiro/operação, apenas o pico da curva).
+    pub fn torque_max_nm(&self) -> f64 {
+        self.torque_curve.iter()
+            .map(|p| p[1])
+            .fold(0.0_f64, f64::max)
+    }
+
     /// Potência máxima varrendo a curva (para relatório; não usar como referência de carga)
     pub fn power_kw_max(&self) -> f64 {
         (0..=(self.rpm_redline as u32)).step_by(50)
@@ -161,6 +169,13 @@ mod tests {
         let bsfc_far_off = bsfc_mdl.bsfc_gkwh(3_500.0, 0.30);
         assert!(bsfc_far_off > bsfc_optimal, "BSFC far from optimal should be higher");
         assert!(bsfc_far_off <= bsfc_mdl.bsfc_max_gkwh, "BSFC should not exceed max");
+    }
+
+    #[test]
+    fn torque_maximo_da_curva() {
+        let e = engine_teste();
+        // Pico da curva de teste é 500 Nm (banda plana 1.600–2.800 rpm)
+        assert!((e.torque_max_nm() - 500.0).abs() < 1e-9);
     }
 
     #[test]
