@@ -220,10 +220,10 @@ pub fn fatigue_life_cycles(
     let sigma_ult = Al7075T6::SIGMA_ULT_MPA;
     let sigma_equiv = sigma_a / (1.0 - sigma_m / sigma_ult).max(0.01);
 
-    if sigma_equiv >= SE_MPA {
-        return f64::INFINITY; // vida infinita
+    if sigma_equiv <= SE_MPA {
+        return f64::INFINITY; // abaixo do limite de fadiga → vida infinita
     }
-    N_BASE * (SE_MPA / sigma_equiv).powf(B)
+    N_BASE * (SE_MPA / sigma_equiv).powf(B) // < N_BASE quando σ > Se
 }
 
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
@@ -362,6 +362,16 @@ mod tests {
         let vf = flutter_speed_ms(vd, 14.2, 11.94, 1.64, 0.020, 130.0);
         assert!(!flutter_check(vf, vd),
             "Flutter check passou com longarina de 20 mm — verificação vácua");
+    }
+
+    #[test]
+    fn fadiga_alta_tensao_vida_curta() {
+        // σ_a equivalente acima do limite de fadiga → vida FINITA e menor que 10⁷
+        let vida_alta_tensao = fatigue_life_cycles(300.0, 50.0);
+        // σ_a equivalente abaixo do limite → vida "infinita" (≥ 10⁹ por convenção)
+        let vida_baixa_tensao = fatigue_life_cycles(80.0, 40.0);
+        assert!(vida_alta_tensao < 1e7, "alta tensão deveria dar vida finita < 10⁷");
+        assert!(vida_baixa_tensao >= 1e9, "baixa tensão deveria dar vida quase infinita");
     }
 
     #[test]
