@@ -39,7 +39,9 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.wing.le_root_x_m, 2.90);
     assert_eq!(cfg.propeller.psru_ratio, 1.867);
     assert_eq!(cfg.propeller.diameter_m, 1.95);
-    assert_eq!(cfg.fuel_system.capacity_l, 240.0);
+    // 260 L desde a correção pós-Task-3.1 (era 240 L; ~8% de margem sobre os
+    // ~241 L exigidos pela missão no MTOW convergido — ver task-3.1-report.md).
+    assert_eq!(cfg.fuel_system.capacity_l, 260.0);
     assert_eq!(cfg.gear.h_cg_ground_m, 1.05);
     assert_eq!(cfg.gear.x_nose_m, 1.40);
     assert_eq!(cfg.gear.x_main_m, 3.85);

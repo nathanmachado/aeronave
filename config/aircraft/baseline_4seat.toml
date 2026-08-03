@@ -38,7 +38,8 @@ psru_ratio = 1.867
 psru_efficiency = 0.97
 
 [fuel_system]
-capacity_l = 240.0
+# 260 L: dimensionado pela convergência de MTOW (Task 3.1) — missão de 8h exige ~241 L; margem ~8%
+capacity_l = 260.0
 
 [gear]
 retractable = true
