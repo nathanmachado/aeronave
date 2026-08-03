@@ -2,15 +2,12 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use aeronave::agents::aerodynamics::AerodynamicsAgent;
-use aeronave::agents::propulsion::PropulsionAgent;
-use aeronave::agents::weight_balance::WeightBalanceAgent;
 use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::structural::StructuralAgent;
 use aeronave::agents::landing_gear::LandingGearAgent;
-use aeronave::models::aircraft_state::AircraftState;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::AircraftReport;
+use aeronave::orchestrator::size_aircraft;
 use aeronave::validation::constraint_checker::ConstraintChecker;
 
 fn sep() { println!("{}", "─".repeat(64)); }
@@ -72,11 +69,33 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════════╝\n");
     println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
-    let state = AircraftState::from_config(&cfg);
+    // ── Sizing: convergência de MTOW (Task 3.1) ─────────────────────────────────
+    // Fecha o laço de ponto fixo entre aerodinâmica (que precisa do peso para
+    // CL/CD de cruzeiro) e peso/balanceamento (que precisa do arrasto/consumo
+    // para fechar OEW + combustível de missão). Antes desta task, a
+    // aerodinâmica usava `sizing.mtow_initial_guess_kg` (um palpite nunca
+    // realimentado) enquanto Performance/Structural/LandingGear/
+    // ConstraintChecker usavam `wb.spec.mtow_kg` (o MTOW do cenário
+    // estrutural "4 pax + bagagem + tanque cheio") — dois MTOWs diferentes
+    // no mesmo relatório (bug B5). Agora um único MTOW de projeto convergido
+    // (`design_mtow_kg`) alimenta todos os agentes a jusante.
+    let sized = size_aircraft(&cfg, &engine, &req).unwrap_or_else(|e| {
+        eprintln!("Erro ao convergir MTOW: {e}");
+        std::process::exit(1);
+    });
+    let design_mtow_kg = sized.state.mtow_kg;
+
+    println!("[ SIZING ] Convergência de MTOW");
+    println!("  Iterações: {}  |  MTOW inicial: {:.1}kg → MTOW convergido: {:.1}kg",
+             sized.iterations.len(), sized.iterations[0], design_mtow_kg);
+    println!("  Combustível de missão (autonomia mínima + reserva): {:.1}kg\n",
+             sized.mission_fuel_kg);
+
+    let state = &sized.state;
 
     // ── Agente 1: Aerodinâmica ────────────────────────────────────────────────
     println!("[ AGENTE 1 ] AerodynamicsAgent");
-    let wing = AerodynamicsAgent::run(&state, &req);
+    let wing = &sized.wing;
     println!("  Envergadura: {:.2}m  |  Área: {:.1}m²  |  AR: {:.2}",
              wing.span_m, wing.area_m2, wing.aspect_ratio);
     println!("  Perfil: {}  |  e={:.3}  |  L/D={:.1}",
@@ -88,7 +107,7 @@ fn main() {
 
     // ── Agente 2: Propulsão ───────────────────────────────────────────────────
     println!("[ AGENTE 2 ] PropulsionAgent — {} + PSRU", engine.name);
-    let prop = PropulsionAgent::run(&state, &req, &wing, &engine);
+    let prop = &sized.prop;
     println!("  {:.0} hp / {:.1} kW  |  {:.0} Nm  |  PSRU {:.3}:1",
              prop.power_hp, prop.power_kw, prop.max_torque_nm, prop.psru_ratio);
     println!("  Motor {:.0} rpm (cruzeiro)  |  Hélice {:.0} rpm  Ø{:.2}m  η={:.1}%  Tração: {:.0}N",
@@ -105,10 +124,10 @@ fn main() {
 
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
-    let wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req);
+    let wb = &sized.wb;
     println!("  Corda: raiz {:.3}m  ponta {:.3}m  MAC {:.3}m",
              wb.chord_root_m, wb.chord_tip_m, wb.mac_m);
-    println!("  OEW: {:.1}kg  |  MTOW: {:.1}kg  |  NP: {:.3}m do nariz",
+    println!("  OEW: {:.1}kg  |  MTOW (cenário estrutural, tanque cheio): {:.1}kg  |  NP: {:.3}m do nariz",
              wb.oew_kg, wb.spec.mtow_kg, wb.x_np_m);
     println!("  Envelope CG: {:.1}%–{:.1}% MAC  |  SM mín: {:.1}%",
              wb.spec.cg_mac_fwd_pct, wb.spec.cg_mac_aft_pct,
@@ -119,7 +138,7 @@ fn main() {
 
     // ── Agente 4: Desempenho ──────────────────────────────────────────────────
     println!("[ AGENTE 4 ] PerformanceAgent");
-    let perf = PerformanceAgent::run(&state, &wing, &prop, wb.spec.mtow_kg, &engine);
+    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine);
     println!("  V_cruzeiro: {:.1}km/h  |  V_stall: {:.1}km/h",
              perf.v_cruise_kmh, perf.v_stall_kmh);
     println!("  RC (SL/MTOW): {:.2}m/s ({:.0}fpm)  |  RC (2500m): {:.2}m/s",
@@ -134,7 +153,7 @@ fn main() {
     println!("[ AGENTE 5 ] StructuralAgent — Longarina e Flutter");
     let wing_mass_kg = cfg.masses.item_mass("asa")
         .expect("item de massa 'asa' ausente na configuração da aeronave");
-    let struc = StructuralAgent::run(&wing, wb.spec.mtow_kg, wing_mass_kg, &req, &cfg.structure);
+    let struc = StructuralAgent::run(wing, design_mtow_kg, wing_mass_kg, &req, &cfg.structure);
     println!("  Fator de carga: {:.1}g limite  |  {:.1}g último (CS-23 Normal)",
              struc.design_load_factor_g, struc.ultimate_load_factor_g);
     println!("  M_raiz (limite): {:.0}N·m  |  (último): {:.0}N·m",
@@ -161,7 +180,7 @@ fn main() {
         .expect("item de massa 'trem_principal' ausente na configuração da aeronave");
     let mass_nose = cfg.masses.item_mass("trem_nariz")
         .expect("item de massa 'trem_nariz' ausente na configuração da aeronave");
-    let gear = LandingGearAgent::run(wb.spec.mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
+    let gear = LandingGearAgent::run(design_mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
     println!("  Tipo: {}",     gear.gear_type);
     println!("  Bitola: {:.2}m  |  Empeno: {:.2}m  |  Anti-tombamento: {:.1}°",
              gear.track_width_m, gear.wheelbase_m, gear.tipover_angle_deg);
@@ -178,7 +197,7 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, &wing, &prop, wb.spec.mtow_kg, &engine);
+    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -229,7 +248,7 @@ fn main() {
         validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
         wing:             wing.clone(),
         propulsion:       prop.clone(),
-        weight:           Some(wb.spec),
+        weight:           Some(wb.spec.clone()),
         performance:      Some(perf),
         structure:        Some(struc),
         landing_gear:     Some(gear),

@@ -28,6 +28,8 @@ fn carrega_os_dois_motores_do_disco() {
 #[test]
 fn carrega_baseline_do_disco_campo_a_campo() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
+    assert_eq!(cfg.sizing.mtow_initial_guess_kg, 1461.0);
+    assert_eq!(cfg.sizing.mtow_max_kg, 1800.0);
     assert_eq!(cfg.wing.span_m, 11.94);
     assert_eq!(cfg.wing.area_m2, 14.2);
     assert_eq!(cfg.wing.taper_ratio, 0.45);

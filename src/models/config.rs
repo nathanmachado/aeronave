@@ -255,7 +255,16 @@ fn require_non_negative(field: &str, v: f64) -> Result<(), ConfigError> {
 /// Valida as invariantes físicas e de consistência de uma `AircraftConfig`
 /// recém-carregada.
 fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
-    require_positive("mtow_guess_kg", cfg.mtow_guess_kg)?;
+    // [sizing]
+    require_positive("sizing.mtow_initial_guess_kg", cfg.sizing.mtow_initial_guess_kg)?;
+    require_positive("sizing.mtow_max_kg", cfg.sizing.mtow_max_kg)?;
+    if cfg.sizing.mtow_initial_guess_kg >= cfg.sizing.mtow_max_kg {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: sizing.mtow_initial_guess_kg ({}) deve ser \
+             menor que sizing.mtow_max_kg ({})",
+            cfg.sizing.mtow_initial_guess_kg, cfg.sizing.mtow_max_kg
+        )));
+    }
 
     // [wing]
     require_positive("wing.span_m", cfg.wing.span_m)?;
@@ -618,7 +627,9 @@ mod tests {
     /// exatamente uma invariante).
     fn aircraft_toml_valido() -> String {
         r#"
-            mtow_guess_kg = 1000.0
+            [sizing]
+            mtow_initial_guess_kg = 1000.0
+            mtow_max_kg = 1800.0
             [wing]
             span_m = 10.0
             area_m2 = 12.0
@@ -689,6 +700,15 @@ mod tests {
     #[test]
     fn aircraft_toml_valido_carrega_sem_erro() {
         parse_aircraft(&aircraft_toml_valido()).expect("TOML de teste deveria ser válido");
+    }
+
+    #[test]
+    fn rejeita_mtow_initial_guess_maior_ou_igual_ao_max() {
+        let toml = aircraft_toml_valido()
+            .replace("mtow_initial_guess_kg = 1000.0", "mtow_initial_guess_kg = 2000.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mtow_initial_guess_kg"), "{err}");
+        assert!(err.to_string().contains("mtow_max_kg"), "{err}");
     }
 
     #[test]

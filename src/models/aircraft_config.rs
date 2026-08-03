@@ -15,11 +15,7 @@ use serde::{Deserialize, Serialize};
 /// Configuração completa da célula — espelha `config/aircraft/*.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AircraftConfig {
-    /// Estimativa inicial de MTOW (kg) usada pelo `AerodynamicsAgent` para
-    /// calcular CL/CD de cruzeiro antes que o `WeightBalanceAgent` feche o
-    /// peso real — ponto de partida do laço iterativo de projeto, não um
-    /// requisito. Campo de topo (fora de qualquer seção `[...]`) do TOML.
-    pub mtow_guess_kg: f64,
+    pub sizing: SizingCfg,
     pub wing: WingCfg,
     pub fuselage: FuselageCfg,
     pub empennage: EmpennageCfg,
@@ -32,6 +28,24 @@ pub struct AircraftConfig {
     /// componente específico da aeronave.
     pub drag: DragCfg,
     pub masses: MassesCfg,
+}
+
+/// Parâmetros do laço de convergência de MTOW (`orchestrator::size_aircraft`,
+/// Task 3.1) — substitui o antigo `mtow_guess_kg` de topo, que era apenas um
+/// palpite inicial nunca realimentado pelo `WeightBalanceAgent` (bug B5: o
+/// `AerodynamicsAgent` calculava CL/CD de cruzeiro com o palpite, enquanto
+/// `PerformanceAgent`/`StructuralAgent`/`LandingGearAgent` usavam o MTOW real
+/// de `wb.spec.mtow_kg` — dois MTOWs diferentes no mesmo relatório).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SizingCfg {
+    /// Estimativa inicial de MTOW (kg) — ponto de partida do laço de ponto
+    /// fixo em `orchestrator::size_aircraft`; não é um requisito.
+    pub mtow_initial_guess_kg: f64,
+    /// Limite superior de MTOW aceito pelo laço de convergência — se o MTOW
+    /// convergido ultrapassar este valor, `size_aircraft` retorna
+    /// `SizingError::MtowExcedido` em vez de aceitar uma aeronave fora do
+    /// envelope estrutural/operacional pretendido.
+    pub mtow_max_kg: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +189,10 @@ pub mod test_fixtures {
     /// real só aparece em `tests/`, carregado do TOML de verdade.
     pub fn config_teste() -> AircraftConfig {
         AircraftConfig {
-            mtow_guess_kg: 1_400.0,
+            sizing: SizingCfg {
+                mtow_initial_guess_kg: 1_400.0,
+                mtow_max_kg: 1_900.0,
+            },
             wing: WingCfg {
                 span_m: 11.0,
                 area_m2: 13.5,

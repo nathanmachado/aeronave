@@ -5,7 +5,9 @@
 # posições/massas em landing_gear.rs e main.rs). Trocar de célula-base
 # agora é trocar este arquivo, não o código.
 
-mtow_guess_kg = 1461.0   # estimativa inicial (laço de projeto) — não é requisito
+[sizing]
+mtow_initial_guess_kg = 1461.0   # estimativa inicial (laço de projeto) — não é requisito
+mtow_max_kg = 1800.0             # limite superior aceito pelo laço de convergência (Task 3.1)
 
 [wing]
 span_m = 11.94

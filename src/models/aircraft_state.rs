@@ -62,7 +62,7 @@ impl AircraftState {
             cd0_misc: cfg.drag.cd0_misc,
             cd0_gear_fixed_increment: cfg.gear.cd0_fixed_increment,
 
-            mtow_kg: cfg.mtow_guess_kg,
+            mtow_kg: cfg.sizing.mtow_initial_guess_kg,
 
             psru_ratio: cfg.propeller.psru_ratio,
             prop_diameter_m: cfg.propeller.diameter_m,
