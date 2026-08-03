@@ -75,19 +75,36 @@ fn main() {
     // para fechar OEW + combustível de missão). Antes desta task, a
     // aerodinâmica usava `sizing.mtow_initial_guess_kg` (um palpite nunca
     // realimentado) enquanto Performance/Structural/LandingGear/
-    // ConstraintChecker usavam `wb.spec.mtow_kg` (o MTOW do cenário
-    // estrutural "4 pax + bagagem + tanque cheio") — dois MTOWs diferentes
-    // no mesmo relatório (bug B5). Agora um único MTOW de projeto convergido
-    // (`design_mtow_kg`) alimenta todos os agentes a jusante.
+    // ConstraintChecker usavam `wb.spec.mtow_kg` — dois MTOWs diferentes
+    // coexistindo sem que nenhum fosse necessariamente correto (bug B5). A
+    // correção NÃO colapsa para um único número: são dois MTOWs com
+    // significados físicos distintos, cada um usado onde faz sentido
+    // (decisão da revisão da Task 3.1 — ver task-3.1-report.md, Finding 3):
+    //   - `design_mtow_kg` (missão, convergido pelo laço): peso da aeronave
+    //     levando exatamente o combustível da missão mínima — alimenta
+    //     PerformanceAgent e os checks de requisito de missão (V_cruzeiro,
+    //     autonomia, alcance).
+    //   - `envelope_mtow_kg` (`wb.spec.mtow_kg`, cenário "4 pax + bagagem +
+    //     tanque cheio"): pior caso de carregamento LEGAL da aeronave —
+    //     alimenta StructuralAgent/LandingGearAgent, que precisam
+    //     dimensionar para a carga máxima que a aeronave pode legalmente
+    //     carregar (tipicamente MAIOR que o MTOW de missão, que não enche o
+    //     tanque até a borda no payload máximo).
     let sized = size_aircraft(&cfg, &engine, &req).unwrap_or_else(|e| {
         eprintln!("Erro ao convergir MTOW: {e}");
         std::process::exit(1);
     });
     let design_mtow_kg = sized.state.mtow_kg;
+    let envelope_mtow_kg = sized.wb.spec.mtow_kg;
 
     println!("[ SIZING ] Convergência de MTOW");
-    println!("  Iterações: {}  |  MTOW inicial: {:.1}kg → MTOW convergido: {:.1}kg",
-             sized.iterations.len(), sized.iterations[0], design_mtow_kg);
+    // `iterations.len() - 1`: o vetor tem N palpites intermediários MAIS o
+    // valor final convergido anexado ao término do laço — o número de
+    // PASSAGENS do laço de ponto fixo é `len() - 1`, não `len()`.
+    println!("  Iterações: {}  |  MTOW inicial: {:.1}kg → MTOW missão (convergido): {:.1}kg",
+             sized.iterations.len() - 1, sized.iterations[0], design_mtow_kg);
+    println!("  MTOW envelope (cenário máximo: 4 pax + bagagem + tanque cheio): {:.1}kg",
+             envelope_mtow_kg);
     println!("  Combustível de missão (autonomia mínima + reserva): {:.1}kg\n",
              sized.mission_fuel_kg);
 
@@ -153,7 +170,9 @@ fn main() {
     println!("[ AGENTE 5 ] StructuralAgent — Longarina e Flutter");
     let wing_mass_kg = cfg.masses.item_mass("asa")
         .expect("item de massa 'asa' ausente na configuração da aeronave");
-    let struc = StructuralAgent::run(wing, design_mtow_kg, wing_mass_kg, &req, &cfg.structure);
+    // Estrutura dimensiona para o pior caso de carga LEGAL (envelope), não
+    // para o MTOW de missão — ver comentário do bloco [ SIZING ] acima.
+    let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure);
     println!("  Fator de carga: {:.1}g limite  |  {:.1}g último (CS-23 Normal)",
              struc.design_load_factor_g, struc.ultimate_load_factor_g);
     println!("  M_raiz (limite): {:.0}N·m  |  (último): {:.0}N·m",
@@ -180,7 +199,10 @@ fn main() {
         .expect("item de massa 'trem_principal' ausente na configuração da aeronave");
     let mass_nose = cfg.masses.item_mass("trem_nariz")
         .expect("item de massa 'trem_nariz' ausente na configuração da aeronave");
-    let gear = LandingGearAgent::run(design_mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
+    // Trem de pouso também dimensiona para o envelope estrutural (mesma
+    // razão da StructuralAgent acima) — as cargas de pouso/solo devem
+    // suportar o pior caso legal, não o MTOW de missão.
+    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
     println!("  Tipo: {}",     gear.gear_type);
     println!("  Bitola: {:.2}m  |  Empeno: {:.2}m  |  Anti-tombamento: {:.1}°",
              gear.track_width_m, gear.wheelbase_m, gear.tipover_angle_deg);

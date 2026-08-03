@@ -38,7 +38,12 @@ psru_ratio = 1.867
 psru_efficiency = 0.97
 
 [fuel_system]
-# 260 L: dimensionado pela convergência de MTOW (Task 3.1) — missão de 8h exige ~241 L; margem ~8%
+# 260 L: dimensionado pela convergência de MTOW (Task 3.1) — no MTOW
+# convergido (~1.529,9 kg) a missão de 8h exige 243,92 L; margem de
+# 16,08 L (~6,6%). (O tanque original de 240 L ficava 3,92 L / 1,6% curto
+# no ponto convergido — não os "0,73 L / 0,3%" reportados inicialmente,
+# que vinham de um transiente da checagem por-iteração, corrigido na
+# revisão da Task 3.1.)
 capacity_l = 260.0
 
 [gear]

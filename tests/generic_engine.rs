@@ -147,16 +147,35 @@ fn massa_do_motor_afeta_oew_e_cg() {
 // ATUALIZAÇÃO (Task 3.1 + correção do controller): este teste rodava a um
 // MTOW fixo (o palpite `sizing.mtow_initial_guess_kg` = 1.461 kg, nunca
 // realimentado — bug B5). A Task 3.1 fechou o laço de convergência
-// (`orchestrator::size_aircraft`) e revelou que, ao MTOW real (~1.530 kg),
-// o tanque de 240 L original ficava 0,3% curto (achado NEEDS_CONTEXT — ver
+// (`orchestrator::size_aircraft`) e revelou que, ao MTOW convergido
+// (~1.529,9 kg), o tanque de 240 L original ficava 3,92 L / 1,6% curto no
+// PONTO CONVERGIDO (achado NEEDS_CONTEXT — ver
 // `orchestrator_toyota_240l_insuficiente_regressao_sintetica` abaixo, que
 // preserva essa descoberta como regressão). O controller decidiu a
 // remediação de projeto (não deste código): `fuel_system.capacity_l`
-// 240 → 260 L em `config/aircraft/baseline_4seat.toml`, com margem ~8% no
-// MTOW convergido. Este teste agora roda o pipeline completo e honesto
-// (`size_aircraft`, não mais o palpite fixo) contra a aeronave-base real.
+// 240 → 260 L em `config/aircraft/baseline_4seat.toml`, dando 16,08 L
+// (~6,6%) de margem sobre os 243,92 L exigidos no MTOW convergido. Este
+// teste agora roda o pipeline completo e honesto (`size_aircraft`, não mais
+// o palpite fixo) contra a aeronave-base real.
+//
+// ATUALIZAÇÃO 2 (revisão da Task 3.1, achado de teste quase-tautológico):
+// dado `Ok(sized)`, `endurance_h >= 8.0` é garantido por construção pela
+// checagem de aceite do laço (`fuel_req_l <= capacity_l · 1.001`) dentro de
+// ~0,1% — ver a derivação algébrica no comentário de `size_aircraft` em
+// `src/orchestrator.rs`. `range_km >= 2.240` é a MESMA asserção (range =
+// v_cruise · endurance, uma constante multiplicativa da mesma desigualdade).
+// Ou seja: este teste não está verificando "a física dá 8h", está verificando
+// "o laço aceitou" — que já é garantido por `size_aircraft` não ter retornado
+// `Err`. Os asserts abaixo são mantidos ESTRITOS de propósito (documentam o
+// requisito do projeto, não uma tolerância mais fraca), mas o teste foi
+// renomeado para refletir o que ele de fato mede — autonomia/alcance
+// derivados da capacidade do tanque no MTOW de projeto, não uma verificação
+// independente do laço. A margem REAL (a que de fato distingue "cabe" de
+// "não cabe") está no tanque, não na autonomia — ver
+// `margem_de_combustivel_no_mtow_convergido` logo abaixo, que pina o número
+// que realmente varia.
 #[test]
-fn autonomia_minima_8_horas() {
+fn autonomia_e_alcance_derivados_do_tanque_no_mtow_convergido() {
     let cfg   = baseline_state();
     let req   = baseline_mission();
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -171,10 +190,64 @@ fn autonomia_minima_8_horas() {
     println!("BSFC: {:.0} g/kWh", sized.prop.bsfc_cruise_gkwh);
     println!("Eficiência hélice: {:.3}", sized.prop.prop_efficiency);
 
+    // Requisitos do projeto — NÃO enfraquecidos (mesmos limiares desde a
+    // Task 0.3). Ver comentário acima: dado `Ok`, isto é garantido por
+    // construção pelo laço — mantido estrito como documentação do requisito.
     assert!(sized.prop.endurance_h >= 8.0,
         "Autonomia {:.2} h abaixo do requisito de 8 h", sized.prop.endurance_h);
     assert!(sized.prop.range_km >= 2_240.0,
         "Alcance {:.0} km abaixo do requisito de 2.240 km", sized.prop.range_km);
+}
+
+/// Achado da revisão da Task 3.1 (teste quase-tautológico acima): a margem
+/// que de fato distingue uma missão viável de uma inviável é a folga entre
+/// `fuel_system.capacity_l` e o combustível exigido pela missão NO PONTO
+/// CONVERGIDO — não a autonomia em si (que é derivada da mesma folga por uma
+/// transformação algébrica, sempre ≥ requisito quando `Ok`). Este teste pina
+/// essa margem diretamente: no MTOW convergido (~1.529,9 kg), a missão exige
+/// 243,92 L; o tanque de 260 L sobra 16,08 L (~6,6%). Nota importante: a
+/// autonomia NO PESO DE PROJETO é exatamente 8,0h por construção (margem
+/// zero no ponto de missão — é assim que o MTOW convergiu: `fuel_kg` é
+/// calculado exatamente para `endurance_min_h`, nem mais nem menos); a
+/// margem real do projeto está inteiramente no tanque (a diferença entre
+/// `capacity_l` e o combustível de missão), não na autonomia reportada a
+/// tanque cheio (`prop.endurance_h`, que é maior que 8h só porque o tanque
+/// tem mais litros do que a missão mínima exige).
+#[test]
+fn margem_de_combustivel_no_mtow_convergido() {
+    let cfg   = baseline_state();
+    let req   = baseline_mission();
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized = size_aircraft(&cfg, &toyota, &req)
+        .expect("aeronave-base + Toyota deveria convergir com o tanque de 260 L");
+
+    let fuel_req_l_convergido = sized.mission_fuel_kg / toyota.fuel.density_kg_per_l;
+    let margem_l = cfg.fuel_system.capacity_l - fuel_req_l_convergido;
+    let margem_pct = margem_l / fuel_req_l_convergido * 100.0;
+
+    println!(
+        "combustível de missão convergido: {fuel_req_l_convergido:.6} L | capacidade: {:.1} L | \
+         margem: {margem_l:.6} L ({margem_pct:.4}%)",
+        cfg.fuel_system.capacity_l
+    );
+
+    let margem_pre_pin_l = 16.084075;
+    assert!((margem_l - margem_pre_pin_l).abs() < 0.1,
+        "margem de combustível {margem_l:.4} L divergiu do valor medido na Task 3.1 \
+         {margem_pre_pin_l:.4} L");
+    assert!((margem_pct - 6.5941).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido na Task 3.1 ~6.5941%");
+
+    // Autonomia exatamente no requisito no PESO DE PROJETO (não a tanque
+    // cheio, que sobra pelos 16,08 L de margem acima) — confirma que
+    // `fuel_kg` foi calculado para bater exatamente `endurance_min_h`, sem
+    // folga escondida na física, só no tanque.
+    let endurance_no_peso_projeto_h =
+        fuel_req_l_convergido / sized.prop.fc_cruise_lph * (1.0 - req.fuel_reserve_fraction);
+    assert!((endurance_no_peso_projeto_h - req.endurance_min_h).abs() < 1e-6,
+        "autonomia no peso de projeto {endurance_no_peso_projeto_h:.6} h deveria bater \
+         EXATAMENTE o requisito {:.6} h (é assim que fuel_kg foi calculado — margem zero \
+         por construção neste ponto)", req.endurance_min_h);
 }
 
 // Regressão do resolvedor coarse-to-fine de `max_level_speed_ms` (bissecção
@@ -220,9 +293,12 @@ fn toyota_v_max_regressao_310kmh() {
 // ATUALIZAÇÃO (Task 3.1 + correção do controller): `size_aircraft` fecha o
 // laço de convergência; ao rodar contra a aeronave-base real, o MTOW honesto
 // converge para ~1.529,9 kg, revelando que o tanque original de 240 L
-// ficava 0,3% curto para a missão (achado NEEDS_CONTEXT documentado na
-// primeira rodada desta task — ver `task-3.1-report.md`). O controller
-// decidiu a remediação (fora deste código): `fuel_system.capacity_l`
+// ficava 3,92 L / 1,6% curto no PONTO CONVERGIDO (achado NEEDS_CONTEXT
+// documentado na primeira rodada desta task — ver `task-3.1-report.md`; os
+// "0,73 L / 0,3%" reportados originalmente eram um artefato de a checagem
+// de aceite rodar a cada iteração em vez de só no ponto convergido, corrigido
+// na revisão desta task — ver `size_aircraft` em `src/orchestrator.rs`). O
+// controller decidiu a remediação (fora deste código): `fuel_system.capacity_l`
 // 240 → 260 L. Com essa correção, o MTOW converge e este teste passa a
 // pinar os números do pipeline REAL (via `size_aircraft`, não mais o
 // palpite fixo) — a nova "regressão de ouro" desta task.
@@ -278,6 +354,47 @@ fn golden_toyota_baseline_regressao_task_2_1() {
          {v_max_pos_task_3_1_kmh:.6} km/h", );
 }
 
+/// Achado da revisão da Task 3.1 (checagem de aceite rodando a cada
+/// iteração, em vez de só no ponto convergido — corrigido em
+/// `src/orchestrator.rs::size_aircraft_with_max_iters`): demonstrado que um
+/// palpite inicial de 1.700 kg disparava `CombustivelInsuficiente` espúrio
+/// (260,7 L, transiente de uma iteração intermediária mais pesada) mesmo
+/// quando o ponto fixo real da aeronave-base+Toyota precisa de só 243,92 L
+/// — ou seja, o veredito de viabilidade dependia do palpite inicial, que é
+/// só um ponto de partida numérico, não um dado de projeto. Este teste
+/// prova que, com a correção, o MTOW convergido é o MESMO
+/// (dentro da tolerância de convergência do laço, 0,5 kg) qualquer que seja
+/// o palpite inicial — incluindo palpites próximos do limite superior
+/// `sizing.mtow_max_kg` (1.800 kg no baseline).
+#[test]
+fn convergencia_independe_do_palpite_inicial() {
+    let base_cfg = baseline_state();
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let req = baseline_mission();
+
+    let palpites = [1_461.0, 1_600.0, 1_700.0, 1_790.0];
+    let mut convergidos = Vec::with_capacity(palpites.len());
+
+    for &palpite in &palpites {
+        let mut cfg = base_cfg.clone();
+        cfg.sizing.mtow_initial_guess_kg = palpite;
+        let sized = size_aircraft(&cfg, &toyota, &req).unwrap_or_else(|e| {
+            panic!("palpite inicial {palpite} kg deveria convergir (Ok), obtido erro: {e}")
+        });
+        println!("palpite {palpite:.0} kg → convergido {:.6} kg", sized.state.mtow_kg);
+        convergidos.push(sized.state.mtow_kg);
+    }
+
+    let referencia = convergidos[0]; // palpite 1.461 kg (o do baseline real)
+    for (palpite, mtow) in palpites.iter().zip(convergidos.iter()) {
+        assert!((mtow - referencia).abs() < 0.5,
+            "palpite inicial {palpite} kg convergiu para {mtow:.4} kg, divergindo da \
+             referência {referencia:.4} kg (palpite 1.461 kg) por mais de 0,5 kg — o MTOW \
+             convergido não deveria depender do palpite inicial (achado da revisão da \
+             Task 3.1)");
+    }
+}
+
 // ─── TASK 3.1: CONVERGÊNCIA DE MTOW — ACHADO E CORREÇÃO ────────────────────────
 //
 // `orchestrator::size_aircraft` fecha o laço de ponto fixo entre
@@ -293,17 +410,22 @@ fn golden_toyota_baseline_regressao_task_2_1() {
 // real com o tanque ORIGINAL de 240 L era fuel-inviável: o MTOW converge
 // para ~1.529,9 kg (bem acima do palpite de 1.461 kg — que já era menor que
 // só OEW + payload, 885 + 440 = 1.325 kg, antes mesmo de somar combustível:
-// ele SEMPRE precisaria subir), e a esse MTOW a missão exige 240,73 L contra
-// os 240,0 L de capacidade — 0,73 L (0,3%) a mais do que o tanque original
-// carregava.
+// ele SEMPRE precisaria subir), e no PONTO CONVERGIDO a missão exige
+// 243,92 L contra os 240,0 L de capacidade — 3,92 L (1,6%) a mais do que o
+// tanque original carregava. (Correção da revisão desta task: o número
+// originalmente reportado, 240,73 L / 0,3%, vinha de a checagem de aceite
+// rodar a cada iteração — capturava um transiente do laço, não o ponto fixo.
+// Depois de mover a checagem para rodar só no ponto convergido, o valor real
+// é 243,92 L / 1,6% — ver `size_aircraft` em `src/orchestrator.rs`.)
 //
 // O controller decidiu a remediação de PROJETO (não deste código):
 // `fuel_system.capacity_l` 240 → 260 L em
-// `config/aircraft/baseline_4seat.toml`, dando ~8% de margem sobre os
-// ~241 L necessários. Com essa correção, `size_aircraft` converge
-// normalmente para a aeronave-base real (ver `golden_toyota_baseline_regressao_task_2_1`
-// e `autonomia_minima_8_horas` acima, ambos atualizados para rodar o
-// pipeline completo via `size_aircraft`).
+// `config/aircraft/baseline_4seat.toml`, dando 16,08 L (~6,6%) de margem
+// sobre os 243,92 L necessários no ponto convergido. Com essa correção,
+// `size_aircraft` converge normalmente para a aeronave-base real (ver
+// `golden_toyota_baseline_regressao_task_2_1` e
+// `autonomia_e_alcance_derivados_do_tanque_no_mtow_convergido` acima, ambos
+// atualizados para rodar o pipeline completo via `size_aircraft`).
 //
 // O teste abaixo preserva a cobertura de regressão do caminho
 // `CombustivelInsuficiente` contra o motor Toyota real SEM depender de um
@@ -311,7 +433,10 @@ fn golden_toyota_baseline_regressao_task_2_1() {
 // disco e sobrescreve `capacity_l` de volta para 240 L em código (mutação
 // sintética, não um arquivo checked-in) — assim o achado original continua
 // coberto por teste mesmo depois que `baseline_4seat.toml` passou a usar
-// 260 L.
+// 260 L. O `necessario_l` pinado abaixo é o valor no PONTO CONVERGIDO (não
+// um transiente): como a capacidade do tanque não influencia a trajetória
+// de convergência (só a checagem de aceite no final — ver
+// `size_aircraft`), é o MESMO número medido com o tanque real de 260 L.
 #[test]
 fn orchestrator_toyota_240l_insuficiente_regressao_sintetica() {
     let toml_real = std::fs::read_to_string(config_path("config/aircraft/baseline_4seat.toml"))
@@ -338,7 +463,7 @@ fn orchestrator_toyota_240l_insuficiente_regressao_sintetica() {
         SizingError::CombustivelInsuficiente { necessario_l, capacidade_l } => {
             assert!((capacidade_l - 240.0).abs() < 1e-9,
                 "capacidade_l deveria ser 240.0 (mutação sintética), obtido {capacidade_l}");
-            let necessario_pre_pin_l = 240.73219593771384;
+            let necessario_pre_pin_l = 243.91592468340414;
             assert!((necessario_l - necessario_pre_pin_l).abs() < 1e-3,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 3.1 \
                  {necessario_pre_pin_l:.6} L");
@@ -358,13 +483,17 @@ fn orchestrator_toyota_240l_insuficiente_regressao_sintetica() {
 // esta célula (ver `trocar_motor_muda_resultado_sem_mudar_codigo` acima —
 // `cruise_feasible = false`). Ao convergir o MTOW honestamente, isso se
 // reflete numa inviabilidade de combustível muito mais severa que a do
-// Toyota (não é um caso de borda de 0,3%): o rpm de melhor esforço
+// Toyota (não é um caso de borda de 1,6%): o rpm de melhor esforço
 // encontrado por `search_cruise_rpm` para tentar (sem sucesso) sustentar a
 // velocidade mínima exigida consome combustível muito acima da capacidade do
 // tanque. O aumento do tanque para 260 L (correção do controller para o
-// caso Toyota) não resolve o caso Rotax — 404,3 L necessários é quase o
-// dobro da capacidade nova, não uma borda de alguns litros — então este
-// teste roda contra a aeronave-base REAL (não uma mutação sintética).
+// caso Toyota) não resolve o caso Rotax — 409,3 L necessários é ~1,57× a
+// capacidade nova, não uma borda de alguns litros — então este teste roda
+// contra a aeronave-base REAL (não uma mutação sintética). (O valor pinado
+// abaixo mudou de 404,3 L para 409,3 L na revisão da Task 3.1: o número
+// antigo era o transiente da PRIMEIRA iteração, calculado quando a checagem
+// de aceite ainda rodava a cada passo — corrigido para o valor no PONTO
+// CONVERGIDO, ver Finding 1 do relatório da revisão.)
 #[test]
 fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
     let cfg = baseline_state();
@@ -380,7 +509,7 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
         SizingError::CombustivelInsuficiente { necessario_l, capacidade_l } => {
             assert!((capacidade_l - 260.0).abs() < 1e-9,
                 "capacidade_l divergiu do config/aircraft/baseline_4seat.toml atual ({capacidade_l})");
-            let necessario_pre_pin_l = 404.3027554583842;
+            let necessario_pre_pin_l = 409.32412997472005;
             assert!((necessario_l - necessario_pre_pin_l).abs() < 1e-2,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 3.1 \
                  {necessario_pre_pin_l:.6} L");

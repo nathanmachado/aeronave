@@ -82,7 +82,7 @@ impl std::fmt::Display for SizingError {
         match self {
             SizingError::NaoConvergiu { ultimo_mtow } => write!(
                 f,
-                "laço de convergência de MTOW não convergiu após {MAX_ITERATIONS} iterações \
+                "laço de convergência de MTOW não convergiu dentro do limite de iterações \
                  (último valor: {ultimo_mtow:.1} kg)"
             ),
             SizingError::MtowExcedido { mtow, limite } => write!(
@@ -112,18 +112,44 @@ impl std::error::Error for SizingError {}
 /// candidato da iteração, roda `AerodynamicsAgent` → `PropulsionAgent` →
 /// `WeightBalanceAgent` nessa ordem (a mesma ordem de `main.rs`), calcula o
 /// combustível de missão (autonomia mínima + reserva, não o tanque cheio) e
-/// fecha um novo candidato de MTOW. Converge quando `|novo - mtow| < 0.5 kg`;
-/// falha se ultrapassar 50 iterações, se o combustível necessário exceder a
-/// capacidade do tanque, ou se o MTOW ultrapassar `sizing.mtow_max_kg`.
+/// fecha um novo candidato de MTOW. Converge quando `|novo - mtow| < 0.5 kg`.
+///
+/// As checagens de aceite (`CombustivelInsuficiente`, `MtowExcedido`) só são
+/// avaliadas no PONTO CONVERGIDO — nunca em iterações intermediárias. Rodar
+/// a checagem a cada iteração faria o veredito depender do palpite inicial
+/// (`sizing.mtow_initial_guess_kg`): um palpite mais pesado que o MTOW real
+/// passa por candidatos intermediários mais altos, cujo combustível
+/// transiente pode furar a capacidade do tanque mesmo quando o ponto fixo
+/// (o único MTOW que efetivamente descreve a aeronave) cabe perfeitamente
+/// (achado da revisão desta task: palpite 1.700 kg disparava
+/// `CombustivelInsuficiente` com 260,7 L espúrios, enquanto o ponto fixo real
+/// precisa de só 243,92 L). Só há uma checagem por-iteração — um bail-out de
+/// divergência (`novo > 2× mtow_max_kg`) — que existe apenas para não gastar
+/// as `max_iters` completas numa série que já visivelmente não vai convergir
+/// dentro do envelope.
 pub fn size_aircraft(
     cfg: &AircraftConfig,
     engine: &EngineSpec,
     req: &Requirements,
 ) -> Result<SizedAircraft, SizingError> {
+    size_aircraft_with_max_iters(cfg, engine, req, MAX_ITERATIONS)
+}
+
+/// Mesmo laço de `size_aircraft`, com o número máximo de iterações
+/// parametrizável — existe só para que `SizingError::NaoConvergiu` seja
+/// testável sem depender de uma configuração real que genuinamente precise
+/// de mais de 50 iterações para não convergir (o que seria artificial de
+/// construir). `size_aircraft` delega para cá com `MAX_ITERATIONS` (50).
+pub(crate) fn size_aircraft_with_max_iters(
+    cfg: &AircraftConfig,
+    engine: &EngineSpec,
+    req: &Requirements,
+    max_iters: u32,
+) -> Result<SizedAircraft, SizingError> {
     let mut mtow = cfg.sizing.mtow_initial_guess_kg;
     let mut iterations: Vec<f64> = Vec::new();
 
-    for _ in 0..MAX_ITERATIONS {
+    for _ in 0..max_iters {
         iterations.push(mtow);
 
         let mut state = AircraftState::from_config(cfg);
@@ -134,24 +160,25 @@ pub fn size_aircraft(
 
         // Combustível exigido pela MISSÃO (autonomia mínima requerida, com
         // reserva) — não o tanque cheio (isso é `state.fuel_capacity_l`,
-        // usado só para a checagem de capacidade abaixo).
+        // usado só para a checagem de capacidade abaixo). Calculado aqui
+        // (a cada iteração) porque `fuel_kg` alimenta `novo`, mas só é
+        // CHECADO contra a capacidade do tanque no ponto convergido, abaixo.
         let fuel_req_l =
             prop.fc_cruise_lph * req.endurance_min_h / (1.0 - req.fuel_reserve_fraction);
-
-        if fuel_req_l > cfg.fuel_system.capacity_l * FUEL_CAPACITY_SLACK {
-            return Err(SizingError::CombustivelInsuficiente {
-                necessario_l: fuel_req_l,
-                capacidade_l: cfg.fuel_system.capacity_l,
-            });
-        }
-
         let fuel_kg = fuel_req_l * engine.fuel.density_kg_per_l;
 
         let wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req);
 
         let novo = wb.oew_kg + req.payload_kg() + fuel_kg;
 
-        if novo > cfg.sizing.mtow_max_kg {
+        // Bail-out de DIVERGÊNCIA (não é a checagem de aceite): se o
+        // candidato já dispara para mais do dobro do limite configurado, a
+        // série não vai convergir dentro do envelope de projeto — não vale
+        // a pena esperar `max_iters` para descobrir isso. Roda a cada
+        // iteração de propósito (ao contrário das checagens de aceite
+        // abaixo), porque seu objetivo é cortar séries que claramente não
+        // vão convergir, não avaliar o resultado final.
+        if novo > 2.0 * cfg.sizing.mtow_max_kg {
             return Err(SizingError::MtowExcedido {
                 mtow: novo,
                 limite: cfg.sizing.mtow_max_kg,
@@ -159,6 +186,21 @@ pub fn size_aircraft(
         }
 
         if (novo - mtow).abs() < CONVERGENCE_TOL_KG {
+            // Convergiu — as checagens de ACEITE rodam aqui, uma única vez,
+            // sobre o ponto fixo (não sobre um transiente intermediário).
+            if fuel_req_l > cfg.fuel_system.capacity_l * FUEL_CAPACITY_SLACK {
+                return Err(SizingError::CombustivelInsuficiente {
+                    necessario_l: fuel_req_l,
+                    capacidade_l: cfg.fuel_system.capacity_l,
+                });
+            }
+            if novo > cfg.sizing.mtow_max_kg {
+                return Err(SizingError::MtowExcedido {
+                    mtow: novo,
+                    limite: cfg.sizing.mtow_max_kg,
+                });
+            }
+
             iterations.push(novo);
             state.mtow_kg = novo;
             return Ok(SizedAircraft {
@@ -289,6 +331,43 @@ mod tests {
             other => panic!(
                 "esperava SizingError::MtowExcedido para mtow_max_kg=1000 com config \
                  pesada, obtido: {other:?}"
+            ),
+        }
+    }
+
+    /// Achado da revisão: `NaoConvergiu` não tinha cobertura de teste (a
+    /// fixture sintética converge em ~9 iterações, bem abaixo de
+    /// `MAX_ITERATIONS`=50, então nenhum teste existente conseguia disparar
+    /// esgotamento sem ser artificial). `size_aircraft_with_max_iters`
+    /// existe exatamente para isto: força `max_iters=1`, que não dá tempo
+    /// nenhum do laço convergir, exercitando o branch de erro sem inventar
+    /// uma configuração artificialmente lenta para convergir.
+    #[test]
+    fn max_iters_esgotado_retorna_nao_convergiu() {
+        let cfg = config_teste();
+        let engine = engine_teste();
+        let req = requisitos_teste();
+
+        let err = size_aircraft_with_max_iters(&cfg, &engine, &req, 1)
+            .expect_err("com max_iters=1 o laço não tem chance de convergir \
+                         (a fixture leva ~9 iterações normalmente)");
+
+        println!("erro (esperado): {err}");
+        match err {
+            SizingError::NaoConvergiu { ultimo_mtow } => {
+                assert!(ultimo_mtow.is_finite() && ultimo_mtow > 0.0,
+                    "ultimo_mtow ({ultimo_mtow}) deveria ser um valor finito e positivo");
+                // Com max_iters=1, o laço executa uma única iteração (o
+                // palpite inicial relaxado uma vez em direção a `novo`) e
+                // esgota antes de reavaliar convergência — `ultimo_mtow`
+                // deveria ter se movido do palpite inicial, não ficado
+                // parado nele (prova de que a iteração de fato rodou).
+                assert!((ultimo_mtow - cfg.sizing.mtow_initial_guess_kg).abs() > 1e-6,
+                    "ultimo_mtow ({ultimo_mtow}) deveria ter se movido do palpite inicial \
+                     ({}) após uma iteração", cfg.sizing.mtow_initial_guess_kg);
+            }
+            other => panic!(
+                "esperava SizingError::NaoConvergiu para max_iters=1, obtido: {other:?}"
             ),
         }
     }

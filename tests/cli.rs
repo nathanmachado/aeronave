@@ -27,9 +27,9 @@ fn manifest_dir() -> PathBuf {
 /// `tests/generic_engine.rs`,
 /// `orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l`), o Rotax
 /// 915iS — motor fraco demais para sustentar 280 km/h com esta célula —
-/// falha por combustível insuficiente (precisa de ~404 L, o tanque tem
+/// falha por combustível insuficiente (precisa de ~409 L, o tanque tem
 /// 260 L — não é uma borda de alguns litros como o caso Toyota original,
-/// é quase o dobro) ANTES de gerar o JSON (que só é escrito após o sizing
+/// é ~1,57×) ANTES de gerar o JSON (que só é escrito após o sizing
 /// convergir). O teste verifica os dois pontos honestos: (1) `--engine`
 /// trocou qual motor é usado (visível no cabeçalho impresso em stdout antes
 /// do erro) — ponto real da Task 2.3; (2) o binário sai com erro e uma
@@ -58,7 +58,7 @@ fn engine_flag_troca_motor_e_rotax_falha_honestamente_por_combustivel() {
          usado, mesmo que o sizing falhe depois — ver comentário acima):\n{stdout}");
 
     assert!(!output.status.success(),
-        "binário deveria sair com erro: o Rotax 915iS precisa de ~404 L contra os 260 L do \
+        "binário deveria sair com erro: o Rotax 915iS precisa de ~409 L contra os 260 L do \
          tanque configurado — inviável por uma margem grande, não um caso de borda");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -107,16 +107,20 @@ fn engine_inexistente_gera_erro_amigavel() {
 ///
 /// NOTA (Task 3.1): a primeira rodada desta task descobriu que, ao fechar o
 /// laço de convergência honestamente (`orchestrator::size_aircraft`), o MTOW
-/// real da aeronave-base + Toyota (~1.530 kg) exigia mais combustível
-/// (240,73 L) do que o tanque original de 240,0 L — este teste chegou a
-/// esperar falha (achado NEEDS_CONTEXT, ver `task-3.1-report.md`). O
-/// controller decidiu a remediação de projeto: `fuel_system.capacity_l`
-/// 240 → 260 L (`config/aircraft/baseline_4seat.toml`), dando ~8% de
+/// real da aeronave-base + Toyota (~1.529,9 kg) exigia mais combustível
+/// (243,92 L no ponto convergido) do que o tanque original de 240,0 L —
+/// este teste chegou a esperar falha (achado NEEDS_CONTEXT, ver
+/// `task-3.1-report.md`). O controller decidiu a remediação de projeto:
+/// `fuel_system.capacity_l` 240 → 260 L
+/// (`config/aircraft/baseline_4seat.toml`), dando 16,08 L (~6,6%) de
 /// margem. Com essa correção, o binário volta a rodar com sucesso sem
 /// argumentos — o teste reverte à expectativa original (exit 0, JSON com o
 /// motor padrão). A cobertura de regressão do achado original (tanque de
 /// 240 L, mutação sintética) continua em
 /// `tests/generic_engine.rs::orchestrator_toyota_240l_insuficiente_regressao_sintetica`.
+/// (Nota da revisão: o número originalmente reportado aqui, 240,73 L / 0,3%,
+/// era um transiente de a checagem de aceite rodar a cada iteração —
+/// corrigido para o valor no ponto convergido, 243,92 L / 1,6%.)
 #[test]
 fn sem_argumentos_usa_motor_padrao_toyota() {
     let out_path = std::env::temp_dir().join(format!(
