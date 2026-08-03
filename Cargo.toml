@@ -7,5 +7,13 @@ description = "Modelagem matemática de aeronave experimental 4 lugares — Toyo
 [dependencies]
 clap = { version = "4.6.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip` (Task 6.1, achado do teste de round-trip do schema
+# v4): sem essa feature, serde_json usa um parser de ponto flutuante mais
+# rápido mas NÃO byte-exato — `serialize` → `deserialize` pode devolver um
+# f64 de último-bit diferente do original (confirmado em teste: iterações
+# de MTOW do laço de convergência não batiam byte a byte após ida e volta
+# pelo JSON). Para um contrato versionado que o CAD desserializa de volta,
+# perda silenciosa de precisão é pior que o custo (marginal, load-time) do
+# parser exato.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "0.8"

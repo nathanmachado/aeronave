@@ -1,4 +1,57 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::agents::constraint_diagram::WingLoadingReport;
+
+/// (De)serialização de `StructuralSpec::fatigue_life_cycles` (Task 6.1,
+/// achado da própria checagem de round-trip deste schema).
+///
+/// `agents::structural::fatigue_life_cycles` retorna legitimamente
+/// `f64::INFINITY` quando a tensão equivalente fica abaixo do limite de
+/// fadiga (Se) — "vida infinita" é o resultado físico correto do modelo de
+/// Goodman, não um erro. Mas o serializador padrão de `serde_json`
+/// (RFC 8259 não tem representação de infinito/NaN em JSON) converte
+/// `Infinity` silenciosamente para `null`, o que quebra a desserialização
+/// de volta em `f64` (`null` não é um `f64` válido) — um consumidor de CAD
+/// batendo `serde_json::from_str::<AircraftReport>` no schema oficial
+/// falharia sempre que a longarina caísse abaixo do limite de fadiga.
+/// Este módulo serializa o caso infinito explicitamente como a string
+/// `"infinita"` (documentado em `docs/aircraft_spec.schema.md`) em vez de
+/// deixar o valor virar `null` sem aviso.
+mod fatigue_life_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if value.is_infinite() && *value > 0.0 {
+            serializer.serialize_str("infinita")
+        } else {
+            value.serialize(serializer)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<f64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum NumOrInfinita {
+            Num(f64),
+            Str(String),
+        }
+        match NumOrInfinita::deserialize(deserializer)? {
+            NumOrInfinita::Num(n) => Ok(n),
+            NumOrInfinita::Str(s) if s == "infinita" => Ok(f64::INFINITY),
+            NumOrInfinita::Str(s) => Err(serde::de::Error::custom(format!(
+                "valor inesperado para fatigue_life_cycles: '{s}' (esperado um número ou \"infinita\")"
+            ))),
+        }
+    }
+}
 
 /// Saída do AerodynamicsAgent
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,7 +301,10 @@ pub struct StructuralSpec {
     pub design_dive_speed_kmh: f64,
     /// Velocidade de manobra VA (km/h) — CS 23.335, calculada com VS1 (limpa)
     pub va_kmh: f64,
-    /// Vida em fadiga estimada (ciclos de voo)
+    /// Vida em fadiga estimada (ciclos de voo) — pode ser infinita (abaixo
+    /// do limite de fadiga do material); serializada como a string
+    /// `"infinita"` nesse caso, não `null` — ver `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
     pub fatigue_life_cycles: f64,
     /// Verificação: flutter OK?
     pub flutter_ok: bool,
@@ -451,13 +507,103 @@ pub struct ElectricalSpec {
     pub margin_continuous_pct: f64,
 }
 
+/// Versão do schema JSON (`AircraftReport`) — contrato com o time de CAD
+/// (`docs/aircraft_spec.schema.md`). Política de versionamento:
+///   - Bump de MINOR (ex.: 4.0 → 4.1): mudança aditiva (novo campo opcional,
+///     novo bloco) — consumidores existentes continuam funcionando sem
+///     alteração.
+///   - Bump de MAJOR (ex.: 4.0 → 5.0): mudança que quebra compatibilidade
+///     (renomeia/remove campo, muda tipo ou unidade de um campo existente)
+///     — consumidores precisam ser atualizados.
+///
+/// v4.0 (Task 6.1): adiciona `schema_version`, `geometry`, `sizing`,
+/// `fidelity`, `warnings` ao relatório v3 (que só tinha `revision` como
+/// string de versão livre, sem política declarada).
+pub const SCHEMA_VERSION: &str = "4.0";
+
+/// Geometria consolidada para consumo do CAD paramétrico — todas as
+/// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
+/// `docs/aircraft_spec.schema.md` para a convenção de eixos completa).
+/// Campos que já existiam internamente (`WeightBalanceOutput`,
+/// `AircraftConfig`) mas não eram ecoados no JSON antes da Task 6.1.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeometrySpec {
+    /// Posição do bordo de ataque da raiz da asa (m do datum) — única fonte
+    /// desta posição na configuração (`[wing].le_root_x_m`).
+    pub wing_le_root_x_m: f64,
+    /// Corda na raiz da asa (m).
+    pub chord_root_m: f64,
+    /// Corda na ponta da asa (m).
+    pub chord_tip_m: f64,
+    /// Corda Aerodinâmica Média — MAC (m).
+    pub mac_m: f64,
+    /// Posição do bordo de ataque do MAC (m do datum).
+    pub mac_le_x_m: f64,
+    /// Distância da raiz à seção do MAC, medida na envergadura (m) —
+    /// `y_MAC = (b/6)·(1+2λ)/(1+λ)` (ver `agents::weight_balance::
+    /// mac_spanwise_pos`).
+    pub y_mac_m: f64,
+    /// Comprimento total da fuselagem (m).
+    pub fuselage_length_m: f64,
+    /// Largura interna da cabine (m).
+    pub cabin_width_m: f64,
+    /// Altura interna da cabine (m).
+    pub cabin_height_m: f64,
+}
+
+/// Relatório de dimensionamento (Task 6.1) — MTOWs convergido/envelope,
+/// histórico de convergência, margem de combustível e o diagrama de
+/// restrições clássico (`WingLoadingReport`), até aqui calculados por
+/// `orchestrator::size_aircraft` mas não serializados no JSON final.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SizingReport {
+    /// MTOW de missão (kg) — peso convergido levando exatamente o
+    /// combustível da missão mínima (`SizedAircraft::state.mtow_kg`).
+    pub mtow_mission_kg: f64,
+    /// MTOW de envelope (kg) — pior caso legal de carregamento ("4 pax +
+    /// bagagem + tanque cheio", `SizedAircraft::wb.spec.mtow_kg`); tipicamente
+    /// ≥ `mtow_mission_kg`, dimensiona Estrutura/Trem de Pouso.
+    pub mtow_envelope_kg: f64,
+    /// Trajetória de MTOW do laço de ponto fixo (primeiro palpite → valor
+    /// final convergido) — `SizedAircraft::iterations`.
+    pub iterations: Vec<f64>,
+    /// `true` quando o laço de ponto fixo convergiu dentro do limite de
+    /// iterações (sempre `true` quando este `SizingReport` existe — se o
+    /// laço não convergisse, `orchestrator::size_aircraft` teria retornado
+    /// `SizingError::NaoConvergiu` e `main.rs` nunca chegaria a montar o
+    /// relatório final). Mantido explícito para o consumidor de CAD não
+    /// precisar inferir isso a partir de `iterations`.
+    pub converged: bool,
+    /// Combustível exigido pela missão (L) — `MissionSpec::fuel_total_l`.
+    pub fuel_required_l: f64,
+    /// Capacidade física do tanque configurado (L) — `[fuel_system].capacity_l`.
+    pub fuel_capacity_l: f64,
+    /// Margem absoluta de combustível no ponto convergido (L):
+    /// `fuel_capacity_l − fuel_required_l`.
+    pub fuel_margin_l: f64,
+    /// Margem de combustível (%): `fuel_margin_l / fuel_capacity_l × 100`.
+    pub fuel_margin_pct: f64,
+    /// Diagrama de restrições clássico W/S × P/W (Task 3.2) no ponto
+    /// convergido — puramente informativo, não redimensiona a aeronave
+    /// automaticamente.
+    pub constraints: WingLoadingReport,
+}
+
 /// Relatório completo de validação — saída do Orchestrator
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AircraftReport {
+    /// Versão do schema — ver `SCHEMA_VERSION` para a política de bump.
+    pub schema_version: String,
+    /// DEPRECATED (mantido só por compatibilidade com consumidores
+    /// anteriores à v4, que liam uma string de revisão livre): mesmo valor
+    /// de `schema_version` — novos consumidores devem usar `schema_version`.
     pub revision: String,
     pub validation_status: String,
     pub wing: WingSpec,
     pub propulsion: PropulsionSpec,
+    /// Geometria consolidada para o CAD paramétrico (Task 6.1) — ver
+    /// `GeometrySpec`.
+    pub geometry: Option<GeometrySpec>,
     pub empennage: Option<EmpennageSpec>,
     pub control_surfaces: Option<ControlSurfacesSpec>,
     pub weight: Option<WeightSpec>,
@@ -475,5 +621,22 @@ pub struct AircraftReport {
     /// Orçamento elétrico (Task 5.2) — `Option` só por simetria com os
     /// demais campos do relatório; `main.rs` sempre o preenche.
     pub electrical: Option<ElectricalSpec>,
+    /// Dimensionamento/convergência de MTOW (Task 6.1) — ver `SizingReport`.
+    pub sizing: Option<SizingReport>,
+    /// Nível de confiança por bloco do relatório — chave = nome do bloco
+    /// (ex.: "wing", "structure"), valor = uma de "preliminary" (estimativa
+    /// simplificada, exige análise posterior — FEM, GVT, VLM/CFD conforme o
+    /// bloco), "semi-empirical" (curvas/correlações de catálogo ou
+    /// literatura, não first-principles puro) ou "computed" (equações
+    /// fechadas/segmentadas, sem correlação empírica externa). O time de
+    /// CAD deve tratar blocos "preliminary" como precisando de análise
+    /// posterior antes de fabricação — ver `docs/aircraft_spec.schema.md`.
+    pub fidelity: BTreeMap<String, String>,
     pub violations: Vec<String>,
+    /// Avisos do `ConstraintChecker` (Task 6.1) — condições que não violam
+    /// nenhum requisito do projeto, mas merecem atenção (ex.: pico elétrico
+    /// acima da capacidade do alternador, coberto pela bateria). Antes desta
+    /// task só `violations` era serializado — `warnings` existia em
+    /// `ConstraintReport` mas era descartado ao montar o JSON final.
+    pub warnings: Vec<String>,
 }

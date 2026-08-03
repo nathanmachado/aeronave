@@ -1,5 +1,6 @@
 {
-  "revision": "3.0",
+  "schema_version": "4.0",
+  "revision": "4.0",
   "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
@@ -40,6 +41,17 @@
     "p_req_cruise_kw": 112.36172733732073,
     "p_shaft_cruise_kw": 122.88722938820213,
     "cruise_feasible": true
+  },
+  "geometry": {
+    "wing_le_root_x_m": 2.9,
+    "chord_root_m": 1.6403858372321378,
+    "chord_tip_m": 0.7381736267544621,
+    "mac_m": 1.2463161361039574,
+    "mac_le_x_m": 2.9,
+    "y_mac_m": 2.6075862068965514,
+    "fuselage_length_m": 8.2,
+    "cabin_width_m": 1.22,
+    "cabin_height_m": 1.2
   },
   "empennage": {
     "s_horizontal_m2": 2.5809129985152786,
@@ -189,7 +201,7 @@
     "flutter_speed_kmh": 749.5537645327781,
     "design_dive_speed_kmh": 350.0,
     "va_kmh": 242.20916702984982,
-    "fatigue_life_cycles": null,
+    "fatigue_life_cycles": "infinita",
     "flutter_ok": true
   },
   "landing_gear": {
@@ -246,6 +258,53 @@
     "peak_load_w": 1260.0,
     "margin_continuous_pct": 52.22222222222223
   },
+  "sizing": {
+    "mtow_mission_kg": 1532.334247199687,
+    "mtow_envelope_kg": 1543.4,
+    "iterations": [
+      1461.0,
+      1493.8956758885138,
+      1511.6068703971978,
+      1521.1592429904772,
+      1526.3158762527319,
+      1529.1013034917491,
+      1530.6062930461198,
+      1531.4194284126697,
+      1531.8590914838505,
+      1532.334247199687
+    ],
+    "converged": true,
+    "fuel_required_l": 246.82648476153216,
+    "fuel_capacity_l": 260.0,
+    "fuel_margin_l": 13.173515238467843,
+    "fuel_margin_pct": 5.06673663017994,
+    "constraints": {
+      "ws_max_stall_n_m2": 1966.982929431489,
+      "v_stall_ref_ms": 43.20987654320987,
+      "ws_optimal_cruise_n_m2": 2137.1350245323865,
+      "ws_actual_n_m2": 1058.281828330094,
+      "pw_min_climb_w_n": 5.1634325509254495,
+      "pw_actual_w_n": 9.598403728272867,
+      "recommended_wing_area_m2": 7.639924951779176,
+      "ws_chosen_n_m2": 1966.982929431489
+    }
+  },
+  "fidelity": {
+    "control_surfaces": "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de autoridade/eficiência de controle)",
+    "electrical": "preliminary (soma de cargas nominais configuradas; requer análise transiente/térmica real)",
+    "empennage": "preliminary (dimensionado por coeficiente de volume — Raymer Tab. 6.4; requer VLM/CFD para eficiência real)",
+    "geometry": "computed (derivado da configuração + WeightBalanceAgent)",
+    "landing_gear": "preliminary (dimensionamento estático de cargas; requer análise dinâmica de pouso/afundamento)",
+    "mission": "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, L/D constante em cruzeiro)",
+    "performance": "computed (equações de desempenho em forma fechada, atmosfera ISA padrão)",
+    "propeller": "semi-empirical (Mach de ponta + folga de solo; requer mapa de desempenho de hélice real do fabricante)",
+    "propulsion": "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)",
+    "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
+    "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
+    "vn_diagram": "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)",
+    "weight": "semi-empirical (soma de itens de massa configurados + braços de momento)",
+    "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
+  },
   "violations": [
     "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.708; x_cg=2.921m, limites em x: [3.491m, 3.741m])",
     "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.659; x_cg=2.981m, limites em x: [3.491m, 3.741m])",
@@ -253,5 +312,8 @@
     "Cenário '4 pax + bagagem + cheio': CG 29.4% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.431; x_cg=3.266m, limites em x: [3.491m, 3.741m])",
     "Cenário '4 pax + bagagem + meia': CG 27.6% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.448; x_cg=3.244m, limites em x: [3.491m, 3.741m])",
     "Cenário '4 pax + bagagem vazio': CG 26.0% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.464; x_cg=3.225m, limites em x: [3.491m, 3.741m])"
+  ],
+  "warnings": [
+    "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
   ]
 }

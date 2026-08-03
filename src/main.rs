@@ -8,8 +8,11 @@ use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::propeller::PropellerAgent;
 use aeronave::agents::structural::StructuralAgent;
 use aeronave::agents::landing_gear::LandingGearAgent;
+use std::collections::BTreeMap;
+
+use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
-use aeronave::models::specs::AircraftReport;
+use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION};
 use aeronave::orchestrator::size_aircraft;
 use aeronave::validation::constraint_checker::ConstraintChecker;
 
@@ -428,12 +431,89 @@ fn main() {
              custo_h, avgas_h, avgas_h - custo_h);
     println!("  Economia/100h de voo: R$ {:.0}", (avgas_h - custo_h) * 100.0);
 
+    // ── Geometria consolidada p/ CAD (Task 6.1) ─────────────────────────────────
+    // Campos que já existiam internamente (`wb`, `cfg`) mas não eram
+    // ecoados no JSON antes desta task — ver `specs::GeometrySpec`.
+    let geometry = GeometrySpec {
+        wing_le_root_x_m: cfg.wing.le_root_x_m,
+        chord_root_m:     wb.chord_root_m,
+        chord_tip_m:      wb.chord_tip_m,
+        mac_m:            wb.mac_m,
+        mac_le_x_m:       wb.mac_le_x_m,
+        y_mac_m:          mac_spanwise_pos(wing.span_m, wing.taper_ratio),
+        fuselage_length_m: cfg.fuselage.length_m,
+        cabin_width_m:    cfg.fuselage.cabin_width_m,
+        cabin_height_m:   cfg.fuselage.cabin_height_m,
+    };
+
+    // ── Dimensionamento/convergência (Task 6.1) ─────────────────────────────────
+    // `sized.iterations`/`sized.constraints` já existiam em `SizedAircraft`
+    // desde as Tasks 3.1/3.2 mas não eram serializados no relatório final —
+    // ver `specs::SizingReport`.
+    let fuel_margin_l = cfg.fuel_system.capacity_l - mission.fuel_total_l;
+    let sizing = SizingReport {
+        mtow_mission_kg:  design_mtow_kg,
+        mtow_envelope_kg: envelope_mtow_kg,
+        iterations:       sized.iterations.clone(),
+        converged:        true,
+        fuel_required_l:  mission.fuel_total_l,
+        fuel_capacity_l:  cfg.fuel_system.capacity_l,
+        fuel_margin_l,
+        fuel_margin_pct:  fuel_margin_l / cfg.fuel_system.capacity_l * 100.0,
+        constraints:      sized.constraints.clone(),
+    };
+
+    // ── Mapa de fidelidade por bloco (Task 6.1) ─────────────────────────────────
+    // Honestidade explícita para o consumidor de CAD: blocos "preliminary"
+    // exigem análise posterior (FEM, GVT, VLM/CFD conforme o caso) antes de
+    // fabricação — ver doc-comment de `AircraftReport::fidelity` e
+    // `docs/aircraft_spec.schema.md`.
+    let mut fidelity: BTreeMap<String, String> = BTreeMap::new();
+    fidelity.insert("wing".into(),
+        "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)".into());
+    fidelity.insert("propulsion".into(),
+        "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)".into());
+    fidelity.insert("geometry".into(),
+        "computed (derivado da configuração + WeightBalanceAgent)".into());
+    fidelity.insert("empennage".into(),
+        "preliminary (dimensionado por coeficiente de volume — Raymer Tab. 6.4; \
+         requer VLM/CFD para eficiência real)".into());
+    fidelity.insert("control_surfaces".into(),
+        "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de \
+         autoridade/eficiência de controle)".into());
+    fidelity.insert("weight".into(),
+        "semi-empirical (soma de itens de massa configurados + braços de momento)".into());
+    fidelity.insert("performance".into(),
+        "computed (equações de desempenho em forma fechada, atmosfera ISA padrão)".into());
+    fidelity.insert("vn_diagram".into(),
+        "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)".into());
+    fidelity.insert("structure".into(),
+        "preliminary (vigas simplificadas — viga I equivalente; requer FEM); \
+         flutter: preliminary — estimativa analítica, requer GVT (ensaio de \
+         vibração em solo)".into());
+    fidelity.insert("landing_gear".into(),
+        "preliminary (dimensionamento estático de cargas; requer análise \
+         dinâmica de pouso/afundamento)".into());
+    fidelity.insert("propeller".into(),
+        "semi-empirical (Mach de ponta + folga de solo; requer mapa de \
+         desempenho de hélice real do fabricante)".into());
+    fidelity.insert("mission".into(),
+        "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \
+         L/D constante em cruzeiro)".into());
+    fidelity.insert("electrical".into(),
+        "preliminary (soma de cargas nominais configuradas; requer análise \
+         transiente/térmica real)".into());
+    fidelity.insert("sizing".into(),
+        "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)".into());
+
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {
-        revision:         "3.0".to_string(),
+        schema_version:   SCHEMA_VERSION.to_string(),
+        revision:         SCHEMA_VERSION.to_string(),
         validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
         wing:             wing.clone(),
         propulsion:       prop.clone(),
+        geometry:         Some(geometry),
         empennage:        Some(emp.clone()),
         control_surfaces: Some(cs.clone()),
         weight:           Some(wb.spec.clone()),
@@ -444,7 +524,10 @@ fn main() {
         propeller:        Some(propeller),
         mission:          Some(mission.clone()),
         electrical:       Some(electrical.clone()),
+        sizing:           Some(sizing),
+        fidelity,
         violations:       report.violations,
+        warnings:         report.warnings,
     };
 
     let json = serde_json::to_string_pretty(&report_final)
@@ -452,7 +535,7 @@ fn main() {
     std::fs::write(&cli.out, &json)
         .unwrap_or_else(|e| panic!("Falha ao escrever '{}': {e}", cli.out.display()));
 
-    println!("\n[ SAÍDA ] {} v3.0 gerado — 6 agentes completos.", cli.out.display());
+    println!("\n[ SAÍDA ] {} v{} gerado — 6 agentes completos.", cli.out.display(), SCHEMA_VERSION);
     println!("\nPróximas etapas:");
     println!("  Fase 3 — CAD: FreeCad + Agente Python (socket localhost:9999)");
     println!("  Fase 4 — Plano de construção, BOM e documentação ANAC");

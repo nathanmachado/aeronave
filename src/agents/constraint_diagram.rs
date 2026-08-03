@@ -11,6 +11,8 @@
 //! tempo dividido por força = velocidade), o que é esperado: o eixo P/W do
 //! diagrama de restrições tem unidade de velocidade.
 
+use serde::{Deserialize, Serialize};
+
 use crate::agents::aerodynamics::dynamic_pressure;
 use crate::agents::performance::shaft_power_kw;
 use crate::models::aircraft_state::AircraftState;
@@ -32,7 +34,11 @@ const RC_REQ_MS: f64 = 1.5;
 const ETA_P_CLIMB: f64 = 0.80;
 
 /// Relatório do diagrama de restrições clássico W/S × P/W.
-#[derive(Debug, Clone)]
+///
+/// `Serialize`/`Deserialize` (Task 6.1): serializado dentro de
+/// `specs::SizingReport` no relatório JSON final (`AircraftReport::sizing`)
+/// — antes não era exposto ao consumidor de CAD.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WingLoadingReport {
     /// W/S máximo p/ atender V_stall com flap (N/m²):
     ///   W/S ≤ ½·ρ_SL·Vs²·CL_max_flaps
