@@ -1,0 +1,32 @@
+name = "Rotax 915 iS"
+mass_kg = 84.0
+rpm_idle = 1400.0
+rpm_rated = 5800.0
+rpm_redline = 5800.0
+rpm_max_continuous = 5500.0
+torque_curve = [
+  [1400.0, 80.0],
+  [4300.0, 132.0],
+  [4900.0, 137.0],
+  [5800.0, 111.0],
+]
+
+[bsfc]
+bsfc_min_gkwh = 285.0
+rpm_optimal = 4800.0
+load_optimal = 0.75
+rpm_penalty_gkwh = 25.0
+load_penalty_gkwh = 30.0
+bsfc_max_gkwh = 420.0
+
+[induction.turbocharged]
+critical_altitude_m = 4600.0
+power_loss_per_1000m = 0.09
+
+[fuel]
+name = "Mogas E0 / AVGAS 100LL"
+density_kg_per_l = 0.72
+lhv_mj_per_kg = 43.5
+
+# Nota: o 915 iS tem redutor integrado 2.54:1 — o PSRU no aircraft.toml da Fase 2
+# deve ser configurável por motor; até lá, documentado aqui via este comentário.
