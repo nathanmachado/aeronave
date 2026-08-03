@@ -34,6 +34,9 @@ pub struct Requirements {
     pub airfield_altitude_m: f64,
     /// Desvio ISA em °C (ex.: ISA+20 → 20.0)
     pub isa_delta_c: f64,
+    /// Parâmetros da análise de missão por segmentos (Task 5.1) — táxi,
+    /// subida integrada e descida. Ver `AnalysisCfg`.
+    pub analysis: AnalysisCfg,
 }
 
 impl Requirements {
@@ -41,6 +44,37 @@ impl Requirements {
     pub fn payload_kg(&self) -> f64 {
         self.passengers as f64 * self.pax_mass_kg + self.baggage_kg
     }
+}
+
+/// Parâmetros da análise de missão por segmentos (Task 5.1,
+/// `agents::mission::MissionAgent`) — substituem o modelo antigo de
+/// consumo constante (`fc_cruise_lph · endurance`) por uma missão
+/// segmentada: táxi (fração fixa), subida integrada (RC × consumo, passo
+/// 100m), cruzeiro (Breguet, massa decrescente) e descida (potência
+/// parcial). São parâmetros da MISSÃO (não da célula/motor), portanto
+/// vivem em `config/missions/*.toml` ao lado de `Requirements`, não em
+/// `AircraftConfig`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisCfg {
+    /// Combustível fixo de táxi + run-up antes da decolagem (litros) — não
+    /// é modelado por tempo/potência, é um valor fixo de projeto (típico
+    /// para esta classe de aeronave).
+    pub taxi_fuel_l: f64,
+    /// Taxa de descida de projeto (m/s) — define o tempo (e, por
+    /// aproximação de pequeno ângulo, a distância horizontal) do segmento
+    /// de descida.
+    pub descent_rate_ms: f64,
+    /// Fração da potência/vazão de combustível de CRUZEIRO usada durante a
+    /// descida (potência parcial, não motor cortado) — ex.: 0.20 = 20% da
+    /// vazão de combustível de cruzeiro. Faixa válida: [0.05, 0.5] (abaixo
+    /// de 5% seria efetivamente motor cortado/idle, não modelado; acima de
+    /// 50% não seria uma descida de baixa potência).
+    pub descent_power_fraction: f64,
+    /// Política de velocidade de subida. Hoje só `"vy"` (melhor razão de
+    /// subida, `agents::performance::climb_rate_ms`) é suportada — reservado
+    /// para uma futura política `"vx"` (melhor ângulo) ou velocidade fixa,
+    /// daí ser uma string validada em vez de um booleano.
+    pub climb_speed_policy: String,
 }
 
 /// Fixture sintética de `Requirements` para uso em testes de `src/` —
@@ -64,6 +98,12 @@ pub mod test_fixtures {
             cruise_altitude_m: 2_400.0,
             airfield_altitude_m: 0.0,
             isa_delta_c: 0.0,
+            analysis: AnalysisCfg {
+                taxi_fuel_l: 2.5,
+                descent_rate_ms: 3.5,
+                descent_power_fraction: 0.25,
+                climb_speed_policy: "vy".to_string(),
+            },
         }
     }
 }

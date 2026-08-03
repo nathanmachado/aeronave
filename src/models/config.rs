@@ -700,6 +700,26 @@ fn validate_mission(req: &Requirements) -> Result<(), ConfigError> {
         )));
     }
 
+    require_positive_missao("analysis.taxi_fuel_l", req.analysis.taxi_fuel_l)?;
+    require_positive_missao("analysis.descent_rate_ms", req.analysis.descent_rate_ms)?;
+
+    require_finite_missao("analysis.descent_power_fraction", req.analysis.descent_power_fraction)?;
+    if req.analysis.descent_power_fraction < 0.05 || req.analysis.descent_power_fraction > 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: analysis.descent_power_fraction deve estar em \
+             [0.05, 0.5] (valor: {})",
+            req.analysis.descent_power_fraction
+        )));
+    }
+
+    if req.analysis.climb_speed_policy != "vy" {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: analysis.climb_speed_policy só suporta \"vy\" \
+             (melhor razão de subida) hoje (valor: \"{}\")",
+            req.analysis.climb_speed_policy
+        )));
+    }
+
     Ok(())
 }
 
@@ -1291,6 +1311,12 @@ mod tests {
             cruise_altitude_m = 2500.0
             airfield_altitude_m = 0.0
             isa_delta_c = 0.0
+
+            [analysis]
+            taxi_fuel_l = 3.0
+            descent_rate_ms = 4.0
+            descent_power_fraction = 0.20
+            climb_speed_policy = "vy"
         "#
         .to_string()
     }
@@ -1375,5 +1401,69 @@ mod tests {
         let toml = mission_toml_valido().replace("cruise_altitude_m = 2500.0", "cruise_altitude_m = 12000.0");
         let err = parse_mission(&toml).unwrap_err();
         assert!(err.to_string().contains("cruise_altitude_m"), "{err}");
+    }
+
+    // ─── [analysis] (Task 5.1) ──────────────────────────────────────────────
+
+    #[test]
+    fn rejeita_taxi_fuel_l_nao_positivo() {
+        let toml = mission_toml_valido().replace("taxi_fuel_l = 3.0", "taxi_fuel_l = 0.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("taxi_fuel_l"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_taxi_fuel_l_nao_finito() {
+        let toml = mission_toml_valido().replace("taxi_fuel_l = 3.0", "taxi_fuel_l = nan");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("taxi_fuel_l"), "{err}");
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_descent_rate_ms_nao_positivo() {
+        let toml = mission_toml_valido().replace("descent_rate_ms = 4.0", "descent_rate_ms = -1.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("descent_rate_ms"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_descent_power_fraction_abaixo_de_0_05() {
+        let toml = mission_toml_valido()
+            .replace("descent_power_fraction = 0.20", "descent_power_fraction = 0.01");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("descent_power_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_descent_power_fraction_acima_de_0_5() {
+        let toml = mission_toml_valido()
+            .replace("descent_power_fraction = 0.20", "descent_power_fraction = 0.6");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("descent_power_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_climb_speed_policy_diferente_de_vy() {
+        let toml = mission_toml_valido()
+            .replace(r#"climb_speed_policy = "vy""#, r#"climb_speed_policy = "vx""#);
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("climb_speed_policy"), "{err}");
+    }
+
+    #[test]
+    fn aceita_variante_sintetica_de_analysis_taxi_e_descida() {
+        // Fixture usada em `requirements::test_fixtures::requisitos_teste`
+        // (taxi 2.5 L, descida 3.5 m/s @ 25% potência) — garante que a
+        // validação aceita valores diferentes do baseline real, não só os
+        // do `default.toml`.
+        let toml = mission_toml_valido()
+            .replace("taxi_fuel_l = 3.0", "taxi_fuel_l = 2.5")
+            .replace("descent_rate_ms = 4.0", "descent_rate_ms = 3.5")
+            .replace("descent_power_fraction = 0.20", "descent_power_fraction = 0.25");
+        let req = parse_mission(&toml).expect("variante sintética deveria ser válida");
+        assert_eq!(req.analysis.taxi_fuel_l, 2.5);
+        assert_eq!(req.analysis.descent_rate_ms, 3.5);
+        assert_eq!(req.analysis.descent_power_fraction, 0.25);
     }
 }

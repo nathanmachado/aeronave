@@ -12,3 +12,13 @@ fuel_reserve_fraction = 0.10   # 10% + 45 min embutidos no endurance
 cruise_altitude_m = 2500.0
 airfield_altitude_m = 0.0
 isa_delta_c = 0.0
+
+# Análise de missão por segmentos (Task 5.1) — táxi, subida integrada,
+# cruzeiro Breguet e descida substituem o antigo modelo de consumo
+# constante. Ver `agents::mission::MissionAgent` e
+# `models::requirements::AnalysisCfg`.
+[analysis]
+taxi_fuel_l = 3.0              # táxi + run-up fixo (L)
+descent_rate_ms = 4.0          # taxa de descida de projeto (m/s)
+descent_power_fraction = 0.20  # 20% da vazão de combustível de cruzeiro
+climb_speed_policy = "vy"      # única política suportada hoje

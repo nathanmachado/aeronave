@@ -343,6 +343,71 @@ pub struct PropellerSpec {
     pub ok_clearance: bool,
 }
 
+/// Saída do MissionAgent (Task 5.1) — análise de missão por segmentos
+/// (táxi, subida integrada, cruzeiro Breguet, descida, reserva), que
+/// substitui o modelo antigo de consumo constante
+/// (`fc_cruise_lph · endurance_min_h`) na determinação do combustível de
+/// missão consumido pelo laço de convergência de MTOW
+/// (`orchestrator::size_aircraft`). Ver `agents::mission` para a dedução
+/// completa de cada segmento.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionSpec {
+    /// Combustível de táxi + run-up (kg) — `analysis.taxi_fuel_l` × densidade.
+    pub fuel_taxi_kg: f64,
+    /// Combustível queimado durante a subida integrada (kg) — soma dos
+    /// passos de 100m entre `airfield_altitude_m` e `cruise_altitude_m`, a
+    /// potência de rpm_max_continuous (carga plena).
+    pub fuel_climb_kg: f64,
+    /// Combustível queimado em cruzeiro (kg) — equação de Breguet, massa
+    /// decrescente ao longo da distância de cruzeiro (não consumo
+    /// constante × tempo).
+    pub fuel_cruise_kg: f64,
+    /// Combustível queimado na descida (kg) — potência parcial
+    /// (`analysis.descent_power_fraction` × vazão de cruzeiro) × tempo de
+    /// descida.
+    pub fuel_descent_kg: f64,
+    /// Reserva (kg) — `req.fuel_reserve_fraction` × (táxi+subida+cruzeiro+
+    /// descida), fração sobre o consumo da missão (não sobre o total com
+    /// reserva incluída).
+    pub fuel_reserve_kg: f64,
+    /// Combustível total da missão (kg) — soma de todos os segmentos acima
+    /// + reserva. É este valor (convertido para litros) que o laço de
+    /// convergência de MTOW usa como `fuel_req_l`.
+    pub fuel_total_kg: f64,
+    /// `fuel_total_kg` convertido para litros pela densidade do combustível
+    /// do motor — comparado contra `[fuel_system].capacity_l` no ponto
+    /// convergido (`SizingError::CombustivelInsuficiente`).
+    pub fuel_total_l: f64,
+    /// Duração da subida integrada (minutos).
+    pub climb_time_min: f64,
+    /// Distância horizontal percorrida durante a subida (km) — aproximação
+    /// de pequeno ângulo (`d ≈ V_y·t`, ignora o cosseno do ângulo de
+    /// subida).
+    pub climb_distance_km: f64,
+    /// Distância horizontal percorrida durante a descida (km) — mesma
+    /// aproximação de pequeno ângulo, à velocidade de cruzeiro.
+    pub descent_distance_km: f64,
+    /// Distância de cruzeiro (km) — `alcance_total_exigido − subida − descida`,
+    /// consumida pela equação de Breguet para determinar `fuel_cruise_kg`.
+    pub cruise_distance_km: f64,
+    /// Tempo total de voo (subida + cruzeiro + descida, horas) — NÃO inclui
+    /// o táxi (modelado só como combustível fixo, sem duração explícita).
+    pub block_time_h: f64,
+    /// Alcance sem vento (km) — soma dos três segmentos de distância
+    /// (subida + cruzeiro + descida), recomputado a partir dos segmentos
+    /// (não um eco direto de `cruise_speed_min_kmh · endurance_min_h`) como
+    /// checagem de consistência interna; por construção, igual ao alcance
+    /// exigido dentro de tolerância de ponto flutuante, já que
+    /// `cruise_distance_km` é justamente o que falta para fechar essa soma.
+    pub range_no_wind_km: f64,
+    /// Informativo: alcance Breguet SE o tanque cheio inteiro fosse
+    /// queimado em cruzeiro (não a missão real, que reserva parte do
+    /// tanque para táxi/subida/descida/reserva) — mostra o alcance máximo
+    /// deste modelo, partindo do MTOW convergido e do L/D/η_p/BSFC de
+    /// cruzeiro.
+    pub breguet_range_full_tank_km: f64,
+}
+
 /// Relatório completo de validação — saída do Orchestrator
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AircraftReport {
@@ -358,5 +423,11 @@ pub struct AircraftReport {
     pub structure: Option<StructuralSpec>,
     pub landing_gear: Option<GearSpec>,
     pub propeller: Option<PropellerSpec>,
+    /// Análise de missão por segmentos (Task 5.1) — táxi, subida, cruzeiro
+    /// Breguet, descida e reserva. `Option` só por simetria com os demais
+    /// campos do relatório (`main.rs` sempre o preenche — o laço de
+    /// convergência de MTOW já exige um `MissionSpec` válido para sequer
+    /// convergir).
+    pub mission: Option<MissionSpec>,
     pub violations: Vec<String>,
 }

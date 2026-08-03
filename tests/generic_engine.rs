@@ -215,6 +215,15 @@ fn autonomia_e_alcance_derivados_do_tanque_no_mtow_convergido() {
 /// `capacity_l` e o combustível de missão), não na autonomia reportada a
 /// tanque cheio (`prop.endurance_h`, que é maior que 8h só porque o tanque
 /// tem mais litros do que a missão mínima exige).
+/// ATUALIZAÇÃO (Task 5.1): `MissionAgent` substitui o modelo de consumo
+/// constante como fonte de `fuel_req_l`/`fuel_kg` do laço — ver comentário
+/// de `golden_toyota_baseline_regressao_task_2_1` acima para a tabela
+/// completa old→new. A margem de tanque SOBE (de ~6,55% para ~13,43%): o
+/// cruzeiro Breguet queima menos combustível que consumo constante (a
+/// massa cai ao longo do cruzeiro, aliviando arrasto induzido), e essa
+/// economia supera com folga o combustível extra da subida a potência
+/// plena (não modelado no cálculo antigo) e a reserva agora calculada
+/// sobre táxi+subida+cruzeiro+descida (não sobre autonomia×consumo).
 #[test]
 fn margem_de_combustivel_no_mtow_convergido() {
     let cfg   = baseline_state();
@@ -223,7 +232,7 @@ fn margem_de_combustivel_no_mtow_convergido() {
     let sized = size_aircraft(&cfg, &toyota, &req)
         .expect("aeronave-base + Toyota deveria convergir com o tanque de 260 L");
 
-    let fuel_req_l_convergido = sized.mission_fuel_kg / toyota.fuel.density_kg_per_l;
+    let fuel_req_l_convergido = sized.mission.fuel_total_l;
     let margem_l = cfg.fuel_system.capacity_l - fuel_req_l_convergido;
     let margem_pct = margem_l / fuel_req_l_convergido * 100.0;
 
@@ -233,28 +242,31 @@ fn margem_de_combustivel_no_mtow_convergido() {
         cfg.fuel_system.capacity_l
     );
 
-    // Task 4.6: a atmosfera ISA completa (Isa::density_kgm3) substitui a
-    // aproximação exponencial de densidade — desloca ligeiramente (~0,06%
-    // em ρ de cruzeiro) o combustível de missão exigido, e portanto a
-    // margem de tanque. Valor pré-Task-4.6: 16.084075 L (~6,5941%); valor
-    // honesto pós-Task-4.6, medido: 15.980075 L (~6,5487%).
-    let margem_pre_pin_l = 15.980075;
-    assert!((margem_l - margem_pre_pin_l).abs() < 0.1,
-        "margem de combustível {margem_l:.4} L divergiu do valor medido na Task 4.6 \
-         {margem_pre_pin_l:.4} L");
-    assert!((margem_pct - 6.5487).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido na Task 4.6 ~6,5487%");
+    // Task 4.6: 16.084075 L (~6,5941%) → 15.980075 L (~6,5487%) — desvio
+    // sub-0,1% da atmosfera ISA completa (ver comentário de
+    // `golden_toyota_baseline_regressao_task_2_1`).
+    // Task 5.1: análise por segmentos (táxi+subida integrada+cruzeiro
+    // Breguet+descida+reserva) substitui consumo constante — medido:
+    // 30.790697 L (~13,4334%).
+    let margem_pin_l = 30.790697;
+    assert!((margem_l - margem_pin_l).abs() < 0.1,
+        "margem de combustível {margem_l:.4} L divergiu do valor medido na Task 5.1 \
+         {margem_pin_l:.4} L");
+    assert!((margem_pct - 13.4334).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido na Task 5.1 ~13,4334%");
 
-    // Autonomia exatamente no requisito no PESO DE PROJETO (não a tanque
-    // cheio, que sobra pelos 16,08 L de margem acima) — confirma que
-    // `fuel_kg` foi calculado para bater exatamente `endurance_min_h`, sem
-    // folga escondida na física, só no tanque.
-    let endurance_no_peso_projeto_h =
-        fuel_req_l_convergido / sized.prop.fc_cruise_lph * (1.0 - req.fuel_reserve_fraction);
-    assert!((endurance_no_peso_projeto_h - req.endurance_min_h).abs() < 1e-6,
-        "autonomia no peso de projeto {endurance_no_peso_projeto_h:.6} h deveria bater \
-         EXATAMENTE o requisito {:.6} h (é assim que fuel_kg foi calculado — margem zero \
-         por construção neste ponto)", req.endurance_min_h);
+    // Invariante honesto do modelo por segmentos (substitui a checagem
+    // tautológica antiga de "autonomia no peso de projeto == requisito",
+    // que só fazia sentido para o modelo de consumo constante): o alcance
+    // recomputado a partir dos três segmentos de distância
+    // (subida+cruzeiro+descida) bate EXATAMENTE o alcance exigido pela
+    // missão (`cruise_speed_min_kmh · endurance_min_h`) — por construção,
+    // já que `cruise_distance_km` é definido como o que falta para fechar
+    // essa soma (ver docstring de `MissionSpec::range_no_wind_km`).
+    let alcance_exigido_km = req.cruise_speed_min_kmh * req.endurance_min_h;
+    assert!((sized.mission.range_no_wind_km - alcance_exigido_km).abs() < 1e-6,
+        "range_no_wind_km {:.6} km deveria bater EXATAMENTE o alcance exigido {:.6} km",
+        sized.mission.range_no_wind_km, alcance_exigido_km);
 }
 
 // Regressão do resolvedor coarse-to-fine de `max_level_speed_ms` (bissecção
@@ -332,6 +344,34 @@ fn toyota_v_max_regressao_310kmh() {
 //   oew_kg:           885,0 kg  →   885,0 kg     (inalterado — não depende
 //                                    de densidade do ar)
 //   v_cruise_kmh: 308,643232 km/h → 308,599033 km/h (-0,044 km/h, -0,014%)
+//
+// ATUALIZAÇÃO (Task 5.1): `MissionAgent` (análise por segmentos — táxi,
+// subida integrada a potência plena, cruzeiro Breguet com massa
+// decrescente, descida a potência parcial, reserva) substitui o modelo de
+// consumo constante (`fc_cruise_lph · endurance_min_h / (1 − reserva)`)
+// como fonte do combustível de missão do laço de convergência de MTOW. O
+// MTOW convergido CAI (a missão honesta exige MENOS combustível: o
+// cruzeiro Breguet queima menos que consumo constante porque a massa cai
+// ao longo do voo, e essa economia mais que compensa o combustível extra
+// da subida a potência plena) — `sized.prop.endurance_h`/`fc_cruise_lph`
+// continuam vindo do `PropulsionAgent` (modelo de tanque cheio / consumo
+// constante, inalterado nesta task — ver `agents::propulsion`), então
+// batem valores DIFERENTES dos de antes só porque o MTOW convergido (que
+// alimenta `wing.cd_cruise` e portanto `fc_cruise_lph`) mudou, não porque
+// a fórmula de `PropulsionSpec::endurance_h` mudou. Tabela Task 4.6 →
+// Task 5.1 (mesmo tanque 260 L, ΔISA=0 no `default.toml`):
+//   mtow_kg:        1.529,976737 → 1.517,535815  (-12,44 kg, -0,81%)
+//   endurance_h:    8,523894095  → 8,562282924   (+0,038 h, +0,45% — tanque
+//                                    cheio/MTOW menor → menos arrasto)
+//   fc_cruise_lph: 27,452241593  → 27,329159999   (-0,123 L/h, -0,45%)
+//   oew_kg:           885,0 kg  →   885,0 kg     (inalterado)
+//   v_cruise_kmh: 308,599033 km/h → 308,893470 km/h (+0,294 km/h, +0,095% —
+//                                    MTOW menor → menos arrasto induzido)
+//   combustível de missão: 244,02 L (constante) → 229,21 L (Breguet) —
+//                                    margem sobre o tanque de 260 L sobe de
+//                                    ~6,55% para ~13,43% (ver
+//                                    `margem_de_combustivel_no_mtow_convergido`
+//                                    abaixo para a tabela completa).
 #[test]
 fn golden_toyota_baseline_regressao_task_2_1() {
     let cfg    = baseline_state();
@@ -345,22 +385,22 @@ fn golden_toyota_baseline_regressao_task_2_1() {
         sized.state.mtow_kg, sized.prop.endurance_h, sized.prop.fc_cruise_lph, sized.wb.oew_kg
     );
 
-    let mtow_convergido_kg = 1_529.976737231;
-    let endurance_h = 8.523894094538;
-    let fc_lph = 27.452241593422;
+    let mtow_convergido_kg = 1_517.535814658;
+    let endurance_h = 8.562282924;
+    let fc_lph = 27.329159999;
     let oew_kg = 885.0;
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
-        "MTOW convergido {:.6} kg divergiu do valor medido na Task 4.6 {:.6} kg",
+        "MTOW convergido {:.6} kg divergiu do valor medido na Task 5.1 {:.6} kg",
         sized.state.mtow_kg, mtow_convergido_kg);
     assert!((sized.prop.endurance_h - endurance_h).abs() < 1e-6,
-        "Autonomia {:.6} h divergiu do valor pós-Task-4.6 {:.6} h",
+        "Autonomia {:.6} h divergiu do valor pós-Task-5.1 {:.6} h",
         sized.prop.endurance_h, endurance_h);
     assert!((sized.prop.fc_cruise_lph - fc_lph).abs() < 1e-6,
-        "Consumo cruzeiro {:.6} L/h divergiu do valor pós-Task-4.6 {:.6} L/h",
+        "Consumo cruzeiro {:.6} L/h divergiu do valor pós-Task-5.1 {:.6} L/h",
         sized.prop.fc_cruise_lph, fc_lph);
     assert!((sized.wb.oew_kg - oew_kg).abs() < 1e-6,
-        "OEW {:.6} kg divergiu do valor pós-Task-4.6 {:.6} kg",
+        "OEW {:.6} kg divergiu do valor pós-Task-5.1 {:.6} kg",
         sized.wb.oew_kg, oew_kg);
 
     // V_max nivelada @ MTOW convergido — mesmo pipeline que alimenta
@@ -370,11 +410,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
                                        &toyota, cfg.performance.static_thrust_factor);
     let v_max_kmh = v_max_ms * 3.6;
     println!("golden: v_cruise_kmh={v_max_kmh:.6}");
-    // Pré-Task-4.6: 308.64323162934545 km/h (densidade exponencial).
-    let v_max_pos_task_4_6_kmh = 308.599033;
-    assert!((v_max_kmh - v_max_pos_task_4_6_kmh).abs() < 1e-3,
-        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-4.6 \
-         {v_max_pos_task_4_6_kmh:.6} km/h", );
+    // Pré-Task-5.1: 308.599033 km/h (MTOW 1.529,98 kg).
+    let v_max_pos_task_5_1_kmh = 308.893470;
+    assert!((v_max_kmh - v_max_pos_task_5_1_kmh).abs() < 1e-3,
+        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-5.1 \
+         {v_max_pos_task_5_1_kmh:.6} km/h", );
 }
 
 // ─── TASK 4.7: Vx/Vy, planeio, gradiente CS 23.65, distâncias sobre 15m ────
@@ -398,6 +438,22 @@ fn golden_toyota_baseline_regressao_task_2_1() {
 //   vx_kmh=119.712  vy_kmh=151.636  best_glide_kmh=175.719  glide_ratio=16.456
 //   climb_gradient_pct=14.232  (CS 23.65 exige ≥8.3% — folga de quase 6 p.p.)
 //   to_50ft_paved_m=388.852  to_50ft_grass_m=436.751  ldg_50ft_m=542.815
+//
+// ATUALIZAÇÃO (Task 5.1): `MissionAgent` (análise por segmentos) desloca o
+// MTOW convergido de ~1.529,98 kg para ~1.517,54 kg (ver comentário de
+// `golden_toyota_baseline_regressao_task_2_1`) — MTOW MENOR reduz W/S em
+// toda a varredura de desempenho, então RC/gradiente/L-D efetivo mudam
+// junto. Tabela Task 4.7 → Task 5.1 (mesmo baseline/Toyota, ΔISA=0):
+//   vx_kmh:              119.712275 → 119.224565  (-0,41%)
+//   vy_kmh:               151.635549 → 151.017782  (-0,41%)
+//   best_glide_kmh:       175.719442 → 175.003557  (-0,41%)
+//   glide_ratio:           16.456403 →  16.456403  (inalterado — L/D_max
+//                                        não depende de MTOW, só de CD0/AR/e)
+//   climb_gradient_pct:    14.231571 →  14.489845  (+1,82% — MTOW menor →
+//                                        mais excesso de potência relativo)
+//   to_50ft_paved_m:      388.852096 → 382.791485  (-1,56%)
+//   to_50ft_grass_m:      436.750941 → 429.914523  (-1,57%)
+//   ldg_50ft_m:           542.815218 → 540.795252  (-0,37%)
 #[test]
 fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     let cfg    = baseline_state();
@@ -420,16 +476,18 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     assert!(perf.vx_kmh < perf.vy_kmh, "Vx deveria ser < Vy");
     assert!(perf.vy_kmh < perf.best_glide_kmh, "Vy deveria ser < V_bg para esta polar");
 
-    // Pins ±1% (ou mais apertado quando o valor é robusto/determinístico).
+    // Pins ±1% (ou mais apertado quando o valor é robusto/determinístico) —
+    // valores pós-Task-5.1 (MTOW convergido ~1.517,54 kg, ver tabela
+    // old→new acima).
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             119.712275, 0.01),
-        ("vy_kmh",              perf.vy_kmh,             151.635549, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     175.719442, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             119.224565, 0.01),
+        ("vy_kmh",              perf.vy_kmh,             151.017782, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     175.003557, 0.01),
         ("glide_ratio",         perf.glide_ratio,         16.456403, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  14.231571, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    388.852096, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    436.750941, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         542.815218, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  14.489845, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    382.791485, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    429.914523, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         540.795252, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -445,23 +503,30 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
 
     // Tabela old→new (ver comentário acima) — `to_distance_*`/
     // `landing_distance_m` continuam "baseados em rolagem de solo"
-    // (decisão do controller), mas T_avg de decolagem mudou de fonte.
-    let to_distance_paved_novo_pin = 359.241334;
+    // (decisão do controller), mas T_avg de decolagem mudou de fonte
+    // (Task 4.7), e agora o MTOW convergido também mudou (Task 5.1):
+    // to_distance_paved_m 359.241334 → 353.422785 (-1,62%), to_distance_
+    // grass_m 431.089601 → 424.107341 (-1,62%), landing_distance_m
+    // 397.545691 → 395.788892 (-0,44%, massa de pouso = MTOW - 60%
+    // combustível, também menor).
+    let to_distance_paved_novo_pin = 353.422785;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
-        "to_distance_paved_m {:.3} divergiu do pin pós-Task-4.7 {:.3}",
+        "to_distance_paved_m {:.3} divergiu do pin pós-Task-5.1 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 431.089601;
+    let to_distance_grass_novo_pin = 424.107341;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
-        "to_distance_grass_m {:.3} divergiu do pin pós-Task-4.7 {:.3}",
+        "to_distance_grass_m {:.3} divergiu do pin pós-Task-5.1 {:.3}",
         perf.to_distance_grass_m, to_distance_grass_novo_pin);
-    // landing_distance_m NÃO deveria ter mudado (mu_brake_paved=0.40
-    // reproduz exatamente o antigo literal hardcoded) — tolerância apertada.
-    let landing_distance_pin_inalterado = 397.545691;
-    assert!((perf.landing_distance_m - landing_distance_pin_inalterado).abs() < 0.5,
-        "landing_distance_m {:.3} divergiu do valor esperado (deveria ficar praticamente \
-         inalterado, {:.3})", perf.landing_distance_m, landing_distance_pin_inalterado);
+    // landing_distance_m: pequena queda (-0,44%) refletindo o MTOW
+    // convergido menor — tolerância alargada de "praticamente inalterado"
+    // (Task 4.7) para 1% (Task 5.1 desloca o MTOW, não a fórmula).
+    let landing_distance_pin = 395.788892;
+    assert!((perf.landing_distance_m - landing_distance_pin).abs()
+                < landing_distance_pin * 0.01,
+        "landing_distance_m {:.3} divergiu do pin pós-Task-5.1 {:.3}",
+        perf.landing_distance_m, landing_distance_pin);
 
     // Decolagem/pouso sobre 15m devem exceder as estimativas ground-roll-
     // based simplificadas — segmentos adicionais (rotação/subida,
@@ -547,18 +612,33 @@ fn convergencia_independe_do_palpite_inicial() {
 // `autonomia_e_alcance_derivados_do_tanque_no_mtow_convergido` acima, ambos
 // atualizados para rodar o pipeline completo via `size_aircraft`).
 //
-// O teste abaixo preserva a cobertura de regressão do caminho
-// `CombustivelInsuficiente` contra o motor Toyota real SEM depender de um
-// arquivo de configuração inviável estar commitado: ele lê o TOML real do
-// disco e sobrescreve `capacity_l` de volta para 240 L em código (mutação
-// sintética, não um arquivo checked-in) — assim o achado original continua
-// coberto por teste mesmo depois que `baseline_4seat.toml` passou a usar
-// 260 L. O `necessario_l` pinado abaixo é o valor no PONTO CONVERGIDO (não
-// um transiente): como a capacidade do tanque não influencia a trajetória
-// de convergência (só a checagem de aceite no final — ver
-// `size_aircraft`), é o MESMO número medido com o tanque real de 260 L.
+// ATUALIZAÇÃO (Task 5.1) — REVERSÃO DO ACHADO: `MissionAgent` (análise de
+// missão por segmentos — táxi, subida integrada a potência plena, cruzeiro
+// Breguet com massa decrescente, descida a potência parcial, reserva sobre
+// o consumo sem reserva) substitui o modelo de consumo constante como
+// fonte do combustível de missão. No ponto convergido, o combustível
+// exigido pela aeronave-base + Toyota CAI de 244,02 L (modelo antigo) para
+// 229,21 L (Breguet honesto) — o cruzeiro Breguet queima menos combustível
+// porque a massa cai ao longo da distância percorrida (menos arrasto
+// induzido conforme o tanque esvazia), e essa economia supera com folga o
+// combustível extra da subida a potência plena (não modelado antes) e a
+// reserva recalculada sobre o novo subtotal por segmentos.
+//
+// Consequência honesta: o tanque ORIGINAL de 240 L — que a Task 3.1 havia
+// encontrado insuficiente por 3,92 L/1,6% sob o modelo antigo, motivando o
+// aumento para 260 L — na verdade TERIA SIDO SUFICIENTE sob o modelo por
+// segmentos (229,21 L cabem em 240 L, com ~10,79 L/4,5% de margem). Isso
+// não invalida a decisão de aumentar para 260 L (tomada com o modelo então
+// disponível, e que continua dando mais margem — ~13,4% — sob o modelo
+// novo); registra apenas que o "achado" original (240 L insuficiente) foi
+// um artefato do modelo de consumo constante, não uma restrição física
+// permanente. O teste abaixo, que antes pinava `CombustivelInsuficiente`
+// para a mutação sintética de 240 L, é reescrito para pinar a REVERSÃO —
+// preserva a mesma mutação sintética (não depende de um arquivo de
+// configuração inviável estar commitado) como regressão do modelo por
+// segmentos em si.
 #[test]
-fn orchestrator_toyota_240l_insuficiente_regressao_sintetica() {
+fn orchestrator_toyota_240l_agora_suficiente_com_missao_por_segmentos() {
     let toml_real = std::fs::read_to_string(config_path("config/aircraft/baseline_4seat.toml"))
         .expect("falha ao ler baseline_4seat.toml do disco");
     assert!(toml_real.contains("capacity_l = 260.0"),
@@ -572,35 +652,29 @@ fn orchestrator_toyota_240l_insuficiente_regressao_sintetica() {
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = baseline_mission();
 
-    let err = size_aircraft(&cfg, &toyota, &req).expect_err(
-        "regressão: com o tanque ORIGINAL de 240 L (mutação sintética), o MTOW convergido da \
-         aeronave-base real (Toyota) deveria continuar exigindo mais combustível do que a \
-         capacidade — ver comentário acima e task-3.1-report.md",
+    let sized = size_aircraft(&cfg, &toyota, &req).expect(
+        "reversão do achado da Task 3.1: sob o modelo de missão por segmentos (Task 5.1), o \
+         tanque de 240 L (mutação sintética) deveria ser SUFICIENTE para a aeronave-base real \
+         (Toyota) — ver comentário acima",
     );
-    println!("regressão do achado original: {err}");
 
-    match err {
-        SizingError::CombustivelInsuficiente { necessario_l, capacidade_l } => {
-            assert!((capacidade_l - 240.0).abs() < 1e-9,
-                "capacidade_l deveria ser 240.0 (mutação sintética), obtido {capacidade_l}");
-            // Task 4.6: 243.91592468340414 L (pré-ISA-completa) → 244.019925274865 L
-            // (pós — ver comentário de `golden_toyota_baseline_regressao_task_2_1`
-            // para a origem do desvio sub-0,1%, propagada até aqui pelo laço de
-            // convergência de MTOW).
-            let necessario_pre_pin_l = 244.019925274865;
-            assert!((necessario_l - necessario_pre_pin_l).abs() < 1e-3,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 4.6 \
-                 {necessario_pre_pin_l:.6} L");
-            assert!(necessario_l > capacidade_l,
-                "o ponto central do achado original: a missão precisa de mais combustível do \
-                 que o tanque de 240 L tinha — {necessario_l:.2} L > {capacidade_l:.2} L");
-        }
-        other => panic!(
-            "esperava SizingError::CombustivelInsuficiente para a mutação sintética de 240 L, \
-             obtido: {other:?} — a física mudou desde que este achado foi documentado; revise \
-             o comentário e o relatório da Task 3.1"
-        ),
-    }
+    let necessario_l = sized.mission.fuel_total_l;
+    let margem_l = cfg.fuel_system.capacity_l - necessario_l;
+    println!(
+        "reversão do achado original: necessario_l={necessario_l:.6} capacidade_l={:.1} \
+         margem_l={margem_l:.6}",
+        cfg.fuel_system.capacity_l
+    );
+
+    // Combustível exigido no ponto convergido — mesma mutação sintética de
+    // 240 L, valor medido sob o modelo por segmentos.
+    let necessario_pin_l = 229.209303165;
+    assert!((necessario_l - necessario_pin_l).abs() < 1e-3,
+        "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 5.1 \
+         {necessario_pin_l:.6} L");
+    assert!(necessario_l < cfg.fuel_system.capacity_l,
+        "o ponto central da reversão: a missão agora exige MENOS combustível do que o tanque \
+         de 240 L tem — {necessario_l:.2} L < {:.2} L", cfg.fuel_system.capacity_l);
 }
 
 // Motor Rotax 915iS: já conhecido por não sustentar 280 km/h de cruzeiro com
@@ -611,13 +685,17 @@ fn orchestrator_toyota_240l_insuficiente_regressao_sintetica() {
 // encontrado por `search_cruise_rpm` para tentar (sem sucesso) sustentar a
 // velocidade mínima exigida consome combustível muito acima da capacidade do
 // tanque. O aumento do tanque para 260 L (correção do controller para o
-// caso Toyota) não resolve o caso Rotax — 409,3 L necessários é ~1,57× a
-// capacidade nova, não uma borda de alguns litros — então este teste roda
-// contra a aeronave-base REAL (não uma mutação sintética). (O valor pinado
-// abaixo mudou de 404,3 L para 409,3 L na revisão da Task 3.1: o número
-// antigo era o transiente da PRIMEIRA iteração, calculado quando a checagem
-// de aceite ainda rodava a cada passo — corrigido para o valor no PONTO
-// CONVERGIDO, ver Finding 1 do relatório da revisão.)
+// caso Toyota) não resolve o caso Rotax — mesmo com o modelo de missão por
+// segmentos da Task 5.1 (que reduziu o combustível exigido do caso Toyota
+// em ~6%), o Rotax ainda precisa de bem mais que a capacidade — não uma
+// borda de alguns litros — então este teste roda contra a aeronave-base
+// REAL (não uma mutação sintética). (O valor pinado abaixo mudou de 404,3 L
+// para 409,3 L na revisão da Task 3.1: o número antigo era o transiente da
+// PRIMEIRA iteração, calculado quando a checagem de aceite ainda rodava a
+// cada passo — corrigido para o valor no PONTO CONVERGIDO, ver Finding 1 do
+// relatório da revisão. ATUALIZAÇÃO Task 5.1: 409,45 L → 370,66 L —
+// `MissionAgent` também reduz o combustível exigido pelo Rotax, mas não o
+// suficiente para caber nos 260 L: ainda ~42,6% acima da capacidade.)
 #[test]
 fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
     let cfg = baseline_state();
@@ -635,10 +713,13 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
                 "capacidade_l divergiu do config/aircraft/baseline_4seat.toml atual ({capacidade_l})");
             // Task 4.6: 409.32412997472005 L (pré-ISA-completa) → 409.452959981169 L
             // (pós — mesma origem de desvio sub-0,1% da tabela acima).
-            let necessario_pre_pin_l = 409.452959981169;
-            assert!((necessario_l - necessario_pre_pin_l).abs() < 1e-2,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 4.6 \
-                 {necessario_pre_pin_l:.6} L");
+            // Task 5.1: 409.452959981169 L → 370.663832773 L (`MissionAgent`
+            // — análise por segmentos reduz o combustível exigido, mas não
+            // o suficiente para caber nos 260 L).
+            let necessario_pin_l = 370.663832773;
+            assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
+                "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 5.1 \
+                 {necessario_pin_l:.6} L");
         }
         other => panic!("esperava CombustivelInsuficiente para o Rotax, obtido: {other:?}"),
     }
@@ -679,8 +760,12 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
         "veredito P/W deveria ser ✓ no baseline: pw_actual ({:.4} W/N) deveria ser ≥ \
          pw_min_climb ({:.4} W/N)", c.pw_actual_w_n, c.pw_min_climb_w_n);
 
-    // Pin: ws_actual = MTOW_convergido·g / S = 1.529,9 kg · 9,807 / 14,2 m² ≈ 1.056,5 N/m²
-    let ws_actual_esperado = 1_056.5;
+    // Pin: ws_actual = MTOW_convergido·g / S. ATUALIZAÇÃO (Task 5.1):
+    // `MissionAgent` desloca o MTOW convergido de ~1.529,9 kg para
+    // ~1.517,5 kg (ver comentário de `golden_toyota_baseline_regressao_
+    // task_2_1`) → ws_actual = 1.517,5 kg · 9,807 / 14,2 m² ≈ 1.048,1 N/m²
+    // (era ≈1.056,5 N/m²).
+    let ws_actual_esperado = 1_048.06;
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);

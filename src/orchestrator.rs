@@ -18,13 +18,14 @@
 use crate::agents::aerodynamics::AerodynamicsAgent;
 use crate::agents::constraint_diagram::{wing_loading_limits, WingLoadingReport};
 use crate::agents::empennage::EmpennageAgent;
+use crate::agents::mission::{MissionAgent, MissionError};
 use crate::agents::propulsion::PropulsionAgent;
 use crate::agents::weight_balance::{WeightBalanceAgent, WeightBalanceOutput};
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
-use crate::models::specs::{EmpennageSpec, PropulsionSpec, WingSpec};
+use crate::models::specs::{EmpennageSpec, MissionSpec, PropulsionSpec, WingSpec};
 
 /// Número máximo de iterações do laço de ponto fixo antes de desistir.
 const MAX_ITERATIONS: u32 = 50;
@@ -61,8 +62,15 @@ pub struct SizedAircraft {
     /// iterações, já que `wing`/`cfg.empennage` não mudam com o MTOW.
     pub emp: EmpennageSpec,
     /// Massa de combustível (kg) requerida pela missão (autonomia mínima +
-    /// reserva) no MTOW convergido — não é o tanque cheio.
+    /// reserva) no MTOW convergido — não é o tanque cheio. Desde a Task 5.1
+    /// é `mission.fuel_total_kg` (análise por segmentos), não mais
+    /// `fc_cruise_lph · endurance_min_h / (1 − reserva)`.
     pub mission_fuel_kg: f64,
+    /// Análise de missão por segmentos (Task 5.1, `agents::mission::
+    /// MissionAgent`) que produziu `mission_fuel_kg` — táxi, subida
+    /// integrada, cruzeiro Breguet, descida e reserva, calculada no MTOW
+    /// convergido.
+    pub mission: MissionSpec,
     /// Diagrama de restrições clássico (W/S × P/W, Task 3.2) — calculado no
     /// MTOW convergido, com a asa/motor/estado finais. Puramente
     /// informativo: recomenda uma área de asa, não redimensiona a
@@ -87,6 +95,26 @@ pub enum SizingError {
     /// (com reserva) excede a capacidade física do tanque configurado —
     /// missão inviável com esta célula/motor, não um bug do laço.
     CombustivelInsuficiente { necessario_l: f64, capacidade_l: f64 },
+    /// A análise de missão por segmentos (Task 5.1, `agents::mission::
+    /// MissionAgent`) não conseguiu produzir uma missão fisicamente
+    /// alcançável com o MTOW candidato desta iteração — subida travada ou
+    /// distância de cruzeiro não positiva. Ver `agents::mission::
+    /// MissionError`.
+    ///
+    /// Nota de projeto: ao contrário de `CombustivelInsuficiente`/
+    /// `MtowExcedido` (checados só no PONTO CONVERGIDO — ver docstring de
+    /// `size_aircraft_with_max_iters`), este erro pode disparar numa
+    /// iteração INTERMEDIÁRIA do laço: sem um `MissionSpec` válido não há
+    /// `fuel_kg` para fechar `novo = OEW + payload + fuel_kg` e continuar
+    /// iterando. Um palpite inicial transitoriamente mais pesado que o
+    /// ponto fixo real poderia, em tese, disparar este erro mesmo quando o
+    /// MTOW convergido seria viável — mesma classe de risco documentada
+    /// para `CombustivelInsuficiente` antes da correção da Task 3.1, mas
+    /// aqui sem uma forma barata de diferir a checagem (o cálculo, não só
+    /// o veredito, depende da subida ser viável). Não observado no
+    /// baseline real nem nas fixtures sintéticas deste crate — registrado
+    /// como refinamento futuro caso apareça na prática.
+    MissaoInviavel(MissionError),
 }
 
 impl std::fmt::Display for SizingError {
@@ -108,6 +136,7 @@ impl std::fmt::Display for SizingError {
                  capacidade do tanque configurado ({capacidade_l:.1} L) — missão inviável \
                  com esta célula/motor"
             ),
+            SizingError::MissaoInviavel(e) => write!(f, "análise de missão inviável: {e}"),
         }
     }
 }
@@ -174,14 +203,17 @@ pub(crate) fn size_aircraft_with_max_iters(
         let emp = EmpennageAgent::run(&wing, cfg);
         let prop = PropulsionAgent::run(&state, req, &wing, engine);
 
-        // Combustível exigido pela MISSÃO (autonomia mínima requerida, com
-        // reserva) — não o tanque cheio (isso é `state.fuel_capacity_l`,
-        // usado só para a checagem de capacidade abaixo). Calculado aqui
-        // (a cada iteração) porque `fuel_kg` alimenta `novo`, mas só é
-        // CHECADO contra a capacidade do tanque no ponto convergido, abaixo.
-        let fuel_req_l =
-            prop.fc_cruise_lph * req.endurance_min_h / (1.0 - req.fuel_reserve_fraction);
-        let fuel_kg = fuel_req_l * engine.fuel.density_kg_per_l;
+        // Combustível exigido pela MISSÃO (Task 5.1: análise por segmentos
+        // — táxi, subida integrada, cruzeiro Breguet, descida e reserva —
+        // ver `agents::mission::MissionAgent`), não o tanque cheio (isso é
+        // `state.fuel_capacity_l`, usado só para a checagem de capacidade
+        // abaixo). Calculado aqui (a cada iteração) porque `fuel_kg`
+        // alimenta `novo`, mas a checagem de capacidade só roda no ponto
+        // convergido, abaixo.
+        let mission = MissionAgent::run(&state, &wing, &prop, engine, req, mtow)
+            .map_err(SizingError::MissaoInviavel)?;
+        let fuel_req_l = mission.fuel_total_l;
+        let fuel_kg = mission.fuel_total_kg;
 
         let wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req, &emp);
 
@@ -227,6 +259,7 @@ pub(crate) fn size_aircraft_with_max_iters(
                 wb,
                 emp,
                 mission_fuel_kg: fuel_kg,
+                mission,
                 iterations,
                 constraints,
             });
@@ -243,8 +276,12 @@ pub(crate) fn size_aircraft_with_max_iters(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::mission::MissionError;
     use crate::models::aircraft_config::test_fixtures::config_teste;
-    use crate::models::engine::test_fixtures::motor_generico_teste as engine_teste;
+    use crate::models::engine::test_fixtures::{
+        motor_generico_fraco_teste as engine_fraco_teste,
+        motor_generico_teste as engine_teste,
+    };
     use crate::models::requirements::test_fixtures::requisitos_teste;
 
     #[test]
@@ -387,6 +424,40 @@ mod tests {
             }
             other => panic!(
                 "esperava SizingError::NaoConvergiu para max_iters=1, obtido: {other:?}"
+            ),
+        }
+    }
+
+    /// Task 5.1: `MissionAgent::run` pode retornar `MissionError::
+    /// SubidaInviavel` (motor incapaz de sustentar a subida até
+    /// `cruise_altitude_m` no MTOW candidato) — este teste confirma que o
+    /// laço PROPAGA esse erro corretamente através de
+    /// `SizingError::MissaoInviavel` (`.map_err(SizingError::
+    /// MissaoInviavel)`), em vez de propagar um `Result` desencaixado ou
+    /// entrar em pânico. O motor sintético "fraco" (`motor_generico_fraco_
+    /// teste`, ~52 kW de pico) já é conhecido por não sustentar o cruzeiro
+    /// exigido pela fixture sintética (`propulsion::tests::
+    /// motor_fraco_marca_cruzeiro_inviavel`) — a mesma fraqueza de potência
+    /// também trava a subida integrada antes de alcançar `cruise_altitude_m`.
+    #[test]
+    fn motor_fraco_retorna_missao_inviavel_nao_panico() {
+        let cfg = config_teste();
+        let engine = engine_fraco_teste();
+        let req = requisitos_teste();
+
+        let err = size_aircraft(&cfg, &engine, &req)
+            .expect_err("motor sintético fraco não deveria conseguir subir até a altitude de \
+                          cruzeiro com este MTOW — deveria falhar, não convergir nem entrar \
+                          em pânico");
+        println!("erro (esperado): {err}");
+
+        match err {
+            SizingError::MissaoInviavel(MissionError::SubidaInviavel { rc_ms, .. }) => {
+                assert!(rc_ms.is_finite(), "rc_ms do erro deveria ser finito, obtido {rc_ms}");
+            }
+            other => panic!(
+                "esperava SizingError::MissaoInviavel(MissionError::SubidaInviavel), \
+                 obtido: {other:?}"
             ),
         }
     }

@@ -160,6 +160,24 @@ fn main() {
     println!("  Autonomia: {:.2}h  |  Alcance: {:.0}km\n",
              prop.endurance_h, prop.range_km);
 
+    // ── Missão por Segmentos (Task 5.1) ───────────────────────────────────────
+    // Substitui o consumo constante acima (`fc_cruise_lph · endurance`) como
+    // fonte do combustível de missão do laço de convergência de MTOW — ver
+    // `agents::mission::MissionAgent`.
+    println!("[ MISSÃO ] MissionAgent — táxi, subida integrada, cruzeiro Breguet, descida");
+    let mission = &sized.mission;
+    println!("  Táxi:     {:.2}kg", mission.fuel_taxi_kg);
+    println!("  Subida:   {:.2}kg  |  {:.1}min  |  {:.1}km",
+             mission.fuel_climb_kg, mission.climb_time_min, mission.climb_distance_km);
+    println!("  Cruzeiro: {:.2}kg  |  {:.1}km", mission.fuel_cruise_kg, mission.cruise_distance_km);
+    println!("  Descida:  {:.2}kg  |  {:.1}km", mission.fuel_descent_kg, mission.descent_distance_km);
+    println!("  Reserva:  {:.2}kg  ({:.0}% do consumo sem reserva)",
+             mission.fuel_reserve_kg, req.fuel_reserve_fraction * 100.0);
+    println!("  Total:    {:.2}kg  |  {:.1}L  |  Tempo de bloco: {:.2}h",
+             mission.fuel_total_kg, mission.fuel_total_l, mission.block_time_h);
+    println!("  Alcance sem vento: {:.0}km  |  Alcance Breguet (tanque cheio): {:.0}km\n",
+             mission.range_no_wind_km, mission.breguet_range_full_tank_km);
+
     // ── Agente 9: Hélice ──────────────────────────────────────────────────────
     // Dimensionamento/validação da hélice (Task 4.5) — Mach de ponta de pá
     // (estático e cruzeiro) e folga de solo (CS 23.925). Roda logo após a
@@ -409,6 +427,7 @@ fn main() {
         structure:        Some(struc),
         landing_gear:     Some(gear),
         propeller:        Some(propeller),
+        mission:          Some(mission.clone()),
         violations:       report.violations,
     };
 

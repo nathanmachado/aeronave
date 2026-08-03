@@ -59,11 +59,23 @@ ground_clearance_min_m = 0.23
 
 [fuel_system]
 # 260 L: dimensionado pela convergência de MTOW (Task 3.1) — no MTOW
-# convergido (~1.529,9 kg) a missão de 8h exige 243,92 L; margem de
-# 16,08 L (~6,6%). (O tanque original de 240 L ficava 3,92 L / 1,6% curto
-# no ponto convergido — não os "0,73 L / 0,3%" reportados inicialmente,
-# que vinham de um transiente da checagem por-iteração, corrigido na
-# revisão da Task 3.1.)
+# convergido de então (~1.529,9 kg, modelo de consumo constante) a missão
+# de 8h exigia 243,92 L; margem de 16,08 L (~6,6%). (O tanque original de
+# 240 L ficava 3,92 L / 1,6% curto no ponto convergido — não os
+# "0,73 L / 0,3%" reportados inicialmente, que vinham de um transiente da
+# checagem por-iteração, corrigido na revisão da Task 3.1.)
+#
+# ATUALIZAÇÃO (Task 5.1): `MissionAgent` (análise de missão por segmentos —
+# táxi, subida integrada, cruzeiro Breguet, descida, reserva) substitui o
+# modelo de consumo constante. No MTOW convergido honesto (~1.517,5 kg) a
+# mesma missão de 8h exige só 229,21 L — margem de 30,79 L (~13,4%) sobre
+# os 260 L. Achado retroativo: o tanque ORIGINAL de 240 L, que motivou o
+# aumento acima, teria sido SUFICIENTE sob este modelo (margem de ~10,79 L/
+# ~4,5%) — a "insuficiência" de 240 L era um artefato do modelo de consumo
+# constante, não uma restrição física permanente (ver
+# `tests/generic_engine.rs::orchestrator_toyota_240l_agora_suficiente_com_missao_por_segmentos`).
+# Mantido em 260 L (não revertido): decisão de projeto já tomada que
+# continua dando MAIS margem sob o modelo novo, não menos.
 capacity_l = 260.0
 
 [gear]
