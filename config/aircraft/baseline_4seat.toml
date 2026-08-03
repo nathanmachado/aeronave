@@ -67,15 +67,24 @@ ground_clearance_min_m = 0.23
 #
 # ATUALIZAÇÃO (Task 5.1): `MissionAgent` (análise de missão por segmentos —
 # táxi, subida integrada, cruzeiro Breguet, descida, reserva) substitui o
-# modelo de consumo constante. No MTOW convergido honesto (~1.517,5 kg) a
-# mesma missão de 8h exige só 229,21 L — margem de 30,79 L (~13,4%) sobre
-# os 260 L. Achado retroativo: o tanque ORIGINAL de 240 L, que motivou o
-# aumento acima, teria sido SUFICIENTE sob este modelo (margem de ~10,79 L/
-# ~4,5%) — a "insuficiência" de 240 L era um artefato do modelo de consumo
-# constante, não uma restrição física permanente (ver
-# `tests/generic_engine.rs::orchestrator_toyota_240l_agora_suficiente_com_missao_por_segmentos`).
-# Mantido em 260 L (não revertido): decisão de projeto já tomada que
-# continua dando MAIS margem sob o modelo novo, não menos.
+# modelo de consumo constante. No MTOW convergido honesto a mesma missão de
+# 8h exige menos combustível que o modelo antigo — margem sobre os 260 L
+# sobe de ~6,6% para ~10,0% (ver tabela completa em
+# `tests/generic_engine.rs::golden_toyota_baseline_regressao_task_2_1` e
+# `margem_de_combustivel_no_mtow_convergido`). Achado retroativo: o tanque
+# ORIGINAL de 240 L, que motivou o aumento acima, teria sido SUFICIENTE
+# sob a hipótese de CRUZEIRO BREGUET A L/D CONSTANTE (ver
+# `agents::mission`) usada neste modelo — margem apertada, ~1,5%
+# (`tests/generic_engine.rs::orchestrator_toyota_240l_agora_suficiente_com_missao_por_segmentos`).
+# Achado da revisão desta task (Finding 4): essa suficiência NÃO deve ser
+# lida como "não é uma restrição física permanente" em geral — é
+# específica da hipótese de L/D constante ao longo do cruzeiro; um modelo
+# de cruzeiro NIVELADO (altitude constante, mais realista para uma missão
+# real com ATC/espaço aéreo) estimado pelo revisor fica ~1% de distância de
+# reverter esta conclusão de volta para "insuficiente". Mantido em 260 L
+# (não revertido): decisão de projeto já tomada que continua dando MAIS
+# margem sob o modelo novo, não menos, e não depende dessa hipótese
+# apertada de 240 L.
 capacity_l = 260.0
 
 [gear]

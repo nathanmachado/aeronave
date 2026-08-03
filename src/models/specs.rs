@@ -46,7 +46,17 @@ pub struct PropulsionSpec {
     pub fuel_capacity_l: f64,
     pub fc_cruise_lph: f64,
     pub bsfc_cruise_gkwh: f64,
+    /// INFORMATIVO (a tanque cheio, consumo constante no ponto de cruzeiro
+    /// escolhido) — não é mais a fonte dos gates de autonomia/alcance do
+    /// projeto desde a Task 5.1 (achado da revisão dessa task, Finding 1):
+    /// esses gates agora usam `MissionSpec::block_time_h` (análise por
+    /// segmentos, `ConstraintChecker::verify`). Mantido aqui só para
+    /// referência ("quanto tempo o tanque cheio dura neste ponto de
+    /// cruzeiro", não "a missão cumpre o requisito").
     pub endurance_h: f64,
+    /// INFORMATIVO (a tanque cheio, consumo constante) — mesma ressalva de
+    /// `endurance_h` acima; o gate de alcance do projeto usa
+    /// `MissionSpec::range_no_wind_km` desde a Task 5.1.
     pub range_km: f64,
     pub prop_efficiency: f64,
     pub thrust_cruise_n: f64,
@@ -175,7 +185,12 @@ pub struct PerformanceSpec {
     pub to_distance_paved_m: f64,
     pub to_distance_grass_m: f64,
     pub landing_distance_m: f64,
+    /// INFORMATIVO — eco de `PropulsionSpec::range_km` (a tanque cheio,
+    /// consumo constante). Não é a fonte dos gates de alcance do projeto
+    /// desde a Task 5.1 — ver `PropulsionSpec::range_km`.
     pub range_km: f64,
+    /// INFORMATIVO — eco de `PropulsionSpec::endurance_h`. Mesma ressalva
+    /// de `range_km` acima.
     pub endurance_h: f64,
     // ─── Task 4.7: Vx/Vy, planeio, gradiente CS 23.65, distâncias sobre 15m ──
     /// Velocidade de MELHOR ÂNGULO de subida (km/h) — maximiza RC(V)/V, não
@@ -403,8 +418,13 @@ pub struct MissionSpec {
     /// Informativo: alcance Breguet SE o tanque cheio inteiro fosse
     /// queimado em cruzeiro (não a missão real, que reserva parte do
     /// tanque para táxi/subida/descida/reserva) — mostra o alcance máximo
-    /// deste modelo, partindo do MTOW convergido e do L/D/η_p/BSFC de
-    /// cruzeiro.
+    /// deste modelo. Endpoints coerentes (Finding 3 da revisão da Task
+    /// 5.1): `w0 = ZFW + tanque cheio`, `w1 = ZFW` (peso vazio de
+    /// combustível — OEW + payload), não o MTOW da missão real (que só
+    /// carrega o combustível da missão, não o tanque cheio) menos o peso
+    /// do tanque cheio, que produzia `w1 < ZFW` — fisicamente incoerente
+    /// (queimaria mais combustível do que a aeronave tem capacidade de
+    /// carregar).
     pub breguet_range_full_tank_km: f64,
 }
 

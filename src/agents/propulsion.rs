@@ -67,7 +67,15 @@ pub fn thrust_n(eta: f64, power_shaft_w: f64, v_ms: f64) -> f64 {
 // ─── CONSUMO DE COMBUSTÍVEL ──────────────────────────────────────────────────
 
 /// Consumo de combustível em L/h.
-/// power_kw: potência consumida (kW)
+///
+/// `power_kw`: potência consumida — DEVE ser a potência de VIRABREQUIM
+/// (pré-PSRU), a mesma referência de `bsfc_gkwh` (`BsfcModel::bsfc_gkwh`
+/// modela o motor, medido no virabrequim). Achado da revisão da Task 5.1
+/// (Finding 2): potências de EIXO pós-PSRU (`p_req_cruise_kw`/
+/// `shaft_power_kw`, já reduzidas por `PSRU_EFFICIENCY`) precisam ser
+/// divididas por `PSRU_EFFICIENCY` ANTES de chegar aqui — ver o único
+/// caller (`PropulsionAgent::run`) e a dedução em
+/// `agents::mission` ("BSFC referencia o virabrequim").
 /// bsfc_gkwh: consumo específico (g/kWh) — de `engine.bsfc.bsfc_gkwh(...)`
 /// density_kg_per_l: densidade do combustível (kg/L) — de `engine.fuel.density_kg_per_l`
 pub fn fuel_consumption_lph(power_kw: f64, bsfc_gkwh: f64, density_kg_per_l: f64) -> f64 {
@@ -208,7 +216,14 @@ impl PropulsionAgent {
             req.cruise_altitude_m, drag_n,
         );
 
-        let fc_lph = fuel_consumption_lph(cp.p_req_kw, cp.bsfc_gkwh, engine.fuel.density_kg_per_l);
+        // `cp.p_req_kw` é potência de EIXO (pós-PSRU, na hélice) — BSFC
+        // referencia o VIRABREQUIM (pré-PSRU). Achado da revisão da Task
+        // 5.1 (Finding 2): sem dividir por `PSRU_EFFICIENCY`, o consumo era
+        // subestimado em ~3% (`1/0,97 − 1`) — ver doc de
+        // `fuel_consumption_lph` e a dedução em `agents::mission`.
+        let fc_lph = fuel_consumption_lph(
+            cp.p_req_kw / PSRU_EFFICIENCY, cp.bsfc_gkwh, engine.fuel.density_kg_per_l,
+        );
 
         // Tração em cruzeiro (por construção, iguala o arrasto em regime
         // permanente: T = η·P_req/V = η·(D·V/η)/V = D).

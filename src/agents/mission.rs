@@ -35,55 +35,81 @@
 //! ## Dedução da equação de Breguet (segmento de cruzeiro)
 //!
 //! Para uma aeronave a hélice em voo nivelado, a taxa de queima de PESO de
-//! combustível é proporcional à potência de eixo consumida:
+//! combustível é proporcional à potência consumida no VIRABREQUIM (não à
+//! potência de eixo entregue à hélice — ver "BSFC referencia o virabrequim"
+//! abaixo, achado da revisão desta task, Finding 2):
 //!
 //! ```text
-//!   -dW/dt = c_p · P_eixo
+//!   -dW/dt = c_p · P_virabrequim
 //! ```
 //!
 //! onde `c_p` é o consumo específico "baseado em peso" (unidade: 1/m — peso
-//! de combustível por unidade de ENERGIA). A potência de eixo, por sua vez,
-//! relaciona-se ao arrasto via a eficiência de hélice `η_p`:
+//! de combustível por unidade de ENERGIA). A potência de eixo NA HÉLICE
+//! (pós-PSRU) relaciona-se ao arrasto via a eficiência de hélice `η_p`:
 //!
 //! ```text
-//!   P_eixo = D·V / η_p = (W / (L/D)) · V / η_p       [voo nivelado: T=D]
+//!   P_hélice = D·V / η_p = (W / (L/D)) · V / η_p     [voo nivelado: T=D]
+//! ```
+//!
+//! e a potência no VIRABREQUIM (pré-PSRU) é MAIOR que `P_hélice` pelas
+//! perdas mecânicas do PSRU (correia/engrenagens, `η_PSRU` — ver
+//! `agents::propulsion::PSRU_EFFICIENCY`):
+//!
+//! ```text
+//!   P_virabrequim = P_hélice / η_PSRU
 //! ```
 //!
 //! Substituindo e usando `dR = V·dt` (R = distância percorrida):
 //!
 //! ```text
-//!   -dW = c_p/η_p · (W/(L/D)) · dR
-//!   dR  = -η_p·(L/D)/c_p · dW/W
+//!   -dW = (c_p/η_PSRU)/η_p · (W/(L/D)) · dR
+//!   dR  = -η_p·η_PSRU·(L/D)/c_p · dW/W
 //! ```
 //!
 //! Integrando de `W0` (início do cruzeiro) a `W1` (fim):
 //!
 //! ```text
-//!   R = η_p·(L/D)/c_p · ln(W0/W1)
+//!   R = η_p·η_PSRU·(L/D)/c_p · ln(W0/W1)
 //! ```
 //!
 //! Esta é a equação clássica de Breguet para propulsão a hélice (Anderson,
-//! "Introduction to Flight", cap. 6; Raymer, "Aircraft Design", cap. 3). O
-//! BSFC do motor (`bsfc_gkwh`, g de combustível por kWh de energia de EIXO)
-//! é um consumo específico baseado em MASSA, não em peso: `c_p = g·c`, onde
-//! `c` = BSFC convertido para kg de combustível por Joule de energia de eixo
-//! (kg/(W·s) = kg/J). Substituindo:
+//! "Introduction to Flight", cap. 6; Raymer, "Aircraft Design", cap. 3),
+//! generalizada com o fator `η_PSRU` (ausente na dedução original desta
+//! task — Finding 2 da revisão). O BSFC do motor (`bsfc_gkwh`, g de
+//! combustível por kWh de energia no VIRABREQUIM) é um consumo específico
+//! baseado em MASSA, não em peso: `c_p = g·c`, onde `c` = BSFC convertido
+//! para kg de combustível por Joule de energia no virabrequim (kg/(W·s) =
+//! kg/J). Substituindo:
 //!
 //! ```text
-//!   R = (η_p/(g·c))·(L/D)·ln(W0/W1)
+//!   R = (η_p·η_PSRU/(g·c))·(L/D)·ln(W0/W1)
 //! ```
 //!
 //! Isolando `W1` (a forma usada aqui — dada a distância de cruzeiro `R`,
 //! quanto sobra de massa depois de queimar combustível):
 //!
 //! ```text
-//!   W1 = W0 · exp(−R·g·c / (η_p·(L/D)))
+//!   W1 = W0 · exp(−R·g·c / (η_p·η_PSRU·(L/D)))
 //! ```
 //!
 //! Como `W = m·g`, a razão `W1/W0 = m1/m0` — o fator `g` cancela na razão de
 //! massas, então a fórmula acima é aplicada diretamente em massa (kg), sem
 //! precisar converter para Newtons: `m1 = m0·exp(−expoente)`,
-//! `expoente = R·g·c/(η_p·(L/D))`.
+//! `expoente = R·g·c/(η_p·η_PSRU·(L/D))`.
+//!
+//! ### BSFC referencia o virabrequim, não o eixo pós-PSRU (Finding 2)
+//!
+//! `BsfcModel::bsfc_gkwh` modela o consumo específico do MOTOR — medido no
+//! virabrequim, ANTES das perdas mecânicas do PSRU (correia/engrenagem,
+//! `η_PSRU = 0,97`). `shaft_power_kw`/`p_req_cruise_kw` (usados na subida e
+//! no cálculo de `fc_cruise_lph` em `agents::propulsion`) já são potências
+//! PÓS-PSRU (potência de eixo entregue à hélice). Multiplicar BSFC
+//! diretamente por uma potência pós-PSRU subestima o consumo de
+//! combustível pela fração de perdas do PSRU (~3%, já que `η_PSRU=0,97`):
+//! a correção — usada tanto na subida (`fuel_climb_kg`) quanto no cruzeiro
+//! Breguet acima e em `agents::propulsion::PropulsionAgent::run`
+//! (`fc_cruise_lph`) — é dividir a potência de eixo pós-PSRU por `η_PSRU`
+//! antes de aplicar o BSFC, recuperando a potência de virabrequim.
 //!
 //! ### Conversão de unidades de `c` (BSFC → kg/(W·s))
 //!
@@ -103,21 +129,27 @@
 //!                          = [m]·[m/s²]·[s²/m²] = adimensional ✓
 //! ```
 //!
-//! (`η_p` e `L/D` já são adimensionais, então dividir por eles não afeta a
-//! verificação.)
+//! (`η_p`, `η_PSRU` e `L/D` já são adimensionais, então dividir por eles não
+//! afeta a verificação.)
 //!
-//! ### Hand-check (documentado no brief do controller, reproduzido em teste)
+//! ### Hand-check (documentado no brief do controller, ATUALIZADO na revisão
+//! ### desta task — Finding 2 — para incluir `η_PSRU`, reproduzido em teste)
 //!
 //! `R = 2.000.000 m`, `bsfc = 210 g/kWh` → `c = 210/3,6×10⁹ = 5,8333×10⁻⁸
-//! kg/(W·s)`, `η_p = 0,808`, `L/D = 13`:
+//! kg/(W·s)`, `η_p = 0,808`, `η_PSRU = 0,97`, `L/D = 13`:
 //!
 //! ```text
-//!   expoente = 2.000.000 · 9,807 · 5,8333×10⁻⁸ / (0,808·13)
-//!            = 1,1442 / 10,504 = 0,1089
-//!   W1/W0 = exp(−0,1089) = 0,8968 → combustível ≈ 10,32% de W0
+//!   expoente = 2.000.000 · 9,807 · 5,8333×10⁻⁸ / (0,808·0,97·13)
+//!            = 1,1442 / 10,1889 = 0,11231
+//!   W1/W0 = exp(−0,11231) = 0,89379 → combustível ≈ 10,62% de W0
 //! ```
+//!
+//! (Valor original do brief, SEM `η_PSRU` — expoente 0,1089, combustível
+//! ~10,32% — preservado no comentário do teste como "antes da correção da
+//! revisão", não mais o valor autoritativo.)
 
 use crate::agents::performance::{climb_rate_ms, shaft_power_kw};
+use crate::agents::propulsion::PSRU_EFFICIENCY;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
@@ -145,16 +177,23 @@ fn bsfc_kg_per_j(bsfc_gkwh: f64) -> f64 {
 
 /// Fração de massa restante `m1/m0` depois de percorrer `range_m` em
 /// cruzeiro Breguet — ver dedução completa no docstring do módulo.
-fn breguet_mass_ratio(range_m: f64, eta_p: f64, ld: f64, bsfc_gkwh: f64) -> f64 {
+///
+/// `eta_psru`: eficiência mecânica do PSRU (Finding 2 da revisão) — o BSFC
+/// referencia potência de VIRABREQUIM, mas `eta_p` (eficiência de hélice)
+/// só converte potência de EIXO (pós-PSRU) em tração; sem este fator, o
+/// consumo é subestimado em `1/η_PSRU − 1 ≈ 3%`.
+fn breguet_mass_ratio(range_m: f64, eta_p: f64, eta_psru: f64, ld: f64, bsfc_gkwh: f64) -> f64 {
     let c = bsfc_kg_per_j(bsfc_gkwh);
-    let expoente = range_m * c * G / (eta_p * ld);
+    let expoente = range_m * c * G / (eta_p * eta_psru * ld);
     (-expoente).exp()
 }
 
 /// Combustível queimado (kg) para percorrer `range_m` em cruzeiro Breguet,
 /// partindo de massa `w0_kg`.
-fn breguet_fuel_burn_kg(w0_kg: f64, range_m: f64, eta_p: f64, ld: f64, bsfc_gkwh: f64) -> f64 {
-    let ratio = breguet_mass_ratio(range_m, eta_p, ld, bsfc_gkwh);
+fn breguet_fuel_burn_kg(
+    w0_kg: f64, range_m: f64, eta_p: f64, eta_psru: f64, ld: f64, bsfc_gkwh: f64,
+) -> f64 {
+    let ratio = breguet_mass_ratio(range_m, eta_p, eta_psru, ld, bsfc_gkwh);
     w0_kg * (1.0 - ratio)
 }
 
@@ -163,12 +202,14 @@ fn breguet_fuel_burn_kg(w0_kg: f64, range_m: f64, eta_p: f64, ld: f64, bsfc_gkwh
 /// `breguet_range_full_tank_km`. Requer `w0_kg > w1_kg > 0`; fora disso
 /// (configuração fisicamente degenerada — tanque cheio mais pesado que o
 /// MTOW) retorna `0.0` em vez de produzir NaN/infinito.
-fn breguet_range_m(w0_kg: f64, w1_kg: f64, eta_p: f64, ld: f64, bsfc_gkwh: f64) -> f64 {
+fn breguet_range_m(
+    w0_kg: f64, w1_kg: f64, eta_p: f64, eta_psru: f64, ld: f64, bsfc_gkwh: f64,
+) -> f64 {
     if w1_kg <= 0.0 || w0_kg <= w1_kg {
         return 0.0;
     }
     let c = bsfc_kg_per_j(bsfc_gkwh);
-    (eta_p / (G * c)) * ld * (w0_kg / w1_kg).ln()
+    (eta_p * eta_psru / (G * c)) * ld * (w0_kg / w1_kg).ln()
 }
 
 /// Erros da análise de missão por segmentos — casos em que a missão pedida
@@ -260,13 +301,19 @@ impl MissionAgent {
             let dt_s = step_m / rc_ms;
             let dt_h = dt_s / 3_600.0;
 
-            // Potência de eixo à carga plena (rpm_max_continuous) na
-            // altitude do passo, e BSFC nesse mesmo ponto a carga ≈ 100%
-            // (subida é regime de potência plena, não de cruzeiro).
-            let p_kw = shaft_power_kw(engine, engine.rpm_max_continuous, alt_m);
+            // Potência de eixo (pós-PSRU, na hélice) à carga plena
+            // (rpm_max_continuous) na altitude do passo, e BSFC nesse mesmo
+            // ponto a carga ≈ 100% (subida é regime de potência plena, não
+            // de cruzeiro).
+            let p_shaft_kw = shaft_power_kw(engine, engine.rpm_max_continuous, alt_m);
             let bsfc_gkwh = engine.bsfc.bsfc_gkwh(engine.rpm_max_continuous, 1.0);
+            // BSFC referencia o VIRABREQUIM (pré-PSRU) — ver "BSFC
+            // referencia o virabrequim" no docstring do módulo (Finding 2
+            // da revisão): recupera a potência de virabrequim dividindo a
+            // potência de eixo pós-PSRU por η_PSRU antes de aplicar o BSFC.
+            let p_crankshaft_kw = p_shaft_kw / PSRU_EFFICIENCY;
             // massa[g] = P[kW]·bsfc[g/kWh]·t[h]  →  massa[kg] = /1000
-            let step_fuel_kg = p_kw * bsfc_gkwh * dt_h / 1_000.0;
+            let step_fuel_kg = p_crankshaft_kw * bsfc_gkwh * dt_h / 1_000.0;
 
             // Distância horizontal ≈ TAS·t (pequeno ângulo: TAS·cos γ ≈ TAS
             // — γ tipicamente < 10° para esta classe de aeronave, erro de
@@ -312,7 +359,7 @@ impl MissionAgent {
 
         let mass_start_cruise_kg = mass_kg; // massa após táxi + subida
         let fuel_cruise_kg = breguet_fuel_burn_kg(
-            mass_start_cruise_kg, cruise_distance_m, prop.prop_efficiency,
+            mass_start_cruise_kg, cruise_distance_m, prop.prop_efficiency, PSRU_EFFICIENCY,
             wing.ld_ratio_cruise, prop.bsfc_cruise_gkwh,
         );
 
@@ -324,14 +371,31 @@ impl MissionAgent {
         let fuel_total_kg = subtotal_kg + fuel_reserve_kg;
         let fuel_total_l = fuel_total_kg / density;
 
-        // ── Informativo: alcance Breguet queimando o TANQUE CHEIO inteiro,
-        //    a partir do MTOW candidato — mostra o alcance MÁXIMO deste
-        //    modelo (não a missão real, que reserva parte do tanque para
-        //    táxi/subida/descida/reserva).
+        // ── Informativo: alcance Breguet queimando o TANQUE CHEIO inteiro
+        //    (Finding 3 da revisão desta task — endpoints coerentes, NÃO
+        //    `mtow_mission_kg`/`mtow_mission_kg − capacidade`, que combinava
+        //    a massa da missão REAL — só ~229 L a bordo — com uma queima de
+        //    260 L, produzindo `w1 < ZFW`, fisicamente incoerente).
+        //
+        //    Par coerente: parte-se do peso vazio de combustível (ZFW —
+        //    OEW + payload, SEM nenhum combustível) com o TANQUE CHEIO
+        //    (`w0`), e queima-se até `w1 = ZFW` (tanque vazio). Mostra o
+        //    alcance MÁXIMO deste modelo (não a missão real, que reserva
+        //    parte do tanque para táxi/subida/descida/reserva).
+        //
+        //    `MissionAgent::run` não recebe OEW diretamente (assinatura
+        //    fixada pelo controller na Task 5.1: state/wing/prop/engine/
+        //    req/mtow_mission_kg) — mas, por construção do laço de
+        //    convergência (`orchestrator::size_aircraft`), no MTOW
+        //    candidato `mtow_mission_kg = OEW + payload + fuel_total_kg`
+        //    (exato no ponto convergido, ±`CONVERGENCE_TOL_KG` em
+        //    iterações intermediárias) — então `mtow_mission_kg −
+        //    fuel_total_kg` já é o ZFW, sem precisar de um parâmetro novo.
+        let zfw_kg = mtow_mission_kg - fuel_total_kg;
         let full_tank_fuel_kg = state.fuel_capacity_l * density;
-        let w1_full_tank_kg = mtow_mission_kg - full_tank_fuel_kg;
+        let w0_full_tank_kg = zfw_kg + full_tank_fuel_kg;
         let breguet_range_full_tank_km = breguet_range_m(
-            mtow_mission_kg, w1_full_tank_kg, prop.prop_efficiency, wing.ld_ratio_cruise,
+            w0_full_tank_kg, zfw_kg, prop.prop_efficiency, PSRU_EFFICIENCY, wing.ld_ratio_cruise,
             prop.bsfc_cruise_gkwh,
         ) / 1_000.0;
 
@@ -390,46 +454,70 @@ mod tests {
 
     // ─── Breguet: sanidade dimensional ──────────────────────────────────
 
+    /// η_PSRU de teste — mesmo valor de `agents::propulsion::PSRU_EFFICIENCY`
+    /// (0,97), literal aqui para que os testes de sanidade abaixo não
+    /// dependam silenciosamente de um valor de produção que poderia mudar.
+    const ETA_PSRU_TESTE: f64 = 0.97;
+
     #[test]
     fn breguet_fuel_burn_zero_para_distancia_zero() {
-        let fuel = breguet_fuel_burn_kg(1_500.0, 0.0, 0.80, 13.0, 210.0);
+        let fuel = breguet_fuel_burn_kg(1_500.0, 0.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0);
         assert!(fuel.abs() < 1e-9, "combustível para 0 km deveria ser exatamente 0, obtido {fuel}");
     }
 
     #[test]
     fn breguet_fuel_burn_monotono_na_distancia() {
-        let f1 = breguet_fuel_burn_kg(1_500.0, 500_000.0, 0.80, 13.0, 210.0);
-        let f2 = breguet_fuel_burn_kg(1_500.0, 1_000_000.0, 0.80, 13.0, 210.0);
-        let f3 = breguet_fuel_burn_kg(1_500.0, 2_000_000.0, 0.80, 13.0, 210.0);
+        let f1 = breguet_fuel_burn_kg(1_500.0, 500_000.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0);
+        let f2 = breguet_fuel_burn_kg(1_500.0, 1_000_000.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0);
+        let f3 = breguet_fuel_burn_kg(1_500.0, 2_000_000.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0);
         assert!(f1 < f2 && f2 < f3,
             "combustível Breguet deveria crescer estritamente com a distância: \
              {f1:.3} < {f2:.3} < {f3:.3}");
     }
 
-    /// Hand-check do docstring do módulo (dedução da equação de Breguet):
-    /// R=2.000.000 m, bsfc=210 g/kWh, η_p=0,808, L/D=13 →
-    /// expoente≈0,1089 → W1/W0≈0,8968 → combustível ≈10,32% de W0.
+    /// Combustível Breguet deve crescer conforme `η_PSRU` cai (mais perdas
+    /// mecânicas → mais potência de virabrequim exigida para a mesma
+    /// potência de eixo/tração) — sanidade direta do Finding 2 da revisão.
+    #[test]
+    fn breguet_fuel_burn_cresce_quando_eta_psru_cai() {
+        let fuel_psru_alto = breguet_fuel_burn_kg(1_500.0, 1_000_000.0, 0.80, 0.99, 13.0, 210.0);
+        let fuel_psru_baixo = breguet_fuel_burn_kg(1_500.0, 1_000_000.0, 0.80, 0.90, 13.0, 210.0);
+        assert!(fuel_psru_baixo > fuel_psru_alto,
+            "η_PSRU menor (mais perdas) deveria exigir MAIS combustível para o mesmo alcance: \
+             η=0,90 → {fuel_psru_baixo:.3}kg, η=0,99 → {fuel_psru_alto:.3}kg");
+    }
+
+    /// Hand-check do docstring do módulo (dedução da equação de Breguet,
+    /// ATUALIZADO na revisão desta task — Finding 2 — para incluir
+    /// `η_PSRU`): R=2.000.000 m, bsfc=210 g/kWh, η_p=0,808, η_PSRU=0,97,
+    /// L/D=13 → expoente≈0,11231 → W1/W0≈0,89379 → combustível ≈10,62% de
+    /// W0. (Valor original do brief, sem η_PSRU: expoente≈0,1089,
+    /// combustível ≈10,32% — não mais autoritativo, preservado aqui só
+    /// como referência histórica do valor pré-correção.)
     #[test]
     fn breguet_hand_check_expoente_e_fracao_de_combustivel() {
         let w0 = 1_000.0; // massa arbitrária — a fração não depende de w0
-        let ratio = breguet_mass_ratio(2_000_000.0, 0.808, 13.0, 210.0);
-        let fuel = breguet_fuel_burn_kg(w0, 2_000_000.0, 0.808, 13.0, 210.0);
+        let ratio = breguet_mass_ratio(2_000_000.0, 0.808, ETA_PSRU_TESTE, 13.0, 210.0);
+        let fuel = breguet_fuel_burn_kg(w0, 2_000_000.0, 0.808, ETA_PSRU_TESTE, 13.0, 210.0);
         let fuel_fraction = fuel / w0;
 
         println!("hand-check: w1/w0={ratio:.6}  fração de combustível={fuel_fraction:.6}");
 
-        // exponente = 2e6 · 5,8333e-8 · 9,807 / (0,808·13) ≈ 0,10894
-        let expoente_esperado = 2_000_000.0 * (210.0 / 3.6e9) * G / (0.808 * 13.0);
-        assert!((expoente_esperado - 0.1089).abs() < 0.001,
-            "expoente hand-calculado {expoente_esperado:.6} diverge do valor do brief (~0,1089)");
+        // expoente = 2e6 · 5,8333e-8 · 9,807 / (0,808·0,97·13) ≈ 0,11231
+        let expoente_esperado =
+            2_000_000.0 * (210.0 / 3.6e9) * G / (0.808 * ETA_PSRU_TESTE * 13.0);
+        assert!((expoente_esperado - 0.11231).abs() < 0.001,
+            "expoente hand-calculado {expoente_esperado:.6} diverge do valor da revisão \
+             (~0,11231)");
 
         let ratio_esperado = (-expoente_esperado).exp();
         assert!((ratio - ratio_esperado).abs() / ratio_esperado < 0.005,
             "razão de massa {ratio:.6} do código diverge >0,5% do hand-check {ratio_esperado:.6}");
-        assert!((ratio - 0.8968).abs() < 0.005,
-            "razão de massa {ratio:.6} diverge >0,5% do valor do brief (~0,8968)");
-        assert!((fuel_fraction - 0.1032).abs() < 0.005,
-            "fração de combustível {fuel_fraction:.6} diverge >0,5% do valor do brief (~0,1032)");
+        assert!((ratio - 0.89379).abs() < 0.005,
+            "razão de massa {ratio:.6} diverge >0,5% do valor da revisão (~0,89379)");
+        assert!((fuel_fraction - 0.10621).abs() < 0.005,
+            "fração de combustível {fuel_fraction:.6} diverge >0,5% do valor da revisão \
+             (~0,10621)");
     }
 
     #[test]
@@ -438,9 +526,9 @@ mod tests {
         // a partir de w0/(w0-fuel) deve reproduzir R.
         let w0 = 1_500.0;
         let r_m = 1_800_000.0;
-        let fuel = breguet_fuel_burn_kg(w0, r_m, 0.80, 13.0, 210.0);
+        let fuel = breguet_fuel_burn_kg(w0, r_m, 0.80, ETA_PSRU_TESTE, 13.0, 210.0);
         let w1 = w0 - fuel;
-        let r_recuperado_m = breguet_range_m(w0, w1, 0.80, 13.0, 210.0);
+        let r_recuperado_m = breguet_range_m(w0, w1, 0.80, ETA_PSRU_TESTE, 13.0, 210.0);
         assert!((r_recuperado_m - r_m).abs() / r_m < 1e-6,
             "alcance recuperado {r_recuperado_m:.1} m diverge do original {r_m:.1} m");
     }
@@ -449,10 +537,10 @@ mod tests {
     fn breguet_range_degenerado_retorna_zero_sem_nan() {
         // w1 >= w0 (tanque mais pesado que o MTOW) é fisicamente degenerado
         // — deve retornar 0.0, não NaN/infinito.
-        assert_eq!(breguet_range_m(1_000.0, 1_000.0, 0.80, 13.0, 210.0), 0.0);
-        assert_eq!(breguet_range_m(1_000.0, 1_200.0, 0.80, 13.0, 210.0), 0.0);
-        assert_eq!(breguet_range_m(1_000.0, 0.0, 0.80, 13.0, 210.0), 0.0);
-        assert_eq!(breguet_range_m(1_000.0, -50.0, 0.80, 13.0, 210.0), 0.0);
+        assert_eq!(breguet_range_m(1_000.0, 1_000.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0), 0.0);
+        assert_eq!(breguet_range_m(1_000.0, 1_200.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0), 0.0);
+        assert_eq!(breguet_range_m(1_000.0, 0.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0), 0.0);
+        assert_eq!(breguet_range_m(1_000.0, -50.0, 0.80, ETA_PSRU_TESTE, 13.0, 210.0), 0.0);
     }
 
     // ─── Subida integrada ────────────────────────────────────────────────
@@ -494,9 +582,10 @@ mod tests {
             let (rc_ms, _vy) = climb_rate_ms(mass_kg, alt_m, req.isa_delta_c, &wing, &state, &engine, 1.0);
             assert!(rc_ms > RC_MIN_MS, "fixture sintética deveria ter subida viável em todo o perfil");
             let dt_s = step_m / rc_ms;
-            let p_kw = shaft_power_kw(&engine, engine.rpm_max_continuous, alt_m);
+            let p_shaft_kw = shaft_power_kw(&engine, engine.rpm_max_continuous, alt_m);
             let bsfc_gkwh = engine.bsfc.bsfc_gkwh(engine.rpm_max_continuous, 1.0);
-            let step_fuel_kg = p_kw * bsfc_gkwh * (dt_s / 3_600.0) / 1_000.0;
+            let p_crankshaft_kw = p_shaft_kw / PSRU_EFFICIENCY;
+            let step_fuel_kg = p_crankshaft_kw * bsfc_gkwh * (dt_s / 3_600.0) / 1_000.0;
             mass_kg -= step_fuel_kg;
             massas.push(mass_kg);
             alt_m += step_m;

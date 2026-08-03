@@ -157,7 +157,8 @@ fn main() {
     println!("  {}  |  {:.0}L  |  {:.1}L/h  |  BSFC {:.0}g/kWh",
              prop.fuel_type, prop.fuel_capacity_l,
              prop.fc_cruise_lph, prop.bsfc_cruise_gkwh);
-    println!("  Autonomia: {:.2}h  |  Alcance: {:.0}km\n",
+    println!("  Autonomia (tanque cheio, consumo constante — informativo): {:.2}h  |  \
+              Alcance (idem): {:.0}km\n",
              prop.endurance_h, prop.range_km);
 
     // ── Missão por Segmentos (Task 5.1) ───────────────────────────────────────
@@ -367,7 +368,8 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb, &propeller, &perf);
+    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
+                                             &propeller, &perf, mission);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -377,7 +379,11 @@ fn main() {
     let checks = [
         (report.all_satisfied(),              "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65"),
         (perf.v_cruise_kmh >= 280.0,          "V_cruzeiro ≥ 280 km/h"),
-        (prop.endurance_h  >= 8.0,            "Autonomia ≥ 8 h"),
+        // Task 5.1 (achado da revisão, Finding 1): gate honesto sobre o
+        // tempo de bloco da missão por segmentos, não mais o endurance a
+        // tanque cheio/consumo constante (`prop.endurance_h`, agora
+        // informativo — ver seu doc-comment em `specs.rs`).
+        (mission.block_time_h >= req.endurance_min_h, "Autonomia da missão (block_time_h) ≥ 8 h"),
         (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar"),
         (ceil_ok,                             "Teto de serviço ≥ 3.000 m"),
         (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)"),
