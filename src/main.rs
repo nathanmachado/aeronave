@@ -174,7 +174,7 @@ fn main() {
 
     // ── Agente 4: Desempenho ──────────────────────────────────────────────────
     println!("[ AGENTE 4 ] PerformanceAgent");
-    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine);
+    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req);
     println!("  V_cruzeiro: {:.1}km/h  |  V_stall: {:.1}km/h",
              perf.v_cruise_kmh, perf.v_stall_kmh);
     println!("  RC (SL/MTOW): {:.2}m/s ({:.0}fpm)  |  RC (2500m): {:.2}m/s",

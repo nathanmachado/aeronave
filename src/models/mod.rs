@@ -4,3 +4,4 @@ pub mod aircraft_config;
 pub mod specs;
 pub mod engine;
 pub mod config;
+pub mod atmosphere;

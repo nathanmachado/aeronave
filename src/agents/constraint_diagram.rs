@@ -11,14 +11,14 @@
 //! tempo dividido por força = velocidade), o que é esperado: o eixo P/W do
 //! diagrama de restrições tem unidade de velocidade.
 
-use crate::agents::aerodynamics::{dynamic_pressure, isa_density};
+use crate::agents::aerodynamics::dynamic_pressure;
 use crate::agents::performance::shaft_power_kw;
 use crate::models::aircraft_state::AircraftState;
+use crate::models::atmosphere::{Isa, RHO_SL};
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
 use crate::models::specs::WingSpec;
 
-const RHO_SL: f64 = 1.225; // kg/m³ — densidade ISA ao nível do mar
 const G: f64 = 9.807;      // m/s²
 
 /// Razão de subida mínima exigida (CS-23), o mesmo piso usado em `main.rs`
@@ -93,7 +93,10 @@ pub fn wing_loading_limits(
     let ws_max_stall_n_m2 = 0.5 * RHO_SL * v_stall_ref_ms * v_stall_ref_ms * wing.cl_max;
 
     // ── W/S ótimo de cruzeiro ───────────────────────────────────────────
-    let rho_cruise = isa_density(req.cruise_altitude_m);
+    // Mesma densidade de cruzeiro usada por `AerodynamicsAgent` (Task 4.6):
+    // atmosfera ISA completa, no ΔISA da missão — mantém os dois pontos de
+    // W/S "de cruzeiro" fisicamente consistentes entre si.
+    let rho_cruise = Isa::density_kgm3(req.cruise_altitude_m, req.isa_delta_c);
     let v_cruise_ms = req.cruise_speed_min_kmh / 3.6;
     let q_cruise = dynamic_pressure(rho_cruise, v_cruise_ms);
     let ws_optimal_cruise_n_m2 = q_cruise

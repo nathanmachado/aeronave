@@ -7,24 +7,17 @@
 /// Velocidades em km/h são convertidas internamente.
 
 use crate::models::{
+    atmosphere::RHO_SL,
     aircraft_state::AircraftState,
     requirements::Requirements,
     specs::WingSpec,
 };
 
-// Constantes atmosféricas (ISA — International Standard Atmosphere)
-const RHO_SL: f64 = 1.225;      // kg/m³ — densidade ao nível do mar
 const G: f64 = 9.807;            // m/s²
 
 // Trem retrátil e recolhido não contribui CD0 — só o trem FIXO soma um
 // incremento (vem de `[gear] cd0_fixed_increment` do TOML de aeronave).
 const CD0_GEAR_RETRACTABLE: f64 = 0.0;
-
-/// Densidade atmosférica ISA em altitude h (metros), aproximação exponencial.
-/// Válida até ~11.000 m (troposfera).
-pub fn isa_density(altitude_m: f64) -> f64 {
-    RHO_SL * (1.0 - 0.0000226 * altitude_m).powf(4.256)
-}
 
 /// Pressão dinâmica: q = 0.5 · ρ · V²
 /// V em m/s, retorna Pa.
@@ -91,11 +84,15 @@ pub fn ld_ratio(cl: f64, cd: f64) -> f64 {
     cl / cd
 }
 
-/// Número de Mach da ponta da hélice (verificação de compressibilidade)
-pub fn mach_tip(prop_diameter_m: f64, prop_rpm: f64, v_cruise_ms: f64) -> f64 {
+/// Número de Mach da ponta da hélice (verificação de compressibilidade).
+/// `a_ms`: velocidade do som local (m/s) — de `Isa::speed_of_sound_ms`, na
+/// altitude/ΔISA relevantes (ex.: cruzeiro). Antes da Task 4.6 este valor
+/// era um literal fixo (340,0 m/s, aproximação @ 2.500m ISA); agora é
+/// calculado a partir da atmosfera ISA completa.
+pub fn mach_tip(prop_diameter_m: f64, prop_rpm: f64, v_cruise_ms: f64, a_ms: f64) -> f64 {
     let tip_speed = std::f64::consts::PI * prop_diameter_m * (prop_rpm / 60.0);
     let total_speed = (tip_speed * tip_speed + v_cruise_ms * v_cruise_ms).sqrt();
-    total_speed / 340.0  // velocidade do som @ 2.500m ISA ≈ 340 m/s
+    total_speed / a_ms
 }
 
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
@@ -105,7 +102,9 @@ pub struct AerodynamicsAgent;
 impl AerodynamicsAgent {
     /// Executa o agente e retorna a especificação aerodinâmica completa.
     pub fn run(state: &AircraftState, req: &Requirements) -> WingSpec {
-        let rho_cruise = isa_density(req.cruise_altitude_m);
+        let rho_cruise = crate::models::atmosphere::Isa::density_kgm3(
+            req.cruise_altitude_m, req.isa_delta_c,
+        );
         let v_cruise_ms = req.cruise_speed_min_kmh / 3.6;
         let weight_n = state.mtow_kg * G;
 
@@ -156,17 +155,10 @@ mod tests {
     use super::*;
     use crate::models::aircraft_config::test_fixtures::config_teste;
 
-    #[test]
-    fn isa_density_sea_level() {
-        let rho = isa_density(0.0);
-        assert!((rho - RHO_SL).abs() < 1e-6, "densidade SL incorreta: {rho}");
-    }
-
-    #[test]
-    fn isa_density_decresce_com_altitude() {
-        assert!(isa_density(2_500.0) < isa_density(0.0));
-        assert!(isa_density(5_000.0) < isa_density(2_500.0));
-    }
+    // Testes de densidade ISA (isa_density_sea_level, isa_density_decresce_com_altitude)
+    // moveram-se para `src/models/atmosphere.rs` (Task 4.6) junto com a
+    // função — `isa_density` foi removida deste módulo em favor de
+    // `Isa::density_kgm3`.
 
     #[test]
     fn stall_speed_fisica() {
@@ -231,8 +223,9 @@ mod tests {
     #[test]
     fn mach_tip_abaixo_de_0_75() {
         // Regra: Mach na ponta da hélice < 0.75 para evitar ruído e perda de eficiência
-        // Prop 1.95m @ 1.500 rpm, V=77.8 m/s
-        let m = mach_tip(1.95, 1_500.0, 77.8);
+        // Prop 1.95m @ 1.500 rpm, V=77.8 m/s, velocidade do som @ 2.500m ISA
+        let a_ms = crate::models::atmosphere::Isa::speed_of_sound_ms(2_500.0, 0.0);
+        let m = mach_tip(1.95, 1_500.0, 77.8, a_ms);
         assert!(m < 0.75, "Mach ponta hélice {m:.3} excede limite 0.75");
     }
 }

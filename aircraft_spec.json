@@ -10,13 +10,13 @@
     "thickness_ratio": 0.15,
     "oswald_efficiency": 0.7555832290782708,
     "cd0": 0.022,
-    "cl_cruise": 0.3651437286593931,
-    "cd_cruise": 0.02759467934647761,
+    "cl_cruise": 0.3649887500058317,
+    "cd_cruise": 0.027589931233331515,
     "cl_max": 1.72,
     "cl_max_clean": 1.45,
-    "stall_speed_flaps_kmh": 113.99255913458848,
-    "stall_speed_clean_kmh": 124.1528593014455,
-    "ld_ratio_cruise": 13.232396146904412
+    "stall_speed_flaps_kmh": 113.99579272370019,
+    "stall_speed_clean_kmh": 124.15638110442171,
+    "ld_ratio_cruise": 13.229056169769905
   },
   "propulsion": {
     "engine_model": "Toyota 1GD-FTV 2.8 Turbo Diesel",
@@ -31,13 +31,13 @@
     "prop_diameter_m": 1.95,
     "fuel_type": "Diesel S-10",
     "fuel_capacity_l": 260.0,
-    "fc_cruise_lph": 27.440541526882967,
-    "bsfc_cruise_gkwh": 211.8765588849971,
-    "endurance_h": 8.527528502699363,
-    "range_km": 2387.7079807558216,
+    "fc_cruise_lph": 27.452241593422304,
+    "bsfc_cruise_gkwh": 211.90137415301373,
+    "endurance_h": 8.523894094537898,
+    "range_km": 2386.6903464706115,
     "prop_efficiency": 0.8103989574988021,
-    "thrust_cruise_n": 1133.5283748567736,
-    "p_req_cruise_kw": 108.79001907470499,
+    "thrust_cruise_n": 1133.8788859589918,
+    "p_req_cruise_kw": 108.82365926434825,
     "p_shaft_cruise_kw": 122.88722938820213,
     "cruise_feasible": true
   },
@@ -51,16 +51,16 @@
     "static_margin_pct": 60.44514978413294
   },
   "performance": {
-    "v_cruise_kmh": 308.64323162934545,
-    "v_stall_kmh": 113.99255913458848,
-    "rc_sl_ms": 4.990384366483306,
-    "rc_cruise_alt_ms": 4.551344805353198,
+    "v_cruise_kmh": 308.599033447643,
+    "v_stall_kmh": 113.99579272370019,
+    "rc_sl_ms": 4.989911001499973,
+    "rc_cruise_alt_ms": 4.551291474056924,
     "service_ceiling_m": 5200.0,
-    "to_distance_paved_m": 294.7256769460097,
-    "to_distance_grass_m": 353.6708123352116,
-    "landing_distance_m": 397.53533214908725,
-    "range_km": 2387.7079807558216,
-    "endurance_h": 8.527528502699363
+    "to_distance_paved_m": 294.7623575586021,
+    "to_distance_grass_m": 353.71482907032254,
+    "landing_distance_m": 397.54569052729556,
+    "range_km": 2386.6903464706115,
+    "endurance_h": 8.523894094537898
   },
   "structure": {
     "design_load_factor_g": 3.8,
@@ -75,7 +75,7 @@
     "frame_spacing_mm": 300.0,
     "flutter_speed_kmh": 749.5537645327781,
     "design_dive_speed_kmh": 350.0,
-    "va_kmh": 242.01847738623837,
+    "va_kmh": 242.02534264410477,
     "fatigue_life_cycles": null,
     "flutter_ok": true
   },

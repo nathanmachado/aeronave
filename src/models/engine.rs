@@ -92,10 +92,21 @@ impl EngineSpec {
             .fold(0.0, f64::max)
     }
 
+    /// Fator de derate de potência com altitude.
+    ///
+    /// Simplificação deliberada (Task 4.6): usa `Isa::density_kgm3(altitude_m,
+    /// 0.0)` — dia ISA padrão, NÃO o `isa_delta_c` da missão. O derate do
+    /// motor (aspirado via Gagg-Ferrar, turbo via altitude crítica) depende
+    /// fisicamente da densidade real do ar admitido, que varia com o desvio
+    /// ISA do dia — mas encadear `isa_delta_c` até aqui exigiria mudar a
+    /// assinatura pública desta função (e de todos os seus chamadores) só
+    /// para um efeito de segunda ordem. Fica registrado como refinamento
+    /// futuro, se pedido; hoje o modelo assume dia padrão para o derate.
     pub fn altitude_factor(&self, altitude_m: f64) -> f64 {
         match self.induction {
             Induction::NaturallyAspirated => {
-                let sigma = crate::agents::aerodynamics::isa_density(altitude_m) / 1.225;
+                let sigma = crate::models::atmosphere::Isa::density_kgm3(altitude_m, 0.0)
+                    / crate::models::atmosphere::RHO_SL;
                 (1.132 * sigma - 0.132).clamp(0.0, 1.0) // Gagg-Ferrar
             }
             Induction::Turbocharged { critical_altitude_m, power_loss_per_1000m } => {

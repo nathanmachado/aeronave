@@ -193,7 +193,9 @@ impl PropulsionAgent {
         // Potência necessária para voo nivelado a V_cruise não depende do
         // rpm do motor (só de arrasto e velocidade) — calculada uma vez.
         let drag_n = {
-            let rho = crate::agents::aerodynamics::isa_density(req.cruise_altitude_m);
+            let rho = crate::models::atmosphere::Isa::density_kgm3(
+                req.cruise_altitude_m, req.isa_delta_c,
+            );
             let q   = crate::agents::aerodynamics::dynamic_pressure(rho, v_cruise_ms);
             crate::agents::aerodynamics::drag_total_n(q, wing.area_m2, wing.cd_cruise)
         };
