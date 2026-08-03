@@ -16,6 +16,7 @@
 //! por TODOS os agentes a jusante.
 
 use crate::agents::aerodynamics::AerodynamicsAgent;
+use crate::agents::constraint_diagram::{wing_loading_limits, WingLoadingReport};
 use crate::agents::propulsion::PropulsionAgent;
 use crate::agents::weight_balance::{WeightBalanceAgent, WeightBalanceOutput};
 use crate::models::aircraft_config::AircraftConfig;
@@ -56,6 +57,11 @@ pub struct SizedAircraft {
     /// Massa de combustível (kg) requerida pela missão (autonomia mínima +
     /// reserva) no MTOW convergido — não é o tanque cheio.
     pub mission_fuel_kg: f64,
+    /// Diagrama de restrições clássico (W/S × P/W, Task 3.2) — calculado no
+    /// MTOW convergido, com a asa/motor/estado finais. Puramente
+    /// informativo: recomenda uma área de asa, não redimensiona a
+    /// aeronave automaticamente.
+    pub constraints: WingLoadingReport,
     /// Trajetória de MTOW ao longo das iterações (primeiro palpite → valor
     /// final convergido) — para diagnóstico/relatório, não é usado por
     /// nenhum agente a jusante.
@@ -203,6 +209,7 @@ pub(crate) fn size_aircraft_with_max_iters(
 
             iterations.push(novo);
             state.mtow_kg = novo;
+            let constraints = wing_loading_limits(novo, &wing, engine, &state, req);
             return Ok(SizedAircraft {
                 state,
                 wing,
@@ -210,6 +217,7 @@ pub(crate) fn size_aircraft_with_max_iters(
                 wb,
                 mission_fuel_kg: fuel_kg,
                 iterations,
+                constraints,
             });
         }
 

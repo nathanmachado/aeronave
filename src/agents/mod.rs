@@ -4,3 +4,4 @@ pub mod weight_balance;
 pub mod performance;
 pub mod structural;
 pub mod landing_gear;
+pub mod constraint_diagram;

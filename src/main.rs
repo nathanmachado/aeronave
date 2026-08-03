@@ -108,6 +108,25 @@ fn main() {
     println!("  Combustível de missão (autonomia mínima + reserva): {:.1}kg\n",
              sized.mission_fuel_kg);
 
+    // ── Diagrama de restrições W/S × P/W (Task 3.2) ─────────────────────────────
+    // Puramente informativo — recomenda uma área de asa a partir dos limites
+    // clássicos de stall/cruzeiro/subida, mas não redimensiona a aeronave
+    // automaticamente (ver `agents::constraint_diagram`).
+    println!("[ RESTRIÇÕES ] Diagrama W/S × P/W (Raymer cap. 5 / Gudmundsson cap. 3)");
+    let cons = &sized.constraints;
+    println!("  W/S máximo (stall, Vs_ref={:.1}m/s): {:.1}N/m²  |  W/S ótimo (cruzeiro): {:.1}N/m²",
+             cons.v_stall_ref_ms, cons.ws_max_stall_n_m2, cons.ws_optimal_cruise_n_m2);
+    println!("  W/S atual: {:.1}N/m²  |  W/S escolhido p/ recomendação: {:.1}N/m²",
+             cons.ws_actual_n_m2, cons.ws_chosen_n_m2);
+    println!("  P/W mínimo (RC≥1.5m/s): {:.3}W/N  |  P/W atual (pot. máx. contínua, SL): {:.3}W/N",
+             cons.pw_min_climb_w_n, cons.pw_actual_w_n);
+    println!("  Área de asa recomendada: {:.2}m²  |  Área atual: {:.2}m²",
+             cons.recommended_wing_area_m2, sized.wing.area_m2);
+    let ws_ok = cons.ws_actual_n_m2 <= cons.ws_max_stall_n_m2;
+    let pw_ok = cons.pw_actual_w_n >= cons.pw_min_climb_w_n;
+    println!("  {} W/S atual ≤ W/S máximo (stall)", if ws_ok { "✓" } else { "✗" });
+    println!("  {} P/W atual ≥ P/W mínimo (subida)\n", if pw_ok { "✓" } else { "✗" });
+
     let state = &sized.state;
 
     // ── Agente 1: Aerodinâmica ────────────────────────────────────────────────

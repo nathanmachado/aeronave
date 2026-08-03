@@ -517,3 +517,45 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
         other => panic!("esperava CombustivelInsuficiente para o Rotax, obtido: {other:?}"),
     }
 }
+
+// ─── TASK 3.2: DIAGRAMA DE RESTRIÇÕES (W/S × P/W) ──────────────────────────────
+//
+// `orchestrator::size_aircraft` agora calcula `sized.constraints`
+// (`WingLoadingReport`) no MTOW convergido, com a asa/motor/estado finais —
+// ver `src/agents/constraint_diagram.rs`. Este teste roda contra a
+// aeronave-base + Toyota REAIS (não fixtures sintéticas) e verifica que
+// ambos os vereditos do diagrama de restrições são satisfeitos no baseline
+// de projeto: a carga alar atual respeita o limite de stall, e a razão
+// peso-potência atual (potência máxima contínua no eixo, SL) excede o
+// mínimo exigido para a razão de subida requerida (CS-23, 1,5 m/s).
+#[test]
+fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
+    let cfg    = baseline_state();
+    let req    = baseline_mission();
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized  = size_aircraft(&cfg, &toyota, &req)
+        .expect("aeronave-base + Toyota deveria convergir com o tanque de 260 L");
+
+    let c = &sized.constraints;
+    println!(
+        "ws_max_stall={:.2} N/m² | ws_optimal_cruise={:.2} N/m² | ws_actual={:.2} N/m² | \
+         pw_min_climb={:.4} W/N | pw_actual={:.4} W/N | recommended_area={:.3} m²",
+        c.ws_max_stall_n_m2, c.ws_optimal_cruise_n_m2, c.ws_actual_n_m2,
+        c.pw_min_climb_w_n, c.pw_actual_w_n, c.recommended_wing_area_m2
+    );
+
+    let ws_ok = c.ws_actual_n_m2 <= c.ws_max_stall_n_m2;
+    let pw_ok = c.pw_actual_w_n >= c.pw_min_climb_w_n;
+    assert!(ws_ok,
+        "veredito W/S deveria ser ✓ no baseline: ws_actual ({:.2} N/m²) deveria ser ≤ \
+         ws_max_stall ({:.2} N/m²)", c.ws_actual_n_m2, c.ws_max_stall_n_m2);
+    assert!(pw_ok,
+        "veredito P/W deveria ser ✓ no baseline: pw_actual ({:.4} W/N) deveria ser ≥ \
+         pw_min_climb ({:.4} W/N)", c.pw_actual_w_n, c.pw_min_climb_w_n);
+
+    // Pin: ws_actual = MTOW_convergido·g / S = 1.529,9 kg · 9,807 / 14,2 m² ≈ 1.056,5 N/m²
+    let ws_actual_esperado = 1_056.5;
+    assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
+        "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
+        c.ws_actual_n_m2, ws_actual_esperado);
+}
