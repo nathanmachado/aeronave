@@ -11,7 +11,9 @@ pub struct EngineSpec {
     pub rpm_redline: f64,
     /// RPM máximo de uso contínuo (cruzeiro/subida prolongada)
     pub rpm_max_continuous: f64,
-    /// Pontos (rpm, Nm) — interpolação linear entre pontos; 0 fora da faixa
+    /// Pontos (rpm, Nm) — interpolação linear entre pontos; 0 fora da faixa.
+    /// Invariante: rpm points must be strictly increasing for correct interpolation.
+    /// Validation of this invariant is performed when loading from TOML config.
     pub torque_curve: Vec<[f64; 2]>,
     pub bsfc: BsfcModel,
     pub induction: Induction,
@@ -48,10 +50,6 @@ pub struct BsfcModel {
 }
 
 impl BsfcModel {
-    pub fn default_diesel() -> Self {
-        Self { bsfc_min_gkwh: 200.0, rpm_optimal: 2_200.0, load_optimal: 0.70,
-               rpm_penalty_gkwh: 18.0, load_penalty_gkwh: 22.0, bsfc_max_gkwh: 380.0 }
-    }
     pub fn bsfc_gkwh(&self, rpm: f64, load_fraction: f64) -> f64 {
         let rp = ((rpm - self.rpm_optimal) / 1_000.0).powi(2) * self.rpm_penalty_gkwh;
         let lp = ((load_fraction - self.load_optimal) / 0.30).powi(2) * self.load_penalty_gkwh;
@@ -99,7 +97,14 @@ mod tests {
             rpm_redline: 3_800.0, rpm_max_continuous: 3_000.0,
             torque_curve: vec![[700.0, 200.0], [1_600.0, 500.0],
                                [2_800.0, 500.0], [3_400.0, 420.0], [3_800.0, 0.0]],
-            bsfc: BsfcModel::default_diesel(),
+            bsfc: BsfcModel {
+                bsfc_min_gkwh: 200.0,
+                rpm_optimal: 2_200.0,
+                load_optimal: 0.70,
+                rpm_penalty_gkwh: 18.0,
+                load_penalty_gkwh: 22.0,
+                bsfc_max_gkwh: 380.0,
+            },
             induction: Induction::Turbocharged { critical_altitude_m: 2_000.0,
                                                  power_loss_per_1000m: 0.10 },
             fuel: FuelSpec { name: "Diesel S-10".into(),
@@ -121,5 +126,30 @@ mod tests {
         let e = engine_teste();
         // P = T·2πN/60 → 420 Nm @ 3400 rpm ≈ 149.5 kW
         assert!((e.power_kw(3_400.0) - 149.5).abs() < 1.0);
+    }
+
+    #[test]
+    fn bsfc_gkwh_penalidades() {
+        let e = engine_teste();
+        let bsfc_mdl = &e.bsfc;
+
+        // At optimal point (2200 rpm, 0.70 load): BSFC ≈ bsfc_min_gkwh
+        let bsfc_optimal = bsfc_mdl.bsfc_gkwh(2_200.0, 0.70);
+        assert!((bsfc_optimal - 200.0).abs() < 1.0, "optimal BSFC should be ~200 g/kWh");
+
+        // Far off optimal: penalties apply; BSFC increases
+        let bsfc_far_off = bsfc_mdl.bsfc_gkwh(3_500.0, 0.30);
+        assert!(bsfc_far_off > bsfc_optimal, "BSFC far from optimal should be higher");
+        assert!(bsfc_far_off <= bsfc_mdl.bsfc_max_gkwh, "BSFC should not exceed max");
+    }
+
+    #[test]
+    fn potencia_maxima_da_curva() {
+        let e = engine_teste();
+        let p_max = e.power_kw_max();
+
+        // Torque curve peaks at 3400 rpm with 420 Nm → ~149.5 kW
+        // Scan step_by(50) should find peak near this value
+        assert!(p_max > 145.0 && p_max < 155.0, "peak power should be ~149-151 kW from fixture curve");
     }
 }
