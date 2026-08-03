@@ -214,6 +214,26 @@ pub fn landing_distance_m(
     (s_ground + s_air) * surface_factor.sqrt() // correção para superfície
 }
 
+// ─── VELOCIDADE MÁXIMA NIVELADA ───────────────────────────────────────────────
+
+/// Velocidade máxima em voo nivelado: maior V com P_disp(V) ≥ P_req(V).
+/// Bissecção entre 1.2·Vs e 200 m/s (720 km/h) sobre f(V) = P_excesso(V).
+pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, wing: &WingSpec,
+                          state: &AircraftState, engine_rpm: f64) -> f64 {
+    let rho = isa_density(altitude_m);
+    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    let (mut lo, mut hi) = (1.2 * v_stall, 200.0);
+    let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine_rpm,
+                                       state.psru_ratio, state.prop_diameter_m, altitude_m);
+    if pex(hi) > 0.0 { return hi; }        // limitado pelo teto do modelo
+    if pex(lo) <= 0.0 { return lo; }       // não sustenta nem o mínimo — inviável
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        if pex(mid) > 0.0 { lo = mid; } else { hi = mid; }
+    }
+    0.5 * (lo + hi)
+}
+
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
 
 pub struct PerformanceAgent;
@@ -246,8 +266,13 @@ impl PerformanceAgent {
         let mass_ldg = mtow_kg - prop.fuel_capacity_l * 0.840 * 0.60;
         let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, 1.00);
 
+        // Velocidade máxima nivelada em cruzeiro (2.500 m, rpm máximo contínuo)
+        // rpm máximo contínuo = rated rpm por enquanto (parametrizado na Fase 1)
+        let v_max_cruise_ms = max_level_speed_ms(mtow_kg, 2_500.0, wing, state,
+                                                  Engine1GdFtv::RPM_RATED);
+
         PerformanceSpec {
-            v_cruise_kmh:         prop.range_km / prop.endurance_h,
+            v_cruise_kmh:         v_max_cruise_ms * 3.6,
             v_stall_kmh:          wing.stall_speed_kmh,
             rc_sl_ms:             rc_sl,
             rc_cruise_alt_ms:     rc_cruise_alt,
@@ -324,6 +349,16 @@ mod tests {
         println!("Pouso pista pavimentada: {d:.0} m");
         assert!(d > 300.0 && d < 700.0,
             "Distância LDG {d:.0} m fora do esperado (300–700 m)");
+    }
+
+    #[test]
+    fn velocidade_maxima_resolvida_do_equilibrio() {
+        let (state, wing, _) = setup();
+        let v_max = max_level_speed_ms(1_461.0, 2_500.0, &wing, &state, 3_400.0);
+        let v_max_kmh = v_max * 3.6;
+        // Deve ser um número resolvido (não o requisito ecoado) e > requisito
+        assert!(v_max_kmh > 280.0 && v_max_kmh < 400.0,
+            "V_max nivelada {v_max_kmh:.0} km/h implausível");
     }
 
     #[test]
