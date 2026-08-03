@@ -95,15 +95,29 @@ pub struct EmpennageSpec {
 /// Geometria física de UMA superfície de controle (m/m²) — saída de
 /// `agents::control_surfaces::ControlSurfacesAgent`.
 ///
-/// Convenção de `span_m`/`area_m2` (ver docstring do módulo do agente para a
-/// dedução completa):
-///   - aileron/flap: `span_m` é a envergadura FÍSICA DE UM LADO (a asa tem
-///     duas, esquerda e direita, idênticas por simetria); `area_m2` já soma
-///     os dois lados.
-///   - profundor/leme: superfície única — `span_m`/`area_m2` já são o total.
-/// `start_m`/`end_m`: posição ao longo da envergadura da superfície-mãe
-/// (asa para aileron/flap, medida a partir da linha de centro; EH/EV para
-/// profundor/leme, medida a partir da raiz), em metros.
+/// Convenção UNIFICADA de `span_m`/`start_m`/`end_m`/`area_m2` (ver
+/// docstring do módulo do agente para a dedução algébrica completa):
+///
+///   - **Superfícies ESPELHADAS** (aileron, flap — asa; elevator/profundor
+///     — EH): `span_m`, `start_m` e `end_m` são medidos POR LADO (a
+///     superfície existe idêntica nos dois lados, esquerdo e direito, por
+///     simetria) — `start_m`/`end_m` a partir da LINHA DE CENTRO da
+///     superfície-mãe (0 = linha de centro; `end_m` nunca ultrapassa a
+///     SEMI-envergadura da superfície-mãe: `wing.span_m/2` para
+///     aileron/flap, `emp.span_h_m/2` para o profundor). `area_m2` é a área
+///     TOTAL dos dois lados somados (2 × área de um lado).
+///   - **Superfície ÚNICA** (rudder/leme — EV, painel não-espelhado):
+///     `span_m`/`start_m`/`end_m` medidos a partir da RAIZ (base da deriva,
+///     0 = raiz; `end_m` até `rudder_span_frac · span_v_m`). `area_m2` já é
+///     a área total (não há segundo lado a somar).
+///
+/// Um consumidor de CAD deve tratar `start_m`/`end_m` como distância a
+/// partir da linha de centro (superfícies espelhadas) OU da raiz (leme) —
+/// NUNCA como a largura ponta-a-ponta da superfície (achado da revisão da
+/// Task 4.2: a versão original reportava `elevator.end_m` como a largura
+/// ponta-a-ponta do profundor, ~1.8× a semi-envergadura real do EH,
+/// posicionando a superfície fora do estabilizador se lida como
+/// distância-da-linha-de-centro).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SurfaceGeom {
     pub span_m: f64,

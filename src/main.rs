@@ -179,16 +179,18 @@ fn main() {
     // dimensionadas, sem participar do laço de convergência de MTOW.
     println!("[ AGENTE 8 ] ControlSurfacesAgent — Aileron, Flap, Profundor e Leme");
     let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
-    println!("  Aileron:  span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m",
+    println!("  Aileron:   span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m por lado, da linha de centro",
              cs.aileron.span_m, cs.aileron.area_m2, cs.aileron.chord_mean_m,
              cs.aileron.start_m, cs.aileron.end_m);
-    println!("  Flap:     span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m",
+    println!("  Flap:      span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m por lado, da linha de centro",
              cs.flap.span_m, cs.flap.area_m2, cs.flap.chord_mean_m,
              cs.flap.start_m, cs.flap.end_m);
-    println!("  Profundor: span={:.3}m  área={:.3}m²  corda_média={:.3}m",
-             cs.elevator.span_m, cs.elevator.area_m2, cs.elevator.chord_mean_m);
-    println!("  Leme:      span={:.3}m  área={:.3}m²  corda_média={:.3}m\n",
-             cs.rudder.span_m, cs.rudder.area_m2, cs.rudder.chord_mean_m);
+    println!("  Profundor: span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m por lado, da linha de centro",
+             cs.elevator.span_m, cs.elevator.area_m2, cs.elevator.chord_mean_m,
+             cs.elevator.start_m, cs.elevator.end_m);
+    println!("  Leme:      span={:.3}m  área(painel único)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m da raiz\n",
+             cs.rudder.span_m, cs.rudder.area_m2, cs.rudder.chord_mean_m,
+             cs.rudder.start_m, cs.rudder.end_m);
 
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");

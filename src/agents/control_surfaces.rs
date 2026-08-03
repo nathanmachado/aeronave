@@ -28,22 +28,21 @@
 /// ── Profundor (EH) ──────────────────────────────────────────────────────
 /// O estabilizador horizontal é uma superfície ESPELHADA (`span_h_m` é a
 /// envergadura TOTAL ponta-a-ponta, mesma convenção da asa — ver
-/// `EmpennageAgent`). O profundor é definido por UMA fração
-/// (`elevator_span_frac`), medida a partir da raiz (η=0, linha de centro)
-/// — cobrindo `elevator_span_frac` da semi-envergadura EM CADA lado,
-/// simetricamente. Por identidade algébrica (a mesma que torna
-/// `chord_root = 2S/(b(1+λ))` válida tanto para uma asa espelhada quanto
-/// para um único painel trapezoidal de comprimento `b`), a área de dois
-/// trapézios "raiz→η_edge" espelhados, com η_edge=`elevator_span_frac`,
-/// soma-se EXATAMENTE à área de um único trapézio calculado com a
-/// envergadura FÍSICA TOTAL `elevator_span_frac · span_h_m` — por isso o
-/// cálculo abaixo não tem um fator ×2 explícito (`tail_surface_single`
-/// serve tanto para o profundor quanto para o leme).
+/// `EmpennageAgent`). Segue a MESMA convenção de `SurfaceGeom` usada por
+/// aileron/flap (ver docstring de `SurfaceGeom` em `models::specs`):
+/// `span_m`/`start_m`/`end_m` são POR LADO, medidos a partir da linha de
+/// centro (η=0) até `elevator_span_frac` da semi-envergadura do EH
+/// (`span_h_m/2`); `area_m2` é o TOTAL dos dois lados (`tail_surface_mirrored`,
+/// função dedicada — corrigido na revisão da Task 4.2: a versão original
+/// reportava `span_m`/`end_m` já DOBRADOS, iguais à largura ponta-a-ponta
+/// do profundor, o que um consumidor de CAD leria como distância-da-linha-
+/// de-centro e posicionaria a superfície fora do estabilizador).
 ///
 /// ── Leme (EV) ────────────────────────────────────────────────────────────
 /// A deriva NÃO é espelhada (um único painel) — `span_v_m` já é a
 /// envergadura física TOTAL desse painel (raiz na base, η=0, até
-/// `rudder_span_frac·span_v_m`). Mesma função `tail_surface_single`.
+/// `rudder_span_frac·span_v_m`). `tail_surface_single` (sem espelhamento,
+/// sem fator ×2).
 use crate::agents::weight_balance::{chord_at, chord_root};
 use crate::models::{
     aircraft_config::AircraftConfig,
@@ -76,7 +75,7 @@ impl ControlSurfacesAgent {
             cs.flap_chord_frac,
         );
 
-        let elevator = tail_surface_single(
+        let elevator = tail_surface_mirrored(
             emp.chord_h_root_m,
             emp.taper_h,
             emp.span_h_m,
@@ -120,11 +119,37 @@ fn wing_surface_per_side(
     }
 }
 
-/// Profundor/leme: superfície única "raiz (η=0) → η=span_frac", sobre a
-/// envergadura física total `surf_span_m` da superfície-mãe (`span_h_m`
-/// para o EH, `span_v_m` para o EV) — ver docstring do módulo para a
-/// justificativa de por que a mesma função serve para ambos os casos
-/// (EH espelhado vs. EV painel único).
+/// Profundor: EH ESPELHADO — um lado, de `η=0` (linha de centro) a
+/// `η=span_frac` (fração da SEMI-envergadura `full_span_m/2`). `span_m`/
+/// `start_m`/`end_m` são POR LADO (mesma convenção de `wing_surface_per_side`
+/// para aileron/flap); `area_m2` é o TOTAL dos dois lados — a soma dos dois
+/// trapézios espelhados idênticos, `2 × área_por_lado`.
+fn tail_surface_mirrored(
+    c_root: f64,
+    taper: f64,
+    full_span_m: f64,
+    span_frac: f64,
+    chord_frac: f64,
+) -> SurfaceGeom {
+    let half_span = full_span_m / 2.0;
+    let c_start = chord_frac * chord_at(0.0, c_root, taper);
+    let c_end = chord_frac * chord_at(span_frac, c_root, taper);
+    let span_per_side = span_frac * half_span;
+    let area_per_side = 0.5 * (c_start + c_end) * span_per_side;
+
+    SurfaceGeom {
+        span_m: span_per_side,
+        area_m2: 2.0 * area_per_side,
+        chord_mean_m: 0.5 * (c_start + c_end),
+        start_m: 0.0,
+        end_m: span_per_side,
+    }
+}
+
+/// Leme: EV painel ÚNICO (não espelhado) — de `η=0` (raiz, base da deriva)
+/// a `η=span_frac`, sobre a envergadura física total `surf_span_m`
+/// (`span_v_m`). `span_m`/`area_m2` já são o total (não há segundo lado a
+/// somar).
 fn tail_surface_single(
     c_root: f64,
     taper: f64,
@@ -267,6 +292,48 @@ mod tests {
         assert!(cs_maior.aileron.area_m2 > cs_base.aileron.area_m2,
             "área do aileron deveria crescer com aileron_chord_frac: base={:.4} maior={:.4}",
             cs_base.aileron.area_m2, cs_maior.aileron.area_m2);
+    }
+
+    /// Regressão do finding de revisão: `elevator.end_m` é POR LADO (fração
+    /// da semi-envergadura do EH), então nunca pode ultrapassar
+    /// `emp.span_h_m/2` — antes da correção, `end_m` era a largura
+    /// ponta-a-ponta do profundor (~1.8× a semi-envergadura real).
+    #[test]
+    fn elevator_end_m_nao_ultrapassa_semi_envergadura_do_eh() {
+        let (wing, emp, cfg) = fixture();
+        let cs = ControlSurfacesAgent::run(&wing, &emp, &cfg);
+        let half_span_h = emp.span_h_m / 2.0;
+
+        println!("elevator.end_m={:.4}m  semi-envergadura EH={:.4}m", cs.elevator.end_m, half_span_h);
+        assert!(cs.elevator.end_m <= half_span_h + 1e-9,
+            "elevator.end_m ({:.4}m) não deveria ultrapassar a semi-envergadura do EH ({:.4}m)",
+            cs.elevator.end_m, half_span_h);
+        assert_eq!(cs.elevator.start_m, 0.0);
+        assert!((cs.elevator.end_m - cs.elevator.span_m).abs() < 1e-9,
+            "end_m deveria ser igual a span_m quando start_m=0");
+    }
+
+    /// Consistência de espelhamento: a área TOTAL do profundor deve ser
+    /// EXATAMENTE `2 × (trapézio de um lado, de η=0 a elevator_span_frac)`
+    /// — a mesma identidade algébrica usada por `wing_surface_per_side`
+    /// para aileron/flap, agora também vale bit-a-bit para o profundor
+    /// (antes da correção, a área já era numericamente igual por
+    /// coincidência algébrica, mas `span_m`/`end_m` não eram "por lado").
+    #[test]
+    fn elevator_area_bate_com_dois_trapezios_por_lado() {
+        let (wing, emp, cfg) = fixture();
+        let cs = ControlSurfacesAgent::run(&wing, &emp, &cfg);
+
+        let chord_frac = cfg.control_surfaces.elevator_chord_frac;
+        let c_start = chord_frac * crate::agents::weight_balance::chord_at(0.0, emp.chord_h_root_m, emp.taper_h);
+        let c_end = chord_frac * crate::agents::weight_balance::chord_at(
+            cfg.control_surfaces.elevator_span_frac, emp.chord_h_root_m, emp.taper_h);
+        let area_per_side = 0.5 * (c_start + c_end) * cs.elevator.span_m;
+
+        println!("elevator.area_m2={:.9}  2×área_por_lado={:.9}", cs.elevator.area_m2, 2.0 * area_per_side);
+        assert!((cs.elevator.area_m2 - 2.0 * area_per_side).abs() < 1e-9,
+            "elevator.area_m2 ({:.9}) deveria ser exatamente 2×área_por_lado ({:.9})",
+            cs.elevator.area_m2, 2.0 * area_per_side);
     }
 
     #[test]

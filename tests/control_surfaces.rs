@@ -106,6 +106,59 @@ fn baseline_area_do_profundor_coerente_com_s_h() {
         cs.elevator.area_m2, aprox);
 }
 
+/// Regressão do finding de revisão (SurfaceGeom para o profundor divergia
+/// da convenção "por lado" de aileron/flap/rudder): `elevator.end_m` é POR
+/// LADO — nunca pode ultrapassar a semi-envergadura real do EH
+/// (`emp.span_h_m/2`). Antes da correção, `end_m` valia
+/// `elevator_span_frac·span_h_m` (a largura ponta-a-ponta do profundor,
+/// ~2.89m no baseline real) — 1.8× a semi-envergadura real do EH (~1.61m),
+/// o que posicionaria a superfície fora do estabilizador se um consumidor
+/// de CAD lesse `end_m` como distância-da-linha-de-centro.
+#[test]
+fn baseline_elevator_end_m_nao_ultrapassa_semi_envergadura_do_eh() {
+    let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
+    let state = AircraftState::from_config(&cfg);
+    let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
+    let wing = AerodynamicsAgent::run(&state, &req);
+    let emp = EmpennageAgent::run(&wing, &cfg);
+
+    let cs = ControlSurfacesAgent::run(&wing, &emp, &cfg);
+    let half_span_h = emp.span_h_m / 2.0;
+
+    println!("elevator: span/lado={:.4}m  [{:.4}–{:.4}]m  semi-envergadura EH={:.4}m",
+        cs.elevator.span_m, cs.elevator.start_m, cs.elevator.end_m, half_span_h);
+
+    assert!(cs.elevator.end_m <= half_span_h + 1e-9,
+        "elevator.end_m ({:.4}m) não deveria ultrapassar a semi-envergadura do EH ({:.4}m)",
+        cs.elevator.end_m, half_span_h);
+    assert_eq!(cs.elevator.start_m, 0.0);
+}
+
+/// Consistência de espelhamento: a área TOTAL do profundor deve ser
+/// EXATAMENTE `2 × (trapézio de um lado, de η=0 a elevator_span_frac)` —
+/// mesma identidade algébrica que já valia para aileron/flap.
+#[test]
+fn baseline_elevator_area_bate_com_dois_trapezios_por_lado() {
+    let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
+    let state = AircraftState::from_config(&cfg);
+    let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
+    let wing = AerodynamicsAgent::run(&state, &req);
+    let emp = EmpennageAgent::run(&wing, &cfg);
+
+    let cs = ControlSurfacesAgent::run(&wing, &emp, &cfg);
+
+    let chord_frac = cfg.control_surfaces.elevator_chord_frac;
+    let c_start = chord_frac * aeronave::agents::weight_balance::chord_at(0.0, emp.chord_h_root_m, emp.taper_h);
+    let c_end = chord_frac * aeronave::agents::weight_balance::chord_at(
+        cfg.control_surfaces.elevator_span_frac, emp.chord_h_root_m, emp.taper_h);
+    let area_per_side = 0.5 * (c_start + c_end) * cs.elevator.span_m;
+
+    println!("elevator.area_m2={:.9}  2×área_por_lado={:.9}", cs.elevator.area_m2, 2.0 * area_per_side);
+    assert!((cs.elevator.area_m2 - 2.0 * area_per_side).abs() < 1e-9,
+        "elevator.area_m2 ({:.9}) deveria ser exatamente 2×área_por_lado ({:.9})",
+        cs.elevator.area_m2, 2.0 * area_per_side);
+}
+
 /// Coerência geométrica: aileron e flap não se sobrepõem e ambos cabem
 /// dentro da semi-envergadura da asa real.
 #[test]
