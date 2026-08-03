@@ -147,6 +147,51 @@ impl PropellerAgent {
     }
 }
 
+/// Tolerância (m) acima da qual a divergência entre o diâmetro derivado
+/// AUTORITATIVO (`PropellerSpec::diameter_m`, calculado com o `prop_rpm_cruise`
+/// REAL da busca de BSFC) e o diâmetro PROVISÓRIO usado para inicializar essa
+/// mesma busca (`AircraftState::prop_diameter_m`, só folga de solo — ver
+/// `models::aircraft_state::AircraftState::from_config`) passa a ser
+/// reportada como aviso — ver `diameter_mismatch_warning`.
+pub const DIAMETER_MISMATCH_TOLERANCE_M: f64 = 0.01;
+
+/// Quando `[propeller].diameter_m` está omitido, `AircraftState` usa um
+/// diâmetro PROVISÓRIO (só a restrição de folga de solo, calculável sem
+/// `EngineSpec`/`Requirements`) para inicializar a busca de rpm de cruzeiro
+/// do `PropulsionAgent` — ver a nota de projeto no docstring do módulo.
+/// Quando o Mach de ponta (não a folga de solo) é a restrição mais apertada,
+/// o diâmetro AUTORITATIVO calculado por `PropellerAgent::run` (que já usa o
+/// `prop_rpm_cruise` real) pode divergir desse provisório — e, nesse caso, o
+/// rpm/BSFC/consumo escolhidos pela busca (calculados com o diâmetro
+/// provisório) não refletem mais o diâmetro finalmente recomendado.
+///
+/// Retorna `Some(mensagem)` em português quando essa divergência excede
+/// `DIAMETER_MISMATCH_TOLERANCE_M` — usada tanto por
+/// `ConstraintChecker::verify` (como AVISO, não violação — o resultado
+/// continua fisicamente válido, só potencialmente inconsistente entre si)
+/// quanto por `main.rs` (impressa na seção do Agente 9), para que as duas
+/// saídas fiquem alinhadas. Retorna `None` quando `source == "config"`
+/// (não há provisório envolvido) ou quando a divergência está dentro da
+/// tolerância (tipicamente o caso em que a folga de solo — não o Mach —
+/// governa: o provisório já usa exatamente a mesma fórmula de margem/
+/// arredondamento do caminho autoritativo nesse cenário, então os dois
+/// valores coincidem bit-a-bit).
+pub fn diameter_mismatch_warning(propeller: &PropellerSpec, prop: &PropulsionSpec) -> Option<String> {
+    if propeller.source != "derivado" {
+        return None;
+    }
+    let delta = (propeller.diameter_m - prop.prop_diameter_m).abs();
+    if delta <= DIAMETER_MISMATCH_TOLERANCE_M {
+        return None;
+    }
+    Some(format!(
+        "Diâmetro de hélice derivado ({:.2} m) difere do provisório usado na busca de \
+         cruzeiro ({:.2} m) — fixe [propeller] diameter_m = {:.2} e re-rode para \
+         resultados consistentes",
+        propeller.diameter_m, prop.prop_diameter_m, propeller.diameter_m
+    ))
+}
+
 // ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -282,6 +327,108 @@ mod tests {
         assert!(spec.ok_mach_static);
         assert!(spec.ok_mach_cruise);
         assert!(spec.ok_clearance);
+    }
+
+    /// Reproduz a mesma fórmula que `AircraftState::from_config` usa para o
+    /// diâmetro PROVISÓRIO quando `[propeller].diameter_m` está omitido —
+    /// duplicada aqui deliberadamente (não importada de `models::aircraft_state`)
+    /// para que este teste também sirva de sentinela: se a fórmula de lá
+    /// divergir desta cópia, os testes de `diameter_mismatch_warning` abaixo
+    /// deixam de ser representativos do comportamento real.
+    fn bootstrap_diameter_m(shaft_height_m: f64, ground_clearance_min_m: f64) -> f64 {
+        round_down_cm(diameter_max_by_clearance_m(shaft_height_m, ground_clearance_min_m) - DERIVE_MARGIN_M)
+    }
+
+    // ─── Aviso de divergência: diâmetro derivado × provisório (mitigação) ──
+
+    /// Quando o Mach de ponta (não a folga de solo) é a restrição mais
+    /// apertada, o diâmetro AUTORITATIVO (calculado com o `prop_rpm_cruise`
+    /// real) fica bem menor que o PROVISÓRIO (só folga de solo, usado para
+    /// inicializar a busca de cruzeiro) — a divergência deve disparar aviso.
+    #[test]
+    fn aviso_dispara_quando_mach_governa_o_diametro_derivado() {
+        let mut cfg = config_teste();
+        cfg.propeller.diameter_m = None; // omitido — deriva
+        cfg.propeller.psru_ratio = 1.0;  // PSRU 1:1 — rpm de hélice bem mais alto
+
+        let mut engine = engine_teste();
+        engine.rpm_rated = 3_200.0;
+
+        let req = requisitos_teste();
+        // rpm de cruzeiro também bem mais alto que o caso psru=2.0 normal —
+        // reforça que o Mach (não a folga) governa em ambas as condições.
+        let prop_spec = prop_spec_teste(1.0, 2_000.0);
+
+        let spec = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
+        let bootstrap = bootstrap_diameter_m(cfg.propeller.shaft_height_m, cfg.propeller.ground_clearance_min_m);
+        println!(
+            "mach governa: D_autoritativo={:.4} D_provisorio={:.4} (Δ={:.4})",
+            spec.diameter_m, bootstrap, (spec.diameter_m - bootstrap).abs()
+        );
+
+        assert_eq!(spec.source, "derivado");
+        assert!(spec.diameter_m < bootstrap - DIAMETER_MISMATCH_TOLERANCE_M,
+            "pré-condição do teste: diâmetro autoritativo ({:.4}) deveria ficar bem abaixo do \
+             provisório ({:.4}) quando o Mach governa", spec.diameter_m, bootstrap);
+
+        // `prop_spec` simula o `PropulsionSpec` real: `prop_diameter_m` é o
+        // que `AircraftState`/`PropulsionAgent` de fato usaram (o provisório).
+        let mut prop_spec_real = prop_spec.clone();
+        prop_spec_real.prop_diameter_m = bootstrap;
+
+        let aviso = diameter_mismatch_warning(&spec, &prop_spec_real);
+        assert!(aviso.is_some(), "esperava aviso de divergência de diâmetro, obteve None");
+        let msg = aviso.unwrap();
+        assert!(msg.contains("Diâmetro de hélice derivado"), "{msg}");
+        assert!(msg.contains(&format!("{:.2}", spec.diameter_m)), "{msg}");
+        assert!(msg.contains(&format!("{:.2}", bootstrap)), "{msg}");
+    }
+
+    /// Quando a folga de solo (não o Mach) governa, o provisório usa
+    /// EXATAMENTE a mesma fórmula (folga − margem, arredondada para baixo)
+    /// que o caminho autoritativo aplica nesse cenário — os dois valores
+    /// devem coincidir e nenhum aviso deve disparar.
+    #[test]
+    fn sem_aviso_quando_folga_governa_o_diametro_derivado() {
+        let mut cfg = config_teste();
+        cfg.propeller.diameter_m = None; // omitido — deriva (folga governa,
+                                          // ver `diametro_derivado_respeita_ambos_os_maximos_com_margem`)
+
+        let engine = engine_teste();
+        let req = requisitos_teste();
+        let prop_spec = prop_spec_teste(cfg.propeller.psru_ratio, 1_200.0);
+
+        let spec = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
+        let bootstrap = bootstrap_diameter_m(cfg.propeller.shaft_height_m, cfg.propeller.ground_clearance_min_m);
+        println!(
+            "folga governa: D_autoritativo={:.4} D_provisorio={:.4}",
+            spec.diameter_m, bootstrap
+        );
+
+        assert_eq!(spec.source, "derivado");
+        assert!((spec.diameter_m - bootstrap).abs() < 1e-9,
+            "quando a folga governa, autoritativo ({:.4}) e provisório ({:.4}) deveriam \
+             coincidir exatamente (mesma fórmula)", spec.diameter_m, bootstrap);
+
+        let mut prop_spec_real = prop_spec.clone();
+        prop_spec_real.prop_diameter_m = bootstrap;
+
+        let aviso = diameter_mismatch_warning(&spec, &prop_spec_real);
+        assert!(aviso.is_none(), "não deveria haver aviso quando a folga governa, obteve: {aviso:?}");
+    }
+
+    #[test]
+    fn sem_aviso_quando_diametro_vem_da_config() {
+        let cfg = config_teste(); // diameter_m = Some(1.90) — source "config"
+        let engine = engine_teste();
+        let req = requisitos_teste();
+        let prop_spec = prop_spec_teste(cfg.propeller.psru_ratio, 1_200.0);
+
+        let spec = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
+        assert_eq!(spec.source, "config");
+
+        let aviso = diameter_mismatch_warning(&spec, &prop_spec);
+        assert!(aviso.is_none(), "não deveria haver aviso quando diameter_m vem da config, obteve: {aviso:?}");
     }
 
     // ─── Propriedade: mais altura de eixo → mais folga de solo ──────────────

@@ -167,6 +167,19 @@ impl ConstraintChecker {
             ));
         }
 
+        // 12. Diâmetro derivado × provisório (mitigação pós-revisão da Task
+        // 4.5): quando `[propeller].diameter_m` está omitido, o resultado de
+        // propulsão foi calculado com um diâmetro PROVISÓRIO (só folga de
+        // solo — ver `agents::propeller::diameter_mismatch_warning`), que
+        // pode divergir do diâmetro AUTORITATIVO acima quando o Mach de
+        // ponta (não a folga) é a restrição mais apertada. Isto é um AVISO,
+        // não uma violação — o resultado continua fisicamente válido, só
+        // potencialmente inconsistente entre a hélice recomendada e o
+        // rpm/BSFC/consumo de cruzeiro reportados.
+        if let Some(aviso) = crate::agents::propeller::diameter_mismatch_warning(propeller, prop) {
+            warnings.push(aviso);
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -186,13 +199,15 @@ mod tests {
 
     /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec,
     /// WeightBalanceOutput, PropellerSpec)` coerente via os agentes reais
-    /// (motor sintético de teste — não um motor real), para servir de base
-    /// às asserções de violação isolada abaixo. Os testes sobrescrevem
-    /// apenas os campos relevantes à violação isolada em questão, para não
-    /// depender do resultado real dos demais agentes (já testados em seus
-    /// próprios módulos).
-    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec) {
-        let cfg    = crate::models::aircraft_config::test_fixtures::config_teste();
+    /// (motor sintético de teste — não um motor real) a partir de uma
+    /// `AircraftConfig` fornecida — usada por `setup()` (fixture padrão) e
+    /// pelos testes de aviso de divergência de diâmetro abaixo, que
+    /// precisam mutar `cfg.propeller` ANTES do pipeline rodar (o aviso
+    /// depende do diâmetro PROVISÓRIO real calculado por
+    /// `AircraftState::from_config`, não de um valor sobrescrito depois).
+    fn setup_with_cfg(cfg: crate::models::aircraft_config::AircraftConfig)
+        -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec)
+    {
         let state  = AircraftState::from_config(&cfg);
         let req    = crate::models::requirements::test_fixtures::requisitos_teste();
         let wing   = AerodynamicsAgent::run(&state, &req);
@@ -202,6 +217,15 @@ mod tests {
         let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
         let propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
         (req, wing, prop, engine, wb, propeller)
+    }
+
+    /// Base de todas as asserções de violação isolada abaixo — usa a
+    /// fixture sintética padrão (`config_teste()`). Os testes sobrescrevem
+    /// apenas os campos relevantes à violação isolada em questão, para não
+    /// depender do resultado real dos demais agentes (já testados em seus
+    /// próprios módulos).
+    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec) {
+        setup_with_cfg(crate::models::aircraft_config::test_fixtures::config_teste())
     }
 
     #[test]
@@ -324,5 +348,67 @@ mod tests {
 
         assert!(!report.violations.iter().any(|v| v.contains("Hélice:")),
             "não deveria haver violação de hélice, obteve: {:?}", report.violations);
+    }
+
+    // ─── Aviso de divergência: diâmetro derivado × provisório (mitigação) ──
+    //
+    // Testes de integração de ponta a ponta (via `AircraftState::from_config`
+    // real, não specs construídas à mão) — complementam os testes unitários
+    // de `agents::propeller::diameter_mismatch_warning` exercitando a
+    // fiação real: `AircraftState` calcula o diâmetro PROVISÓRIO,
+    // `PropulsionAgent` o usa na busca de cruzeiro, `PropellerAgent` deriva
+    // o AUTORITATIVO, e `ConstraintChecker::verify` compara os dois.
+
+    /// PSRU 1:1 (em vez do ~2.0 da fixture padrão) faz o Mach de ponta — não
+    /// a folga de solo — governar o diâmetro derivado, divergindo do
+    /// provisório usado pela busca de cruzeiro.
+    #[test]
+    fn aviso_de_diametro_aparece_quando_mach_governa_com_pipeline_real() {
+        let mut cfg = crate::models::aircraft_config::test_fixtures::config_teste();
+        cfg.propeller.diameter_m = None;
+        cfg.propeller.psru_ratio = 1.0;
+
+        let (req, wing, prop, engine, wb, propeller) = setup_with_cfg(cfg);
+        assert_eq!(propeller.source, "derivado");
+        println!(
+            "pipeline real (Mach governa): D_autoritativo={:.4} D_provisorio(prop.prop_diameter_m)={:.4}",
+            propeller.diameter_m, prop.prop_diameter_m
+        );
+        assert!((propeller.diameter_m - prop.prop_diameter_m).abs() > 0.01,
+            "pré-condição do teste: com PSRU 1:1 o diâmetro autoritativo ({:.4}) deveria \
+             divergir do provisório ({:.4}) usado pela busca de cruzeiro",
+            propeller.diameter_m, prop.prop_diameter_m);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
+
+        assert!(report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
+            "esperava aviso de divergência de diâmetro, obteve: {:?}", report.warnings);
+        // É AVISO, não violação — o resultado continua fisicamente válido.
+        assert!(!report.violations.iter().any(|v| v.contains("Diâmetro de hélice derivado")),
+            "divergência de diâmetro deveria ser aviso, não violação: {:?}", report.violations);
+    }
+
+    /// Fixture padrão (`config_teste()`, PSRU~2.0) com diâmetro omitido: a
+    /// folga de solo governa o diâmetro derivado (ver
+    /// `agents::propeller::tests::diametro_derivado_respeita_ambos_os_maximos_com_margem`),
+    /// então provisório e autoritativo coincidem e nenhum aviso deve
+    /// disparar.
+    #[test]
+    fn sem_aviso_de_diametro_quando_folga_governa_com_pipeline_real() {
+        let mut cfg = crate::models::aircraft_config::test_fixtures::config_teste();
+        cfg.propeller.diameter_m = None;
+
+        let (req, wing, prop, engine, wb, propeller) = setup_with_cfg(cfg);
+        assert_eq!(propeller.source, "derivado");
+        println!(
+            "pipeline real (folga governa): D_autoritativo={:.4} D_provisorio(prop.prop_diameter_m)={:.4}",
+            propeller.diameter_m, prop.prop_diameter_m
+        );
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller);
+
+        assert!(!report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
+            "não deveria haver aviso de divergência de diâmetro quando a folga governa, \
+             obteve: {:?}", report.warnings);
     }
 }

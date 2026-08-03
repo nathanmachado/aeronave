@@ -173,10 +173,22 @@ fn main() {
              propeller.tip_mach_static, propeller.tip_mach_cruise_helical, propeller.ground_clearance_m);
     println!("  D_máx por Mach: {:.2}m  |  D_máx por folga: {:.2}m",
              propeller.diameter_max_by_mach_m, propeller.diameter_max_by_clearance_m);
-    println!("  {} Mach estático  {} Mach cruzeiro  {} Folga de solo\n",
+    println!("  {} Mach estático  {} Mach cruzeiro  {} Folga de solo",
              if propeller.ok_mach_static { "✓" } else { "✗" },
              if propeller.ok_mach_cruise { "✓" } else { "✗" },
              if propeller.ok_clearance { "✓" } else { "✗" });
+    // Mitigação (revisão da Task 4.5): quando o diâmetro é derivado (config
+    // omite `diameter_m`) e o Mach de ponta — não a folga de solo — governa,
+    // o diâmetro AUTORITATIVO acima pode divergir do diâmetro PROVISÓRIO que
+    // `PropulsionAgent` de fato usou para escolher o rpm/BSFC/consumo de
+    // cruzeiro (`prop.prop_diameter_m`) — avisa alto, em vez de deixar essa
+    // inconsistência silenciosa (mesmo aviso que `ConstraintChecker::verify`
+    // reporta em `report.warnings`, impresso aqui também para visibilidade
+    // imediata na seção do próprio agente).
+    if let Some(aviso) = aeronave::agents::propeller::diameter_mismatch_warning(&propeller, prop) {
+        println!("  ⚠ {aviso}");
+    }
+    println!();
 
     // ── Empenagem ──────────────────────────────────────────────────────────────
     // Dimensionada por coeficiente de volume (Task 4.1) — geometria pura,
