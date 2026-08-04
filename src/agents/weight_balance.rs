@@ -204,23 +204,78 @@ pub fn lift_curve_slope(aspect_ratio: f64) -> f64 {
     2.0 * std::f64::consts::PI * aspect_ratio / (2.0 + (4.0 + aspect_ratio * aspect_ratio).sqrt())
 }
 
+/// Gradiente de downwash na empenagem horizontal (dε/dα) — aproximação
+/// clássica de asa elíptica (Raymer, "Aircraft Design: A Conceptual
+/// Approach", cap. 16):
+///
+///   dε/dα = 2·a_w / (π·AR_w)
+///
+/// O escoamento descendente (downwash) induzido pela asa reduz o ângulo de
+/// ataque efetivo — e portanto a contribuição estabilizadora — da
+/// empenagem horizontal: a contribuição de `Δ_stab` no NP é multiplicada
+/// por `(1 − dε/dα)` em `neutral_point_m`. `a_w` é `lift_curve_slope` da
+/// asa [1/rad]; `ar_w` é o alongamento da asa.
+pub fn downwash_gradient(a_w: f64, ar_w: f64) -> f64 {
+    2.0 * a_w / (std::f64::consts::PI * ar_w)
+}
+
+/// Contribuição da fuselagem no ponto neutro — método de Multhopp
+/// simplificado (Raymer, "Aircraft Design: A Conceptual Approach", cap. 16,
+/// eq. 16.25). O escoamento sobre a fuselagem à frente do CA da asa produz
+/// um momento de arfagem desestabilizador (Cm_α positivo), que AVANÇA o NP
+/// (desloca para a frente/nariz):
+///
+///   Cm_α_fus = K_f·W_f²·L_f / (MAC·S_w)   [1/grau]
+///   Δx_np_fus/MAC = −Cm_α_fus·(180/π) / a_w
+///
+/// `K_f` (`fuselage_kf`, config `[stability]`) vem da fig. 16.14 de Raymer
+/// (faixa típica 0.01–0.03 conforme a posição vertical da asa na
+/// fuselagem); `W_f` é a largura da cabine (`fuselage.cabin_width_m`), `L_f`
+/// o comprimento da fuselagem (`fuselage.length_m`). `Cm_α_fus` sai em
+/// 1/grau (convenção da fig. 16.14 de Raymer) e precisa ser convertida para
+/// 1/rad (×180/π) antes de dividir por `a_w` [1/rad]. Retorna a fração
+/// ADIMENSIONAL (já dividida por MAC) do deslocamento do NP — negativa
+/// (avanço do NP), a ser multiplicada por `mac_m` pelo chamador.
+pub fn fuselage_np_shift_mac(
+    fuselage_kf: f64,
+    cabin_width_m: f64,
+    fuselage_length_m: f64,
+    mac_m: f64,
+    wing_area_m2: f64,
+    a_w: f64,
+) -> f64 {
+    let cm_alpha_fus_per_deg =
+        fuselage_kf * cabin_width_m * cabin_width_m * fuselage_length_m / (mac_m * wing_area_m2);
+    let cm_alpha_fus_per_rad = cm_alpha_fus_per_deg * (180.0 / std::f64::consts::PI);
+    -cm_alpha_fus_per_rad / a_w
+}
+
 /// Posição do Ponto Neutro (NP) da aeronave — método da área de cauda de
 /// Raymer, com a empenagem REALMENTE dimensionada (`EmpennageAgent`, Task
-/// 4.1) em vez dos antigos `s_ratio`/`a_t/a_w` hardcoded.
+/// 4.1) em vez dos antigos `s_ratio`/`a_t/a_w` hardcoded, e CORRIGIDA por
+/// downwash e pela contribuição da fuselagem (Multhopp simplificado —
+/// fidelidade do envelope de CG, ver `downwash_gradient`/
+/// `fuselage_np_shift_mac` acima).
 ///
-/// x_np = x_ac_wing + Δ_stab
+/// x_np = x_ac_wing + Δ_stab·(1 − dε/dα) + Δx_np_fus/MAC·MAC
 ///   onde Δ_stab = (a_t/a_w)·(S_h/S_w)·(l_h/MAC)·η_h · MAC
 ///
 /// a_w, a_t vêm de `lift_curve_slope` aplicada ao AR da asa e ao AR da
 /// empenagem horizontal (`emp.ar_h`), respectivamente. S_h, l_h, η_h vêm de
 /// `emp` (saída do `EmpennageAgent`, dimensionada por coeficiente de
-/// volume) — nenhum dos quatro é mais uma constante hardcoded aqui.
+/// volume). Sem estas duas correções o NP fica artificialmente atrás
+/// (ignora que parte da eficácia da empenagem é cancelada pelo downwash da
+/// asa, e que a fuselagem por si só já é desestabilizadora) — achado
+/// honesto documentado no relatório da task de downwash/fuselagem.
 pub fn neutral_point_m(
     wing_le_root_m: f64,
     mac_m: f64,
     wing_ar: f64,
     emp: &EmpennageSpec,
     wing_area_m2: f64,
+    fuselage_cabin_width_m: f64,
+    fuselage_length_m: f64,
+    fuselage_kf: f64,
 ) -> f64 {
     // CA da asa: bordo de ataque do MAC + 25% MAC (asa sem enflechamento —
     // y_MAC não desloca x_ac longitudinalmente nesse caso).
@@ -232,7 +287,14 @@ pub fn neutral_point_m(
     let s_ratio = emp.s_horizontal_m2 / wing_area_m2; // S_h / S_w
     let delta_stab = (a_t / a_w) * s_ratio * (emp.arm_h_m / mac_m) * emp.eta_h * mac_m;
 
-    x_ac_wing + delta_stab
+    let deps_dalpha = downwash_gradient(a_w, wing_ar);
+    let delta_stab_com_downwash = delta_stab * (1.0 - deps_dalpha);
+
+    let dx_fus_mac = fuselage_np_shift_mac(
+        fuselage_kf, fuselage_cabin_width_m, fuselage_length_m, mac_m, wing_area_m2, a_w,
+    );
+
+    x_ac_wing + delta_stab_com_downwash + dx_fus_mac * mac_m
 }
 
 /// Margem Estática (Static Margin):
@@ -338,6 +400,7 @@ impl WeightBalanceAgent {
         // não mais `s_ratio`/`l_tail`/`eta_t`/`at_aw` hardcoded.
         let x_np = neutral_point_m(
             arms.wing_le_root_m, mac, wing.aspect_ratio, emp, wing.area_m2,
+            cfg.fuselage.cabin_width_m, cfg.fuselage.length_m, cfg.stability.fuselage_kf,
         );
 
         // Peso vazio operacional
@@ -581,6 +644,118 @@ mod tests {
         assert!((a4  - 3.88).abs() < 0.05, "a(4)  = {a4:.4} (esperado 3.88 ±0.05)");
     }
 
+    // ─── Downwash + Fuselagem (Multhopp) — fidelidade do NP ─────────────────
+
+    /// Hand-check (Raymer cap. 16, aproximação clássica de asa elíptica):
+    /// dε/dα = 2·a_w/(π·AR_w). Com a_w=5.1554 (lift_curve_slope(10.0394),
+    /// AR baseline real) e AR=10.0394:
+    ///   dε/dα = 2·5.1554/(π·10.0394) = 10.3108/31.5464 = 0.3268
+    #[test]
+    fn downwash_gradient_hand_check() {
+        let deps = downwash_gradient(5.1554, 10.0394);
+        println!("dε/dα = {deps:.4}");
+        assert!((deps - 0.3268).abs() < 0.001, "dε/dα = {deps:.4} (esperado ≈0.3268)");
+    }
+
+    /// Propriedade: aumentar o AR da asa (a_w fixo) reduz dε/dα estritamente
+    /// — asas de maior alongamento espalham a esteira de vórtice de ponta
+    /// mais fina, reduzindo o downwash médio na cauda.
+    #[test]
+    fn downwash_gradient_diminui_quando_ar_aumenta() {
+        let baixo = downwash_gradient(5.1554, 8.0);
+        let alto  = downwash_gradient(5.1554, 14.0);
+        assert!(alto < baixo,
+            "dε/dα com AR maior ({alto:.4}) deveria ser MENOR que com AR menor ({baixo:.4})");
+    }
+
+    /// Hand-check (Multhopp simplificado, Raymer eq. 16.25): Cm_α_fus =
+    /// K_f·W_f²·L_f/(MAC·S_w) [1/grau], convertido para 1/rad (×180/π) antes
+    /// de dividir por a_w [1/rad]. Valores do baseline real: K_f=0.02,
+    /// W_f=1.22 (cabin_width_m), L_f=8.2 (length_m), MAC=1.2463, S_w=14.2,
+    /// a_w=5.1554:
+    ///   Cm_α_fus = 0.02·1.4884·8.2/(1.2463·14.2) = 0.24410/17.6975
+    ///            = 0.013793 /grau = 0.79027 /rad
+    ///   Δx_np_fus/MAC = −0.79027/5.1554 = −0.15329
+    #[test]
+    fn fuselage_np_shift_mac_hand_check() {
+        let dx = fuselage_np_shift_mac(0.02, 1.22, 8.2, 1.2463, 14.2, 5.1554);
+        println!("Δx_np_fus/MAC = {dx:.5}");
+        assert!((dx - (-0.15329)).abs() < 0.001, "Δx_np_fus/MAC = {dx:.5} (esperado ≈-0.15329)");
+    }
+
+    /// Propriedade: aumentar `fuselage_kf` aumenta o momento desestabilizador
+    /// da fuselagem — o deslocamento do NP (negativo, avança o NP) fica MAIS
+    /// negativo estritamente.
+    #[test]
+    fn fuselage_np_shift_mac_fica_mais_negativo_quando_kf_aumenta() {
+        let baixo = fuselage_np_shift_mac(0.015, 1.22, 8.2, 1.2463, 14.2, 5.1554);
+        let alto  = fuselage_np_shift_mac(0.030, 1.22, 8.2, 1.2463, 14.2, 5.1554);
+        assert!(alto < baixo,
+            "Δx_np_fus/MAC com kf maior ({alto:.5}) deveria ser MAIS NEGATIVO que com kf \
+             menor ({baixo:.5})");
+    }
+
+    /// Propriedade: aumentar `fuselage_kf` move o NP integrado (`neutral_point_m`)
+    /// para a FRENTE (x menor), estritamente — mais momento desestabilizador
+    /// de fuselagem exige mais estabilizador atrás, empurrando o NP para
+    /// perto do CA da asa.
+    #[test]
+    fn np_avanca_quando_fuselage_kf_aumenta() {
+        let cfg    = config_teste();
+        let state  = AircraftState::from_config(&cfg);
+        let req    = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing   = AerodynamicsAgent::run(&state, &req);
+        let emp    = EmpennageAgent::run(&wing, &cfg);
+        let c_r = chord_root(wing.area_m2, wing.span_m, wing.taper_ratio);
+        let mac = mean_aerodynamic_chord(c_r, wing.taper_ratio);
+
+        let x_np_baixo = neutral_point_m(
+            cfg.wing.le_root_x_m, mac, wing.aspect_ratio, &emp, wing.area_m2,
+            cfg.fuselage.cabin_width_m, cfg.fuselage.length_m, 0.012,
+        );
+        let x_np_alto = neutral_point_m(
+            cfg.wing.le_root_x_m, mac, wing.aspect_ratio, &emp, wing.area_m2,
+            cfg.fuselage.cabin_width_m, cfg.fuselage.length_m, 0.030,
+        );
+        println!("x_np(kf=0.012)={x_np_baixo:.4}m  x_np(kf=0.030)={x_np_alto:.4}m");
+        assert!(x_np_alto < x_np_baixo,
+            "NP deveria avançar (x menor) quando fuselage_kf aumenta: kf_baixo={x_np_baixo:.4}m \
+             kf_alto={x_np_alto:.4}m");
+    }
+
+    /// Hand-check integrado do NP (baseline real, ver task-brief): x_ac_wing
+    /// = 2.90+0.25·1.2463 = 3.211575m; delta_stab (empenagem, sem correção)
+    /// = 0.47456·MAC; com downwash: ×(1−0.3268)=×0.6732 → 0.31947·MAC;
+    /// contribuição da fuselagem: −0.15329·MAC. NP%MAC = 0.25+0.31947−0.15329
+    /// = 0.41618 → x_np = 2.90+0.41618·1.2463 = 3.4187m.
+    ///
+    /// Usa a EmpennageSpec real do baseline (via EmpennageAgent) para não
+    /// depender de uma spec sintética à mão — a_t/a_w e S_h/S_w vêm do
+    /// dimensionamento real (V_h=0.70, AR_h=4.0).
+    #[test]
+    fn neutral_point_m_hand_check_downwash_e_fuselagem() {
+        // Reconstrói a config do baseline real (não a fixture sintética —
+        // este hand-check usa os números do TOML real, ver task brief).
+        let toml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
+        ).expect("falha ao ler baseline_4seat.toml do disco");
+        let cfg = crate::models::config::parse_aircraft(&toml)
+            .expect("baseline real deveria ser uma configuração válida");
+        let state = AircraftState::from_config(&cfg);
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing = AerodynamicsAgent::run(&state, &req);
+        let emp = EmpennageAgent::run(&wing, &cfg);
+        let c_r = chord_root(wing.area_m2, wing.span_m, wing.taper_ratio);
+        let mac = mean_aerodynamic_chord(c_r, wing.taper_ratio);
+
+        let x_np = neutral_point_m(
+            cfg.wing.le_root_x_m, mac, wing.aspect_ratio, &emp, wing.area_m2,
+            cfg.fuselage.cabin_width_m, cfg.fuselage.length_m, cfg.stability.fuselage_kf,
+        );
+        println!("x_np (baseline, downwash+fuselagem) = {x_np:.4}m  MAC={mac:.4}m");
+        assert!((x_np - 3.4187).abs() < 0.005, "x_np = {x_np:.4}m (esperado ≈3.4187m ±0.005)");
+    }
+
     /// Propriedade: aumentar V_h (coeficiente de volume da empenagem
     /// horizontal) aumenta S_h, que por sua vez AUMENTA a contribuição
     /// estabilizadora da empenagem (Δ_stab) — o NP deve recuar (mover para
@@ -598,6 +773,7 @@ mod tests {
         let mac = mean_aerodynamic_chord(c_r, wing.taper_ratio);
         let x_np_base = neutral_point_m(
             cfg.wing.le_root_x_m, mac, wing.aspect_ratio, &emp_base, wing.area_m2,
+            cfg.fuselage.cabin_width_m, cfg.fuselage.length_m, cfg.stability.fuselage_kf,
         );
 
         let mut cfg_maior = cfg.clone();
@@ -605,6 +781,7 @@ mod tests {
         let emp_maior = EmpennageAgent::run(&wing, &cfg_maior);
         let x_np_maior = neutral_point_m(
             cfg_maior.wing.le_root_x_m, mac, wing.aspect_ratio, &emp_maior, wing.area_m2,
+            cfg_maior.fuselage.cabin_width_m, cfg_maior.fuselage.length_m, cfg_maior.stability.fuselage_kf,
         );
 
         println!("x_np base (v_h={:.3}) = {x_np_base:.4}m | x_np maior (v_h={:.3}) = {x_np_maior:.4}m",

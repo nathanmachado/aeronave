@@ -109,9 +109,9 @@
     "fuel_mass_kg": 218.4,
     "cg_mac_fwd_pct": 1.6815099454598386,
     "cg_mac_aft_pct": 29.373075431609326,
-    "static_margin_pct": 43.084570198582206,
-    "cg_limit_fwd_pct_mac": 47.45764563019154,
-    "cg_limit_aft_pct_mac": 67.45764563019154
+    "static_margin_pct": 12.241655026133284,
+    "cg_limit_fwd_pct_mac": 16.61473045774262,
+    "cg_limit_aft_pct_mac": 36.61473045774263
   },
   "performance": {
     "v_cruise_kmh": 304.41248025513846,
@@ -306,12 +306,8 @@
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
-    "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.708; x_cg=2.921m, limites em x: [3.491m, 3.741m])",
-    "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.659; x_cg=2.981m, limites em x: [3.491m, 3.741m])",
-    "Cenário '4 pax sem bagagem': CG 19.1% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.533; x_cg=3.138m, limites em x: [3.491m, 3.741m])",
-    "Cenário '4 pax + bagagem + cheio': CG 29.4% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.431; x_cg=3.266m, limites em x: [3.491m, 3.741m])",
-    "Cenário '4 pax + bagagem + meia': CG 27.6% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.448; x_cg=3.244m, limites em x: [3.491m, 3.741m])",
-    "Cenário '4 pax + bagagem vazio': CG 26.0% MAC fora do envelope de CG admissível [47.5%–67.5%] (SM=0.464; x_cg=3.225m, limites em x: [3.491m, 3.741m])"
+    "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [16.6%–36.6%] (SM=0.399; x_cg=2.921m, limites em x: [3.107m, 3.356m])",
+    "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [16.6%–36.6%] (SM=0.351; x_cg=2.981m, limites em x: [3.107m, 3.356m])"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"

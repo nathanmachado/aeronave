@@ -136,6 +136,12 @@ cooling_drag_fraction = 0.04
 [stability]
 sm_min = 0.05   # margem estática mínima — limite TRASEIRO do CG
 sm_max = 0.25   # proxy de autoridade de profundor (flare) — limite DIANTEIRO do CG
+# Coeficiente de Multhopp simplificado (Raymer eq. 16.25, fig. 16.14) para a
+# contribuição desestabilizadora da fuselagem no ponto neutro — faixa típica
+# 0.01-0.03 conforme a posição vertical da asa na fuselagem (asa baixa como
+# esta aeronave tende à parte superior da faixa). Ver
+# `weight_balance::fuselage_np_shift_mac`.
+fuselage_kf = 0.02
 
 # Parâmetros de desempenho (Task 4.7) — substituem os fatores ad hoc do M5
 # (tração estática sem correção, distância de pouso aérea fixa em 200m,

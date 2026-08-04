@@ -43,11 +43,19 @@ fn baseline_s_h_bate_calculo_manual() {
 /// a_t/a_w≈0.753 — ambos MENORES que os antigos valores hardcoded
 /// s_ratio=0.22/at_aw=0.85), o ponto neutro recua para a frente em relação
 /// ao cálculo hardcoded anterior (NP: ~4.019m → ~3.803m — ver
-/// task-4.1-report.md para a tabela completa por cenário). Mesmo com essa
-/// queda honesta de margem estática, TODOS os cenários de carga da
-/// aeronave-base real continuam estáveis (SM mínimo medido ≈43%, bem acima
-/// do piso de 3% usado em `WeightBalanceAgent::run`) — não há violação de
-/// estabilidade a reportar.
+/// task-4.1-report.md para a tabela completa por cenário).
+///
+/// ATUALIZAÇÃO (task de downwash + fuselagem/Multhopp): `neutral_point_m`
+/// agora também desconta o downwash na empenagem (dε/dα≈0.327 → só ~67% da
+/// contribuição estabilizadora original conta) e a contribuição
+/// desestabilizadora da fuselagem (Multhopp simplificado, avança o NP em
+/// ≈15,3% MAC) — o NP real avança mais uma vez, de ~3.803m para ~3.419m
+/// (≈41,6% MAC). Mesmo com essa segunda queda honesta de margem estática
+/// (SM mínima real cai de ~43% para ~12,2%), TODOS os cenários de carga da
+/// aeronave-base real continuam estáveis pelo critério de referência
+/// (SM>3%, `sc.stable`) — não há violação de ESTABILIDADE a reportar (o
+/// achado honesto do ENVELOPE de CG admissível, que é um critério mais
+/// estrito, é tratado à parte em `tests/cli.rs`).
 #[test]
 fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -68,9 +76,14 @@ fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
              coeficiente de volume (V_h={:.2})", sc.name, sc.static_margin, cfg.empennage.v_h);
     }
 
-    // SM mínima com folga bem acima do piso de estabilidade (3%) — a queda
-    // de margem é honesta (NP mais à frente que o modelo hardcoded antigo),
-    // mas não chega perto de instabilizar nenhum cenário real.
+    // SM mínima (≈12,2% após downwash+fuselagem, ver comentário acima) com
+    // folga bem acima do piso de ESTABILIDADE (3%) — a queda de margem é
+    // honesta (NP mais à frente a cada refinamento de fidelidade), mas não
+    // chega perto de instabilizar nenhum cenário real. O piso de 10% deste
+    // assert é uma checagem de regressão deste teste (não um requisito de
+    // projeto — esse é `[stability].sm_min`=5%, ver `tests/cli.rs` para o
+    // critério de ENVELOPE de CG, que É violado honestamente por dois
+    // cenários dianteiros).
     assert!(sized.wb.spec.static_margin_pct > 10.0,
         "SM mínima {:.2}% muito próxima do piso de estabilidade — revisar",
         sized.wb.spec.static_margin_pct);

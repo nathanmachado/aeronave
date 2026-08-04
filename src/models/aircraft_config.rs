@@ -237,6 +237,18 @@ pub struct StabilityCfg {
     /// Margem estática máxima admissível (autoridade de profundor) — define
     /// o limite DIANTEIRO do CG.
     pub sm_max: f64,
+    /// Coeficiente empírico de momento de arfagem da fuselagem (Multhopp
+    /// simplificado, Raymer eq. 16.25, fig. 16.14) — usado por
+    /// `weight_balance::fuselage_np_shift_mac` para corrigir o ponto neutro
+    /// pela contribuição desestabilizadora da fuselagem (o escoamento sobre
+    /// a fuselagem à frente do CA da asa produz um Cm_α positivo/
+    /// desestabilizante, que avança o NP). Faixa típica 0.01–0.03 conforme a
+    /// posição vertical da asa na fuselagem (Raymer fig. 16.14): asa baixa
+    /// tende ao topo da faixa, asa alta ao fundo. Vive em `[stability]`
+    /// (não em `[fuselage]`) porque é um coeficiente de estabilidade, não
+    /// uma medida geométrica — a geometria em si (`length_m`/
+    /// `cabin_width_m`) já vive em `[fuselage]` e é reaproveitada daqui.
+    pub fuselage_kf: f64,
 }
 
 /// Frações históricas (Raymer Tab. 6.5, monomotor GA) que dimensionam
@@ -451,10 +463,10 @@ pub mod test_fixtures {
             // coincide com o baseline real" usada nas demais seções desta
             // fixture.
             drag: DragCfg { cd0_misc: 0.0032, cooling_drag_fraction: 0.035 },
-            // Levemente diferente do baseline real (0.05/0.25) — mesma
+            // Levemente diferente do baseline real (0.05/0.25/0.02) — mesma
             // justificativa de "nenhum destes números coincide com o
             // baseline real" usada nas demais seções desta fixture.
-            stability: StabilityCfg { sm_min: 0.06, sm_max: 0.28 },
+            stability: StabilityCfg { sm_min: 0.06, sm_max: 0.28, fuselage_kf: 0.018 },
             masses: MassesCfg {
                 items: vec![
                     MassItemCfg { name: "psru_helice_capo".into(),   mass_kg: 62.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.3 },

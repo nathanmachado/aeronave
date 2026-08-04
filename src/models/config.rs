@@ -474,6 +474,18 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.stability.sm_max
         )));
     }
+    // fuselage_kf (Multhopp simplificado, Raymer fig. 16.14) — faixa típica
+    // 0.01–0.03 conforme a posição da asa na fuselagem; teto de folga
+    // (0.005, 0.05) evita erros de digitação grosseiros sem travar
+    // configurações plausíveis fora da faixa "típica".
+    require_finite("stability.fuselage_kf", cfg.stability.fuselage_kf)?;
+    if cfg.stability.fuselage_kf <= 0.005 || cfg.stability.fuselage_kf >= 0.05 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.fuselage_kf deve estar em \
+             (0.005, 0.05) (valor: {})",
+            cfg.stability.fuselage_kf
+        )));
+    }
 
     // [[masses.items]]
     if cfg.masses.items.is_empty() {
@@ -963,6 +975,7 @@ mod tests {
             [stability]
             sm_min = 0.05
             sm_max = 0.25
+            fuselage_kf = 0.02
             [performance]
             mu_brake_paved = 0.40
             mu_brake_grass = 0.30
@@ -1341,6 +1354,27 @@ mod tests {
     #[test]
     fn rejeita_sm_min_nao_finito() {
         let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_fuselage_kf_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("fuselage_kf = 0.02", "fuselage_kf = 0.10");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.fuselage_kf"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_fuselage_kf_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("fuselage_kf = 0.02", "fuselage_kf = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.fuselage_kf"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_fuselage_kf_nao_finito() {
+        let toml = aircraft_toml_valido().replace("fuselage_kf = 0.02", "fuselage_kf = nan");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("finito"), "{err}");
     }
