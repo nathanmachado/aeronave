@@ -306,15 +306,30 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // CD0 total) eleva o consumo de cruzeiro, que compõe com o MTOW maior
     // (+12,1 kg, reconvergência do laço) para exigir mais combustível de
     // missão: 246,826485 L → 255,271883 L (+8,445 L, +3,42%). Margem:
-    // 13,173515 L (~5,3372%) → 4,728117 L (~1,8522%). Investigado antes de
-    // prosseguir (ver task-1-report.md): a física é consistente e na
-    // mesma direção qualitativa da própria história deste teste (Task 5.2
-    // já mostrou a margem caindo MAIS que o projetado no brief pela mesma
-    // razão — a margem é um RESÍDUO de dois números grandes, então
-    // amplifica desproporcionalmente pequenas variações de CD0/MTOW).
-    // Ainda POSITIVA — não é um caso NEEDS_CONTEXT (que exigiria margem
-    // negativa) — mas está bem mais apertada (~1,85%) que o histórico
-    // recente; vale monitorar em revisões futuras.
+    // 13,173515 L → 4,728117 L. Investigado antes de prosseguir (ver
+    // task-1-report.md): a física é consistente e na mesma direção
+    // qualitativa da própria história deste teste (Task 5.2 já mostrou a
+    // margem caindo MAIS que o projetado no brief pela mesma razão — a
+    // margem é um RESÍDUO de dois números grandes, então amplifica
+    // desproporcionalmente pequenas variações de CD0/MTOW). Ainda
+    // POSITIVA — não é um caso NEEDS_CONTEXT (que exigiria margem
+    // negativa) — mas está bem mais apertada que o histórico recente;
+    // vale monitorar em revisões futuras.
+    //
+    // NOTA DE CONVENÇÃO (duas percentagens diferentes coexistem no
+    // projeto, ambas corretas, cada uma com seu próprio denominador — não
+    // confundir): `margem_pct` AQUI NESTE TESTE é definida acima como
+    // `margem_l / fuel_req_l_convergido · 100` — % do COMBUSTÍVEL
+    // NECESSÁRIO (~5,3372% pré-E6 → ~1,8522% pós-E6). Já
+    // `sizing.fuel_margin_pct` (`src/main.rs`, `tests/schema_v4.rs`, JSON
+    // de saída) é `fuel_margin_l / capacity_l · 100` — % da CAPACIDADE DO
+    // TANQUE (~1,8185% pós-E6, ligeiramente menor que o número acima
+    // porque o denominador, capacity_l=260L, é maior que
+    // fuel_req_l_convergido≈255,27L). Os dois números convergem quando a
+    // margem é pequena (denominadores próximos) e divergem mais quanto
+    // maior a margem — por isso este teste, que só olha a razão relativa
+    // ao combustível exigido, não deve ser comparado byte-a-byte com o
+    // campo `fuel_margin_pct` do JSON de saída.
     let margem_pin_l = 4.728117;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
         "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E6 \

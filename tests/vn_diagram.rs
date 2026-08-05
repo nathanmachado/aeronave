@@ -31,6 +31,10 @@ fn baseline_mission() -> Requirements {
 /// medidos em 2026-08 (Task 4.3) — ver task-4.3-report.md para o
 /// hand-check completo. Envelope MTOW = 1543.4 kg, massa leve (cenário
 /// "Solo (piloto)") ≈ 1193 kg.
+/// ATUALIZAÇÃO (Campanha E1–E6, 2026-08-05): envelope MTOW 1543.4 →
+/// 1548.4 kg, massa leve ≈1193 → ≈1198.4 kg (mesmos cenários, massas de
+/// OEW/itens deslocadas pela E6 — ver `config/aircraft/baseline_4seat.toml`
+/// e `.superpowers/sdd/2026-08-05-baseline-e6/task-1-report.md`).
 #[test]
 fn vn_diagram_baseline_pin_velocidades_e_n_gust() {
     let cfg = baseline_state();
@@ -70,7 +74,12 @@ fn vn_diagram_baseline_pin_velocidades_e_n_gust() {
     // projeto convergido de volta, de ~1.523,50 kg para ~1.532,33 kg (ver
     // mesma referência acima) — VS1 (e portanto VA) sobe de novo, proporcional
     // a √MTOW: ~241.0 km/h → 242.209167 km/h.
-    assert!((vn.va_kmh - 242.209).abs() < 1.0, "VA {:.1} km/h fora do pin (~242.209)", vn.va_kmh);
+    // ATUALIZAÇÃO (Campanha E1–E6, 2026-08-05): MTOW de projeto convergido
+    // sobe de novo, de ~1.532,33 kg para ~1.544,43 kg (+12,1 kg — mais CD0
+    // do empennage reconverge o laço mais alto, ver
+    // `tests/generic_engine.rs::golden_toyota_baseline_regressao_task_2_1`)
+    // — VS1/VA sobem proporcional a √MTOW: 242.209167 → 243.176521 km/h.
+    assert!((vn.va_kmh - 243.177).abs() < 1.0, "VA {:.1} km/h fora do pin (~243.177)", vn.va_kmh);
     assert!((vn.vc_kmh - 280.0).abs() < 0.1, "VC {:.1} km/h fora do pin (280.0, requisito de missão)", vn.vc_kmh);
     assert!((vn.vd_kmh - 350.0).abs() < 0.1, "VD {:.1} km/h fora do pin (350.0 = 1.25×VC)", vn.vd_kmh);
     assert!(vn.vb_kmh > 0.0 && vn.vb_kmh < vn.vd_kmh,
