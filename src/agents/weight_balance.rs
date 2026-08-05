@@ -396,7 +396,7 @@ impl WeightBalanceOutput {
     /// `weight_balance.rs`: `WeightBalanceAgent::run` já calculou os
     /// CENÁRIOS e o limite TRASEIRO; `TrimAuthorityAgent::run` consumiu
     /// esses cenários (peso) + a geometria para calcular o limite
-    /// DIANTEIRO por cenário; esta função combina os dois em
+    /// DIANTEIRO; esta função combina os dois em
     /// `inside_envelope`/`spec.cg_limit_fwd_pct_mac`.
     ///
     /// Chamado por `orchestrator::size_aircraft` logo após
@@ -404,28 +404,19 @@ impl WeightBalanceOutput {
     /// leia `spec.cg_limit_fwd_pct_mac` (fica `NaN`) nem confie em
     /// `inside_envelope` refletir o critério dianteiro antes desta chamada.
     ///
-    /// `spec.cg_limit_fwd_pct_mac` recebe o PIOR CASO (maior %MAC, mais
-    /// restritivo) entre os limites efetivos (`max(flare, rotação)`) de
-    /// TODOS os cenários — um único número agregado para compatibilidade
-    /// estrutural com `cg_limit_aft_pct_mac`; o veredito de aceite REAL é
-    /// sempre por cenário (`ScenarioResult::inside_envelope`), não este
-    /// agregado isolado.
+    /// `spec.cg_limit_fwd_pct_mac` recebe `max(trim.flare_limit_pct_mac,
+    /// trim.rotation_limit_pct_mac)` — desde o fix de revisão da task
+    /// trim-authority (cancelamento de peso na rotação, ver
+    /// `agents::trim_authority::rotation_fwd_limit_m`), OS DOIS são
+    /// números ÚNICOS (não variam por cenário) — este limite se aplica
+    /// IGUALMENTE a TODOS os cenários, iterados abaixo um a um por
+    /// clareza estrutural (não porque o valor mude entre eles).
     pub fn apply_trim(&mut self, trim: &crate::models::specs::TrimSpec) {
-        let fwd_limit_for = |name: &str| -> f64 {
-            trim.rotation_limit_pct_mac_per_scenario.iter()
-                .find(|e| e.scenario == name)
-                .map(|e| trim.flare_limit_pct_mac.max(e.rotation_limit_pct_mac))
-                .unwrap_or(trim.flare_limit_pct_mac)
-        };
-
-        let worst_fwd_pct = self.scenarios.iter()
-            .map(|sc| fwd_limit_for(sc.name))
-            .fold(f64::NEG_INFINITY, f64::max);
-        self.spec.cg_limit_fwd_pct_mac = worst_fwd_pct;
+        let fwd_limit_pct = trim.flare_limit_pct_mac.max(trim.rotation_limit_pct_mac);
+        self.spec.cg_limit_fwd_pct_mac = fwd_limit_pct;
 
         for sc in &mut self.scenarios {
-            let fwd_pct = fwd_limit_for(sc.name);
-            sc.inside_envelope = sc.inside_envelope && sc.cg_pct_mac >= fwd_pct;
+            sc.inside_envelope = sc.inside_envelope && sc.cg_pct_mac >= fwd_limit_pct;
         }
     }
 }
@@ -933,22 +924,20 @@ mod tests {
         }
     }
 
-    fn trim_sintetico(flare_pct: f64, rot_leve: f64, rot_pesado: f64) -> crate::models::specs::TrimSpec {
+    /// `TrimSpec` sintético — desde o fix de revisão (cancelamento de peso
+    /// na rotação), `flare_limit_pct_mac`/`rotation_limit_pct_mac` são
+    /// NÚMEROS ÚNICOS (não variam por cenário) — `rotation_margin_per_scenario`
+    /// é só um diagnóstico informativo, não consumido por `apply_trim`.
+    fn trim_sintetico(flare_pct: f64, rotation_pct: f64) -> crate::models::specs::TrimSpec {
         use crate::models::specs::{ScenarioTrimLimit, TrimSensitivity, TrimSpec};
-        let make = |scenario: &str, rot: f64| ScenarioTrimLimit {
-            scenario: scenario.to_string(),
-            rotation_limit_pct_mac: rot,
-            governing_limit_pct_mac: flare_pct.max(rot),
-            governing: if rot > flare_pct { "rotacao".to_string() } else { "flare".to_string() },
-        };
         TrimSpec {
             flare_limit_pct_mac: flare_pct,
-            rotation_limit_pct_mac_per_scenario: vec![
-                make("Leve (dianteiro)", rot_leve),
-                make("Pesado (traseiro)", rot_pesado),
+            rotation_limit_pct_mac: rotation_pct,
+            rotation_margin_per_scenario: vec![
+                ScenarioTrimLimit { scenario: "Leve (dianteiro)".to_string(), rotation_authority_margin_pct: -10.0 },
+                ScenarioTrimLimit { scenario: "Pesado (traseiro)".to_string(), rotation_authority_margin_pct: 5.0 },
             ],
-            governing: "rotacao".to_string(),
-            cl_h_required_at_fwd_limit: -0.7,
+            governing: if rotation_pct >= flare_pct { "rotacao".to_string() } else { "flare".to_string() },
             cl_h_available: -0.7,
             sensitivity: TrimSensitivity {
                 cl_h_max_down_minus: 0.80,
@@ -965,18 +954,18 @@ mod tests {
         }
     }
 
-    /// Cenário "Leve" (CG a 10% MAC) tem limite de rotação em 15% MAC — CG
-    /// fica À FRENTE do limite → `inside_envelope` deve virar `false`
+    /// Limite dianteiro efetivo (rotação, 15% MAC) fica À FRENTE do
+    /// cenário "Leve" (CG a 10% MAC) → `inside_envelope` deve virar `false`
     /// depois de `apply_trim` (estava `true`, critério parcial traseiro
-    /// apenas). Cenário "Pesado" (CG a 25% MAC) tem limite de rotação em
-    /// 12% MAC — CG fica ATRÁS do limite → continua `true`.
+    /// apenas) — e ATRÁS do cenário "Pesado" (CG a 25% MAC) → continua
+    /// `true`. O MESMO limite (15%) se aplica aos dois (número único).
     #[test]
     fn apply_trim_marca_fora_quando_cg_fica_a_frente_do_limite_de_rotacao() {
         let mut wb = wb_sintetico_para_apply_trim();
         assert!(wb.scenarios[0].inside_envelope, "pré-condição: parcial (só traseiro) é true");
         assert!(wb.scenarios[1].inside_envelope, "pré-condição: parcial (só traseiro) é true");
 
-        let trim = trim_sintetico(5.0, 15.0, 12.0);
+        let trim = trim_sintetico(5.0, 15.0);
         wb.apply_trim(&trim);
 
         assert!(!wb.scenarios[0].inside_envelope,
@@ -985,30 +974,31 @@ mod tests {
             "cenário 'Pesado' (CG=25%) deveria continuar DENTRO — limite de rotação (12%) < CG");
     }
 
-    /// `spec.cg_limit_fwd_pct_mac` finalizado deve ser o PIOR CASO (maior
-    /// %MAC) entre os limites efetivos (`max(flare, rotação)`) de todos os
-    /// cenários — aqui, 15% (cenário "Leve") > 12% (cenário "Pesado").
+    /// `spec.cg_limit_fwd_pct_mac` finalizado deve ser `max(flare, rotação)`
+    /// — aqui, rotação (15%) > flare (5%).
     #[test]
-    fn apply_trim_cg_limit_fwd_pct_mac_e_o_pior_caso_entre_cenarios() {
+    fn apply_trim_cg_limit_fwd_pct_mac_e_o_maior_entre_flare_e_rotacao() {
         let mut wb = wb_sintetico_para_apply_trim();
         assert!(wb.spec.cg_limit_fwd_pct_mac.is_nan(), "placeholder antes de apply_trim deveria ser NaN");
 
-        let trim = trim_sintetico(5.0, 15.0, 12.0);
+        let trim = trim_sintetico(5.0, 15.0);
         wb.apply_trim(&trim);
 
         assert!((wb.spec.cg_limit_fwd_pct_mac - 15.0).abs() < 1e-9,
-            "cg_limit_fwd_pct_mac = {} (esperado 15.0, o pior caso entre os dois cenários)",
+            "cg_limit_fwd_pct_mac = {} (esperado 15.0, max(flare=5.0, rotação=15.0))",
             wb.spec.cg_limit_fwd_pct_mac);
     }
 
-    /// Quando a FLARE é mais restritiva que a rotação em um cenário
-    /// específico, `governing_limit_pct_mac`/o critério AND usam a flare
-    /// (constante, `max(flare, rotação)`), não a rotação.
+    /// Quando a FLARE é mais restritiva que a rotação, `apply_trim` usa a
+    /// flare (constante, `max(flare, rotação)`), não a rotação — mesmo
+    /// limite único aplicado a TODOS os cenários (config
+    /// flare-governada continua correta, não hardcoded para "rotação
+    /// sempre governa").
     #[test]
     fn apply_trim_usa_flare_quando_flare_e_mais_restritiva_que_rotacao() {
         let mut wb = wb_sintetico_para_apply_trim();
-        // flare=20% > rotação de ambos os cenários (8%/6%) — flare governa.
-        let trim = trim_sintetico(20.0, 8.0, 6.0);
+        // flare=20% > rotação (6%) — flare governa.
+        let trim = trim_sintetico(20.0, 6.0);
         wb.apply_trim(&trim);
 
         assert!(!wb.scenarios[0].inside_envelope,
@@ -1028,12 +1018,34 @@ mod tests {
         let mut wb = wb_sintetico_para_apply_trim();
         wb.scenarios[1].inside_envelope = false; // simula violação traseira
 
-        let trim = trim_sintetico(1.0, 1.0, 1.0); // dianteiro folgadíssimo
+        let trim = trim_sintetico(1.0, 1.0); // dianteiro folgadíssimo
         wb.apply_trim(&trim);
 
         assert!(!wb.scenarios[1].inside_envelope,
             "AND com critério traseiro false deveria permanecer false mesmo com dianteiro \
              folgado");
+    }
+
+    /// Fix de revisão (envelope vazio, FIX4): quando o limite dianteiro
+    /// (rotação, aqui 40%) fica À FRENTE do limite traseiro
+    /// (`cg_limit_aft_pct_mac`, calculado a partir de x_np=3.80/sm_min=0.05
+    /// na fixture — ≈32%), NENHUM cenário pode ficar dentro do envelope,
+    /// mesmo um cenário com CG bem atrás (aqui, 25%, ainda à FRENTE de
+    /// 40%) — `apply_trim` não precisa de lógica especial para isso, o AND
+    /// simples já produz `false` para todos.
+    #[test]
+    fn apply_trim_com_limite_dianteiro_maior_que_traseiro_marca_todos_fora() {
+        let mut wb = wb_sintetico_para_apply_trim();
+        let aft_pct = wb.spec.cg_limit_aft_pct_mac;
+        let trim = trim_sintetico(5.0, aft_pct + 5.0); // dianteiro além do traseiro
+        wb.apply_trim(&trim);
+
+        assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
+            "pré-condição: fwd ({}) deveria ficar à frente (maior) do aft ({})",
+            wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
+        assert!(wb.scenarios.iter().all(|s| !s.inside_envelope),
+            "com envelope vazio (fwd > aft), NENHUM cenário deveria ficar dentro — obtido: {:?}",
+            wb.scenarios.iter().map(|s| (s.name, s.inside_envelope)).collect::<Vec<_>>());
     }
 
     #[test]

@@ -110,57 +110,45 @@
     "cg_mac_fwd_pct": 1.6815099454598386,
     "cg_mac_aft_pct": 29.373075431609326,
     "static_margin_pct": 12.241655026133284,
-    "cg_limit_fwd_pct_mac": 40.198049903001184,
+    "cg_limit_fwd_pct_mac": 39.926628338266454,
     "cg_limit_aft_pct_mac": 36.61473045774263
   },
   "trim": {
-    "flare_limit_pct_mac": 5.512283277700079,
-    "rotation_limit_pct_mac_per_scenario": [
+    "flare_limit_pct_mac": 7.908401162790693,
+    "rotation_limit_pct_mac": 39.926628338266454,
+    "rotation_margin_per_scenario": [
       {
         "scenario": "Solo (piloto)",
-        "rotation_limit_pct_mac": 29.632181903385035,
-        "governing_limit_pct_mac": 29.632181903385035,
-        "governing": "rotacao"
+        "rotation_authority_margin_pct": -51.30602628454818
       },
       {
         "scenario": "2 pax dianteiros",
-        "rotation_limit_pct_mac": 33.56433664979954,
-        "governing_limit_pct_mac": 33.56433664979954,
-        "governing": "rotacao"
+        "rotation_authority_margin_pct": -47.92156081822173
       },
       {
         "scenario": "4 pax sem bagagem",
-        "rotation_limit_pct_mac": 38.22857656369475,
-        "governing_limit_pct_mac": 38.22857656369475,
-        "governing": "rotacao"
+        "rotation_authority_margin_pct": -36.41837630368233
       },
       {
         "scenario": "4 pax + bagagem + cheio",
-        "rotation_limit_pct_mac": 40.198049903001184,
-        "governing_limit_pct_mac": 40.198049903001184,
-        "governing": "rotacao"
+        "rotation_authority_margin_pct": -22.525507498254342
       },
       {
         "scenario": "4 pax + bagagem + meia",
-        "rotation_limit_pct_mac": 37.45498495831321,
-        "governing_limit_pct_mac": 37.45498495831321,
-        "governing": "rotacao"
+        "rotation_authority_margin_pct": -25.291337195841525
       },
       {
         "scenario": "4 pax + bagagem vazio",
-        "rotation_limit_pct_mac": 34.94027114783454,
-        "governing_limit_pct_mac": 34.94027114783454,
-        "governing": "rotacao"
+        "rotation_authority_margin_pct": -27.658914633529513
       }
     ],
     "governing": "rotacao",
-    "cl_h_required_at_fwd_limit": -0.765,
     "cl_h_available": -0.765,
     "sensitivity": {
       "cl_h_max_down_minus": 0.7999999999999999,
-      "flare_limit_pct_mac_minus": 8.821765716098115,
+      "flare_limit_pct_mac_minus": 10.69395348837209,
       "cl_h_max_down_plus": 0.9,
-      "flare_limit_pct_mac_plus": 2.147762799141885
+      "flare_limit_pct_mac_plus": 5.1228488372092995
     },
     "cm_ac": -0.008,
     "cm_flap_delta": -0.3,
@@ -357,18 +345,19 @@
     "propulsion": "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)",
     "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
     "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
-    "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down semi-empírico, faixa Gudmundsson/Roskam; SENSÍVEL a cl_h_max_down, ver trim.sensitivity; validar em ensaio de voo antes de tratar como definitivo)",
+    "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down semi-empírico, faixa Gudmundsson/Roskam; SENSÍVEL a cl_h_max_down, ver trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)",
     "vn_diagram": "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)",
     "weight": "preliminary (soma de itens de massa configurados não pesados — validar na balança antes da fabricação)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
-    "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [40.2%–36.6%] (SM=0.399; x_cg=2.921m, limites em x: [3.401m, 3.356m])",
-    "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [40.2%–36.6%] (SM=0.351; x_cg=2.981m, limites em x: [3.401m, 3.356m])",
-    "Cenário '4 pax sem bagagem': CG 19.1% MAC fora do envelope de CG admissível [40.2%–36.6%] (SM=0.225; x_cg=3.138m, limites em x: [3.401m, 3.356m])",
-    "Cenário '4 pax + bagagem + cheio': CG 29.4% MAC fora do envelope de CG admissível [40.2%–36.6%] (SM=0.122; x_cg=3.266m, limites em x: [3.401m, 3.356m])",
-    "Cenário '4 pax + bagagem + meia': CG 27.6% MAC fora do envelope de CG admissível [40.2%–36.6%] (SM=0.140; x_cg=3.244m, limites em x: [3.401m, 3.356m])",
-    "Cenário '4 pax + bagagem vazio': CG 26.0% MAC fora do envelope de CG admissível [40.2%–36.6%] (SM=0.156; x_cg=3.225m, limites em x: [3.401m, 3.356m])"
+    "Envelope de CG VAZIO: limite dianteiro por rotação (39.9% MAC) fica ATRÁS do limite traseiro de estabilidade (36.6% MAC) — nenhum CG é admissível; causa: trem principal muito atrás do CG (gear.x_main_m). Revisar posição do trem.",
+    "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.399; x_cg=2.921m, limites em x: [3.398m, 3.356m])",
+    "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.351; x_cg=2.981m, limites em x: [3.398m, 3.356m])",
+    "Cenário '4 pax sem bagagem': CG 19.1% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.225; x_cg=3.138m, limites em x: [3.398m, 3.356m])",
+    "Cenário '4 pax + bagagem + cheio': CG 29.4% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.122; x_cg=3.266m, limites em x: [3.398m, 3.356m])",
+    "Cenário '4 pax + bagagem + meia': CG 27.6% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.140; x_cg=3.244m, limites em x: [3.398m, 3.356m])",
+    "Cenário '4 pax + bagagem vazio': CG 26.0% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.156; x_cg=3.225m, limites em x: [3.398m, 3.356m])"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"

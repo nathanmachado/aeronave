@@ -269,11 +269,25 @@ fn main() {
 
     // Envelope de CG ADMISSÍVEL (Task 4.4 + task trim-authority) — traseiro
     // vem de `[stability].sm_min`; dianteiro vem do `TrimAuthorityAgent`
-    // (ver bloco [ TRIM ] abaixo), pior caso entre os cenários.
-    println!("  Envelope de CG ADMISSÍVEL: {:.1}%–{:.1}% MAC  (sm_min={:.2}, dianteiro: \
-              TrimAuthorityAgent — ver bloco [ TRIM ])",
-             wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
-             cfg.stability.sm_min);
+    // (bloco [ TRIM ] abaixo) — um número ÚNICO (`max(flare, rotação)`,
+    // nenhum dos dois varia por cenário, ver `TrimSpec`), o MESMO para
+    // todos os cenários.
+    //
+    // ENVELOPE VAZIO (fix de revisão, FIX4): quando o dianteiro fica À
+    // FRENTE do traseiro (`cg_limit_fwd_pct_mac > cg_limit_aft_pct_mac`),
+    // um intervalo "X%–Y%" com X>Y seria confuso/invertido — imprime
+    // "VAZIO" explicitamente em vez disso.
+    let envelope_vazio = wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac;
+    if envelope_vazio {
+        println!("  Envelope de CG ADMISSÍVEL: **VAZIO** (dianteiro {:.1}% MAC > traseiro {:.1}% \
+                  MAC — ver bloco [ TRIM ])",
+                 wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
+    } else {
+        println!("  Envelope de CG ADMISSÍVEL: {:.1}%–{:.1}% MAC  (sm_min={:.2}, dianteiro: \
+                  TrimAuthorityAgent — ver bloco [ TRIM ])",
+                 wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
+                 cfg.stability.sm_min);
+    }
     for sc in &wb.scenarios {
         println!("    {} {:30} CG={:5.1}% MAC  SM={:.3}",
                  if sc.inside_envelope { "✓" } else { "✗" },
@@ -291,15 +305,25 @@ fn main() {
     // deste bloco imprimir os detalhes.
     println!("[ TRIM ] TrimAuthorityAgent — Autoridade de Profundor (flare + rotação)");
     let trim = &sized.trim;
-    println!("  Limite de FLARE (pouso, independe do peso): {:.2}% MAC  |  CL_h req={:.3}  \
+    println!("  Limite de FLARE (pouso, número único, independe do peso): {:.2}% MAC  |  \
               CL_h disp={:.3}",
-             trim.flare_limit_pct_mac, trim.cl_h_required_at_fwd_limit, trim.cl_h_available);
-    println!("  Limite de ROTAÇÃO (decolagem, por cenário — depende do peso):");
-    for sc in &trim.rotation_limit_pct_mac_per_scenario {
-        println!("    {:30} rotação={:5.1}% MAC  governa={}",
-                 sc.scenario, sc.rotation_limit_pct_mac, sc.governing);
+             trim.flare_limit_pct_mac, trim.cl_h_available);
+    // Fix de revisão (FIX1): a rotação, apesar de fisicamente depender do
+    // peso, resulta INVARIANTE ao peso do cenário sob Vr=1.1·Vs0(W) — ver
+    // agents::trim_authority::rotation_fwd_limit_m — por isso também é um
+    // número ÚNICO, não mais "por cenário" como na primeira versão deste
+    // agente.
+    println!("  Limite de ROTAÇÃO (decolagem, número único — INVARIANTE ao peso do cenário sob \
+              Vr=1.1·Vs0(W), ver derivação no código): {:.2}% MAC",
+             trim.rotation_limit_pct_mac);
+    println!("  Manobra que GOVERNA o limite dianteiro: {}", trim.governing);
+    println!("  Margem de autoridade de rotação por cenário (diagnóstico, na CG/peso REAIS de \
+              cada um — negativo = autoridade insuficiente):");
+    for sc in &trim.rotation_margin_per_scenario {
+        println!("    {:30} margem={:7.1}%{}",
+                 sc.scenario, sc.rotation_authority_margin_pct,
+                 if sc.rotation_authority_margin_pct < 0.0 { "  ⚠ insuficiente" } else { "" });
     }
-    println!("  Manobra que GOVERNA o limite dianteiro (agregado): {}", trim.governing);
     if trim.governing == "rotacao" {
         println!("  ⚠ ACHADO DE PROJETO: a ROTAÇÃO de decolagem governa o limite dianteiro, \
                   MAIS RESTRITIVA que a flare — o trem principal (x_main={:.2}m) fica muito \
@@ -307,6 +331,22 @@ fn main() {
                   [ AGENTE 6 ]). Decisão de projeto do layout do trem requer revisão humana \
                   — este agente NÃO ajusta gear.x_main_m automaticamente.",
                  cfg.gear.x_main_m);
+    }
+    if envelope_vazio {
+        // Caixa de destaque com largura interna fixa (`BOX_W` caracteres) —
+        // `box_line` preenche cada linha com espaços até a largura, então
+        // as bordas '│' sempre alinham independente do conteúdo.
+        const BOX_W: usize = 68;
+        let box_line = |s: &str| println!("  │ {:<width$} │", s, width = BOX_W);
+        println!("  ┌{}┐", "─".repeat(BOX_W + 2));
+        box_line("⚠⚠⚠  ENVELOPE DE CG VAZIO — NENHUM CG É ADMISSÍVEL  ⚠⚠⚠");
+        println!("  ├{}┤", "─".repeat(BOX_W + 2));
+        box_line(&format!("Limite dianteiro ({}): {:.1}% MAC",
+                           trim.governing, wb.spec.cg_limit_fwd_pct_mac));
+        box_line(&format!("Limite traseiro (sm_min): {:.1}% MAC", wb.spec.cg_limit_aft_pct_mac));
+        box_line("Causa: trem principal muito atrás do CG (gear.x_main_m).");
+        box_line("Revisar posição do trem — decisão de projeto humana, NÃO automatizada.");
+        println!("  └{}┘", "─".repeat(BOX_W + 2));
     }
     println!("  Sensibilidade a cl_h_max_down (±0.05): {:.2}→{:.2}% MAC  |  {:.2}(nominal)={:.2}% \
               |  {:.2}→{:.2}% MAC\n",
@@ -583,7 +623,8 @@ fn main() {
     fidelity.insert("trim".into(),
         "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
          cl_h_max_down semi-empírico, faixa Gudmundsson/Roskam; SENSÍVEL a cl_h_max_down, ver \
-         trim.sensitivity; validar em ensaio de voo antes de tratar como definitivo)".into());
+         trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ \
+         μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {

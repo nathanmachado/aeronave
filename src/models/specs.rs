@@ -220,48 +220,62 @@ pub struct WeightSpec {
     /// Limite DIANTEIRO do envelope de CG admissível (%MAC) — desde a task
     /// trim-authority, vem do `TrimAuthorityAgent` (autoridade FÍSICA de
     /// profundor em flare + rotação de decolagem), não mais do proxy
-    /// `stability.sm_max` (removido). É o PIOR CASO (maior %MAC) entre os
-    /// limites dianteiros por cenário (`TrimSpec::
-    /// rotation_limit_pct_mac_per_scenario`, cada um `max(flare, rotação)`
-    /// — a rotação varia com o peso do cenário) — um número agregado único
-    /// para compatibilidade estrutural com `cg_limit_aft_pct_mac`; o
-    /// veredito de aceite REAL por cenário usa `ScenarioResult::
-    /// inside_envelope` (finalizado por `WeightBalanceOutput::apply_trim`),
-    /// não este campo agregado isoladamente. CG à frente do limite do
-    /// PRÓPRIO cenário excede a autoridade de profundor disponível.
+    /// `stability.sm_max` (removido): `max(TrimSpec::flare_limit_pct_mac,
+    /// TrimSpec::rotation_limit_pct_mac)` — AMBOS são números ÚNICOS (não
+    /// variam por cenário; ver docstring de `TrimSpec::
+    /// rotation_limit_pct_mac` para a derivação de por que a rotação é
+    /// invariante ao peso sob a política `Vr=1,1·Vs0(W)` deste modelo), logo
+    /// este limite se aplica IGUALMENTE a todos os cenários — não é mais um
+    /// agregado de "pior caso" entre cenários distintos (fix de revisão:
+    /// antes da correção do cancelamento de peso, cada cenário tinha um
+    /// limite de rotação diferente e este campo era o máximo entre eles).
+    /// PODE ficar À FRENTE de `cg_limit_aft_pct_mac` — ver essa doc-comment
+    /// para o significado de ENVELOPE VAZIO nesse caso.
     pub cg_limit_fwd_pct_mac: f64,
     /// Limite TRASEIRO do envelope de CG admissível (%MAC) — vem de
     /// `stability.sm_min` (piso de estabilidade estática). CG atrás deste
     /// limite fica abaixo da margem estática mínima aceitável.
+    ///
+    /// **ENVELOPE VAZIO**: quando `cg_limit_fwd_pct_mac > cg_limit_aft_pct_mac`
+    /// (baseline real: ~39,9% > ~36,6%), NENHUM CG é admissível — os dois
+    /// critérios físicos (autoridade de rotação vs. margem estática mínima)
+    /// são mutuamente incompatíveis com esta célula/trem, não apenas com
+    /// os cenários de carga observados. `violations` sempre contém um item
+    /// dedicado "Envelope de CG VAZIO" nesse caso (`ConstraintChecker::verify`),
+    /// distinto das violações por cenário. Causa raiz típica: o trem
+    /// principal (`[gear].x_main_m`) fica longe demais do CG — decisão de
+    /// layout do trem, não corrigida automaticamente por este pipeline.
     pub cg_limit_aft_pct_mac: f64,
 }
 
-/// Um cenário do `WeightBalanceAgent`, com o limite dianteiro de ROTAÇÃO de
-/// decolagem calculado para ele (task trim-authority) — depende do PESO do
-/// cenário (`ScenarioResult::total_mass_kg`), ao contrário do limite de
-/// flare (constante, independe do peso — ver `TrimSpec::flare_limit_pct_mac`).
+/// Margem de autoridade de ROTAÇÃO na CG e no peso REAIS de UM cenário do
+/// `WeightBalanceAgent` (task trim-authority, fix de revisão) — em
+/// contraste com `TrimSpec::rotation_limit_pct_mac` (o CG MÍNIMO admissível,
+/// invariante ao peso — ver sua docstring), esta margem varia por cenário
+/// porque é avaliada na CG e no `Vr(W)` REAIS de CADA cenário, não no
+/// limite. Ver `agents::trim_authority::rotation_available_moment_nm`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioTrimLimit {
     /// Nome do cenário — mesmo `ScenarioResult::name` do `WeightBalanceAgent`.
     pub scenario: String,
-    /// Limite dianteiro de CG (%MAC) pela rotação de decolagem NESTE
-    /// cenário — `agents::trim_authority::rotation_fwd_limit_m` convertido
-    /// para %MAC.
-    pub rotation_limit_pct_mac: f64,
-    /// Limite dianteiro EFETIVO deste cenário — `max(flare_limit_pct_mac,
-    /// rotation_limit_pct_mac)`, o mais restritivo das duas manobras
-    /// críticas nariz-para-cima.
-    pub governing_limit_pct_mac: f64,
-    /// Qual manobra governa NESTE cenário: `"flare"` ou `"rotacao"`.
-    pub governing: String,
+    /// `(momento nariz-acima DISPONÍVEL − momento nariz-acima NECESSÁRIO) /
+    /// NECESSÁRIO × 100`, avaliados na CG e no peso reais deste cenário
+    /// (`Vr(W)` desse peso — ao contrário de `TrimSpec::
+    /// rotation_limit_pct_mac`, aqui W NÃO cancela porque o momento
+    /// NECESSÁRIO, `W·(x_main−x_cg)`, usa a CG REAL do cenário, não a CG no
+    /// limite). Negativo = autoridade de profundor INSUFICIENTE para
+    /// rotacionar nesta CG/peso — quanto mais negativo, maior o déficit.
+    /// Zero exatamente na CG do limite (`rotation_limit_pct_mac`), para
+    /// qualquer peso (prova numérica em `agents::trim_authority::tests`).
+    pub rotation_authority_margin_pct: f64,
 }
 
 /// Sensibilidade do limite de flare a `cl_h_max_down` (±0.05) — a
 /// autoridade de download da empenagem com o profundor no batente é um
 /// parâmetro semi-empírico (faixa típica 0.5–1.2, Gudmundsson/Roskam) sem
 /// medição direta neste projeto; pequenas variações deslocam o limite de
-/// flare de forma NÃO desprezível (ex.: 0.80→~9%, 0.85→~5,5%, 0.90→~2%
-/// MAC no baseline — ver task-1-brief.md). Reportado explicitamente para o
+/// flare de forma NÃO desprezível (baseline real: 0,80→~10,7%,
+/// 0,85→~7,9%, 0,90→~5,1% MAC). Reportado explicitamente para o
 /// consumidor de CAD não tratar `flare_limit_pct_mac` como um número exato
 /// — acompanha `fidelity["trim"] == "preliminary"`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,35 +293,50 @@ pub struct TrimSensitivity {
 /// Saída do TrimAuthorityAgent (task trim-authority) — limite dianteiro
 /// FÍSICO do envelope de CG, derivado da autoridade de profundor nas duas
 /// manobras críticas de arfagem nariz-para-cima: flare no pouso
-/// (V_ref=1,3·Vs0, flap de pouso, balanço de momentos em torno do CG) e
-/// rotação na decolagem (Vr=1,1·Vs0, flap de decolagem, balanço de
-/// momentos em torno do TREM PRINCIPAL). Substitui o antigo proxy
-/// `stability.sm_max` (margem estática máxima, sem base física direta em
-/// autoridade de controle) — ver `agents::trim_authority` para a dedução
-/// completa e ACHADO DE PROJETO honesto: a rotação (não a flare) governa o
-/// limite dianteiro real desta aeronave, e é MAIS restritiva que o antigo
-/// proxy (o trem principal fica muito atrás do CG, `[gear].x_main_m`).
+/// (V_ref=1,3·Vs0, flap de pouso, balanço de momentos em torno do CG,
+/// FECHADO pela contribuição de sustentação da própria empenagem — ver
+/// `agents::trim_authority::cl_h_required_flare`) e rotação na decolagem
+/// (Vr=1,1·Vs0(W), flap de decolagem, balanço de momentos em torno do TREM
+/// PRINCIPAL). Substitui o antigo proxy `stability.sm_max` (margem
+/// estática máxima, sem base física direta em autoridade de controle) —
+/// ver `agents::trim_authority` para a dedução completa.
 ///
-/// `governing`: `"flare"` se a flare governa em TODOS os cenários,
-/// `"rotacao"` se a rotação governa em TODOS os cenários, `"misto"` se
-/// varia por cenário — ver `governing` de cada `ScenarioTrimLimit` para o
-/// veredito POR cenário (o que efetivamente importa para `inside_envelope`).
+/// **Ambos os limites (`flare_limit_pct_mac`/`rotation_limit_pct_mac`) são
+/// NÚMEROS ÚNICOS, não variam por cenário** — a rotação, apesar de
+/// fisicamente depender do peso (`W`), resulta INVARIANTE sob a política de
+/// velocidade `Vr=1,1·Vs0(W)` deste modelo: `q_r(W) ∝ W`, então TODOS os
+/// termos de momento em jogo são proporcionais a `W`, e `W` cancela
+/// exatamente na divisão que dá a posição do CG-limite — ver a derivação
+/// completa (em português) na docstring de
+/// `agents::trim_authority::rotation_fwd_limit_m`. `rotation_margin_per_scenario`
+/// carrega uma quantidade DIFERENTE (e que de fato varia por cenário): a
+/// margem de autoridade avaliada na CG/peso REAIS de cada cenário (ver
+/// `ScenarioTrimLimit`).
+///
+/// `governing`: `"flare"` ou `"rotacao"` — qual dos dois limites ÚNICOS é
+/// maior (mais restritivo). ACHADO DE PROJETO honesto (baseline real): a
+/// rotação governa (≈39,9% MAC ≫ flare ≈7,9% MAC) e fica À FRENTE do
+/// limite traseiro (≈36,6% MAC) — **envelope de CG VAZIO**, ver docstring
+/// de `WeightSpec::cg_limit_aft_pct_mac`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrimSpec {
-    /// Limite dianteiro de flare (%MAC) — independe do peso do cenário: o
-    /// CL de equilíbrio 1g na flare (`cl_max_flaps/1,69`) não depende de W.
+    /// Limite dianteiro de flare (%MAC) — número único, independe do peso.
     pub flare_limit_pct_mac: f64,
-    /// Limite dianteiro de rotação (%MAC) POR CENÁRIO — depende do peso
-    /// (ver `ScenarioTrimLimit`); um valor por cenário do `WeightBalanceAgent`.
-    pub rotation_limit_pct_mac_per_scenario: Vec<ScenarioTrimLimit>,
-    /// Qual manobra governa, agregado sobre todos os cenários — ver
-    /// doc-comment da struct.
+    /// Limite dianteiro de rotação (%MAC) — número único: apesar de
+    /// fisicamente depender do peso do cenário, é INVARIANTE sob a política
+    /// `Vr=1,1·Vs0(W)` (ver docstring da struct/`agents::trim_authority::
+    /// rotation_fwd_limit_m`). Para a margem de autoridade REAL por
+    /// cenário (que de fato varia), ver `rotation_margin_per_scenario`.
+    pub rotation_limit_pct_mac: f64,
+    /// Margem de autoridade de rotação avaliada na CG/peso reais de cada
+    /// cenário do `WeightBalanceAgent` — ver `ScenarioTrimLimit`.
+    /// Diagnóstico informativo/falseável, NÃO usado para calcular
+    /// `rotation_limit_pct_mac` nem `inside_envelope` (esses usam o limite
+    /// único acima).
+    pub rotation_margin_per_scenario: Vec<ScenarioTrimLimit>,
+    /// Qual manobra governa (limite MAIOR, mais restritivo) — `"flare"` ou
+    /// `"rotacao"`. Ver docstring da struct.
     pub governing: String,
-    /// CL_h requerido no limite de flare resolvido — por construção
-    /// coincide com `cl_h_available` (é a própria definição do limite, ver
-    /// `agents::trim_authority::flare_fwd_limit_frac`); reportado como
-    /// checagem de sanidade para um consumidor externo.
-    pub cl_h_required_at_fwd_limit: f64,
     /// CL_h disponível — `-cl_h_max_down·(1 − trim_margin)` (download
     /// máximo da empenagem com o profundor no batente, com a margem de
     /// trim reservada para efeito solo/certificação).

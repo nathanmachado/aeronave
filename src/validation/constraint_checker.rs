@@ -171,17 +171,40 @@ impl ConstraintChecker {
         // 9. Envelope de CG admissível (Task 4.4 + task trim-authority):
         // critério de aceite substitui a antiga checagem isolada
         // `sm > 0.03` — agora TODO cenário de carga precisa ter o CG
-        // dentro de [limite dianteiro do PRÓPRIO cenário (flare/rotação,
-        // TrimAuthorityAgent), cg_limit_aft_pct_mac (sm_min)], não apenas
-        // os extremos observados entre os cenários. `sc.inside_envelope`
-        // já reflete o veredito por cenário (finalizado por
+        // dentro de [cg_limit_fwd_pct_mac (flare/rotação,
+        // TrimAuthorityAgent — número ÚNICO, o MESMO para todos os
+        // cenários desde o fix de revisão do cancelamento de peso na
+        // rotação), cg_limit_aft_pct_mac (sm_min)], não apenas os
+        // extremos observados entre os cenários. `sc.inside_envelope` já
+        // reflete o veredito por cenário (finalizado por
         // `WeightBalanceOutput::apply_trim`); `cg_limit_fwd_pct_mac`
-        // citado na mensagem abaixo é o agregado (pior caso).
+        // citado na mensagem abaixo é o limite que de fato SE APLICA a
+        // este (e a todos os outros) cenário.
         // Limites físicos (m do nariz), reconstruídos a partir de
         // `cg_limit_fwd/aft_pct_mac` — inverso de `weight_balance::cg_pct_mac`
         // (%MAC = (x−x_mac_le)/MAC×100) contra `wb.mac_le_x_m`/`wb.mac_m`.
         let x_limit_fwd_m = wb.mac_le_x_m + wb.spec.cg_limit_fwd_pct_mac / 100.0 * wb.mac_m;
         let x_limit_aft_m = wb.mac_le_x_m + wb.spec.cg_limit_aft_pct_mac / 100.0 * wb.mac_m;
+
+        // 9a. ENVELOPE VAZIO (fix de revisão, FIX4): quando o limite
+        // dianteiro fica À FRENTE do traseiro (`cg_limit_fwd_pct_mac >
+        // cg_limit_aft_pct_mac`), os dois critérios físicos (autoridade de
+        // rotação vs. margem estática mínima) são mutuamente
+        // incompatíveis com esta célula/trem — NENHUM CG é admissível,
+        // independentemente dos cenários de carga observados. Violação
+        // DEDICADA (distinta das violações por cenário abaixo) para não
+        // deixar essa causa raiz implícita em N mensagens repetidas.
+        let envelope_vazio = wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac;
+        if envelope_vazio {
+            violations.push(format!(
+                "Envelope de CG VAZIO: limite dianteiro por rotação ({:.1}% MAC) fica ATRÁS \
+                 do limite traseiro de estabilidade ({:.1}% MAC) — nenhum CG é admissível; \
+                 causa: trem principal muito atrás do CG (gear.x_main_m). Revisar posição do \
+                 trem.",
+                wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac
+            ));
+        }
+
         for sc in &wb.scenarios {
             if !sc.inside_envelope {
                 violations.push(format!(
@@ -395,8 +418,46 @@ mod tests {
             "violação deveria citar o limite dianteiro do envelope: {:?}", report.violations);
     }
 
+    /// Fix de revisão (FIX4): o baseline real tem envelope de CG VAZIO —
+    /// o limite de rotação (invariante ao peso, ≈39,9% MAC) fica À FRENTE
+    /// do limite traseiro de estabilidade (≈36,6% MAC), então os dois
+    /// critérios físicos são mutuamente incompatíveis com esta
+    /// célula/trem. `ConstraintChecker::verify` deve reportar uma
+    /// violação DEDICADA "Envelope de CG VAZIO", distinta (e ALÉM) das
+    /// violações por cenário — citando os dois limites e a causa raiz
+    /// (`gear.x_main_m`).
+    #[test]
+    fn violacao_de_envelope_vazio_aparece_no_baseline_real() {
+        let toml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
+        ).expect("falha ao ler baseline_4seat.toml do disco");
+        let cfg = crate::models::config::parse_aircraft(&toml)
+            .expect("baseline real deveria ser uma configuração válida");
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical) = setup_with_cfg(cfg);
+        assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
+            "pré-condição do teste: baseline real deveria ter envelope de CG vazio (fwd={:.2}% \
+             > aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical);
+
+        assert!(report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
+            "esperava violação dedicada de envelope vazio, obteve: {:?}", report.violations);
+        assert!(report.violations.iter().any(|v| v.contains("gear.x_main_m")),
+            "violação de envelope vazio deveria citar a causa raiz (gear.x_main_m): {:?}",
+            report.violations);
+        // Ainda deve haver violações POR CENÁRIO também (não substitui,
+        // complementa).
+        assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+            "violações por cenário deveriam continuar presentes ao lado da dedicada: {:?}",
+            report.violations);
+    }
+
     /// Sanidade inversa: se TODOS os cenários estiverem artificialmente
-    /// dentro do envelope, nenhuma violação de envelope deve aparecer.
+    /// dentro do envelope, nenhuma violação POR CENÁRIO deve aparecer —
+    /// mas a violação DEDICADA de envelope vazio (se o `wb.spec` sintético
+    /// da fixture também tiver fwd>aft) é independente do override de
+    /// `inside_envelope` por cenário, então não é coberta por este teste
+    /// (ver `violacao_de_envelope_vazio_aparece_no_baseline_real` acima).
     #[test]
     fn sem_violacao_de_envelope_quando_todos_os_cenarios_estao_dentro() {
         let (req, wing, prop, engine, mut wb, propeller, perf, mission, electrical) = setup();

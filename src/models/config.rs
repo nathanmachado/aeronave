@@ -386,6 +386,32 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.empennage.eta_h
         )));
     }
+    // Task trim-authority (fix de revisão): braço de cauda mínimo relativo
+    // à MAC — o modelo de flare linearizado de `agents::trim_authority::
+    // cl_h_required_flare` divide por `η_h·(S_h/S_w)·(l_h/MAC)`; um braço
+    // curto demais (l_h/MAC pequeno) exige CL_h extremos/pouco realistas
+    // para qualquer Cm de perfil plausível, sinal de que o braço de cauda
+    // não é fisicamente compatível com este modelo simplificado (não é
+    // sobre um polo matemático — a correção do fechamento vertical já
+    // eliminou o polo em x̄ — é sobre o DOMÍNIO DE VALIDADE da
+    // linearização). MAC calculada diretamente de `[wing]` (mesma fórmula
+    // de `weight_balance::mean_aerodynamic_chord`) porque `validate_aircraft`
+    // não tem uma `WingSpec` já calculada neste ponto do pipeline.
+    let c_r_mac_check = crate::agents::weight_balance::chord_root(
+        cfg.wing.area_m2, cfg.wing.span_m, cfg.wing.taper_ratio,
+    );
+    let mac_check = crate::agents::weight_balance::mean_aerodynamic_chord(
+        c_r_mac_check, cfg.wing.taper_ratio,
+    );
+    let l_h_over_mac_check = cfg.empennage.tail_arm_m / mac_check;
+    if l_h_over_mac_check <= 1.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.tail_arm_m/MAC ({l_h_over_mac_check:.3}) \
+             — braço de cauda curto demais para o modelo de flare (agents::trim_authority) — \
+             mínimo exigido 1.5 (tail_arm_m={:.2}m, MAC calculada={mac_check:.3}m)",
+            cfg.empennage.tail_arm_m
+        )));
+    }
 
     // [propeller]
     if let Some(d) = cfg.propeller.diameter_m {
@@ -1272,6 +1298,27 @@ mod tests {
         let toml = aircraft_toml_valido().replace("eta_h = 0.90", "eta_h = 0.3");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("empennage.eta_h"), "{err}");
+    }
+
+    /// Task trim-authority (fix de revisão, FIX7): braço de cauda curto
+    /// demais relativo à MAC (l_h/MAC ≤ 1.5) — fora do domínio de
+    /// validade do modelo linearizado de flare
+    /// (`agents::trim_authority::cl_h_required_flare`). Fixture:
+    /// span=10/area=12/taper=0.5 → MAC≈1.2444m; tail_arm_m=1.5 →
+    /// l_h/MAC≈1.205 (< 1.5).
+    #[test]
+    fn rejeita_tail_arm_m_curto_demais_relativo_a_mac() {
+        let toml = aircraft_toml_valido().replace("tail_arm_m = 4.5", "tail_arm_m = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tail_arm_m"), "{err}");
+        assert!(err.to_string().contains("MAC"), "{err}");
+    }
+
+    #[test]
+    fn aceita_tail_arm_m_pouco_acima_do_limite_de_1_5() {
+        // l_h/MAC = 1.87/1.2444 ≈ 1.503 — pouco acima do piso.
+        let toml = aircraft_toml_valido().replace("tail_arm_m = 4.5", "tail_arm_m = 1.87");
+        parse_aircraft(&toml).expect("tail_arm_m/MAC pouco acima de 1.5 deveria ser aceito");
     }
 
     #[test]

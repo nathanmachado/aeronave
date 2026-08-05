@@ -99,7 +99,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
 | `weight` | preliminary (soma de itens de massa configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — a aritmética é exata, mas os valores de entrada são estimativas de catálogo/projeto, não massas medidas; erros aqui se propagam para MTOW/estrutura/trem de pouso |
-| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down` semi-empírico, Gudmundsson/Roskam) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `cl_h_max_down` (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
+| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down` semi-empírico, Gudmundsson/Roskam; rotação DESCONSIDERA o binário tração/arrasto/inércia, resíduo estimado ≈ μ_roll·(W−L_g)·h_cg) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `cl_h_max_down` (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
 | `performance` | computed (equações fechadas, atmosfera ISA padrão) | — |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
@@ -257,37 +257,59 @@ da superfície espelhada.
 | `fuel_mass_kg` | f64 | kg | Massa de combustível no cenário de peso |
 | `cg_mac_fwd_pct` / `cg_mac_aft_pct` | f64 | %MAC | CG mais dianteiro/traseiro OBSERVADO entre os cenários de carga |
 | `static_margin_pct` | f64 | % | Margem estática |
-| `cg_limit_fwd_pct_mac` | f64 | %MAC | Limite DIANTEIRO admissível — desde a v4.1, o PIOR CASO (maior %MAC) entre os limites por cenário calculados pelo `TrimAuthorityAgent` (bloco `trim` abaixo), não mais o proxy `[stability].sm_max`. Não confundir com `cg_mac_fwd_pct` acima (valor OBSERVADO). O veredito de aceite por cenário fica em `trim.rotation_limit_pct_mac_per_scenario`/`violations`, não neste agregado isolado. |
+| `cg_limit_fwd_pct_mac` | f64 | %MAC | Limite DIANTEIRO admissível — `max(trim.flare_limit_pct_mac, trim.rotation_limit_pct_mac)` (bloco `trim` abaixo), não mais o proxy `[stability].sm_max`. Ambos os termos do `max` são NÚMEROS ÚNICOS (não variam por cenário de carga — ver bloco `trim`), então este limite se aplica IGUALMENTE a todos os cenários. Não confundir com `cg_mac_fwd_pct` acima (valor OBSERVADO). **PODE ficar À FRENTE de `cg_limit_aft_pct_mac`** — ver "Envelope vazio" abaixo. |
 | `cg_limit_aft_pct_mac` | f64 | %MAC | Limite TRASEIRO admissível — de `[stability].sm_min` |
+
+**Envelope vazio**: quando `cg_limit_fwd_pct_mac > cg_limit_aft_pct_mac`
+(baseline real: ≈39,9% > ≈36,6%), NENHUM CG é admissível — os dois
+critérios físicos (autoridade de rotação de decolagem vs. margem estática
+mínima) são mutuamente incompatíveis com esta célula/trem, não apenas com
+os cenários de carga observados. Nesse caso `violations` sempre contém um
+item DEDICADO começando com `"Envelope de CG VAZIO:"` (distinto das
+violações por cenário, que também continuam presentes) —
+`ConstraintChecker::verify`, seção 9a. Um consumidor de CAD deve tratar
+`cg_limit_fwd_pct_mac > cg_limit_aft_pct_mac` como sinal explícito dessa
+condição (não como um intervalo "invertido" a ser corrigido/normalizado).
 
 ### `trim` — `TrimSpec` (TrimAuthorityAgent — novo na v4.1)
 
 Limite dianteiro FÍSICO do envelope de CG, derivado da autoridade de
 profundor disponível nas duas manobras críticas de arfagem
 nariz-para-cima: **flare no pouso** (V_ref = 1,3·Vs0, flap de pouso,
-balanço de momentos em torno do CG) e **rotação na decolagem** (Vr =
-1,1·Vs0, flap de decolagem, balanço de momentos em torno do TREM
+balanço de momentos em torno do CG, fechado pela contribuição de
+sustentação da própria empenagem) e **rotação na decolagem** (Vr =
+1,1·Vs0(W), flap de decolagem, balanço de momentos em torno do TREM
 PRINCIPAL). Substitui o proxy `[stability].sm_max` (removido — ver §1).
+
+**`flare_limit_pct_mac` e `rotation_limit_pct_mac` são NÚMEROS ÚNICOS,
+NÃO variam por cenário de carga.** Isto é um resultado NÃO ÓBVIO para a
+rotação especificamente: apesar do balanço de momentos físico depender do
+peso do cenário (`W`), sob a política de velocidade `Vr = 1,1·Vs0(W)`
+usada por este modelo, a pressão dinâmica de rotação `q_r(W)` é
+PROPORCIONAL a `W` — logo TODOS os termos de momento em jogo (download da
+empenagem, sustentação da asa, momento de perfil+flap) também são
+proporcionais a `W`, e o `W` CANCELA EXATAMENTE ao calcular a posição do
+CG-limite (`x_cg_rot = x_main − M_disponível(W)/W`). Ver a dedução
+completa (em português) na docstring de
+`agents::trim_authority::rotation_fwd_limit_m`.
 
 | Campo | Tipo | Unidade | Descrição |
 |---|---|---|---|
-| `flare_limit_pct_mac` | f64 | %MAC | Limite dianteiro de flare — independe do peso do cenário |
-| `rotation_limit_pct_mac_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Um limite de rotação por cenário de carga (`weight`'s cenários) — depende do peso |
-| `governing` | string (`"flare"` \| `"rotacao"` \| `"misto"`) | — | Qual manobra governa, agregado sobre todos os cenários |
-| `cl_h_required_at_fwd_limit` | f64 | — | CL_h requerido no limite de flare resolvido (checagem de sanidade — coincide com `cl_h_available` por construção) |
+| `flare_limit_pct_mac` | f64 | %MAC | Limite dianteiro de flare — número único, independe do peso |
+| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único, INVARIANTE ao peso (ver acima) |
+| `rotation_margin_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Diagnóstico informativo POR CENÁRIO — margem de autoridade de rotação avaliada na CG/peso REAIS de cada cenário (essa sim varia por cenário) — NÃO usado para calcular `rotation_limit_pct_mac`/`inside_envelope` |
+| `governing` | string (`"flare"` \| `"rotacao"`) | — | Qual dos dois limites ÚNICOS é maior (mais restritivo) |
 | `cl_h_available` | f64 | — | CL_h disponível — `-cl_h_max_down·(1−trim_margin)` |
 | `sensitivity` | objeto (`TrimSensitivity`) | — | Limite de flare recomputado a `cl_h_max_down ± 0,05` |
 | `cm_ac` / `cm_flap_delta` | f64 | — | Parâmetros ecoados de `[wing]` |
 | `cl_h_max_down` / `trim_margin` / `cl_ground_rotation` / `to_flap_cm_fraction` | f64 | — | Parâmetros ecoados de `[stability]` |
 
-Sub-bloco `ScenarioTrimLimit` (um por cenário de `weight`):
+Sub-bloco `ScenarioTrimLimit` (um por cenário de `weight`) — `rotation_margin_per_scenario`:
 
 | Campo | Tipo | Unidade | Descrição |
 |---|---|---|---|
 | `scenario` | string | — | Nome do cenário (mesmo do bloco `weight`) |
-| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação NESTE cenário |
-| `governing_limit_pct_mac` | f64 | %MAC | `max(flare_limit_pct_mac, rotation_limit_pct_mac)` — limite EFETIVO deste cenário |
-| `governing` | string (`"flare"` \| `"rotacao"`) | — | Qual manobra governa NESTE cenário |
+| `rotation_authority_margin_pct` | f64 | % | `(momento nariz-acima DISPONÍVEL − NECESSÁRIO)/NECESSÁRIO × 100`, avaliados na CG e no `Vr(W)` REAIS deste cenário. Negativo = autoridade insuficiente para rotacionar nesta CG/peso (quanto mais negativo, maior o déficit). Zero exatamente na CG de `rotation_limit_pct_mac`, para qualquer peso. |
 
 Sub-bloco `sensitivity` (`TrimSensitivity`):
 
@@ -297,11 +319,14 @@ Sub-bloco `sensitivity` (`TrimSensitivity`):
 | `flare_limit_pct_mac_minus` / `flare_limit_pct_mac_plus` | f64 | %MAC | Limite de flare recomputado com o parâmetro acima |
 
 **ACHADO DE PROJETO honesto** (baseline real, não um bug deste código): a
-ROTAÇÃO governa em TODOS os cenários (≈29,6%–40,2% MAC conforme o peso),
-MUITO mais restritiva que a flare (≈5,5% MAC) e que o antigo proxy
-`sm_max` (16,6% MAC) — causa física: o trem principal
-(`[gear].x_main_m`) fica muito atrás do CG desta célula. Ver
-`agents::trim_authority` (docstring do módulo) para a dedução completa.
+ROTAÇÃO governa (≈39,9% MAC), MUITO mais restritiva que a flare (≈7,9%
+MAC) e que o antigo proxy `sm_max` (16,6% MAC) — e fica À FRENTE do
+limite traseiro (≈36,6% MAC): **envelope de CG vazio** (ver acima). Causa
+física: o trem principal (`[gear].x_main_m`) fica muito atrás do CG
+desta célula — a margem de autoridade de rotação
+(`rotation_margin_per_scenario`) é NEGATIVA em todos os 6 cenários reais
+(≈−22% a −51%). Ver `agents::trim_authority` (docstring do módulo) para
+a dedução completa.
 
 ### `performance` — `PerformanceSpec` (PerformanceAgent)
 
