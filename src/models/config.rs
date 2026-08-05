@@ -205,6 +205,9 @@ fn validate_engine(engine: &EngineSpec) -> Result<(), ConfigError> {
 /// material estrutural cadastrado, etc).
 pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_sm_max_migration(toml_str)?;
+    check_cl_h_max_down_migration(toml_str)?;
+    check_empennage_cd0_migration(toml_str)?;
+    check_emp_mass_items_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -212,9 +215,12 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
 
 /// Guarda de migração (task trim-authority): `[stability].sm_max` foi
 /// REMOVIDO — o limite dianteiro do envelope de CG agora é calculado
-/// fisicamente pelo `TrimAuthorityAgent` a partir de `[stability].
-/// cl_h_max_down`/`trim_margin`/`cl_ground_rotation`/`to_flap_cm_fraction` +
-/// `[wing].cm_ac`/`cm_flap_delta` (ver `models::aircraft_config::
+/// fisicamente pelo `TrimAuthorityAgent` a partir da autoridade de
+/// profundor (`[stability].trim_margin`/`cl_ground_rotation`/
+/// `to_flap_cm_fraction` + `[control_surfaces].elevator_deflection_max_deg`
+/// + `[stability].cl_h_stall_limit`, task refino-ciclo2 — autoridade
+/// calculada por geometria, não mais um `cl_h_max_down` de config direto)
+/// + `[wing].cm_ac`/`cm_flap_delta` (ver `models::aircraft_config::
 /// StabilityCfg`). Como `AircraftConfig`/`StabilityCfg` não usam
 /// `#[serde(deny_unknown_fields)]` em lugar nenhum deste crate, um TOML
 /// antigo com `sm_max` seria simplesmente IGNORADO pelo parser (silêncio,
@@ -230,11 +236,85 @@ fn check_sm_max_migration(toml_str: &str) -> Result<(), ConfigError> {
         return Err(ConfigError::Validation(
             "configuração de aeronave inválida: [stability].sm_max foi substituído por um \
              limite dianteiro de CG calculado fisicamente (TrimAuthorityAgent) — remova \
-             sm_max e adicione [stability].cl_h_max_down/trim_margin/cl_ground_rotation/\
-             to_flap_cm_fraction + [wing].cm_ac/cm_flap_delta (ver docs/aircraft_spec.schema.md \
+             sm_max e adicione [stability].trim_margin/cl_ground_rotation/to_flap_cm_fraction/\
+             cl_h_stall_limit + [control_surfaces].elevator_deflection_max_deg + \
+             [wing].cm_ac/cm_flap_delta (ver docs/aircraft_spec.schema.md e \
+             config/aircraft/baseline_4seat.toml para valores de referência)"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (task refino-ciclo2, 1a): `[stability].cl_h_max_down`
+/// foi REMOVIDO — a autoridade de download da empenagem agora é CALCULADA
+/// por geometria DATCOM/Nelson (`agents::trim_authority::
+/// cl_h_max_down_calc`, a partir de `[control_surfaces].
+/// elevator_chord_frac`/`elevator_deflection_max_deg` e `EmpennageSpec::
+/// ar_h`), não mais um palpite semi-empírico direto. Mesma justificativa de
+/// `check_sm_max_migration` (sem `deny_unknown_fields`, um TOML antigo com
+/// `cl_h_max_down` seria simplesmente IGNORADO em silêncio).
+fn check_cl_h_max_down_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("stability").and_then(|s| s.get("cl_h_max_down")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [stability].cl_h_max_down foi substituído por \
+             uma autoridade de profundor calculada fisicamente por geometria DATCOM/Nelson \
+             (TrimAuthorityAgent) — remova cl_h_max_down e adicione \
+             [control_surfaces].elevator_deflection_max_deg + [stability].cl_h_stall_limit \
+             (teto por stall da empenagem; ver docs/aircraft_spec.schema.md e \
+             config/aircraft/baseline_4seat.toml para valores de referência)"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (task refino-ciclo2, 1b): `[empennage].cd0` foi
+/// REMOVIDO — o CD0 da empenagem agora é DERIVADO da área REALMENTE
+/// dimensionada (`[empennage].cd0_area_factor·(S_h+S_v)/S_w`, ver
+/// `AircraftState::from_config`), não mais um valor fixo desacoplado da
+/// geometria.
+fn check_empennage_cd0_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("empennage").and_then(|e| e.get("cd0")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [empennage].cd0 foi substituído por um CD0 \
+             derivado da área da empenagem REALMENTE dimensionada — remova cd0 e adicione \
+             [empennage].cd0_area_factor (faixa 0.008–0.025; ver docs/aircraft_spec.schema.md \
              e config/aircraft/baseline_4seat.toml para valores de referência)"
                 .to_string(),
         ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (task refino-ciclo2, 1b): os itens `emp_horizontal`/
+/// `emp_vertical` de `[[masses.items]]` foram REMOVIDOS — a massa da
+/// empenagem agora é DERIVADA de `EmpennageSpec × [empennage].
+/// mass_per_area_{h,v}_kg_m2` (`weight_balance::oew_items`), não mais um
+/// valor fixo hardcoded na lista de massas. Ao contrário das outras
+/// migrações acima (uma chave escalar), aqui a checagem percorre o array
+/// `[[masses.items]]` procurando por `name` conhecido.
+fn check_emp_mass_items_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    let Some(items) = raw.get("masses").and_then(|m| m.get("items")).and_then(|i| i.as_array())
+    else {
+        return Ok(());
+    };
+    for item in items {
+        if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+            if name == "emp_horizontal" || name == "emp_vertical" {
+                return Err(ConfigError::Validation(format!(
+                    "configuração de aeronave inválida: [[masses.items]] '{name}' foi \
+                     substituído por uma massa derivada da área da empenagem REALMENTE \
+                     dimensionada — remova este item de [[masses.items]] e adicione \
+                     [empennage].mass_per_area_h_kg_m2/mass_per_area_v_kg_m2 (faixa \
+                     4–20 kg/m²; ver docs/aircraft_spec.schema.md e \
+                     config/aircraft/baseline_4seat.toml para valores de referência)"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -356,7 +436,6 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     require_non_negative("fuselage.cd0", cfg.fuselage.cd0)?;
 
     // [empennage]
-    require_non_negative("empennage.cd0", cfg.empennage.cd0)?;
     require_positive("empennage.tail_arm_m", cfg.empennage.tail_arm_m)?;
     require_finite("empennage.v_h", cfg.empennage.v_h)?;
     if cfg.empennage.v_h <= 0.2 || cfg.empennage.v_h >= 1.5 {
@@ -384,6 +463,35 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             "configuração de aeronave inválida: empennage.eta_h deve estar em (0.5, 1.0] \
              (valor: {})",
             cfg.empennage.eta_h
+        )));
+    }
+    // Task refino-ciclo2 (1b): massa por área (kg/m²) e fator de área de
+    // CD0 da empenagem — substituem os antigos itens de massa fixos
+    // (`emp_horizontal`/`emp_vertical`) e o campo `[empennage].cd0`
+    // (removidos, ver `check_emp_mass_items_migration`/
+    // `check_empennage_cd0_migration`).
+    require_finite("empennage.mass_per_area_h_kg_m2", cfg.empennage.mass_per_area_h_kg_m2)?;
+    if cfg.empennage.mass_per_area_h_kg_m2 <= 4.0 || cfg.empennage.mass_per_area_h_kg_m2 >= 20.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.mass_per_area_h_kg_m2 deve estar em \
+             (4.0, 20.0) (valor: {})",
+            cfg.empennage.mass_per_area_h_kg_m2
+        )));
+    }
+    require_finite("empennage.mass_per_area_v_kg_m2", cfg.empennage.mass_per_area_v_kg_m2)?;
+    if cfg.empennage.mass_per_area_v_kg_m2 <= 4.0 || cfg.empennage.mass_per_area_v_kg_m2 >= 20.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.mass_per_area_v_kg_m2 deve estar em \
+             (4.0, 20.0) (valor: {})",
+            cfg.empennage.mass_per_area_v_kg_m2
+        )));
+    }
+    require_finite("empennage.cd0_area_factor", cfg.empennage.cd0_area_factor)?;
+    if cfg.empennage.cd0_area_factor <= 0.008 || cfg.empennage.cd0_area_factor >= 0.025 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.cd0_area_factor deve estar em \
+             (0.008, 0.025) (valor: {})",
+            cfg.empennage.cd0_area_factor
         )));
     }
     // Task trim-authority (fix de revisão): braço de cauda mínimo relativo
@@ -544,12 +652,12 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.stability.sm_min
         )));
     }
-    require_finite("stability.cl_h_max_down", cfg.stability.cl_h_max_down)?;
-    if cfg.stability.cl_h_max_down <= 0.5 || cfg.stability.cl_h_max_down >= 1.2 {
+    require_finite("stability.cl_h_stall_limit", cfg.stability.cl_h_stall_limit)?;
+    if cfg.stability.cl_h_stall_limit <= 0.8 || cfg.stability.cl_h_stall_limit >= 1.4 {
         return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: stability.cl_h_max_down deve estar em \
-             (0.5, 1.2) (valor: {})",
-            cfg.stability.cl_h_max_down
+            "configuração de aeronave inválida: stability.cl_h_stall_limit deve estar em \
+             (0.8, 1.4) (valor: {})",
+            cfg.stability.cl_h_stall_limit
         )));
     }
     require_finite("stability.trim_margin", cfg.stability.trim_margin)?;
@@ -636,6 +744,22 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     require_frac("control_surfaces.elevator_chord_frac", cs.elevator_chord_frac)?;
     require_frac("control_surfaces.rudder_span_frac", cs.rudder_span_frac)?;
     require_frac("control_surfaces.rudder_chord_frac", cs.rudder_chord_frac)?;
+    // Task refino-ciclo2 (1a): deflexão máxima do profundor no batente —
+    // alimenta `agents::trim_authority::cl_h_max_down_calc`. Faixa típica
+    // 10–35° (Gudmundsson/Roskam). Nota: o ajuste de Nelson usado por
+    // `tau_elevator` (`elevator_chord_frac`, validado acima via
+    // `require_frac`, (0,1]) só tem base experimental em c_e/c ∈ [0.1, 0.6]
+    // — fora dessa faixa a curva extrapola sem respaldo (documentado, não
+    // reforçado aqui como erro rígido para não travar experimentação de
+    // projeto preliminar).
+    require_finite("control_surfaces.elevator_deflection_max_deg", cs.elevator_deflection_max_deg)?;
+    if cs.elevator_deflection_max_deg <= 10.0 || cs.elevator_deflection_max_deg >= 35.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: control_surfaces.elevator_deflection_max_deg \
+             deve estar em (10.0, 35.0) (valor: {})",
+            cs.elevator_deflection_max_deg
+        )));
+    }
 
     if cs.aileron_span_start_frac >= cs.aileron_span_end_frac {
         return Err(ConfigError::Validation(format!(
@@ -1029,7 +1153,6 @@ mod tests {
             cabin_height_m = 1.1
             cd0 = 0.01
             [empennage]
-            cd0 = 0.004
             tail_arm_m = 4.5
             v_h = 0.70
             v_v = 0.04
@@ -1038,6 +1161,9 @@ mod tests {
             taper_h = 0.5
             taper_v = 0.5
             eta_h = 0.90
+            mass_per_area_h_kg_m2 = 9.0
+            mass_per_area_v_kg_m2 = 11.0
+            cd0_area_factor = 0.014
             [propeller]
             diameter_m = 1.8
             blades = 2
@@ -1078,7 +1204,7 @@ mod tests {
             cooling_drag_fraction = 0.04
             [stability]
             sm_min = 0.05
-            cl_h_max_down = 0.85
+            cl_h_stall_limit = 1.10
             trim_margin = 0.10
             cl_ground_rotation = 0.5
             to_flap_cm_fraction = 0.5
@@ -1099,6 +1225,7 @@ mod tests {
             flap_chord_frac = 0.30
             elevator_span_frac = 0.90
             elevator_chord_frac = 0.35
+            elevator_deflection_max_deg = 25.0
             rudder_span_frac = 0.90
             rudder_chord_frac = 0.35
             [[masses.items]]
@@ -1548,21 +1675,119 @@ mod tests {
         assert!(err.to_string().contains("wing.cm_flap_delta"), "{err}");
     }
 
-    // ─── [stability] cl_h_max_down / trim_margin / cl_ground_rotation /
-    //     to_flap_cm_fraction (task trim-authority) ──────────────────────────
+    // ─── [stability] cl_h_stall_limit / trim_margin / cl_ground_rotation /
+    //     to_flap_cm_fraction (task refino-ciclo2) ──────────────────────────
 
     #[test]
-    fn rejeita_cl_h_max_down_fora_da_faixa() {
-        let toml = aircraft_toml_valido().replace("cl_h_max_down = 0.85", "cl_h_max_down = 1.5");
+    fn rejeita_cl_h_stall_limit_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("cl_h_stall_limit = 1.10", "cl_h_stall_limit = 1.5");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("stability.cl_h_max_down"), "{err}");
+        assert!(err.to_string().contains("stability.cl_h_stall_limit"), "{err}");
     }
 
     #[test]
-    fn rejeita_cl_h_max_down_muito_baixo() {
-        let toml = aircraft_toml_valido().replace("cl_h_max_down = 0.85", "cl_h_max_down = 0.3");
+    fn rejeita_cl_h_stall_limit_muito_baixo() {
+        let toml = aircraft_toml_valido().replace("cl_h_stall_limit = 1.10", "cl_h_stall_limit = 0.3");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("stability.cl_h_max_down"), "{err}");
+        assert!(err.to_string().contains("stability.cl_h_stall_limit"), "{err}");
+    }
+
+    // ─── [control_surfaces] elevator_deflection_max_deg (task refino-ciclo2) ──
+
+    #[test]
+    fn rejeita_elevator_deflection_max_deg_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("elevator_deflection_max_deg = 25.0", "elevator_deflection_max_deg = 40.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("elevator_deflection_max_deg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_elevator_deflection_max_deg_muito_baixo() {
+        let toml = aircraft_toml_valido()
+            .replace("elevator_deflection_max_deg = 25.0", "elevator_deflection_max_deg = 5.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("elevator_deflection_max_deg"), "{err}");
+    }
+
+    // ─── [empennage] mass_per_area_{h,v}_kg_m2 / cd0_area_factor (task
+    //     refino-ciclo2, 1b) ────────────────────────────────────────────────
+
+    #[test]
+    fn rejeita_mass_per_area_h_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("mass_per_area_h_kg_m2 = 9.0", "mass_per_area_h_kg_m2 = 25.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.mass_per_area_h_kg_m2"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_mass_per_area_v_muito_baixo() {
+        let toml = aircraft_toml_valido()
+            .replace("mass_per_area_v_kg_m2 = 11.0", "mass_per_area_v_kg_m2 = 2.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.mass_per_area_v_kg_m2"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cd0_area_factor_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("cd0_area_factor = 0.014", "cd0_area_factor = 0.05");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.cd0_area_factor"), "{err}");
+    }
+
+    // ─── Migrações (task refino-ciclo2) ──────────────────────────────────
+
+    /// Config de uma versão anterior do schema (com `[stability].
+    /// cl_h_max_down`) deve ser rejeitada com um erro de migração claro.
+    #[test]
+    fn rejeita_config_antiga_com_cl_h_max_down_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "sm_min = 0.05\n",
+            "sm_min = 0.05\n            cl_h_max_down = 0.85\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("cl_h_max_down"), "{err}");
+        assert!(err.to_string().contains("substituído"), "{err}");
+    }
+
+    /// Config antiga com `[empennage].cd0` deve ser rejeitada com um erro
+    /// de migração claro.
+    #[test]
+    fn rejeita_config_antiga_com_empennage_cd0_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "tail_arm_m = 4.5\n",
+            "cd0 = 0.004\n            tail_arm_m = 4.5\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage].cd0"), "{err}");
+        assert!(err.to_string().contains("substituído"), "{err}");
+    }
+
+    /// Config antiga com um item `emp_horizontal`/`emp_vertical` em
+    /// `[[masses.items]]` deve ser rejeitada com um erro de migração claro.
+    #[test]
+    fn rejeita_config_antiga_com_item_de_massa_emp_horizontal_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "[[masses.items]]\n            name = \"asa\"",
+            "[[masses.items]]\n            name = \"emp_horizontal\"\n            mass_kg = 27.0\n            \
+             arm_ref = \"empennage_cg\"\n            [[masses.items]]\n            name = \"asa\"",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("emp_horizontal"), "{err}");
+        assert!(err.to_string().contains("substituído"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_item_de_massa_emp_vertical_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "[[masses.items]]\n            name = \"asa\"",
+            "[[masses.items]]\n            name = \"emp_vertical\"\n            mass_kg = 16.0\n            \
+             arm_ref = \"empennage_cg\"\n            [[masses.items]]\n            name = \"asa\"",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("emp_vertical"), "{err}");
+        assert!(err.to_string().contains("substituído"), "{err}");
     }
 
     #[test]

@@ -25,6 +25,12 @@ pub struct AircraftState {
     pub cl_max_flaps: f64,
     pub cd0_wing: f64,
     pub cd0_fuselage: f64,
+    /// CD0 da empenagem — task refino-ciclo2 (1b): deixou de ser um eco
+    /// direto de `[empennage].cd0` (campo REMOVIDO da config) e passou a
+    /// ser DERIVADO de `[empennage].cd0_area_factor·(S_h+S_v)/S_w` — ver
+    /// `AircraftState::from_config` para o cálculo (usa
+    /// `agents::empennage::tail_areas_m2`, que não depende de
+    /// `AerodynamicsAgent` já ter rodado).
     pub cd0_empennage: f64,
     /// CD0 residual (antenas, juntas, imperfeições).
     pub cd0_misc: f64,
@@ -60,6 +66,17 @@ impl AircraftState {
     /// Constrói o estado inicial da aeronave a partir de uma configuração
     /// carregada de TOML (ver `models::config::load_aircraft`).
     pub fn from_config(cfg: &AircraftConfig) -> Self {
+        // CD0 da empenagem (task refino-ciclo2, 1b) — derivado da área
+        // REALMENTE dimensionada (S_h+S_v, `agents::empennage::
+        // tail_areas_m2`), não mais um valor fixo de config. `tail_areas_m2`
+        // usa só geometria de `[wing]`/`[empennage]` (span/área/afilamento
+        // — sem nenhuma dependência de MTOW/cd0), então pode ser calculada
+        // aqui, ANTES do `AerodynamicsAgent` rodar, sem reordenar o laço de
+        // convergência em `orchestrator::size_aircraft` — ver docstring de
+        // `tail_areas_m2` para a dedução completa.
+        let (s_h, s_v) = crate::agents::empennage::tail_areas_m2(cfg);
+        let cd0_empennage = cfg.empennage.cd0_area_factor * (s_h + s_v) / cfg.wing.area_m2;
+
         Self {
             wing_span_m: cfg.wing.span_m,
             wing_area_m2: cfg.wing.area_m2,
@@ -71,7 +88,7 @@ impl AircraftState {
             cl_max_flaps: cfg.wing.cl_max_flaps,
             cd0_wing: cfg.wing.cd0_wing,
             cd0_fuselage: cfg.fuselage.cd0,
-            cd0_empennage: cfg.empennage.cd0,
+            cd0_empennage,
             cd0_misc: cfg.drag.cd0_misc,
             cd0_gear_fixed_increment: cfg.gear.cd0_fixed_increment,
             cooling_drag_fraction: cfg.drag.cooling_drag_fraction,

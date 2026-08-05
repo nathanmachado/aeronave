@@ -280,7 +280,8 @@ pub struct ScenarioTrimLimit {
 /// — acompanha `fidelity["trim"] == "preliminary"`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrimSensitivity {
-    /// `cl_h_max_down − 0.05` usado neste recálculo.
+    /// `cl_h_max_down − 0.05` usado neste recálculo (perturbação direta do
+    /// valor OPERACIONAL/capado, sem recalcular τ/δe).
     pub cl_h_max_down_minus: f64,
     /// Limite de flare (%MAC) recomputado com `cl_h_max_down_minus`.
     pub flare_limit_pct_mac_minus: f64,
@@ -288,6 +289,17 @@ pub struct TrimSensitivity {
     pub cl_h_max_down_plus: f64,
     /// Limite de flare (%MAC) recomputado com `cl_h_max_down_plus`.
     pub flare_limit_pct_mac_plus: f64,
+    /// `[control_surfaces].elevator_deflection_max_deg − 2°` (task
+    /// refino-ciclo2, 1a) — segunda dimensão de sensibilidade, agora que a
+    /// autoridade é calculada por geometria: recalcula `cl_h_max_down_calc`
+    /// (τ/a_t fixos, só δe muda) e o limite de flare resultante.
+    pub elevator_deflection_max_deg_minus: f64,
+    /// Limite de flare (%MAC) recomputado com `elevator_deflection_max_deg_minus`.
+    pub flare_limit_pct_mac_deflection_minus: f64,
+    /// `[control_surfaces].elevator_deflection_max_deg + 2°`.
+    pub elevator_deflection_max_deg_plus: f64,
+    /// Limite de flare (%MAC) recomputado com `elevator_deflection_max_deg_plus`.
+    pub flare_limit_pct_mac_deflection_plus: f64,
 }
 
 /// Saída do TrimAuthorityAgent (task trim-authority) — limite dianteiro
@@ -341,13 +353,36 @@ pub struct TrimSpec {
     /// máximo da empenagem com o profundor no batente, com a margem de
     /// trim reservada para efeito solo/certificação).
     pub cl_h_available: f64,
-    /// Sensibilidade do limite de flare a `cl_h_max_down` (±0.05) — ver
-    /// `TrimSensitivity`.
+    /// Sensibilidade do limite de flare a `cl_h_max_down` (±0.05) E a
+    /// `elevator_deflection_max_deg` (±2°) — ver `TrimSensitivity`.
     pub sensitivity: TrimSensitivity,
     // ─── Parâmetros ecoados (rastreabilidade sem reabrir o TOML) ────────
     pub cm_ac: f64,
     pub cm_flap_delta: f64,
+    /// `cl_h_max_down` OPERACIONAL — valor efetivamente usado no balanço de
+    /// momentos, já truncado no teto de stall quando `capped_by_stall`
+    /// (`min(cl_h_max_down_calc, [stability].cl_h_stall_limit)`). Task
+    /// refino-ciclo2 (1a): deixou de ser um eco direto de
+    /// `[stability].cl_h_max_down` (campo REMOVIDO da config) — agora é
+    /// CALCULADO por geometria DATCOM/Nelson, ver `agents::trim_authority::
+    /// cl_h_max_down_calc`.
     pub cl_h_max_down: f64,
+    /// `cl_h_max_down` BRUTO — `a_t·τ·δe_max_rad`, ANTES de qualquer
+    /// truncamento pelo teto de stall (`[stability].cl_h_stall_limit`).
+    /// Igual a `cl_h_max_down` quando `capped_by_stall == false`; maior
+    /// quando `capped_by_stall == true` (a geometria "pediria" mais
+    /// download do que a empenagem consegue entregar antes de estolar).
+    /// Task refino-ciclo2 (1a).
+    pub cl_h_max_down_calc: f64,
+    /// Eficácia de superfície do profundor τ(c_e/c) — ajuste de Nelson
+    /// (`agents::trim_authority::tau_elevator`), calculada a partir de
+    /// `[control_surfaces].elevator_chord_frac`. Task refino-ciclo2 (1a).
+    pub tau_elevator: f64,
+    /// `true` quando `cl_h_max_down_calc` (bruto) excede
+    /// `[stability].cl_h_stall_limit` — o teto de stall da empenagem, não a
+    /// geometria do profundor, é o fator limitante de `cl_h_max_down`
+    /// neste caso. Task refino-ciclo2 (1a).
+    pub capped_by_stall: bool,
     pub trim_margin: f64,
     pub cl_ground_rotation: f64,
     pub to_flap_cm_fraction: f64,
@@ -656,7 +691,28 @@ pub struct ElectricalSpec {
 /// `[wing].cm_ac`/`cm_flap_delta` — ver `docs/aircraft_spec.schema.md` §1 e
 /// `models::config::parse_aircraft` (erro de migração claro se `sm_max`
 /// ainda estiver presente no TOML).
-pub const SCHEMA_VERSION: &str = "4.1";
+///
+/// v4.2 (task refino-ciclo2): `TrimSpec` ganha três campos NOVOS
+/// (`cl_h_max_down_calc`, `tau_elevator`, `capped_by_stall`) e `TrimSensitivity`
+/// ganha quatro campos NOVOS (par `elevator_deflection_max_deg_minus/plus` +
+/// `flare_limit_pct_mac_deflection_minus/plus`) — mudança ADITIVA (campos
+/// novos em blocos já existentes; nenhum campo existente foi removido nem
+/// mudou de tipo/unidade), consumidores v4.1 continuam funcionando sem
+/// alteração. `TrimSpec::cl_h_max_down` PERMANECE presente com o MESMO
+/// significado (valor operacional usado no balanço de momentos) — só a
+/// FONTE mudou (antes ecoava `[stability].cl_h_max_down` da config, agora é
+/// CALCULADO por geometria DATCOM/Nelson, ver `agents::trim_authority::
+/// cl_h_max_down_calc`). Acompanha, do lado da CONFIGURAÇÃO de entrada (não
+/// deste schema JSON): `[stability].cl_h_max_down` foi REMOVIDO (substituído
+/// por `[control_surfaces].elevator_deflection_max_deg` +
+/// `[stability].cl_h_stall_limit`); `[empennage].cd0` e os itens
+/// `emp_horizontal`/`emp_vertical` de `[[masses.items]]` também foram
+/// REMOVIDOS (substituídos por `[empennage].mass_per_area_{h,v}_kg_m2` +
+/// `cd0_area_factor`, aplicados sobre a área da empenagem REALMENTE
+/// dimensionada) — todos com erro de migração claro em
+/// `models::config::parse_aircraft` se ainda presentes no TOML. Ver
+/// `docs/aircraft_spec.schema.md` §1 e §4.
+pub const SCHEMA_VERSION: &str = "4.2";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver

@@ -35,12 +35,6 @@ cabin_height_m = 1.20
 cd0 = 0.010
 
 [empennage]
-# Campanha E1–E6 (2026-08-05), mudança 8: escala pela área molhada total
-# da empenagem — (S_h_novo+S_v)/(S_h_antigo+S_v) = (3.13+1.41)/(2.58+1.41)
-# ≈ 1.138 — 0.004 → 0.00455, arredondado 0.0046. Consequência honesta do
-# EH maior (v_h ↑, mudança 5 abaixo): mais superfície molhada, mais
-# arrasto parasita da empenagem. cd0 antigo: 0.004.
-cd0 = 0.0046
 # Braço da empenagem (CA asa → CA empenagem) — usado tanto no
 # dimensionamento por coeficiente de volume abaixo quanto no ponto neutro.
 tail_arm_m = 4.80
@@ -62,6 +56,28 @@ ar_v = 1.5
 taper_h = 0.5
 taper_v = 0.5
 eta_h = 0.90
+# Task refino-ciclo2 (1b): massa por área e fator de área de CD0 da
+# empenagem — substituem os antigos itens fixos de [[masses.items]]
+# ("emp_horizontal"/"emp_vertical") e o campo [empennage].cd0 (fixo,
+# 0.0046). CALIBRADOS para reproduzir exatamente os valores da campanha E6
+# (27.0 kg / 16.0 kg / cd0=0.0046) na área REALMENTE dimensionada em
+# runtime desta config (S_h≈3.1340 m², S_v≈1.4129 m², via
+# agents::empennage::EmpennageAgent — ver task-1-report.md para o cálculo
+# completo com precisão total):
+#   mass_per_area_h_kg_m2 = 27.0/S_h ≈ 8.6153 kg/m² — faixa típica Raymer
+#     cap. 15/Niu "Airframe Structural Design" p/ caudas compostas leves
+#     (sanduíche + nervuras), 4–20 kg/m².
+#   mass_per_area_v_kg_m2 = 16.0/S_v ≈ 11.3242 kg/m² — mais reforçada por
+#     área que o estabilizador (suporta o leme + parte da carga torcional
+#     da fuselagem traseira).
+#   cd0_area_factor = 0.0046·S_w/(S_h+S_v) ≈ 0.014366 ≈ 2·Cf·FF
+#     (coeficiente de atrito de placa plana turbulenta × fator de forma,
+#     referenciado à área da ASA — não à área molhada da própria
+#     empenagem, daí o valor bem acima de um 2·Cf·FF típico de ~0.006–0.010
+#     referenciado à própria área). Faixa 0.008–0.025.
+mass_per_area_h_kg_m2 = 8.6153
+mass_per_area_v_kg_m2 = 11.3242
+cd0_area_factor = 0.014366
 
 [propeller]
 diameter_m = 1.95
@@ -171,18 +187,19 @@ cooling_drag_fraction = 0.04
 # models::config::parse_aircraft).
 [stability]
 sm_min = 0.05   # margem estática mínima — limite TRASEIRO do CG
-# |CL| máximo de download da empenagem c/ profundor no batente
-# (semi-empírico; faixa típica 0.5-1.2 — Gudmundsson/Roskam). RESULTADO
-# SENSÍVEL a este parâmetro — ver TrimSpec.sensitivity no JSON de saída.
-#
-# Campanha E1–E6 (2026-08-05), mudança 7: 0.85 → 0.95 — mais autoridade
-# de profundor, consistente com a corda maior de 40% (mudança 6,
-# [control_surfaces].elevator_chord_frac) e a deflexão típica de batente.
-# PARÂMETRO DOMINANTE da sensibilidade do limite de flare — ver o bloco
-# [ TRIM ] impresso (Sensibilidade a cl_h_max_down ±0.05); validar em
-# ensaio antes de congelar como valor de certificação. cl_h_max_down
-# antigo: 0.85.
-cl_h_max_down = 0.95
+# Task refino-ciclo2 (1a): `cl_h_max_down` deixou de ser um parâmetro livre
+# de config — agora é CALCULADO por geometria DATCOM/Nelson
+# (agents::trim_authority::cl_h_max_down_calc, a partir de
+# [control_surfaces].elevator_chord_frac/elevator_deflection_max_deg e
+# EmpennageSpec.ar_h). `cl_h_stall_limit` fica só como TETO físico (download
+# de profundor acima do CL_max da própria empenagem não é alcançável — a
+# superfície estola antes). Faixa típica 0.8-1.4 (Gudmundsson/Roskam).
+# Baseline: cl_h_max_down_calc ≈ 1.0578 (c_e/c=0.40, AR_h=4.0, δe_max=25°)
+# — abaixo do teto, NÃO limitado por stall (capped_by_stall=false). Ainda
+# assim SENSÍVEL a elevator_deflection_max_deg (±2°) — ver TrimSpec.
+# sensitivity no JSON de saída; validar em ensaio antes de congelar como
+# valor de certificação. cl_h_max_down (parâmetro livre antigo): 0.95.
+cl_h_stall_limit = 1.10
 trim_margin = 0.10        # fração da autoridade reservada como margem (efeito solo + certificação)
 cl_ground_rotation = 0.5  # CL da asa na corrida de decolagem antes da rotação (faixa 0-1)
 to_flap_cm_fraction = 0.5 # fração de cm_flap_delta aplicável em flap de decolagem
@@ -219,9 +236,16 @@ flap_span_end_frac      = 0.50   # deve ser ≤ aileron_span_start_frac (sem sob
 flap_chord_frac         = 0.30
 elevator_span_frac      = 0.90   # fração da envergadura do EH
 # Campanha E1–E6 (2026-08-05), mudança 6: 0.35 → 0.40 — profundor maior,
-# coerência geométrica com a mudança 7 ([stability].cl_h_max_down 0.85 →
-# 0.95: mais autoridade de profundor pressupõe corda maior). Antigo: 0.35.
+# coerência geométrica com a mudança 7 (mais autoridade de profundor
+# pressupõe corda maior). Antigo: 0.35. Task refino-ciclo2 (1a): esta
+# fração É a razão c_e/c usada por agents::trim_authority::tau_elevator
+# (ajuste de Nelson, válido em c_e/c ∈ [0.1, 0.6] — 0.40 está dentro).
 elevator_chord_frac     = 0.40
+# Deflexão máxima do profundor no batente (task refino-ciclo2, 1a) — faixa
+# típica 10-35° (Gudmundsson/Roskam). Junto com elevator_chord_frac acima
+# e EmpennageSpec.ar_h (4.0), determina cl_h_max_down_calc ≈ 1.0578 (ver
+# [stability].cl_h_stall_limit).
+elevator_deflection_max_deg = 25.0
 rudder_span_frac        = 0.90   # fração da envergadura do EV
 rudder_chord_frac       = 0.35
 
@@ -275,20 +299,11 @@ name = "asa"
 mass_kg = 130.0
 arm_ref = "wing_struct"
 
-[[masses.items]]
-# Campanha E1–E6 (2026-08-05), mudança 8 (consistência novo vs
-# experimentos): 22.0 → 27.0 — escala pela área do EH, S_h 2.58 → 3.13 m²
-# (mudança 5, [empennage].v_h): 22·3.13/2.58 ≈ 26.7, arredondado 27.
-# Massa antiga: 22.0.
-name = "emp_horizontal"
-mass_kg = 27.0
-arm_ref = "empennage_cg"
-
-[[masses.items]]
-name = "emp_vertical"
-mass_kg = 16.0
-arm_ref = "empennage_cg"
-arm_offset_m = -0.2
+# "emp_horizontal"/"emp_vertical" NÃO são mais itens de [[masses.items]]
+# (task refino-ciclo2, 1b) — a massa da empenagem agora é DERIVADA de
+# EmpennageSpec × [empennage].mass_per_area_{h,v}_kg_m2 (ver comentário em
+# [empennage] acima) — erro de migração claro se estes itens ainda
+# estiverem presentes aqui (models::config::check_emp_mass_items_migration).
 
 [[masses.items]]
 name = "trem_principal"

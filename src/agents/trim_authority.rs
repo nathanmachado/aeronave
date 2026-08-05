@@ -64,6 +64,67 @@ const SENSITIVITY_DELTA: f64 = 0.05;
 /// dessas funções.
 const VR_OVER_VS0: f64 = 1.1;
 
+/// Variação de `[control_surfaces].elevator_deflection_max_deg` usada no
+/// recálculo de sensibilidade (segunda dimensão de `TrimSensitivity`, task
+/// refino-ciclo2) — ±2°.
+const DEFLECTION_SENSITIVITY_DELTA_DEG: f64 = 2.0;
+
+// ─── AUTORIDADE CALCULADA POR GEOMETRIA (DATCOM/Nelson) ───────────────────
+//
+// Task refino-ciclo2 (1a): remove o parâmetro livre `[stability].
+// cl_h_max_down` (palpite semi-empírico sem base geométrica) e o substitui
+// por um cálculo DATCOM/Nelson a partir da geometria já dimensionada do
+// profundor (`[control_surfaces].elevator_chord_frac`, a razão c_e/c entre
+// a corda do profundor e a corda local do estabilizador horizontal — ver
+// `agents::control_surfaces::wing_surface_per_side`/`tail_surface_mirrored`,
+// que multiplicam `chord_frac` pela corda local: a razão é constante ao
+// longo da envergadura, então `elevator_chord_frac` JÁ É c_e/c, sem
+// precisar rodar `ControlSurfacesAgent`) e do alongamento da empenagem
+// horizontal (`EmpennageSpec::ar_h`, via `weight_balance::lift_curve_slope`).
+
+/// Eficácia de superfície do profundor τ(c_e/c) — ajuste empírico de Nelson
+/// (Nelson, R. "Flight Stability and Automatic Control", fig. 2.21):
+///
+///   τ = 1,24·√(c_e/c) − 0,16
+///
+/// Válido no intervalo `c_e/c ∈ [0,1; 0,6]` (faixa coberta pelo ajuste
+/// original de Nelson — fora dela a curva não tem base experimental).
+/// `c_e/c` é a razão entre a corda do profundor e a corda LOCAL do
+/// estabilizador horizontal (constante ao longo da envergadura neste
+/// modelo — ver `models::aircraft_config::ControlSurfacesCfg::
+/// elevator_chord_frac`).
+pub fn tau_elevator(c_e_over_c: f64) -> f64 {
+    1.24 * c_e_over_c.sqrt() - 0.16
+}
+
+/// `cl_h_max_down` calculado por geometria (DATCOM/Nelson) — substitui o
+/// antigo parâmetro livre `[stability].cl_h_max_down`:
+///
+///   cl_h_max_down_calc = a_t · τ · δe_max_rad
+///
+/// TRUNCADO no teto de stall da empenagem (`cl_h_stall_limit`,
+/// `[stability].cl_h_stall_limit`) — download de profundor acima do CL_max
+/// da própria empenagem não é fisicamente alcançável (a superfície
+/// estola antes). Retorna `(valor_usado, limitado_pelo_teto)`: o primeiro
+/// elemento é `min(a_t·τ·δe_max_rad, cl_h_stall_limit)` (o valor
+/// OPERACIONAL, usado no restante do balanço de momentos); o segundo indica
+/// se o teto de stall foi o fator limitante. `a_t` é `weight_balance::
+/// lift_curve_slope(emp.ar_h)`; `δe_max_rad` é `[control_surfaces].
+/// elevator_deflection_max_deg` convertido para radianos.
+pub fn cl_h_max_down_calc(
+    a_t: f64,
+    tau: f64,
+    delta_e_max_rad: f64,
+    cl_h_stall_limit: f64,
+) -> (f64, bool) {
+    let raw = a_t * tau * delta_e_max_rad;
+    if raw > cl_h_stall_limit {
+        (cl_h_stall_limit, true)
+    } else {
+        (raw, false)
+    }
+}
+
 // ─── FLARE (POUSO) ────────────────────────────────────────────────────────
 
 /// CL de equilíbrio 1g na flare (V_ref = 1,3·Vs0) — independe do peso do
@@ -272,13 +333,16 @@ pub fn rotation_fwd_limit_m(
 pub struct TrimAuthorityAgent;
 
 impl TrimAuthorityAgent {
-    /// Calcula o `TrimSpec` completo — limite de flare + limite de rotação
-    /// (ambos números ÚNICOS, ver docstring de `TrimSpec`) + a margem de
-    /// autoridade de rotação por cenário (`wb.scenarios`, saída já
-    /// calculada do `WeightBalanceAgent`) + a sensibilidade a
-    /// `cl_h_max_down` + os parâmetros ecoados. NÃO modifica `wb` — ver
-    /// `WeightBalanceOutput::apply_trim` para a etapa que consome este
-    /// resultado e finaliza `inside_envelope`/`cg_limit_fwd_pct_mac`.
+    /// Calcula o `TrimSpec` completo — autoridade de profundor por
+    /// geometria DATCOM/Nelson (`cl_h_max_down_calc`/`tau_elevator`/
+    /// `capped_by_stall`, task refino-ciclo2 1a) + limite de flare + limite
+    /// de rotação (ambos números ÚNICOS, ver docstring de `TrimSpec`) + a
+    /// margem de autoridade de rotação por cenário (`wb.scenarios`, saída
+    /// já calculada do `WeightBalanceAgent`) + a sensibilidade (±0,05 em
+    /// `cl_h_max_down` E ±2° em `elevator_deflection_max_deg`) + os
+    /// parâmetros ecoados. NÃO modifica `wb` — ver `WeightBalanceOutput::
+    /// apply_trim` para a etapa que consome este resultado e finaliza
+    /// `inside_envelope`/`cg_limit_fwd_pct_mac`.
     pub fn run(
         cfg: &AircraftConfig,
         wing: &WingSpec,
@@ -291,7 +355,17 @@ impl TrimAuthorityAgent {
         let s_ratio = emp.s_horizontal_m2 / wing.area_m2;
         let cm_ac_total = cfg.wing.cm_ac + cfg.wing.cm_flap_delta;
         let clf = cl_flare(wing.cl_max);
-        let cl_avail = cl_h_available(cfg.stability.cl_h_max_down, cfg.stability.trim_margin);
+
+        // Autoridade calculada por geometria (task refino-ciclo2, 1a) —
+        // substitui o antigo parâmetro livre `[stability].cl_h_max_down`.
+        let a_t = crate::agents::weight_balance::lift_curve_slope(emp.ar_h);
+        let tau = tau_elevator(cfg.control_surfaces.elevator_chord_frac);
+        let delta_e_max_rad = cfg.control_surfaces.elevator_deflection_max_deg.to_radians();
+        let (cl_h_max_down, capped_by_stall) =
+            cl_h_max_down_calc(a_t, tau, delta_e_max_rad, cfg.stability.cl_h_stall_limit);
+        let cl_h_max_down_calc_raw = a_t * tau * delta_e_max_rad;
+
+        let cl_avail = cl_h_available(cl_h_max_down, cfg.stability.trim_margin);
 
         let x_flare =
             flare_fwd_limit_frac(cm_ac_total, clf, emp.eta_h, s_ratio, l_h_over_mac, cl_avail);
@@ -304,7 +378,7 @@ impl TrimAuthorityAgent {
         let x_ac_tail = cfg.wing.le_root_x_m + 0.25 * mac + emp.arm_h_m;
         let x_rot = rotation_fwd_limit_m(
             wing.area_m2, wing.cl_max, emp.s_horizontal_m2, emp.eta_h,
-            cfg.stability.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail, cfg.gear.x_main_m,
+            cl_h_max_down, cfg.stability.trim_margin, x_ac_tail, cfg.gear.x_main_m,
             cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
             cfg.stability.to_flap_cm_fraction, cfg.wing.cm_flap_delta, mac,
         );
@@ -318,7 +392,7 @@ impl TrimAuthorityAgent {
             let w_n = sc.total_mass_kg * G;
             let available = rotation_available_moment_nm(
                 w_n, wing.area_m2, wing.cl_max, emp.s_horizontal_m2, emp.eta_h,
-                cfg.stability.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail,
+                cl_h_max_down, cfg.stability.trim_margin, x_ac_tail,
                 cfg.gear.x_main_m, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
                 cfg.stability.to_flap_cm_fraction, cfg.wing.cm_flap_delta, mac,
             );
@@ -333,10 +407,16 @@ impl TrimAuthorityAgent {
         let governing =
             if rotation_limit_pct >= flare_limit_pct { "rotacao" } else { "flare" }.to_string();
 
-        // Sensibilidade a cl_h_max_down (±0,05) — mesma resolução do
-        // limite de flare "nominal" acima, só variando o parâmetro.
-        let cl_minus = cfg.stability.cl_h_max_down - SENSITIVITY_DELTA;
-        let cl_plus = cfg.stability.cl_h_max_down + SENSITIVITY_DELTA;
+        // Sensibilidade — DUAS dimensões (task refino-ciclo2, 1a):
+        //   (1) ±0,05 direto em `cl_h_max_down` (mesma resolução de antes,
+        //       perturbação direta do valor OPERACIONAL/capado, sem
+        //       recalcular τ/δe — captura a incerteza residual do próprio
+        //       ajuste semi-empírico de Nelson);
+        //   (2) ±2° em `elevator_deflection_max_deg`, recalculando
+        //       `cl_h_max_down_calc` (τ/a_t fixos) e o limite de flare —
+        //       captura a incerteza do batente mecânico do profundor.
+        let cl_minus = cl_h_max_down - SENSITIVITY_DELTA;
+        let cl_plus = cl_h_max_down + SENSITIVITY_DELTA;
         let x_flare_minus = flare_fwd_limit_frac(
             cm_ac_total, clf, emp.eta_h, s_ratio, l_h_over_mac,
             cl_h_available(cl_minus, cfg.stability.trim_margin),
@@ -344,6 +424,25 @@ impl TrimAuthorityAgent {
         let x_flare_plus = flare_fwd_limit_frac(
             cm_ac_total, clf, emp.eta_h, s_ratio, l_h_over_mac,
             cl_h_available(cl_plus, cfg.stability.trim_margin),
+        );
+
+        let deflection_minus_deg =
+            cfg.control_surfaces.elevator_deflection_max_deg - DEFLECTION_SENSITIVITY_DELTA_DEG;
+        let deflection_plus_deg =
+            cfg.control_surfaces.elevator_deflection_max_deg + DEFLECTION_SENSITIVITY_DELTA_DEG;
+        let (cl_deflection_minus, _) = cl_h_max_down_calc(
+            a_t, tau, deflection_minus_deg.to_radians(), cfg.stability.cl_h_stall_limit,
+        );
+        let (cl_deflection_plus, _) = cl_h_max_down_calc(
+            a_t, tau, deflection_plus_deg.to_radians(), cfg.stability.cl_h_stall_limit,
+        );
+        let x_flare_deflection_minus = flare_fwd_limit_frac(
+            cm_ac_total, clf, emp.eta_h, s_ratio, l_h_over_mac,
+            cl_h_available(cl_deflection_minus, cfg.stability.trim_margin),
+        );
+        let x_flare_deflection_plus = flare_fwd_limit_frac(
+            cm_ac_total, clf, emp.eta_h, s_ratio, l_h_over_mac,
+            cl_h_available(cl_deflection_plus, cfg.stability.trim_margin),
         );
 
         TrimSpec {
@@ -357,10 +456,17 @@ impl TrimAuthorityAgent {
                 flare_limit_pct_mac_minus: x_flare_minus * 100.0,
                 cl_h_max_down_plus: cl_plus,
                 flare_limit_pct_mac_plus: x_flare_plus * 100.0,
+                elevator_deflection_max_deg_minus: deflection_minus_deg,
+                flare_limit_pct_mac_deflection_minus: x_flare_deflection_minus * 100.0,
+                elevator_deflection_max_deg_plus: deflection_plus_deg,
+                flare_limit_pct_mac_deflection_plus: x_flare_deflection_plus * 100.0,
             },
             cm_ac: cfg.wing.cm_ac,
             cm_flap_delta: cfg.wing.cm_flap_delta,
-            cl_h_max_down: cfg.stability.cl_h_max_down,
+            cl_h_max_down,
+            cl_h_max_down_calc: cl_h_max_down_calc_raw,
+            tau_elevator: tau,
+            capped_by_stall,
             trim_margin: cfg.stability.trim_margin,
             cl_ground_rotation: cfg.stability.cl_ground_rotation,
             to_flap_cm_fraction: cfg.stability.to_flap_cm_fraction,
@@ -381,6 +487,61 @@ mod tests {
     // 0,181754; η_h=0,90; CL_flare=1,72/1,69=1,017751;
     // cm_ac_total=−0,008−0,30=−0,308; avail=−0,85·0,90=−0,765;
     // cm_to (rotação, SINALIZADO) = −0,008+0,5·(−0,30) = −0,158.
+
+    // ─── Task refino-ciclo2 (1a): autoridade calculada por geometria ─────
+    //
+    // Hand-check baseline E6 (c_e/c=0,40, AR_h=4,0 → a_t=3,8832, δ=25°=
+    // 0,436332 rad): τ = 1,24·√0,40−0,16 = 1,24·0,632456−0,16 = 0,62425;
+    // cl = 3,8832·0,62425·0,436332 ≈ 1,0578 (< teto 1,10).
+
+    #[test]
+    fn tau_elevator_hand_check_baseline() {
+        let tau = tau_elevator(0.40);
+        println!("tau(0.40) = {tau:.6}");
+        assert!((tau - 0.62425).abs() < 1e-4, "tau = {tau:.6} (esperado ≈0.62425)");
+    }
+
+    /// Sanidade: com a corda ANTIGA (pré-E6, 0.35) a mesma fórmula produz
+    /// τ≈0.5735, cl≈0.9720 — próximo do palpite 0.95 assumido na E6 (o
+    /// palpite era consistente com a física, mesmo sem tê-la calculado).
+    #[test]
+    fn tau_elevator_sanidade_corda_antiga_0_35() {
+        let tau = tau_elevator(0.35);
+        println!("tau(0.35) = {tau:.6}");
+        assert!((tau - 0.5735).abs() < 1e-3, "tau = {tau:.6} (esperado ≈0.5735)");
+
+        let a_t = crate::agents::weight_balance::lift_curve_slope(4.0);
+        let delta_rad = 25.0_f64.to_radians();
+        let (cl, capped) = cl_h_max_down_calc(a_t, tau, delta_rad, 1.10);
+        println!("cl(corda=0.35) = {cl:.6}  capped={capped}");
+        assert!((cl - 0.9720).abs() < 1e-3, "cl = {cl:.6} (esperado ≈0.9720)");
+        assert!(!capped);
+    }
+
+    #[test]
+    fn cl_h_max_down_calc_hand_check_baseline() {
+        let a_t = crate::agents::weight_balance::lift_curve_slope(4.0);
+        let tau = tau_elevator(0.40);
+        let delta_rad = 25.0_f64.to_radians();
+        let (cl, capped) = cl_h_max_down_calc(a_t, tau, delta_rad, 1.10);
+        println!("a_t={a_t:.6}  tau={tau:.6}  cl={cl:.6}  capped={capped}");
+        assert!((cl - 1.0578).abs() < 0.01, "cl = {cl:.6} (esperado ≈1.0578 ±0.01)");
+        assert!(!capped, "cl (≈1.058) não deveria ser limitado pelo teto de stall (1.10)");
+    }
+
+    /// Quando o valor bruto (a_t·τ·δ) ultrapassa `cl_h_stall_limit`, o
+    /// resultado deve ser TRUNCADO no teto, com `capped_by_stall=true`.
+    #[test]
+    fn cl_h_max_down_calc_e_limitado_pelo_teto_de_stall() {
+        let a_t = crate::agents::weight_balance::lift_curve_slope(4.0);
+        let tau = tau_elevator(0.60); // corda de profundor grande — τ maior
+        let delta_rad = 35.0_f64.to_radians(); // deflexão grande
+        let cl_h_stall_limit = 0.90; // teto baixo, propositalmente restritivo
+        let (cl, capped) = cl_h_max_down_calc(a_t, tau, delta_rad, cl_h_stall_limit);
+        println!("a_t={a_t:.6}  tau={tau:.6}  cl(bruto seria maior)  cl_limitado={cl:.6}  capped={capped}");
+        assert_eq!(cl, cl_h_stall_limit, "cl deveria ser exatamente o teto quando limitado");
+        assert!(capped, "capped_by_stall deveria ser true quando o bruto excede o teto");
+    }
 
     #[test]
     fn cl_flare_hand_check() {
@@ -623,13 +784,26 @@ mod tests {
     /// ≈36.6% — envelope VAZIO), e a margem de autoridade de rotação era
     /// NEGATIVA em todos os cenários. O trem principal recuado
     /// (`gear.x_main_m` 3.85→3.55) e a EH maior/mais autoridade de
-    /// profundor (`v_h` 0.70→0.85, `cl_h_max_down` 0.85→0.95) fecham o
-    /// envelope: rotation_limit_pct_mac cai para ≈10.95% (bem à frente do
-    /// limite traseiro, agora ≈43.46%) e o flare_limit_pct_mac fica
-    /// NEGATIVO (≈-9.00% — fisicamente "antes do bordo de ataque", nunca
-    /// governa; documentado no print/schema, ver comentário do item 2 no
-    /// brief da E6). O caminho de erro (envelope vazio) continua coberto
-    /// por `trim_authority_agent_run_hand_check_baseline_mutado_parametros_
+    /// profundor (`v_h` 0.70→0.85, `cl_h_max_down` 0.85→0.95, palpite de
+    /// config) fecham o envelope: rotation_limit_pct_mac cai para ≈10.95%
+    /// (bem à frente do limite traseiro, ≈43.46%) e o flare_limit_pct_mac
+    /// fica NEGATIVO (≈-9.00% — fisicamente "antes do bordo de ataque",
+    /// nunca governa).
+    ///
+    /// Task refino-ciclo2 (2026-08-05, 1a): `cl_h_max_down` deixa de ser um
+    /// palpite de config e passa a ser CALCULADO por geometria DATCOM/
+    /// Nelson (`c_e/c=0.40`, `AR_h=4.0`, `δe_max=25°` →
+    /// `cl_h_max_down_calc≈1.0577`, +11,3% sobre o palpite 0.95 da E6 —
+    /// abaixo do teto de stall 1.10, `capped_by_stall=false`). Mais
+    /// autoridade → mais download disponível → os DOIS limites avançam
+    /// (%MAC menor): rotation_limit_pct_mac 10.948%→**6.099%** (margens de
+    /// CG melhoram ainda mais) e flare_limit_pct_mac -9.004%→**-16.290%**
+    /// (mais negativo, continua nunca governando). `cg_limit_aft_pct_mac`
+    /// não muda (limite traseiro depende só de `sm_min`/NP, não de
+    /// autoridade de profundor) — permanece ≈43.46%. Envelope de CG
+    /// continua FECHADO, agora com margem MAIOR. O caminho de erro
+    /// (envelope vazio) continua coberto por
+    /// `trim_authority_agent_run_hand_check_baseline_mutado_parametros_
     /// pre_e6` logo abaixo.
     #[test]
     fn trim_authority_agent_run_hand_check_baseline_real() {
@@ -649,40 +823,57 @@ mod tests {
         );
 
         let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
+        println!("cl_h_max_down = {:.6}  cl_h_max_down_calc = {:.6}  tau_elevator = {:.6}  \
+                   capped_by_stall = {}",
+                 trim.cl_h_max_down, trim.cl_h_max_down_calc, trim.tau_elevator,
+                 trim.capped_by_stall);
+        // Hand-check (task refino-ciclo2, brief): τ=1.24·√0.40−0.16≈0.62425;
+        // cl=3.8832·0.62425·0.43633≈1.0577 (a_t real de lift_curve_slope(4.0)).
+        assert!((trim.tau_elevator - 0.62425).abs() < 1e-4,
+            "tau_elevator = {:.6} (esperado ≈0.62425)", trim.tau_elevator);
+        assert!((trim.cl_h_max_down_calc - 1.0577).abs() < 0.001,
+            "cl_h_max_down_calc = {:.6} (esperado ≈1.0577)", trim.cl_h_max_down_calc);
+        assert!(!trim.capped_by_stall,
+            "cl_h_max_down_calc (≈1.058) não deveria ser limitado pelo teto de stall (1.10)");
+        assert!((trim.cl_h_max_down - trim.cl_h_max_down_calc).abs() < 1e-9,
+            "cl_h_max_down operacional deveria bater com cl_h_max_down_calc (não capado)");
+
         println!("flare_limit_pct_mac = {:.6}", trim.flare_limit_pct_mac);
-        // Pin antigo (pré-E6): ≈7.908% ±1%. Pin novo: ≈-9.004%.
+        // Pin pré-refino-ciclo2 (cl_h_max_down=0.95 de config): ≈-9.004%.
+        // Pin novo (cl_h_max_down_calc≈1.0577, geometria): ≈-16.290%.
         assert!(
-            (trim.flare_limit_pct_mac - (-9.004)).abs() < 1.0,
-            "flare_limit_pct_mac = {:.3} (esperado ≈-9.004% ±1%)",
+            (trim.flare_limit_pct_mac - (-16.290)).abs() < 1.0,
+            "flare_limit_pct_mac = {:.3} (esperado ≈-16.290% ±1%)",
             trim.flare_limit_pct_mac
         );
 
         println!("rotation_limit_pct_mac = {:.6}", trim.rotation_limit_pct_mac);
         println!("cg_limit_aft_pct_mac = {:.6}", wb.spec.cg_limit_aft_pct_mac);
-        // Pin antigo (pré-E6): ≈39.93% ±1.5%. Pin novo: ≈10.948%.
+        // Pin pré-refino-ciclo2: ≈10.948%. Pin novo: ≈6.099%.
         assert!(
-            (trim.rotation_limit_pct_mac - 10.948).abs() < 1.5,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈10.948% ±1.5%)",
+            (trim.rotation_limit_pct_mac - 6.099).abs() < 1.5,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈6.099% ±1.5%)",
             trim.rotation_limit_pct_mac
         );
 
         // A rotação ainda governa (é o critério mais restritivo), mas
         // agora fica ATRÁS do limite traseiro — envelope de CG FECHADO
-        // (achado honesto pós-E6).
+        // (achado honesto pós-refino-ciclo2, com margem maior que na E6).
         assert!(trim.rotation_limit_pct_mac > trim.flare_limit_pct_mac);
         assert_eq!(trim.governing, "rotacao",
             "governing deveria continuar 'rotacao' (mais restritiva que a flare, agora \
-             negativa) no baseline real pós-E6");
+             negativa) no baseline real pós-refino-ciclo2");
         assert!(trim.rotation_limit_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
             "limite de rotação ({:.2}%) deveria ficar ATRÁS (ou igual) do limite traseiro \
-             ({:.2}%) — envelope de CG fechado no baseline real pós-E6",
+             ({:.2}%) — envelope de CG fechado no baseline real pós-refino-ciclo2",
             trim.rotation_limit_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
         for sc in &trim.rotation_margin_per_scenario {
             assert!(sc.rotation_authority_margin_pct > 0.0,
                 "cenário '{}': margem de autoridade de rotação deveria ser POSITIVA no \
-                 baseline real pós-E6 (todos os cenários têm CG atrás o bastante) — obtido \
-                 {:.2}%",
+                 baseline real pós-refino-ciclo2 (todos os cenários têm CG atrás o bastante, \
+                 e com margem MAIOR que na E6, autoridade de profundor calculada é maior) — \
+                 obtido {:.2}%",
                 sc.scenario, sc.rotation_authority_margin_pct);
         }
     }
@@ -691,10 +882,14 @@ mod tests {
     /// mutação de três parâmetros usada em
     /// `constraint_checker::tests::violacao_de_envelope_vazio_aparece_com_
     /// baseline_mutado_parametros_pre_e6` (`gear.x_main_m`, `empennage.v_h`,
-    /// `stability.cl_h_max_down` revertidos ao valor pré-E6) — reproduz o
-    /// achado honesto original: rotação governa E fica À FRENTE do limite
-    /// traseiro (envelope de CG vazio). Nota: esta mutação reverte só os
-    /// TRÊS parâmetros de trim/geometria da EH, não `arms.baggage_m` nem
+    /// `control_surfaces.elevator_chord_frac` reduzidos a valores que
+    /// reproduzem uma autoridade de download pré-E6 — desde a task
+    /// refino-ciclo2, `[stability].cl_h_max_down` não existe mais como
+    /// campo de config direto, ver comentário na mutação abaixo) —
+    /// reproduz o achado honesto original: rotação governa E fica À
+    /// FRENTE do limite traseiro (envelope de CG vazio). Nota: esta
+    /// mutação reverte só os TRÊS parâmetros de trim/geometria da EH, não
+    /// `arms.baggage_m` nem
     /// os itens de massa (2, 3, 8) — o cenário mais pesado ("4 pax +
     /// bagagem + cheio") já reflete o bagageiro avançado da E6, então
     /// tem CG deslocado o bastante para ter margem POSITIVA mesmo com a
@@ -710,9 +905,17 @@ mod tests {
         .expect("falha ao ler baseline_4seat.toml do disco");
         let mut cfg = crate::models::config::parse_aircraft(&toml)
             .expect("baseline real deveria ser uma configuração válida");
-        cfg.gear.x_main_m = 3.85;           // valor pré-E6 — causa raiz original
-        cfg.empennage.v_h = 0.70;           // valor pré-E6
-        cfg.stability.cl_h_max_down = 0.85; // valor pré-E6
+        cfg.gear.x_main_m = 3.85;                       // valor pré-E6 — causa raiz original
+        cfg.empennage.v_h = 0.70;                       // valor pré-E6
+        // Task refino-ciclo2: `[stability].cl_h_max_down` foi REMOVIDO (a
+        // autoridade agora é CALCULADA por geometria) — para reproduzir uma
+        // autoridade reduzida equivalente ao antigo palpite pré-E6 (0.85),
+        // reduz a corda do profundor (`elevator_chord_frac` 0.40→0.30, τ
+        // menor). 0.30 dá cl_h_max_down_calc≈0.880 (mais perto do palpite
+        // antigo 0.85 que a corda pré-mudança-6, 0.35, que já dá ≈0.972 —
+        // ALTA o bastante para não mais reproduzir o envelope vazio sob a
+        // física corrigida; checado empiricamente, ver task-1-report.md).
+        cfg.control_surfaces.elevator_chord_frac = 0.30;
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let state = crate::models::aircraft_state::AircraftState::from_config(&cfg);
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);

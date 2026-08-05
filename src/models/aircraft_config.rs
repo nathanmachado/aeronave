@@ -109,7 +109,6 @@ pub struct FuselageCfg {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmpennageCfg {
-    pub cd0: f64,
     /// Braço da empenagem (CA asa → CA empenagem, m) — usado tanto no
     /// dimensionamento por coeficiente de volume (`agents::empennage`)
     /// quanto em `weight_balance::neutral_point_m`.
@@ -132,6 +131,43 @@ pub struct EmpennageCfg {
     /// Eficiência de pressão dinâmica na empenagem horizontal (q_t/q_∞) —
     /// usada em `weight_balance::neutral_point_m`.
     pub eta_h: f64,
+    /// Massa por área da empenagem HORIZONTAL (kg/m²) — task refino-ciclo2
+    /// (1b), substitui o antigo item hardcoded `emp_horizontal` de
+    /// `[[masses.items]]` (erro de migração se presente, ver
+    /// `models::config::parse_aircraft`). `weight_balance::oew_items`
+    /// multiplica por `EmpennageSpec::s_horizontal_m2` (área REALMENTE
+    /// dimensionada, Task 4.1) para obter a massa do item — troca o
+    /// parâmetro livre "massa fixa" por uma densidade de área, consistente
+    /// com o dimensionamento paramétrico da empenagem. Faixa 4–20 kg/m²
+    /// (caudas compostas leves, Raymer cap. 15/Niu "Airframe Structural
+    /// Design" — construção em compósito sanduíche, nervuras leves).
+    /// CALIBRADO para reproduzir o item `emp_horizontal` (27,0 kg) do
+    /// baseline E6 na área S_h runtime (≈3,1340 m²) — ver task-1-report.md
+    /// para o cálculo completo (27,0/S_h ≈ 8,6153 kg/m²).
+    pub mass_per_area_h_kg_m2: f64,
+    /// Massa por área da empenagem VERTICAL (kg/m²) — mesma justificativa
+    /// de `mass_per_area_h_kg_m2`. CALIBRADO para reproduzir o item
+    /// `emp_vertical` (16,0 kg) do baseline E6 na área S_v runtime
+    /// (≈1,4129 m²) — 16,0/S_v ≈ 11,3242 kg/m² (a deriva é estruturalmente
+    /// mais reforçada por área que o estabilizador, daí o valor por área
+    /// maior — suporta o leme e parte da carga torcional da fuselagem
+    /// traseira).
+    pub mass_per_area_v_kg_m2: f64,
+    /// Fator de área para o CD0 da empenagem (adimensional) — task
+    /// refino-ciclo2 (1b), substitui o antigo `[empennage].cd0` fixo (erro
+    /// de migração se presente). `agents::aerodynamics::cd0_total` recebe
+    /// `cd0_area_factor·(S_h+S_v)/S_w` como `cd0_empennage` — mesma lógica
+    /// de "component build-up" de `cd0_wing`/`cd0_fuselage` (Raymer cap.
+    /// 12), mas escalado pela área MOLHADA real da empenagem em vez de um
+    /// valor fixo desacoplado da geometria. Fisicamente ≈ `2·Cf·FF`
+    /// (coeficiente de atrito de placa plana turbulenta × fator de forma
+    /// do perfil da empenagem) referenciado à área da ASA (não à área
+    /// molhada da própria empenagem) — daí o fator ~0,014, bem acima de um
+    /// `2·Cf·FF` típico (~0,006–0,010) referenciado à própria área.
+    /// Faixa 0,008–0,025. CALIBRADO a partir do `cd0=0,0046` fixo do
+    /// baseline E6: `0,0046·S_w/(S_h+S_v) ≈ 0,014366` (ver
+    /// task-1-report.md).
+    pub cd0_area_factor: f64,
 }
 
 /// Configuração da hélice — dimensionamento/validação em
@@ -256,16 +292,23 @@ pub struct DragCfg {
 pub struct StabilityCfg {
     /// Margem estática mínima admissível — define o limite TRASEIRO do CG.
     pub sm_min: f64,
-    /// |CL| máximo de DOWNLOAD da empenagem horizontal com o profundor no
-    /// batente (semi-empírico, faixa típica 0,5–1,2 — Gudmundsson/Roskam).
-    /// Autoridade bruta disponível para as manobras de flare/rotação —
-    /// `agents::trim_authority::cl_h_available` aplica `trim_margin` sobre
-    /// este valor. RESULTADO SENSÍVEL a este parâmetro — ver
-    /// `models::specs::TrimSensitivity`.
-    pub cl_h_max_down: f64,
+    /// Teto de |CL| de DOWNLOAD da empenagem horizontal por STALL da
+    /// própria empenagem — task refino-ciclo2 (1a), substitui o antigo
+    /// parâmetro livre `[stability].cl_h_max_down` (palpite semi-empírico
+    /// sem base geométrica direta; erro de migração claro se presente, ver
+    /// `models::config::parse_aircraft`). A autoridade bruta disponível
+    /// agora é CALCULADA por geometria DATCOM/Nelson
+    /// (`agents::trim_authority::cl_h_max_down_calc`, a partir de
+    /// `[control_surfaces].elevator_chord_frac`/`elevator_deflection_max_deg`
+    /// e `EmpennageSpec::ar_h`) — este campo só entra como TETO físico
+    /// (download de profundor acima do CL_max da própria empenagem não é
+    /// alcançável, a superfície estola antes). Faixa típica 0,8–1,4
+    /// (Gudmundsson/Roskam, CL_max de superfícies de cauda finas).
+    pub cl_h_stall_limit: f64,
     /// Fração da autoridade de profundor RESERVADA como margem (efeito solo
     /// na aproximação/flare + margem de certificação) — não consumida no
-    /// balanço de momentos nominal, reduz `cl_h_max_down` efetivo.
+    /// balanço de momentos nominal, reduz o `cl_h_max_down` calculado
+    /// efetivo.
     pub trim_margin: f64,
     /// CL da asa na corrida de decolagem, ANTES da rotação (ângulo de
     /// ataque de solo, trem no chão) — faixa típica 0–1. Usado no momento
@@ -312,9 +355,18 @@ pub struct ControlSurfacesCfg {
     /// Envergadura do profundor, fração da envergadura TOTAL do
     /// estabilizador horizontal (`EmpennageSpec::span_h_m`).
     pub elevator_span_frac: f64,
-    /// Corda do profundor, fração da corda local do estabilizador
-    /// horizontal.
+    /// Corda do profundor, fração da corda LOCAL do estabilizador
+    /// horizontal — esta é, ao mesmo tempo, a razão `c_e/c` usada por
+    /// `agents::trim_authority::tau_elevator` (a razão corda-do-profundor/
+    /// corda-local é constante ao longo da envergadura neste modelo
+    /// trapezoidal, ver `agents::control_surfaces`), então nenhum campo
+    /// adicional é necessário para a eficácia de superfície do profundor.
     pub elevator_chord_frac: f64,
+    /// Deflexão máxima do profundor no batente (graus) — task
+    /// refino-ciclo2 (1a), usada por `agents::trim_authority::
+    /// cl_h_max_down_calc` (`a_t·τ·δe_max_rad`). Faixa típica 10–35°
+    /// (Gudmundsson/Roskam, batentes mecânicos de profundor em GA leve).
+    pub elevator_deflection_max_deg: f64,
     /// Envergadura do leme, fração da envergadura da deriva
     /// (`EmpennageSpec::span_v_m`).
     pub rudder_span_frac: f64,
@@ -455,7 +507,6 @@ pub mod test_fixtures {
                 cd0: 0.0105,
             },
             empennage: EmpennageCfg {
-                cd0: 0.0042,
                 tail_arm_m: 4.70,
                 v_h: 0.65,
                 v_v: 0.045,
@@ -464,6 +515,14 @@ pub mod test_fixtures {
                 taper_h: 0.45,
                 taper_v: 0.45,
                 eta_h: 0.92,
+                // Levemente diferentes da calibração do baseline real
+                // (8.6153/11.3242/0.014366) — mesma justificativa de
+                // "nenhum destes números coincide com o baseline real"
+                // usada nas demais seções desta fixture (task
+                // refino-ciclo2, 1b).
+                mass_per_area_h_kg_m2: 9.2,
+                mass_per_area_v_kg_m2: 10.7,
+                cd0_area_factor: 0.0135,
             },
             propeller: PropellerCfg {
                 diameter_m: Some(1.90),
@@ -508,14 +567,16 @@ pub mod test_fixtures {
             // coincide com o baseline real" usada nas demais seções desta
             // fixture.
             drag: DragCfg { cd0_misc: 0.0032, cooling_drag_fraction: 0.035 },
-            // Levemente diferente do baseline real (0.05/0.85/0.10/0.5/0.5/
+            // Levemente diferente do baseline real (0.05/1.10/0.10/0.5/0.5/
             // 0.02) — mesma justificativa de "nenhum destes números
             // coincide com o baseline real" usada nas demais seções desta
             // fixture (task trim-authority: sm_max REMOVIDO, ver
-            // `StabilityCfg`).
+            // `StabilityCfg`; task refino-ciclo2: cl_h_max_down REMOVIDO
+            // — autoridade agora calculada por geometria — cl_h_stall_limit
+            // fica só como teto).
             stability: StabilityCfg {
                 sm_min: 0.06,
-                cl_h_max_down: 0.80,
+                cl_h_stall_limit: 1.05,
                 trim_margin: 0.12,
                 cl_ground_rotation: 0.55,
                 to_flap_cm_fraction: 0.5,
@@ -529,8 +590,12 @@ pub mod test_fixtures {
                     MassItemCfg { name: "painel_comandos".into(),    mass_kg: 24.0,  arm_ref: "pax_front".into(),       arm_offset_m: -0.3 },
                     MassItemCfg { name: "fuselagem".into(),          mass_kg: 150.0, arm_ref: "fuselage_struct".into(), arm_offset_m: 0.0 },
                     MassItemCfg { name: "asa".into(),                mass_kg: 120.0, arm_ref: "wing_struct".into(),     arm_offset_m: 0.0 },
-                    MassItemCfg { name: "emp_horizontal".into(),     mass_kg: 21.0,  arm_ref: "empennage_cg".into(),    arm_offset_m: 0.0 },
-                    MassItemCfg { name: "emp_vertical".into(),       mass_kg: 15.0,  arm_ref: "empennage_cg".into(),    arm_offset_m: -0.2 },
+                    // "emp_horizontal"/"emp_vertical" NÃO são mais itens de
+                    // `[[masses.items]]` (task refino-ciclo2, 1b) — agora
+                    // derivados em `weight_balance::oew_items` a partir de
+                    // `EmpennageSpec × [empennage].mass_per_area_{h,v}_kg_m2`
+                    // (erro de migração se presentes aqui, ver
+                    // `models::config::parse_aircraft`).
                     MassItemCfg { name: "trem_principal".into(),     mass_kg: 52.0,  arm_ref: "gear_main".into(),       arm_offset_m: 0.0 },
                     MassItemCfg { name: "trem_nariz".into(),         mass_kg: 21.0,  arm_ref: "gear_nose".into(),       arm_offset_m: 0.0 },
                     MassItemCfg { name: "mobiliario".into(),         mass_kg: 42.0,  arm_ref: "pax_front".into(),       arm_offset_m: 0.5 },
@@ -553,6 +618,10 @@ pub mod test_fixtures {
                 flap_chord_frac: 0.28,
                 elevator_span_frac: 0.88,
                 elevator_chord_frac: 0.33,
+                // Levemente diferente da baseline real (25.0) — mesma
+                // justificativa de "nenhum destes números coincide com o
+                // baseline real" (task refino-ciclo2, 1a).
+                elevator_deflection_max_deg: 24.0,
                 rudder_span_frac: 0.85,
                 rudder_chord_frac: 0.32,
             },

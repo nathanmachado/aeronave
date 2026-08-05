@@ -818,7 +818,16 @@ mod tests {
         // 0,97 — ver seu doc-comment), levemente abaixo do valor antigo
         // implícito: menos potência de eixo disponível, V_max cai:
         // 303.5154833612 km/h → 302.9220524587 km/h (-0,593 km/h, -0,20%).
-        let v_max_observado_kmh = 302.9220524587;
+        //
+        // ATUALIZAÇÃO (task refino-ciclo2, 1b): `cd0_empennage` da fixture
+        // deixa de ser o `[empennage].cd0=0.0042` fixo e passa a ser
+        // DERIVADO de `cd0_area_factor·(S_h+S_v)/S_w` (novos campos da
+        // fixture, `mass_per_area_h/v_kg_m2`/`cd0_area_factor=0.0135` —
+        // ver `aircraft_config::test_fixtures::config_teste`): com
+        // S_h≈2,3762/S_v≈1,4218/S_w=13,5, cd0_empennage cai para
+        // ≈0,003798 (< 0,0042 antigo) — menos arrasto parasita, V_max sobe:
+        // 302.9220524587 km/h → 304.6465774391 km/h (+1,725 km/h, +0,57%).
+        let v_max_observado_kmh = 304.6465774391;
         assert!((v_max_kmh - v_max_observado_kmh).abs() < 0.5,
             "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor observado \
              {v_max_observado_kmh:.2} km/h em mais de 0.5 km/h — possível \

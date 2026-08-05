@@ -57,15 +57,29 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.structure.spar_material, "AA7075-T6");
     assert_eq!(cfg.structure.frame_spacing_mm, 300.0);
     // Campanha E1–E6: 15 → 16 itens — novo item "bateria_recolocada" (28kg,
-    // bateria realocada do painel para o cone de cauda, mudança 2).
-    assert_eq!(cfg.masses.items.len(), 16);
+    // bateria realocada do painel para o cone de cauda, mudança 2). Task
+    // refino-ciclo2 (1b): 16 → 14 itens — "emp_horizontal"/"emp_vertical"
+    // REMOVIDOS de [[masses.items]] (agora derivados em
+    // `weight_balance::oew_items` a partir de `EmpennageSpec ×
+    // [empennage].mass_per_area_{h,v}_kg_m2` — ver
+    // `models::config::check_emp_mass_items_migration`).
+    assert_eq!(cfg.masses.items.len(), 14);
     assert_eq!(cfg.masses.item_mass("asa"), Some(130.0));
     assert_eq!(cfg.masses.item_mass("trem_principal"), Some(55.0));
     // Campanha E1–E6: novos/alterados itens de massa — cobertura direta
     // dos valores do brief (mudanças 2 e 8).
     assert_eq!(cfg.masses.item_mass("avionicos"), Some(32.0));
     assert_eq!(cfg.masses.item_mass("bateria_recolocada"), Some(28.0));
-    assert_eq!(cfg.masses.item_mass("emp_horizontal"), Some(27.0));
+    // "emp_horizontal"/"emp_vertical" não são mais itens de
+    // [[masses.items]] — ver `agents::weight_balance::oew_items` e
+    // `agents::weight_balance::tests::oew_items_deriva_massa_da_
+    // empenagem_de_emp_spec_x_mass_per_area` para a cobertura da massa
+    // DERIVADA (27,000055 kg / 15,999962 kg no runtime real, ≈27,0/16,0
+    // por construção — ver task-1-report.md).
+    assert_eq!(cfg.masses.item_mass("emp_horizontal"), None);
+    assert_eq!(cfg.empennage.mass_per_area_h_kg_m2, 8.6153);
+    assert_eq!(cfg.empennage.mass_per_area_v_kg_m2, 11.3242);
+    assert_eq!(cfg.empennage.cd0_area_factor, 0.014366);
 }
 
 #[test]

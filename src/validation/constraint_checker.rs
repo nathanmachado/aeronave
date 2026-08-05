@@ -461,8 +461,11 @@ mod tests {
     /// trim-authority): parte da config REAL do disco (já com todas as
     /// demais mudanças da E6) e reverte, em uma cópia mutada em código, os
     /// TRÊS parâmetros que juntos fecham o envelope (`gear.x_main_m`,
-    /// `empennage.v_h`, `stability.cl_h_max_down`) ao valor ANTIGO
-    /// pré-E6. Reverter só `gear.x_main_m` (a causa raiz citada na
+    /// `empennage.v_h`, `control_surfaces.elevator_chord_frac` — desde a
+    /// task refino-ciclo2, `[stability].cl_h_max_down` não existe mais
+    /// como campo direto; a corda de profundor reduzida reproduz uma
+    /// autoridade de download equivalente ao antigo palpite pré-E6) ao
+    /// valor ANTIGO pré-E6. Reverter só `gear.x_main_m` (a causa raiz citada na
     /// violação) NÃO basta mais para reproduzir o envelope vazio — os
     /// outros ganhos de autoridade/estabilidade da E6 (EH maior, mais
     /// download do profundor) compensam sozinhos o trem principal antigo
@@ -481,14 +484,20 @@ mod tests {
         ).expect("falha ao ler baseline_4seat.toml do disco");
         let mut cfg = crate::models::config::parse_aircraft(&toml)
             .expect("baseline real deveria ser uma configuração válida");
-        cfg.gear.x_main_m = 3.85;           // valor pré-E6 — causa raiz original
-        cfg.empennage.v_h = 0.70;           // valor pré-E6
-        cfg.stability.cl_h_max_down = 0.85; // valor pré-E6
+        cfg.gear.x_main_m = 3.85;                       // valor pré-E6 — causa raiz original
+        cfg.empennage.v_h = 0.70;                       // valor pré-E6
+        // Task refino-ciclo2: `[stability].cl_h_max_down` foi REMOVIDO — o
+        // equivalente é reduzir `elevator_chord_frac` (0.40→0.30, τ menor)
+        // para reproduzir uma autoridade de download reduzida (≈0.88, perto
+        // do palpite antigo 0.85) — ver comentário equivalente em
+        // `agents::trim_authority::tests::trim_authority_agent_run_hand_
+        // check_baseline_mutado_parametros_pre_e6`.
+        cfg.control_surfaces.elevator_chord_frac = 0.30;
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: parâmetros pré-E6 (x_main_m=3.85, v_h=0.70, \
-             cl_h_max_down=0.85, config real mutada) deveriam reproduzir o envelope de CG \
-             vazio original (fwd={:.2}% > aft={:.2}%)",
+             elevator_chord_frac=0.30, config real mutada) deveriam reproduzir o envelope de \
+             CG vazio original (fwd={:.2}% > aft={:.2}%)",
             wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical);

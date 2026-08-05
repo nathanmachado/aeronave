@@ -305,6 +305,12 @@ fn main() {
     // deste bloco imprimir os detalhes.
     println!("[ TRIM ] TrimAuthorityAgent — Autoridade de Profundor (flare + rotação)");
     let trim = &sized.trim;
+    println!("  Autoridade calculada por geometria DATCOM/Nelson: τ={:.5} (c_e/c={:.2})  |  \
+              cl_h_max_down_calc={:.4}{}  |  cl_h_max_down (operacional)={:.4}",
+             trim.tau_elevator, cfg.control_surfaces.elevator_chord_frac,
+             trim.cl_h_max_down_calc,
+             if trim.capped_by_stall { " (LIMITADO pelo teto de stall)" } else { "" },
+             trim.cl_h_max_down);
     println!("  Limite de FLARE (pouso, número único, independe do peso): {:.2}% MAC  |  \
               CL_h disp={:.3}",
              trim.flare_limit_pct_mac, trim.cl_h_available);
@@ -349,10 +355,17 @@ fn main() {
         println!("  └{}┘", "─".repeat(BOX_W + 2));
     }
     println!("  Sensibilidade a cl_h_max_down (±0.05): {:.2}→{:.2}% MAC  |  {:.2}(nominal)={:.2}% \
-              |  {:.2}→{:.2}% MAC\n",
+              |  {:.2}→{:.2}% MAC",
              trim.sensitivity.cl_h_max_down_minus, trim.sensitivity.flare_limit_pct_mac_minus,
              trim.cl_h_max_down, trim.flare_limit_pct_mac,
              trim.sensitivity.cl_h_max_down_plus, trim.sensitivity.flare_limit_pct_mac_plus);
+    println!("  Sensibilidade a elevator_deflection_max_deg (±2°): {:.0}°→{:.2}% MAC  |  \
+              {:.0}°(nominal)={:.2}%  |  {:.0}°→{:.2}% MAC\n",
+             trim.sensitivity.elevator_deflection_max_deg_minus,
+             trim.sensitivity.flare_limit_pct_mac_deflection_minus,
+             cfg.control_surfaces.elevator_deflection_max_deg, trim.flare_limit_pct_mac,
+             trim.sensitivity.elevator_deflection_max_deg_plus,
+             trim.sensitivity.flare_limit_pct_mac_deflection_plus);
 
     // ── Diagrama V-n completo com rajadas (Task 4.3, CS 23.333/.341) ───────────
     // Roda após o WeightBalanceAgent (precisa do MTOW de envelope e da massa
@@ -614,15 +627,20 @@ fn main() {
          transiente/térmica real)".into());
     fidelity.insert("sizing".into(),
         "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)".into());
-    // task trim-authority: limite dianteiro físico do envelope de CG.
-    // "preliminary" — semi-empírico (Cm_ac/Cm_flap de literatura NACA
-    // 230/Raymer cap. 16; cl_h_max_down semi-empírico, faixa
-    // Gudmundsson/Roskam) e SENSÍVEL a cl_h_max_down (ver
-    // `trim.sensitivity` no JSON) — requer validação em ensaio de voo
-    // antes de tratar o limite dianteiro como definitivo.
+    // task refino-ciclo2: limite dianteiro físico do envelope de CG, agora
+    // com a autoridade de profundor CALCULADA por geometria DATCOM/Nelson
+    // (não mais um `cl_h_max_down` de config direto — ver
+    // `agents::trim_authority::cl_h_max_down_calc`). "preliminary" —
+    // Cm_ac/Cm_flap continuam semi-empíricos (literatura NACA 230/Raymer
+    // cap. 16), e o ajuste de Nelson (τ) em si é uma curva empírica; ainda
+    // SENSÍVEL a `elevator_deflection_max_deg` (ver `trim.sensitivity` no
+    // JSON, ±2°, além do ±0.05 residual em `cl_h_max_down`) — requer
+    // validação em ensaio de voo antes de tratar o limite dianteiro como
+    // definitivo.
     fidelity.insert("trim".into(),
         "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
-         cl_h_max_down semi-empírico, faixa Gudmundsson/Roskam; SENSÍVEL a cl_h_max_down, ver \
+         cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a \
+         elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver \
          trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ \
          μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)".into());
 
