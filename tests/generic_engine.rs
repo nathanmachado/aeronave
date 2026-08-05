@@ -613,7 +613,8 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // resíduo de arredondamento da calibração de massa/cd0 da empenagem).
     let endurance_h = 7.619791;
     // 29.609527870 → 30.709468 → 30.709502 L/h (task refino-ciclo2:
-    // +0,000034 L/h, mesmo resíduo).
+    // +0,000034 L/h, mesmo resíduo — tolerância do assert abaixo apertada
+    // para 5e-5, ~1,5× de margem sobre este resíduo).
     let fc_lph = 30.709502;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
@@ -621,7 +622,8 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // agora é DERIVADA (EmpennageSpec × mass_per_area), calibrada para
     // reproduzir 27,0/16,0 kg na área runtime; resíduo de +0,000018 kg
     // (calibração com 4 casas decimais, não exata) — documentado, não
-    // investigado (bem abaixo de qualquer tolerância de fabricação).
+    // investigado (bem abaixo de qualquer tolerância de fabricação);
+    // tolerância do assert abaixo apertada para 5e-5, ~2,8× de margem.
     let oew_kg = 890.000018;
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
@@ -630,10 +632,10 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     assert!((sized.prop.endurance_h - endurance_h).abs() < 1e-5,
         "Autonomia {:.6} h divergiu do valor pós-refino-ciclo2 {:.6} h",
         sized.prop.endurance_h, endurance_h);
-    assert!((sized.prop.fc_cruise_lph - fc_lph).abs() < 1e-4,
+    assert!((sized.prop.fc_cruise_lph - fc_lph).abs() < 5e-5,
         "Consumo cruzeiro {:.6} L/h divergiu do valor pós-refino-ciclo2 {:.6} L/h",
         sized.prop.fc_cruise_lph, fc_lph);
-    assert!((sized.wb.oew_kg - oew_kg).abs() < 1e-4,
+    assert!((sized.wb.oew_kg - oew_kg).abs() < 5e-5,
         "OEW {:.6} kg divergiu do valor pós-refino-ciclo2 {:.6} kg",
         sized.wb.oew_kg, oew_kg);
 

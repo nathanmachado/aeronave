@@ -125,3 +125,69 @@ impl AircraftState {
         self.wing_span_m.powi(2) / self.wing_area_m2
     }
 }
+
+// ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────
+//
+// Task refino-ciclo2 (1b), achado da revisão (Finding 1 — "estrito nos dois
+// sentidos"): o brief pedia "mudar v_h em config mutada → massa E arrasto
+// acompanham, estrito nos dois sentidos". A cobertura de MASSA já existia
+// (`agents::weight_balance::tests::massa_emp_horizontal_aumenta_
+// estritamente_quando_v_h_aumenta`) — faltava o lado do ARRASTO
+// (`cd0_empennage`, derivado aqui em `AircraftState::from_config`). Este
+// módulo não tinha `mod tests` antes desta adição — é o lar natural do teste
+// porque é aqui que `cd0_empennage` é DERIVADO (ver comentário de
+// `from_config` acima), não em `agents::aerodynamics` (que só CONSOME o
+// valor já pronto via `cd0_total`, sem recalculá-lo).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::aircraft_config::test_fixtures::config_teste;
+
+    /// Propriedade (Finding 1 da revisão, lado do ARRASTO — a contraparte de
+    /// `weight_balance::tests::massa_emp_horizontal_aumenta_estritamente_
+    /// quando_v_h_aumenta`, que já cobre o lado da MASSA): `v_h` maior → S_h
+    /// maior (`agents::empennage::tail_areas_m2`, S_h = v_h·S_w·MAC/l_h) →
+    /// `cd0_empennage = cd0_area_factor·(S_h+S_v)/S_w` maior, ESTRITAMENTE,
+    /// nos DOIS sentidos (aumentar E diminuir `v_h`) — não só "aumentar
+    /// aumenta", mas também "diminuir diminui".
+    ///
+    /// Verificação de que o teste de fato pega uma regressão (nota da
+    /// revisão, "RED first"): rodei manualmente esta mesma asserção contra
+    /// uma cópia local de `tail_areas_m2_from_wing_geometry` com a fórmula
+    /// de `s_h` trocada para usar `emp_cfg.v_v` em vez de `emp_cfg.v_h` (um
+    /// bug plausível — trocar os dois coeficientes de volume) — com essa
+    /// troca, `s_h` deixa de responder a `v_h` (`cfg_maior.empennage.v_h`
+    /// mutado não muda mais `s_h`, logo não muda `cd0_empennage`), e a
+    /// asserção `cd0_maior > cd0_base` falha (`cd0_maior == cd0_base`,
+    /// diferença 0.0). Revertido antes de qualquer commit — não faz parte
+    /// do histórico do repositório, só documentado aqui como evidência de
+    /// que o teste é sensível ao bug que ele existe para prevenir.
+    #[test]
+    fn cd0_empennage_acompanha_v_h_estritamente_nos_dois_sentidos() {
+        let cfg_base = config_teste();
+        let state_base = AircraftState::from_config(&cfg_base);
+
+        let mut cfg_maior = cfg_base.clone();
+        cfg_maior.empennage.v_h *= 1.3;
+        let state_maior = AircraftState::from_config(&cfg_maior);
+
+        let mut cfg_menor = cfg_base.clone();
+        cfg_menor.empennage.v_h *= 0.7;
+        let state_menor = AircraftState::from_config(&cfg_menor);
+
+        println!(
+            "cd0_empennage: menor(v_h={:.4})={:.8}  base(v_h={:.4})={:.8}  \
+             maior(v_h={:.4})={:.8}",
+            cfg_menor.empennage.v_h, state_menor.cd0_empennage,
+            cfg_base.empennage.v_h, state_base.cd0_empennage,
+            cfg_maior.empennage.v_h, state_maior.cd0_empennage,
+        );
+
+        assert!(state_maior.cd0_empennage > state_base.cd0_empennage,
+            "cd0_empennage deveria AUMENTAR estritamente quando v_h aumenta: \
+             base={:.8} maior={:.8}", state_base.cd0_empennage, state_maior.cd0_empennage);
+        assert!(state_menor.cd0_empennage < state_base.cd0_empennage,
+            "cd0_empennage deveria DIMINUIR estritamente quando v_h diminui: \
+             base={:.8} menor={:.8}", state_base.cd0_empennage, state_menor.cd0_empennage);
+    }
+}
