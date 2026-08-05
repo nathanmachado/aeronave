@@ -72,12 +72,13 @@ fn main() {
 
     // Finding 6b da revisão final: banner estava travado em "v3.0 (6
     // Agentes)" — desatualizado desde a Task 6.1 (schema v4) e sempre
-    // desatualizado quanto à contagem real de agentes (9: Aerodinâmica,
-    // Propulsão, Missão, Peso/Balanceamento, Desempenho, Estrutura, Trem de
-    // Pouso, Superfícies de Controle, Hélice — ver os blocos `[ AGENTE N ]`
-    // abaixo). Versão agora lida de `SCHEMA_VERSION` (fonte única).
+    // desatualizado quanto à contagem real de agentes (10: Aerodinâmica,
+    // Propulsão, Missão, Peso/Balanceamento, Autoridade de Trim, Desempenho,
+    // Estrutura, Trem de Pouso, Superfícies de Controle, Hélice — ver os
+    // blocos `[ AGENTE N ]`/`[ TRIM ]` abaixo). Versão agora lida de
+    // `SCHEMA_VERSION` (fonte única).
     println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║   AERONAVE — Dimensionamento Paramétrico v{SCHEMA_VERSION} (9 Agentes)      ║");
+    println!("║   AERONAVE — Dimensionamento Paramétrico v{SCHEMA_VERSION} (10 Agentes)     ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
     println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
@@ -266,11 +267,13 @@ fn main() {
     println!("  Todos os cenários estáveis (SM>3%): {}",
              if all_stable { "✓ SIM" } else { "✗ NÃO" });
 
-    // Envelope de CG ADMISSÍVEL (Task 4.4) — limites vindos de
-    // `[stability]` (sm_min/sm_max), não dos extremos observados acima.
-    println!("  Envelope de CG ADMISSÍVEL: {:.1}%–{:.1}% MAC  (sm_min={:.2}, sm_max={:.2})",
+    // Envelope de CG ADMISSÍVEL (Task 4.4 + task trim-authority) — traseiro
+    // vem de `[stability].sm_min`; dianteiro vem do `TrimAuthorityAgent`
+    // (ver bloco [ TRIM ] abaixo), pior caso entre os cenários.
+    println!("  Envelope de CG ADMISSÍVEL: {:.1}%–{:.1}% MAC  (sm_min={:.2}, dianteiro: \
+              TrimAuthorityAgent — ver bloco [ TRIM ])",
              wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
-             cfg.stability.sm_min, cfg.stability.sm_max);
+             cfg.stability.sm_min);
     for sc in &wb.scenarios {
         println!("    {} {:30} CG={:5.1}% MAC  SM={:.3}",
                  if sc.inside_envelope { "✓" } else { "✗" },
@@ -279,6 +282,37 @@ fn main() {
     let all_inside_envelope = wb.scenarios.iter().all(|s| s.inside_envelope);
     println!("  Todos os cenários dentro do envelope admissível: {}\n",
              if all_inside_envelope { "✓ SIM" } else { "✗ NÃO" });
+
+    // ── TrimAuthorityAgent — Autoridade de Profundor (flare + rotação) ─────────
+    // Limite dianteiro FÍSICO do envelope de CG acima — substitui o antigo
+    // proxy `stability.sm_max`. Roda depois de WB+Empenagem (consome
+    // `wb.scenarios`); `orchestrator::size_aircraft` já aplicou o
+    // resultado a `wb` acima (`WeightBalanceOutput::apply_trim`) antes
+    // deste bloco imprimir os detalhes.
+    println!("[ TRIM ] TrimAuthorityAgent — Autoridade de Profundor (flare + rotação)");
+    let trim = &sized.trim;
+    println!("  Limite de FLARE (pouso, independe do peso): {:.2}% MAC  |  CL_h req={:.3}  \
+              CL_h disp={:.3}",
+             trim.flare_limit_pct_mac, trim.cl_h_required_at_fwd_limit, trim.cl_h_available);
+    println!("  Limite de ROTAÇÃO (decolagem, por cenário — depende do peso):");
+    for sc in &trim.rotation_limit_pct_mac_per_scenario {
+        println!("    {:30} rotação={:5.1}% MAC  governa={}",
+                 sc.scenario, sc.rotation_limit_pct_mac, sc.governing);
+    }
+    println!("  Manobra que GOVERNA o limite dianteiro (agregado): {}", trim.governing);
+    if trim.governing == "rotacao" {
+        println!("  ⚠ ACHADO DE PROJETO: a ROTAÇÃO de decolagem governa o limite dianteiro, \
+                  MAIS RESTRITIVA que a flare — o trem principal (x_main={:.2}m) fica muito \
+                  atrás do CG desta célula (carga de nariz já perto do teto de 25%, ver \
+                  [ AGENTE 6 ]). Decisão de projeto do layout do trem requer revisão humana \
+                  — este agente NÃO ajusta gear.x_main_m automaticamente.",
+                 cfg.gear.x_main_m);
+    }
+    println!("  Sensibilidade a cl_h_max_down (±0.05): {:.2}→{:.2}% MAC  |  {:.2}(nominal)={:.2}% \
+              |  {:.2}→{:.2}% MAC\n",
+             trim.sensitivity.cl_h_max_down_minus, trim.sensitivity.flare_limit_pct_mac_minus,
+             trim.cl_h_max_down, trim.flare_limit_pct_mac,
+             trim.sensitivity.cl_h_max_down_plus, trim.sensitivity.flare_limit_pct_mac_plus);
 
     // ── Diagrama V-n completo com rajadas (Task 4.3, CS 23.333/.341) ───────────
     // Roda após o WeightBalanceAgent (precisa do MTOW de envelope e da massa
@@ -540,6 +574,16 @@ fn main() {
          transiente/térmica real)".into());
     fidelity.insert("sizing".into(),
         "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)".into());
+    // task trim-authority: limite dianteiro físico do envelope de CG.
+    // "preliminary" — semi-empírico (Cm_ac/Cm_flap de literatura NACA
+    // 230/Raymer cap. 16; cl_h_max_down semi-empírico, faixa
+    // Gudmundsson/Roskam) e SENSÍVEL a cl_h_max_down (ver
+    // `trim.sensitivity` no JSON) — requer validação em ensaio de voo
+    // antes de tratar o limite dianteiro como definitivo.
+    fidelity.insert("trim".into(),
+        "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
+         cl_h_max_down semi-empírico, faixa Gudmundsson/Roskam; SENSÍVEL a cl_h_max_down, ver \
+         trim.sensitivity; validar em ensaio de voo antes de tratar como definitivo)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {
@@ -552,6 +596,7 @@ fn main() {
         empennage:        Some(emp.clone()),
         control_surfaces: Some(cs.clone()),
         weight:           Some(wb.spec.clone()),
+        trim:             Some(trim.clone()),
         performance:      Some(perf),
         vn_diagram:       Some(vn.clone()),
         structure:        Some(struc),
@@ -570,7 +615,7 @@ fn main() {
     std::fs::write(&cli.out, &json)
         .unwrap_or_else(|e| panic!("Falha ao escrever '{}': {e}", cli.out.display()));
 
-    println!("\n[ SAÍDA ] {} v{} gerado — 6 agentes completos.", cli.out.display(), SCHEMA_VERSION);
+    println!("\n[ SAÍDA ] {} v{} gerado — 10 agentes completos.", cli.out.display(), SCHEMA_VERSION);
     println!("\nPróximas etapas:");
     println!("  Fase 3 — CAD: FreeCad + Agente Python (socket localhost:9999)");
     println!("  Fase 4 — Plano de construção, BOM e documentação ANAC");

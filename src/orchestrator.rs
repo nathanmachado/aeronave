@@ -20,12 +20,13 @@ use crate::agents::constraint_diagram::{wing_loading_limits, WingLoadingReport};
 use crate::agents::empennage::EmpennageAgent;
 use crate::agents::mission::{MissionAgent, MissionError};
 use crate::agents::propulsion::PropulsionAgent;
+use crate::agents::trim_authority::TrimAuthorityAgent;
 use crate::agents::weight_balance::{WeightBalanceAgent, WeightBalanceOutput};
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
-use crate::models::specs::{EmpennageSpec, MissionSpec, PropulsionSpec, WingSpec};
+use crate::models::specs::{EmpennageSpec, MissionSpec, PropulsionSpec, TrimSpec, WingSpec};
 
 /// Número máximo de iterações do laço de ponto fixo antes de desistir.
 const MAX_ITERATIONS: u32 = 50;
@@ -56,6 +57,12 @@ pub struct SizedAircraft {
     /// "4 pax + bagagem + tanque cheio" (envelope estrutural, distinto do
     /// MTOW de missão em `state.mtow_kg` — ver docstring do módulo).
     pub wb: WeightBalanceOutput,
+    /// Limite dianteiro FÍSICO do envelope de CG (task trim-authority) —
+    /// flare + rotação de decolagem, ver `agents::trim_authority`. Já
+    /// aplicado a `wb` (`WeightBalanceOutput::apply_trim` roda antes deste
+    /// `SizedAircraft` ser devolvido) — `wb.scenarios[].inside_envelope`/
+    /// `wb.spec.cg_limit_fwd_pct_mac` já refletem este `TrimSpec`.
+    pub trim: TrimSpec,
     /// Empenagem dimensionada por coeficiente de volume (Task 4.1) —
     /// puramente geométrica (não depende de MTOW), mas recalculada a cada
     /// iteração junto com a asa por simplicidade; idêntica em todas as
@@ -215,7 +222,7 @@ pub(crate) fn size_aircraft_with_max_iters(
         let fuel_req_l = mission.fuel_total_l;
         let fuel_kg = mission.fuel_total_kg;
 
-        let wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req, &emp);
+        let mut wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req, &emp);
 
         let novo = wb.oew_kg + req.payload_kg() + fuel_kg;
 
@@ -252,11 +259,25 @@ pub(crate) fn size_aircraft_with_max_iters(
             iterations.push(novo);
             state.mtow_kg = novo;
             let constraints = wing_loading_limits(novo, &wing, engine, &state, req);
+
+            // TrimAuthorityAgent (task trim-authority): roda DEPOIS de
+            // WeightBalanceAgent + EmpennageAgent (consome os cenários já
+            // calculados, `wb.scenarios`, mais a geometria da empenagem) e
+            // ANTES do relatório final — `apply_trim` finaliza
+            // `wb.scenarios[].inside_envelope`/`wb.spec.
+            // cg_limit_fwd_pct_mac`, que até aqui só refletiam o critério
+            // TRASEIRO (sm_min). Ver docstring de `WeightBalanceOutput::
+            // apply_trim` para a dependência circular resolvida em duas
+            // fases.
+            let trim = TrimAuthorityAgent::run(cfg, &wing, &emp, &wb);
+            wb.apply_trim(&trim);
+
             return Ok(SizedAircraft {
                 state,
                 wing,
                 prop,
                 wb,
+                trim,
                 emp,
                 mission_fuel_kg: fuel_kg,
                 mission,

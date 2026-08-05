@@ -168,12 +168,15 @@ impl ConstraintChecker {
             ));
         }
 
-        // 9. Envelope de CG admissível (Task 4.4): critério de aceite
-        // substitui a antiga checagem isolada `sm > 0.03` — agora TODO
-        // cenário de carga precisa ter o CG dentro de
-        // [cg_limit_fwd_pct_mac, cg_limit_aft_pct_mac], os limites vindos
-        // dos critérios de estabilidade de `[stability]` (sm_min/sm_max),
-        // não apenas os extremos observados entre os cenários.
+        // 9. Envelope de CG admissível (Task 4.4 + task trim-authority):
+        // critério de aceite substitui a antiga checagem isolada
+        // `sm > 0.03` — agora TODO cenário de carga precisa ter o CG
+        // dentro de [limite dianteiro do PRÓPRIO cenário (flare/rotação,
+        // TrimAuthorityAgent), cg_limit_aft_pct_mac (sm_min)], não apenas
+        // os extremos observados entre os cenários. `sc.inside_envelope`
+        // já reflete o veredito por cenário (finalizado por
+        // `WeightBalanceOutput::apply_trim`); `cg_limit_fwd_pct_mac`
+        // citado na mensagem abaixo é o agregado (pior caso).
         // Limites físicos (m do nariz), reconstruídos a partir de
         // `cg_limit_fwd/aft_pct_mac` — inverso de `weight_balance::cg_pct_mac`
         // (%MAC = (x−x_mac_le)/MAC×100) contra `wb.mac_le_x_m`/`wb.mac_m`.
@@ -287,6 +290,7 @@ mod tests {
     use crate::agents::performance::PerformanceAgent;
     use crate::agents::propeller::PropellerAgent;
     use crate::agents::propulsion::PropulsionAgent;
+    use crate::agents::trim_authority::TrimAuthorityAgent;
     use crate::agents::weight_balance::WeightBalanceAgent;
     use crate::models::aircraft_state::AircraftState;
     use crate::models::engine::test_fixtures::motor_generico_teste;
@@ -308,7 +312,14 @@ mod tests {
         let engine = motor_generico_teste();
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
         let emp    = EmpennageAgent::run(&wing, &cfg);
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
+        let mut wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
+        // task trim-authority: finaliza o envelope (inside_envelope/
+        // cg_limit_fwd_pct_mac) com o limite dianteiro físico — mesma
+        // sequência de `orchestrator::size_aircraft`/`main.rs`, necessária
+        // para os testes de envelope de CG abaixo exercitarem o pipeline
+        // real (não o placeholder NaN de `WeightBalanceAgent::run` sozinho).
+        let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
+        wb.apply_trim(&trim);
         let propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
         let perf   = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
                                             &cfg.performance);
@@ -361,9 +372,10 @@ mod tests {
     // ─── Task 4.4: envelope de CG admissível ─────────────────────────────
 
     /// Com a fixture sintética `config_teste()` (mesmo achado honesto do
-    /// baseline real — ver `weight_balance::tests` e task-4.4-report.md), os
-    /// cenários de carga ficam à frente do limite dianteiro do envelope
-    /// (modelo de NP resulta em SM observada bem acima de `sm_max`).
+    /// baseline real — ver `weight_balance::tests`, `trim_authority::tests`
+    /// e task-4.4-report.md/task-1-report.md), os cenários de carga ficam à
+    /// frente do limite dianteiro FÍSICO do envelope (TrimAuthorityAgent —
+    /// flare/rotação, task trim-authority).
     /// `ConstraintChecker::verify` deve reportar uma violação por cenário
     /// fora do envelope, citando o nome do cenário e os limites em %MAC.
     #[test]

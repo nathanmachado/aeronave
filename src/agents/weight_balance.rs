@@ -311,16 +311,31 @@ pub fn cg_pct_mac(x_cg: f64, x_mac_le: f64, mac: f64) -> f64 {
     (x_cg - x_mac_le) / mac * 100.0
 }
 
-// ─── ENVELOPE DE CG ADMISSÍVEL (Task 4.4) ────────────────────────────────────
+// ─── ENVELOPE DE CG ADMISSÍVEL (Task 4.4 + task trim-authority) ──────────────
 //
 // Em contraste com `cg_fwd`/`cg_aft` (WeightSpec::cg_mac_fwd_pct/aft_pct),
-// que são os extremos apenas OBSERVADOS entre os cenários de carga, as duas
-// funções abaixo calculam os LIMITES admissíveis a partir de critérios de
-// estabilidade — invertendo `static_margin`: SM = (x_np − x_cg)/MAC, logo
-// x_cg = x_np − SM·MAC. Como SM É DECRESCENTE em x_cg (CG mais atrás → SM
-// menor), o SM MÍNIMO aceitável corresponde ao CG MAIS ATRÁS aceitável
-// (limite traseiro) e o SM MÁXIMO aceitável corresponde ao CG MAIS À FRENTE
-// aceitável (limite dianteiro).
+// que são os extremos apenas OBSERVADOS entre os cenários de carga, o
+// envelope ADMISSÍVEL vem de dois critérios físicos INDEPENDENTES — um por
+// extremo, calculados em DUAS FASES por dois agentes diferentes (a
+// dependência é circular: o limite de rotação por cenário precisa dos
+// CENÁRIOS do WeightBalanceAgent, que por sua vez precisariam do limite
+// para decidir `inside_envelope` — resolvida rodando primeiro os
+// cenários/limite traseiro aqui, depois o `TrimAuthorityAgent`, depois
+// `apply_trim` abaixo finaliza o veredito):
+//
+//   - Limite TRASEIRO (`cg_limit_aft_m` abaixo): invertendo `static_margin`
+//     — SM = (x_np−x_cg)/MAC, logo x_cg = x_np−SM·MAC; como SM é
+//     DECRESCENTE em x_cg, o SM MÍNIMO aceitável (`sm_min`) corresponde ao
+//     CG MAIS ATRÁS aceitável. Não depende de peso — calculado aqui,
+//     direto, dentro de `WeightBalanceAgent::run`.
+//   - Limite DIANTEIRO: FÍSICO, não mais um proxy de margem estática — vem
+//     da autoridade de profundor disponível nas manobras de flare/rotação
+//     (`agents::trim_authority::TrimAuthorityAgent`), calculado POR
+//     CENÁRIO (a rotação depende do peso). `WeightBalanceAgent::run`
+//     calcula só um veredito PARCIAL de `inside_envelope` (só o critério
+//     traseiro, que já é conhecido); `apply_trim` (abaixo) finaliza com o
+//     critério dianteiro assim que o `TrimAuthorityAgent` rodar — ver
+//     `orchestrator::size_aircraft`.
 
 /// Limite TRASEIRO do envelope de CG — posição do CG mais atrás admissível
 /// antes de violar a margem estática mínima (`sm_min`, piso de estabilidade
@@ -329,15 +344,6 @@ pub fn cg_pct_mac(x_cg: f64, x_mac_le: f64, mac: f64) -> f64 {
 ///   x_cg_aft = x_np − sm_min·MAC
 pub fn cg_limit_aft_m(x_np: f64, sm_min: f64, mac: f64) -> f64 {
     x_np - sm_min * mac
-}
-
-/// Limite DIANTEIRO do envelope de CG — posição do CG mais à frente
-/// admissível antes de violar a margem estática máxima (`sm_max`, proxy de
-/// autoridade de profundor em flare/pouso, tipicamente 0.25):
-///
-///   x_cg_fwd = x_np − sm_max·MAC
-pub fn cg_limit_fwd_m(x_np: f64, sm_max: f64, mac: f64) -> f64 {
-    x_np - sm_max * mac
 }
 
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
@@ -370,10 +376,58 @@ pub struct ScenarioResult {
     /// contra os limites de `[stability]` (Task 4.4).
     pub stable: bool,
     /// Verdadeiro quando o CG do cenário está DENTRO do envelope admissível
-    /// definido por `[stability]` (sm_min ≤ SM ≤ sm_max), equivalentemente
-    /// `cg_limit_fwd_m ≤ x_cg_m ≤ cg_limit_aft_m` — critério de aceite do
-    /// projeto (Task 4.4), substitui o antigo `sm > 0.03` isolado.
+    /// — critério de aceite do projeto (Task 4.4 + task trim-authority),
+    /// substitui o antigo `sm > 0.03` isolado. `WeightBalanceAgent::run`
+    /// só consegue avaliar o critério TRASEIRO (`x_cg_m ≤ cg_limit_aft_m`,
+    /// via `sm_min` — não depende de peso); o critério DIANTEIRO (físico,
+    /// por cenário — flare/rotação, `agents::trim_authority`) é aplicado
+    /// depois por `WeightBalanceOutput::apply_trim`, que faz o AND final.
+    /// NÃO leia este campo como veredito final antes de `apply_trim` ter
+    /// rodado (`orchestrator::size_aircraft` sempre chama antes de
+    /// devolver `SizedAircraft`).
     pub inside_envelope: bool,
+}
+
+impl WeightBalanceOutput {
+    /// Finaliza o envelope de CG ADMISSÍVEL aplicando o limite dianteiro
+    /// FÍSICO calculado pelo `TrimAuthorityAgent` (flare + rotação, task
+    /// trim-authority) — segunda metade da dependência circular descrita
+    /// no comentário da seção "ENVELOPE DE CG ADMISSÍVEL" mais acima em
+    /// `weight_balance.rs`: `WeightBalanceAgent::run` já calculou os
+    /// CENÁRIOS e o limite TRASEIRO; `TrimAuthorityAgent::run` consumiu
+    /// esses cenários (peso) + a geometria para calcular o limite
+    /// DIANTEIRO por cenário; esta função combina os dois em
+    /// `inside_envelope`/`spec.cg_limit_fwd_pct_mac`.
+    ///
+    /// Chamado por `orchestrator::size_aircraft` logo após
+    /// `TrimAuthorityAgent::run`, ANTES de devolver `SizedAircraft` — nunca
+    /// leia `spec.cg_limit_fwd_pct_mac` (fica `NaN`) nem confie em
+    /// `inside_envelope` refletir o critério dianteiro antes desta chamada.
+    ///
+    /// `spec.cg_limit_fwd_pct_mac` recebe o PIOR CASO (maior %MAC, mais
+    /// restritivo) entre os limites efetivos (`max(flare, rotação)`) de
+    /// TODOS os cenários — um único número agregado para compatibilidade
+    /// estrutural com `cg_limit_aft_pct_mac`; o veredito de aceite REAL é
+    /// sempre por cenário (`ScenarioResult::inside_envelope`), não este
+    /// agregado isolado.
+    pub fn apply_trim(&mut self, trim: &crate::models::specs::TrimSpec) {
+        let fwd_limit_for = |name: &str| -> f64 {
+            trim.rotation_limit_pct_mac_per_scenario.iter()
+                .find(|e| e.scenario == name)
+                .map(|e| trim.flare_limit_pct_mac.max(e.rotation_limit_pct_mac))
+                .unwrap_or(trim.flare_limit_pct_mac)
+        };
+
+        let worst_fwd_pct = self.scenarios.iter()
+            .map(|sc| fwd_limit_for(sc.name))
+            .fold(f64::NEG_INFINITY, f64::max);
+        self.spec.cg_limit_fwd_pct_mac = worst_fwd_pct;
+
+        for sc in &mut self.scenarios {
+            let fwd_pct = fwd_limit_for(sc.name);
+            sc.inside_envelope = sc.inside_envelope && sc.cg_pct_mac >= fwd_pct;
+        }
+    }
 }
 
 impl WeightBalanceAgent {
@@ -427,11 +481,13 @@ impl WeightBalanceAgent {
             LoadScenario { name: "4 pax + bagagem vazio",   pax_front: 2, pax_rear: 2, baggage_kg: 80.0, fuel_fraction: 0.1 },
         ];
 
-        // Envelope de CG admissível (Task 4.4) — limites físicos (m do
-        // nariz), derivados dos critérios de estabilidade de `[stability]`,
-        // não dos cenários de carga observados.
+        // Envelope de CG admissível (Task 4.4 + task trim-authority) —
+        // limite TRASEIRO físico (m do nariz), derivado de `[stability].
+        // sm_min`. O limite DIANTEIRO não é conhecido aqui ainda (depende
+        // do `TrimAuthorityAgent`, que por sua vez depende dos cenários
+        // calculados abaixo) — ver comentário da seção "ENVELOPE DE CG
+        // ADMISSÍVEL" mais acima e `WeightBalanceOutput::apply_trim`.
         let x_cg_limit_aft = cg_limit_aft_m(x_np, cfg.stability.sm_min, mac);
-        let x_cg_limit_fwd = cg_limit_fwd_m(x_np, cfg.stability.sm_max, mac);
 
         let mut scenario_results = Vec::new();
         let mut mtow_max: f64 = 0.0;
@@ -476,10 +532,10 @@ impl WeightBalanceAgent {
 
             if total_mass > mtow_max { mtow_max = total_mass; }
 
-            // Dentro do envelope (Task 4.4): x_cg entre o limite dianteiro
-            // (sm_max) e o traseiro (sm_min) — equivalente a
-            // sm_min ≤ sm ≤ sm_max.
-            let inside_envelope = x_cg >= x_cg_limit_fwd && x_cg <= x_cg_limit_aft;
+            // Veredito PARCIAL (só o critério traseiro, via sm_min) — o
+            // critério dianteiro (TrimAuthorityAgent) é AND'ado depois por
+            // `apply_trim`. Ver docstring de `ScenarioResult::inside_envelope`.
+            let inside_envelope = x_cg <= x_cg_limit_aft;
 
             scenario_results.push(ScenarioResult {
                 name:          sc.name,
@@ -502,9 +558,15 @@ impl WeightBalanceAgent {
         let cg_aft = scenario_results.iter().map(|s| s.cg_pct_mac).fold(f64::NEG_INFINITY, f64::max);
         let sm_min_observado = scenario_results.iter().map(|s| s.static_margin).fold(f64::INFINITY, f64::min);
 
-        // Envelope admissível em %MAC — mesma conversão usada para os
-        // cenários (`cg_pct_mac`), aplicada aos limites físicos.
-        let cg_limit_fwd_pct = cg_pct_mac(x_cg_limit_fwd, x_mac_le, mac);
+        // Envelope TRASEIRO em %MAC — mesma conversão usada para os
+        // cenários (`cg_pct_mac`), aplicada ao limite físico traseiro. O
+        // limite DIANTEIRO ainda não é conhecido aqui — `f64::NAN` é um
+        // placeholder PROPOSITAL (não 0.0 nem qualquer valor "plausível")
+        // até `WeightBalanceOutput::apply_trim` rodar: comparações com NaN
+        // resolvem sempre `false`, então um chamador que esqueça de chamar
+        // `apply_trim` antes de ler `cg_limit_fwd_pct_mac` falha ALTO
+        // (NaN visível em qualquer print/serialização), não silenciosamente
+        // com um número plausível mas errado.
         let cg_limit_aft_pct = cg_pct_mac(x_cg_limit_aft, x_mac_le, mac);
 
         WeightBalanceOutput {
@@ -516,7 +578,7 @@ impl WeightBalanceAgent {
                 cg_mac_fwd_pct:   cg_fwd,
                 cg_mac_aft_pct:   cg_aft,
                 static_margin_pct: sm_min_observado * 100.0,
-                cg_limit_fwd_pct_mac: cg_limit_fwd_pct,
+                cg_limit_fwd_pct_mac: f64::NAN,
                 cg_limit_aft_pct_mac: cg_limit_aft_pct,
             },
             oew_kg,
@@ -794,29 +856,11 @@ mod tests {
     /// Hand-check (mesmos valores do baseline real, ver task-4.1-report.md):
     ///   x_np=3.803m, MAC=1.2463m
     ///   sm_min=0.05 → x_cg_aft = 3.803 − 0.05·1.2463 = 3.803 − 0.062315 = 3.740685 m
-    ///   sm_max=0.25 → x_cg_fwd = 3.803 − 0.25·1.2463 = 3.803 − 0.311575 = 3.491425 m
     #[test]
     fn cg_limit_aft_hand_check() {
         let aft = cg_limit_aft_m(3.803, 0.05, 1.2463);
         println!("cg_limit_aft_m = {aft:.6}");
         assert!((aft - 3.740685).abs() < 1e-4, "aft = {aft:.6} (esperado ≈3.740685)");
-    }
-
-    #[test]
-    fn cg_limit_fwd_hand_check() {
-        let fwd = cg_limit_fwd_m(3.803, 0.25, 1.2463);
-        println!("cg_limit_fwd_m = {fwd:.6}");
-        assert!((fwd - 3.491425).abs() < 1e-4, "fwd = {fwd:.6} (esperado ≈3.491425)");
-    }
-
-    /// O limite dianteiro (SM_max, mais restritivo/maior SM) deve SEMPRE
-    /// ficar à frente (x menor) do limite traseiro (SM_min) — dado que
-    /// SM = (x_np − x_cg)/MAC é decrescente em x_cg, SM maior → x_cg menor.
-    #[test]
-    fn cg_limit_fwd_fica_a_frente_do_cg_limit_aft() {
-        let fwd = cg_limit_fwd_m(3.803, 0.25, 1.2463);
-        let aft = cg_limit_aft_m(3.803, 0.05, 1.2463);
-        assert!(fwd < aft, "limite dianteiro ({fwd:.4}) deveria ficar à frente do traseiro ({aft:.4})");
     }
 
     /// Propriedade: aumentar `sm_min` torna o critério de estabilidade
@@ -831,79 +875,165 @@ mod tests {
              aft base ({aft_base:.4})");
     }
 
-    /// Propriedade simétrica: aumentar `sm_max` RELAXA o critério de
-    /// autoridade de profundor (permite SM mais alta, i.e. CG ainda mais à
-    /// frente, antes de violar o limite) — o limite DIANTEIRO deve avançar
-    /// mais para a frente ainda (x menor), alargando o envelope admissível
-    /// pela frente. (x_cg_fwd = x_np − sm_max·MAC é decrescente em sm_max.)
-    #[test]
-    fn aumentar_sm_max_move_limite_dianteiro_mais_para_frente() {
-        let fwd_base  = cg_limit_fwd_m(3.803, 0.25, 1.2463);
-        let fwd_maior = cg_limit_fwd_m(3.803, 0.35, 1.2463);
-        assert!(fwd_maior < fwd_base,
-            "fwd com sm_max maior ({fwd_maior:.4}) deveria ser MENOR (mais à frente, \
-             envelope mais permissivo) que fwd base ({fwd_base:.4})");
-    }
+    // ─── WeightBalanceOutput::apply_trim (task trim-authority) ──────────────
+    //
+    // O limite dianteiro FÍSICO (flare/rotação) é calculado pelo
+    // `TrimAuthorityAgent` — testado a fundo em `agents::trim_authority::
+    // tests`. Os testes abaixo cobrem só a COMPOSIÇÃO em
+    // `WeightBalanceOutput::apply_trim`: o AND entre o critério traseiro
+    // (já calculado por `WeightBalanceAgent::run`) e o dianteiro (vindo de
+    // um `TrimSpec` sintético), e a agregação do pior caso em
+    // `spec.cg_limit_fwd_pct_mac`.
 
-    /// Task 4.4 — critério cenário-vs-envelope, testado diretamente sobre
-    /// `MassItem`/`cg_from_items` (não a pipeline completa de agentes: o NP
-    /// real da célula-base hoje coloca o envelope bem atrás de todos os 6
-    /// cenários reais — achado honesto documentado em
-    /// `todos_os_cenarios_estaveis` e no relatório da Task 4.4). Cenário
-    /// sintético "bagagem no limite do compartimento + tanque cheio":
-    ///   items: OEW simplificado (700kg @3.55m) + bagagem no limite
-    ///   (30kg @5.6m, arm do compartimento) + tanque cheio (50kg @3.6m).
-    ///   x_cg = (700·3.55 + 30·5.6 + 50·3.6) / 780 = 2833/780 = 3.6321 m
-    /// Com x_np=3.803m, MAC=1.2463m, sm_min=0.05/sm_max=0.25 (mesmos valores
-    /// do baseline real): envelope = [3.4914m, 3.7407m] — x_cg cai DENTRO.
-    #[test]
-    fn cenario_bagagem_no_limite_e_tanque_cheio_fica_dentro_do_envelope() {
-        let (x_np, mac, sm_min, sm_max) = (3.803, 1.2463, 0.05, 0.25);
-        let x_cg_limit_fwd = cg_limit_fwd_m(x_np, sm_max, mac);
+    /// Constrói um `WeightBalanceOutput` sintético mínimo (2 cenários) para
+    /// testar `apply_trim` isoladamente, sem depender do pipeline completo
+    /// de agentes.
+    fn wb_sintetico_para_apply_trim() -> WeightBalanceOutput {
+        let mac = 1.25;
+        let mac_le = 2.90;
+        let x_np = 3.80;
+        let sm_min = 0.05;
         let x_cg_limit_aft = cg_limit_aft_m(x_np, sm_min, mac);
 
-        let items = vec![
-            MassItem { name: "OEW simplificado".to_string(), mass_kg: 700.0, arm_m: 3.55 },
-            MassItem { name: "Bagagem (limite)".to_string(),  mass_kg: 30.0,  arm_m: 5.6 },
-            MassItem { name: "Tanque cheio".to_string(),      mass_kg: 50.0,  arm_m: 3.6 },
-        ];
-        let (_, x_cg) = cg_from_items(&items);
-        println!("x_cg={x_cg:.4}m  envelope=[{x_cg_limit_fwd:.4}, {x_cg_limit_aft:.4}]m");
+        let make_scenario = |name: &'static str, cg_pct: f64| {
+            let x_cg = mac_le + cg_pct / 100.0 * mac;
+            ScenarioResult {
+                name,
+                total_mass_kg: 1_200.0,
+                x_cg_m: x_cg,
+                cg_pct_mac: cg_pct,
+                static_margin: static_margin(x_np, x_cg, mac),
+                stable: true,
+                inside_envelope: x_cg <= x_cg_limit_aft, // mesmo critério parcial de `run()`
+            }
+        };
 
-        assert!(x_cg >= x_cg_limit_fwd && x_cg <= x_cg_limit_aft,
-            "x_cg={x_cg:.4}m deveria estar DENTRO do envelope [{x_cg_limit_fwd:.4}, \
-             {x_cg_limit_aft:.4}]m", );
+        WeightBalanceOutput {
+            spec: crate::models::specs::WeightSpec {
+                oew_kg: 900.0,
+                mtow_kg: 1_400.0,
+                payload_kg: 400.0,
+                fuel_mass_kg: 150.0,
+                cg_mac_fwd_pct: 10.0,
+                cg_mac_aft_pct: 30.0,
+                static_margin_pct: 12.0,
+                cg_limit_fwd_pct_mac: f64::NAN,
+                cg_limit_aft_pct_mac: cg_pct_mac(x_cg_limit_aft, mac_le, mac),
+            },
+            oew_kg: 900.0,
+            chord_root_m: 1.6,
+            chord_tip_m: 0.7,
+            mac_m: mac,
+            mac_le_x_m: mac_le,
+            x_np_m: x_np,
+            scenarios: vec![
+                make_scenario("Leve (dianteiro)", 10.0),
+                make_scenario("Pesado (traseiro)", 25.0),
+            ],
+        }
     }
 
-    /// Teste negativo, MESMO cenário do teste acima acrescido de lastro no
-    /// nariz (arm próximo do datum): o lastro puxa o CG para a frente do
-    /// limite DIANTEIRO do envelope (sm_max) — violação por excesso de
-    /// autoridade de profundor exigida, não por instabilidade (SM continua
-    /// positiva/alta, o problema é justamente SM alta demais).
-    ///   items + lastro (60kg @0.3m):
-    ///   x_cg = (2833 + 60·0.3) / (780+60) = 2851/840 = 3.3940 m < 3.4914 m
+    fn trim_sintetico(flare_pct: f64, rot_leve: f64, rot_pesado: f64) -> crate::models::specs::TrimSpec {
+        use crate::models::specs::{ScenarioTrimLimit, TrimSensitivity, TrimSpec};
+        let make = |scenario: &str, rot: f64| ScenarioTrimLimit {
+            scenario: scenario.to_string(),
+            rotation_limit_pct_mac: rot,
+            governing_limit_pct_mac: flare_pct.max(rot),
+            governing: if rot > flare_pct { "rotacao".to_string() } else { "flare".to_string() },
+        };
+        TrimSpec {
+            flare_limit_pct_mac: flare_pct,
+            rotation_limit_pct_mac_per_scenario: vec![
+                make("Leve (dianteiro)", rot_leve),
+                make("Pesado (traseiro)", rot_pesado),
+            ],
+            governing: "rotacao".to_string(),
+            cl_h_required_at_fwd_limit: -0.7,
+            cl_h_available: -0.7,
+            sensitivity: TrimSensitivity {
+                cl_h_max_down_minus: 0.80,
+                flare_limit_pct_mac_minus: flare_pct + 3.0,
+                cl_h_max_down_plus: 0.90,
+                flare_limit_pct_mac_plus: flare_pct - 3.0,
+            },
+            cm_ac: -0.008,
+            cm_flap_delta: -0.30,
+            cl_h_max_down: 0.85,
+            trim_margin: 0.10,
+            cl_ground_rotation: 0.5,
+            to_flap_cm_fraction: 0.5,
+        }
+    }
+
+    /// Cenário "Leve" (CG a 10% MAC) tem limite de rotação em 15% MAC — CG
+    /// fica À FRENTE do limite → `inside_envelope` deve virar `false`
+    /// depois de `apply_trim` (estava `true`, critério parcial traseiro
+    /// apenas). Cenário "Pesado" (CG a 25% MAC) tem limite de rotação em
+    /// 12% MAC — CG fica ATRÁS do limite → continua `true`.
     #[test]
-    fn lastro_no_nariz_viola_o_limite_dianteiro_do_envelope() {
-        let (x_np, mac, sm_min, sm_max) = (3.803, 1.2463, 0.05, 0.25);
-        let x_cg_limit_fwd = cg_limit_fwd_m(x_np, sm_max, mac);
-        let x_cg_limit_aft = cg_limit_aft_m(x_np, sm_min, mac);
+    fn apply_trim_marca_fora_quando_cg_fica_a_frente_do_limite_de_rotacao() {
+        let mut wb = wb_sintetico_para_apply_trim();
+        assert!(wb.scenarios[0].inside_envelope, "pré-condição: parcial (só traseiro) é true");
+        assert!(wb.scenarios[1].inside_envelope, "pré-condição: parcial (só traseiro) é true");
 
-        let items = vec![
-            MassItem { name: "OEW simplificado".to_string(), mass_kg: 700.0, arm_m: 3.55 },
-            MassItem { name: "Bagagem (limite)".to_string(),  mass_kg: 30.0,  arm_m: 5.6 },
-            MassItem { name: "Tanque cheio".to_string(),      mass_kg: 50.0,  arm_m: 3.6 },
-            MassItem { name: "Lastro no nariz".to_string(),   mass_kg: 60.0,  arm_m: 0.3 },
-        ];
-        let (_, x_cg) = cg_from_items(&items);
-        println!("x_cg={x_cg:.4}m  envelope=[{x_cg_limit_fwd:.4}, {x_cg_limit_aft:.4}]m");
+        let trim = trim_sintetico(5.0, 15.0, 12.0);
+        wb.apply_trim(&trim);
 
-        assert!(x_cg < x_cg_limit_fwd,
-            "x_cg={x_cg:.4}m deveria ficar À FRENTE (menor) do limite dianteiro \
-             {x_cg_limit_fwd:.4}m — lastro no nariz deveria violar o envelope");
-        // Confirma que a violação é especificamente DIANTEIRA (não traseira).
-        assert!(x_cg < x_cg_limit_aft,
-            "sanidade: x_cg={x_cg:.4}m deveria estar bem longe do limite traseiro \
-             {x_cg_limit_aft:.4}m também (violação é pela frente)");
+        assert!(!wb.scenarios[0].inside_envelope,
+            "cenário 'Leve' (CG=10%) deveria ficar FORA — limite de rotação (15%) está à frente");
+        assert!(wb.scenarios[1].inside_envelope,
+            "cenário 'Pesado' (CG=25%) deveria continuar DENTRO — limite de rotação (12%) < CG");
+    }
+
+    /// `spec.cg_limit_fwd_pct_mac` finalizado deve ser o PIOR CASO (maior
+    /// %MAC) entre os limites efetivos (`max(flare, rotação)`) de todos os
+    /// cenários — aqui, 15% (cenário "Leve") > 12% (cenário "Pesado").
+    #[test]
+    fn apply_trim_cg_limit_fwd_pct_mac_e_o_pior_caso_entre_cenarios() {
+        let mut wb = wb_sintetico_para_apply_trim();
+        assert!(wb.spec.cg_limit_fwd_pct_mac.is_nan(), "placeholder antes de apply_trim deveria ser NaN");
+
+        let trim = trim_sintetico(5.0, 15.0, 12.0);
+        wb.apply_trim(&trim);
+
+        assert!((wb.spec.cg_limit_fwd_pct_mac - 15.0).abs() < 1e-9,
+            "cg_limit_fwd_pct_mac = {} (esperado 15.0, o pior caso entre os dois cenários)",
+            wb.spec.cg_limit_fwd_pct_mac);
+    }
+
+    /// Quando a FLARE é mais restritiva que a rotação em um cenário
+    /// específico, `governing_limit_pct_mac`/o critério AND usam a flare
+    /// (constante, `max(flare, rotação)`), não a rotação.
+    #[test]
+    fn apply_trim_usa_flare_quando_flare_e_mais_restritiva_que_rotacao() {
+        let mut wb = wb_sintetico_para_apply_trim();
+        // flare=20% > rotação de ambos os cenários (8%/6%) — flare governa.
+        let trim = trim_sintetico(20.0, 8.0, 6.0);
+        wb.apply_trim(&trim);
+
+        assert!(!wb.scenarios[0].inside_envelope,
+            "cenário 'Leve' (CG=10%) deveria ficar FORA — flare (20%) está à frente do CG");
+        assert!(wb.scenarios[1].inside_envelope,
+            "cenário 'Pesado' (CG=25%) deveria continuar DENTRO — flare (20%) < CG (25%)");
+        assert!((wb.spec.cg_limit_fwd_pct_mac - 20.0).abs() < 1e-9,
+            "cg_limit_fwd_pct_mac deveria ser a flare (20.0), obtido {}",
+            wb.spec.cg_limit_fwd_pct_mac);
+    }
+
+    /// `apply_trim` preserva um veredito `false` já vindo do critério
+    /// traseiro (AND, não OR) — CG artificialmente atrás do limite traseiro
+    /// deve continuar `false` mesmo com um limite dianteiro folgado.
+    #[test]
+    fn apply_trim_preserva_falso_do_criterio_traseiro() {
+        let mut wb = wb_sintetico_para_apply_trim();
+        wb.scenarios[1].inside_envelope = false; // simula violação traseira
+
+        let trim = trim_sintetico(1.0, 1.0, 1.0); // dianteiro folgadíssimo
+        wb.apply_trim(&trim);
+
+        assert!(!wb.scenarios[1].inside_envelope,
+            "AND com critério traseiro false deveria permanecer false mesmo com dianteiro \
+             folgado");
     }
 
     #[test]

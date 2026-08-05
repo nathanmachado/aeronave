@@ -24,9 +24,10 @@ pub struct AircraftConfig {
     pub gear: GearCfg,
     pub arms: ArmsCfg,
     pub structure: StructureCfg,
-    /// Limites de estabilidade estática que definem o envelope de CG
-    /// admissível (Task 4.4) — consumidos por
-    /// `weight_balance::cg_limit_fwd_m`/`cg_limit_aft_m`.
+    /// Limites de estabilidade/controle que definem o envelope de CG
+    /// admissível (Task 4.4 + task trim-authority) — o limite traseiro vem
+    /// de `weight_balance::cg_limit_aft_m`; o dianteiro, de
+    /// `agents::trim_authority::TrimAuthorityAgent`.
     pub stability: StabilityCfg,
     /// CD0 residual (antenas, juntas, imperfeições) — não pertence a nenhum
     /// componente específico da aeronave.
@@ -80,6 +81,22 @@ pub struct WingCfg {
     /// única fonte desta posição; `ArmConfig::wing_le_root_m` e o cálculo do
     /// CG mais traseiro em `main.rs` derivam dela.
     pub le_root_x_m: f64,
+    /// Cm_ac do perfil em torno do seu próprio centro aerodinâmico,
+    /// configuração LIMPA (adimensional, tipicamente negativo para perfis
+    /// com câmber positivo) — quase nulo para a série NACA 230 (Abbott &
+    /// von Doenhoff, "Theory of Wing Sections"). Consumido por
+    /// `agents::trim_authority` no balanço de momentos de flare/rotação
+    /// (task trim-authority) — substitui, junto com `cm_flap_delta`, o
+    /// antigo proxy `stability.sm_max` (removido) como fonte do limite
+    /// DIANTEIRO físico do envelope de CG.
+    pub cm_ac: f64,
+    /// ΔCm de flap de POUSO (incremento nariz-para-baixo do momento de
+    /// arfagem com o flap totalmente estendido, adimensional, negativo) —
+    /// semi-empírico (Raymer cap. 16, faixa típica −0,20 a −0,45).
+    /// Consumido por `agents::trim_authority` (flare usa o valor cheio;
+    /// rotação usa `stability.to_flap_cm_fraction · cm_flap_delta`, flap de
+    /// decolagem parcial).
+    pub cm_flap_delta: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,29 +231,51 @@ pub struct DragCfg {
     pub cooling_drag_fraction: f64,
 }
 
-/// Limites de estabilidade estática (Task 4.4) que definem o envelope de CG
-/// ADMISSÍVEL da aeronave — em contraste com `WeightSpec::cg_mac_fwd_pct`/
-/// `cg_mac_aft_pct`, que são os extremos OBSERVADOS entre os cenários de
-/// carga. O envelope vem de dois critérios físicos independentes:
+/// Limites de estabilidade/controle (Task 4.4 + task trim-authority) que
+/// definem o envelope de CG ADMISSÍVEL da aeronave — em contraste com
+/// `WeightSpec::cg_mac_fwd_pct`/`cg_mac_aft_pct`, que são os extremos
+/// OBSERVADOS entre os cenários de carga. O envelope vem de DOIS critérios
+/// físicos INDEPENDENTES, um por extremo:
 ///
 ///   - `sm_min`: margem estática mínima aceitável — abaixo dela a aeronave
 ///     fica perigosamente próxima da instabilidade estática longitudinal.
 ///     Define o limite TRASEIRO do CG (CG mais atrás permitido): SM cai
-///     quando o CG recua, então SM = sm_min é o pior caso traseiro.
-///   - `sm_max`: proxy de autoridade de profundor em flare/pouso — margem
-///     estática ALTA demais (CG muito à frente) exige mais deflexão de
-///     profundor do que a superfície consegue entregar. Define o limite
-///     DIANTEIRO do CG: SM = sm_max é o pior caso dianteiro.
-///
-/// Ver `weight_balance::cg_limit_fwd_m`/`cg_limit_aft_m` para a conversão em
-/// posição física (metros do datum no nariz).
+///     quando o CG recua, então SM = sm_min é o pior caso traseiro (ver
+///     `weight_balance::cg_limit_aft_m`).
+///   - O limite DIANTEIRO do CG (CG mais à frente permitido) NÃO usa mais
+///     um proxy de margem estática (`sm_max`, REMOVIDO nesta task — config
+///     antiga com `sm_max` produz um erro de migração claro em
+///     `models::config::parse_aircraft`). Em vez disso é calculado
+///     FISICAMENTE pelo `TrimAuthorityAgent` a partir da autoridade de
+///     profundor disponível (`cl_h_max_down`/`trim_margin` abaixo) nas duas
+///     manobras críticas nariz-para-cima (flare no pouso + rotação na
+///     decolagem) — ver `agents::trim_authority` e `models::specs::TrimSpec`.
+///     `cm_ac`/`cm_flap_delta` (agora em `[wing]`) completam o balanço de
+///     momentos usado por esse cálculo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StabilityCfg {
     /// Margem estática mínima admissível — define o limite TRASEIRO do CG.
     pub sm_min: f64,
-    /// Margem estática máxima admissível (autoridade de profundor) — define
-    /// o limite DIANTEIRO do CG.
-    pub sm_max: f64,
+    /// |CL| máximo de DOWNLOAD da empenagem horizontal com o profundor no
+    /// batente (semi-empírico, faixa típica 0,5–1,2 — Gudmundsson/Roskam).
+    /// Autoridade bruta disponível para as manobras de flare/rotação —
+    /// `agents::trim_authority::cl_h_available` aplica `trim_margin` sobre
+    /// este valor. RESULTADO SENSÍVEL a este parâmetro — ver
+    /// `models::specs::TrimSensitivity`.
+    pub cl_h_max_down: f64,
+    /// Fração da autoridade de profundor RESERVADA como margem (efeito solo
+    /// na aproximação/flare + margem de certificação) — não consumida no
+    /// balanço de momentos nominal, reduz `cl_h_max_down` efetivo.
+    pub trim_margin: f64,
+    /// CL da asa na corrida de decolagem, ANTES da rotação (ângulo de
+    /// ataque de solo, trem no chão) — faixa típica 0–1. Usado no momento
+    /// de sustentação nariz-para-cima em `agents::trim_authority`
+    /// (`rotation_fwd_limit_m`, termo `L_g`).
+    pub cl_ground_rotation: f64,
+    /// Fração de `[wing].cm_flap_delta` aplicável em configuração de flap
+    /// de DECOLAGEM (tipicamente parcial, menos extensão que o flap de
+    /// pouso usado na flare) — usado no `Cm` de perfil+flap da rotação.
+    pub to_flap_cm_fraction: f64,
     /// Coeficiente empírico de momento de arfagem da fuselagem (Multhopp
     /// simplificado, Raymer eq. 16.25, fig. 16.14) — usado por
     /// `weight_balance::fuselage_np_shift_mac` para corrigir o ponto neutro
@@ -402,6 +441,12 @@ pub mod test_fixtures {
                 cl_max_flaps: 1.65,
                 cd0_wing: 0.0052,
                 le_root_x_m: 2.80,
+                // Levemente diferentes do baseline real (−0.008/−0.30) —
+                // mesma justificativa de "nenhum destes números coincide
+                // com o baseline real" usada nas demais seções desta
+                // fixture (task trim-authority).
+                cm_ac: -0.010,
+                cm_flap_delta: -0.28,
             },
             fuselage: FuselageCfg {
                 length_m: 8.0,
@@ -463,10 +508,19 @@ pub mod test_fixtures {
             // coincide com o baseline real" usada nas demais seções desta
             // fixture.
             drag: DragCfg { cd0_misc: 0.0032, cooling_drag_fraction: 0.035 },
-            // Levemente diferente do baseline real (0.05/0.25/0.02) — mesma
-            // justificativa de "nenhum destes números coincide com o
-            // baseline real" usada nas demais seções desta fixture.
-            stability: StabilityCfg { sm_min: 0.06, sm_max: 0.28, fuselage_kf: 0.018 },
+            // Levemente diferente do baseline real (0.05/0.85/0.10/0.5/0.5/
+            // 0.02) — mesma justificativa de "nenhum destes números
+            // coincide com o baseline real" usada nas demais seções desta
+            // fixture (task trim-authority: sm_max REMOVIDO, ver
+            // `StabilityCfg`).
+            stability: StabilityCfg {
+                sm_min: 0.06,
+                cl_h_max_down: 0.80,
+                trim_margin: 0.12,
+                cl_ground_rotation: 0.55,
+                to_flap_cm_fraction: 0.5,
+                fuselage_kf: 0.018,
+            },
             masses: MassesCfg {
                 items: vec![
                     MassItemCfg { name: "psru_helice_capo".into(),   mass_kg: 62.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.3 },

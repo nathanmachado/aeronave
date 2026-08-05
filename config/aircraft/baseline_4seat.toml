@@ -19,6 +19,14 @@ cl_max_clean = 1.45
 cl_max_flaps = 1.72
 cd0_wing = 0.0050
 le_root_x_m = 2.90          # única fonte da posição do bordo de ataque
+# Cm_ac do perfil NACA 23015 em torno do seu próprio CA — quase nulo
+# (característica da série 230, Abbott & von Doenhoff). ΔCm de flap de
+# pouso: semi-empírico (Raymer cap. 16, faixa típica −0.20 a −0.45).
+# Consumidos por agents::trim_authority (task trim-authority) — limite
+# dianteiro FÍSICO do envelope de CG, substitui o antigo proxy
+# [stability].sm_max (removido, ver abaixo).
+cm_ac = -0.008
+cm_flap_delta = -0.30
 
 [fuselage]
 length_m = 8.2
@@ -129,13 +137,21 @@ cd0_misc = 0.003
 # `golden_toyota_baseline_regressao_task_2_1`, atualizada na Task 5.2).
 cooling_drag_fraction = 0.04
 
-# Envelope de CG admissível (Task 4.4) — limites de estabilidade estática
-# que definem o CG mais traseiro (sm_min) e mais dianteiro (sm_max)
-# aceitáveis, em contraste com os extremos apenas OBSERVADOS entre os
-# cenários de carga (ver weight_balance::cg_limit_fwd_m/cg_limit_aft_m).
+# Envelope de CG admissível (Task 4.4 + task trim-authority) — limite
+# TRASEIRO (sm_min, margem estática mínima) + parâmetros da autoridade de
+# profundor que definem o limite DIANTEIRO FÍSICO (agents::trim_authority,
+# TrimAuthorityAgent — substitui o antigo proxy sm_max, REMOVIDO: uma
+# config com sm_max presente agora falha com um erro de migração claro em
+# models::config::parse_aircraft).
 [stability]
 sm_min = 0.05   # margem estática mínima — limite TRASEIRO do CG
-sm_max = 0.25   # proxy de autoridade de profundor (flare) — limite DIANTEIRO do CG
+# |CL| máximo de download da empenagem c/ profundor no batente
+# (semi-empírico; faixa típica 0.5-1.2 — Gudmundsson/Roskam). RESULTADO
+# SENSÍVEL a este parâmetro — ver TrimSpec.sensitivity no JSON de saída.
+cl_h_max_down = 0.85
+trim_margin = 0.10        # fração da autoridade reservada como margem (efeito solo + certificação)
+cl_ground_rotation = 0.5  # CL da asa na corrida de decolagem antes da rotação (faixa 0-1)
+to_flap_cm_fraction = 0.5 # fração de cm_flap_delta aplicável em flap de decolagem
 # Coeficiente de Multhopp simplificado (Raymer eq. 16.25, fig. 16.14) para a
 # contribuição desestabilizadora da fuselagem no ponto neutro — faixa típica
 # 0.01-0.03 conforme a posição vertical da asa na fuselagem (asa baixa como

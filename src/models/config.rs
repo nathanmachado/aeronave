@@ -204,9 +204,39 @@ fn validate_engine(engine: &EngineSpec) -> Result<(), ConfigError> {
 /// validando as invariantes físicas e de consistência (braços conhecidos,
 /// material estrutural cadastrado, etc).
 pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
+    check_sm_max_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
+}
+
+/// Guarda de migração (task trim-authority): `[stability].sm_max` foi
+/// REMOVIDO — o limite dianteiro do envelope de CG agora é calculado
+/// fisicamente pelo `TrimAuthorityAgent` a partir de `[stability].
+/// cl_h_max_down`/`trim_margin`/`cl_ground_rotation`/`to_flap_cm_fraction` +
+/// `[wing].cm_ac`/`cm_flap_delta` (ver `models::aircraft_config::
+/// StabilityCfg`). Como `AircraftConfig`/`StabilityCfg` não usam
+/// `#[serde(deny_unknown_fields)]` em lugar nenhum deste crate, um TOML
+/// antigo com `sm_max` seria simplesmente IGNORADO pelo parser (silêncio,
+/// não erro) — a configuração carregaria "com sucesso" usando um envelope
+/// dianteiro completamente diferente do que o operador pretendia, sem
+/// nenhum aviso. Faz o parse do TOML bruto como `toml::Value` primeiro só
+/// para checar essa chave específica e falhar alto e claro, ANTES do parse
+/// tipado — não é validação física (isso é `validate_aircraft`), é
+/// detecção de configuração de uma versão anterior do schema.
+fn check_sm_max_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("stability").and_then(|s| s.get("sm_max")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [stability].sm_max foi substituído por um \
+             limite dianteiro de CG calculado fisicamente (TrimAuthorityAgent) — remova \
+             sm_max e adicione [stability].cl_h_max_down/trim_margin/cl_ground_rotation/\
+             to_flap_cm_fraction + [wing].cm_ac/cm_flap_delta (ver docs/aircraft_spec.schema.md \
+             e config/aircraft/baseline_4seat.toml para valores de referência)"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Lê e faz o parse de uma configuração de célula a partir de um arquivo
@@ -299,6 +329,25 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     }
     require_non_negative("wing.cd0_wing", cfg.wing.cd0_wing)?;
     require_non_negative("wing.le_root_x_m", cfg.wing.le_root_x_m)?;
+    // Task trim-authority: Cm_ac do perfil + ΔCm de flap de pouso,
+    // consumidos pelo balanço de momentos de flare/rotação
+    // (`agents::trim_authority`).
+    require_finite("wing.cm_ac", cfg.wing.cm_ac)?;
+    if cfg.wing.cm_ac <= -0.15 || cfg.wing.cm_ac >= 0.05 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.cm_ac deve estar em (-0.15, 0.05) \
+             (valor: {})",
+            cfg.wing.cm_ac
+        )));
+    }
+    require_finite("wing.cm_flap_delta", cfg.wing.cm_flap_delta)?;
+    if cfg.wing.cm_flap_delta <= -0.6 || cfg.wing.cm_flap_delta >= 0.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.cm_flap_delta deve estar em (-0.6, 0.0) \
+             (valor: {})",
+            cfg.wing.cm_flap_delta
+        )));
+    }
 
     // [fuselage]
     require_positive("fuselage.length_m", cfg.fuselage.length_m)?;
@@ -450,28 +499,55 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         )));
     }
 
-    // [stability] (Task 4.4) — limites de estabilidade que definem o
-    // envelope de CG admissível: 0 < sm_min < sm_max < 0.5.
+    // [stability] (Task 4.4 + task trim-authority) — sm_min segue definindo
+    // o limite TRASEIRO (0 < sm_min); sm_max foi REMOVIDO (ver
+    // `check_sm_max_migration`) — o limite DIANTEIRO agora vem da
+    // autoridade de profundor (`cl_h_max_down`/`trim_margin`/
+    // `cl_ground_rotation`/`to_flap_cm_fraction`), validada abaixo.
     require_finite("stability.sm_min", cfg.stability.sm_min)?;
-    require_finite("stability.sm_max", cfg.stability.sm_max)?;
     if cfg.stability.sm_min <= 0.0 {
         return Err(ConfigError::Validation(format!(
             "configuração de aeronave inválida: stability.sm_min deve ser positivo (valor: {})",
             cfg.stability.sm_min
         )));
     }
-    if cfg.stability.sm_min >= cfg.stability.sm_max {
+    if cfg.stability.sm_min >= 0.5 {
         return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: stability.sm_min ({}) deve ser menor que \
-             stability.sm_max ({})",
-            cfg.stability.sm_min, cfg.stability.sm_max
+            "configuração de aeronave inválida: stability.sm_min deve ser menor que 0.5 \
+             (valor: {})",
+            cfg.stability.sm_min
         )));
     }
-    if cfg.stability.sm_max >= 0.5 {
+    require_finite("stability.cl_h_max_down", cfg.stability.cl_h_max_down)?;
+    if cfg.stability.cl_h_max_down <= 0.5 || cfg.stability.cl_h_max_down >= 1.2 {
         return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: stability.sm_max deve ser menor que 0.5 \
+            "configuração de aeronave inválida: stability.cl_h_max_down deve estar em \
+             (0.5, 1.2) (valor: {})",
+            cfg.stability.cl_h_max_down
+        )));
+    }
+    require_finite("stability.trim_margin", cfg.stability.trim_margin)?;
+    if cfg.stability.trim_margin < 0.0 || cfg.stability.trim_margin > 0.3 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.trim_margin deve estar em [0, 0.3] \
              (valor: {})",
-            cfg.stability.sm_max
+            cfg.stability.trim_margin
+        )));
+    }
+    require_finite("stability.cl_ground_rotation", cfg.stability.cl_ground_rotation)?;
+    if cfg.stability.cl_ground_rotation <= 0.0 || cfg.stability.cl_ground_rotation >= 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.cl_ground_rotation deve estar em \
+             (0.0, 1.0) (valor: {})",
+            cfg.stability.cl_ground_rotation
+        )));
+    }
+    require_finite("stability.to_flap_cm_fraction", cfg.stability.to_flap_cm_fraction)?;
+    if cfg.stability.to_flap_cm_fraction < 0.0 || cfg.stability.to_flap_cm_fraction > 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: stability.to_flap_cm_fraction deve estar em \
+             [0, 1] (valor: {})",
+            cfg.stability.to_flap_cm_fraction
         )));
     }
     // fuselage_kf (Multhopp simplificado, Raymer fig. 16.14) — faixa típica
@@ -919,6 +995,8 @@ mod tests {
             cl_max_flaps = 1.6
             cd0_wing = 0.005
             le_root_x_m = 2.5
+            cm_ac = -0.008
+            cm_flap_delta = -0.30
             [fuselage]
             length_m = 7.5
             cabin_width_m = 1.1
@@ -974,7 +1052,10 @@ mod tests {
             cooling_drag_fraction = 0.04
             [stability]
             sm_min = 0.05
-            sm_max = 0.25
+            cl_h_max_down = 0.85
+            trim_margin = 0.10
+            cl_ground_rotation = 0.5
+            to_flap_cm_fraction = 0.5
             fuselage_kf = 0.02
             [performance]
             mu_brake_paved = 0.40
@@ -1337,18 +1418,10 @@ mod tests {
     }
 
     #[test]
-    fn rejeita_sm_min_maior_ou_igual_a_sm_max() {
-        let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = 0.30");
+    fn rejeita_sm_min_maior_ou_igual_a_0_5() {
+        let toml = aircraft_toml_valido().replace("sm_min = 0.05", "sm_min = 0.55");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("stability.sm_min"), "{err}");
-        assert!(err.to_string().contains("stability.sm_max"), "{err}");
-    }
-
-    #[test]
-    fn rejeita_sm_max_maior_ou_igual_a_0_5() {
-        let toml = aircraft_toml_valido().replace("sm_max = 0.25", "sm_max = 0.55");
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("stability.sm_max"), "{err}");
     }
 
     #[test]
@@ -1377,6 +1450,119 @@ mod tests {
         let toml = aircraft_toml_valido().replace("fuselage_kf = 0.02", "fuselage_kf = nan");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    // ─── migração sm_max → TrimAuthorityAgent (task trim-authority) ────────
+
+    /// Config de uma versão anterior do schema (com `[stability].sm_max`)
+    /// deve ser rejeitada com um erro de migração claro, ANTES de qualquer
+    /// checagem física — não deve carregar silenciosamente ignorando o
+    /// campo desconhecido (comportamento padrão do serde sem
+    /// `deny_unknown_fields`).
+    #[test]
+    fn rejeita_config_antiga_com_sm_max_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "sm_min = 0.05\n",
+            "sm_min = 0.05\n            sm_max = 0.25\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("sm_max"), "{err}");
+        assert!(err.to_string().contains("substituído"), "{err}");
+        assert!(err.to_string().contains("TrimAuthorityAgent"), "{err}");
+    }
+
+    // ─── [wing] cm_ac / cm_flap_delta (task trim-authority) ─────────────────
+
+    #[test]
+    fn rejeita_cm_ac_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("cm_ac = -0.008", "cm_ac = -0.20");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.cm_ac"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cm_ac_nao_finito() {
+        let toml = aircraft_toml_valido().replace("cm_ac = -0.008", "cm_ac = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cm_flap_delta_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("cm_flap_delta = -0.30", "cm_flap_delta = -0.70");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.cm_flap_delta"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cm_flap_delta_nao_negativo() {
+        let toml = aircraft_toml_valido().replace("cm_flap_delta = -0.30", "cm_flap_delta = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.cm_flap_delta"), "{err}");
+    }
+
+    // ─── [stability] cl_h_max_down / trim_margin / cl_ground_rotation /
+    //     to_flap_cm_fraction (task trim-authority) ──────────────────────────
+
+    #[test]
+    fn rejeita_cl_h_max_down_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("cl_h_max_down = 0.85", "cl_h_max_down = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.cl_h_max_down"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cl_h_max_down_muito_baixo() {
+        let toml = aircraft_toml_valido().replace("cl_h_max_down = 0.85", "cl_h_max_down = 0.3");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.cl_h_max_down"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_trim_margin_negativo() {
+        let toml = aircraft_toml_valido().replace("trim_margin = 0.10", "trim_margin = -0.05");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.trim_margin"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_trim_margin_acima_de_0_3() {
+        let toml = aircraft_toml_valido().replace("trim_margin = 0.10", "trim_margin = 0.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.trim_margin"), "{err}");
+    }
+
+    #[test]
+    fn aceita_trim_margin_no_limite_zero() {
+        let toml = aircraft_toml_valido().replace("trim_margin = 0.10", "trim_margin = 0.0");
+        parse_aircraft(&toml).expect("trim_margin = 0.0 (limite inferior) deveria ser válido");
+    }
+
+    #[test]
+    fn rejeita_cl_ground_rotation_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("cl_ground_rotation = 0.5", "cl_ground_rotation = 1.2");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.cl_ground_rotation"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cl_ground_rotation_nao_positivo() {
+        let toml = aircraft_toml_valido().replace("cl_ground_rotation = 0.5", "cl_ground_rotation = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.cl_ground_rotation"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_to_flap_cm_fraction_fora_de_0_1() {
+        let toml = aircraft_toml_valido().replace("to_flap_cm_fraction = 0.5", "to_flap_cm_fraction = 1.3");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("stability.to_flap_cm_fraction"), "{err}");
+    }
+
+    #[test]
+    fn aceita_to_flap_cm_fraction_no_limite_zero() {
+        let toml = aircraft_toml_valido().replace("to_flap_cm_fraction = 0.5", "to_flap_cm_fraction = 0.0");
+        parse_aircraft(&toml).expect("to_flap_cm_fraction = 0.0 (limite inferior) deveria ser válido");
     }
 
     // ─── [performance] (Task 4.7) ────────────────────────────────────────────

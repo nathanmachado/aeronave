@@ -18,6 +18,7 @@ use aeronave::agents::landing_gear::LandingGearAgent;
 use aeronave::agents::performance::PerformanceAgent;
 use aeronave::agents::propeller::PropellerAgent;
 use aeronave::agents::structural::StructuralAgent;
+use aeronave::agents::trim_authority::TrimAuthorityAgent;
 use aeronave::agents::vn_diagram::VnDiagramAgent;
 use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
@@ -51,6 +52,10 @@ fn build_baseline_report() -> AircraftReport {
     let mission = &sized.mission;
     let wb = &sized.wb;
     let emp = &sized.emp;
+    // task trim-authority: já aplicado a `sized.wb` por `size_aircraft`
+    // (`WeightBalanceOutput::apply_trim`) — recalcula aqui só para popular
+    // o bloco `trim` do relatório, mesma sequência de `main.rs`.
+    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb);
 
     let propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
     let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
@@ -110,6 +115,7 @@ fn build_baseline_report() -> AircraftReport {
     fidelity.insert("structure".into(), "preliminary (vigas simplificadas; requer FEM); flutter preliminary — requer GVT".into());
     fidelity.insert("mission".into(), "computed (segmentos + Breguet L/D constante)".into());
     fidelity.insert("empennage".into(), "preliminary (coeficiente de volume; requer VLM/CFD)".into());
+    fidelity.insert("trim".into(), "preliminary (semi-empírico; sensível a cl_h_max_down)".into());
 
     AircraftReport {
         schema_version: SCHEMA_VERSION.to_string(),
@@ -121,6 +127,7 @@ fn build_baseline_report() -> AircraftReport {
         empennage: Some(emp.clone()),
         control_surfaces: Some(cs.clone()),
         weight: Some(wb.spec.clone()),
+        trim: Some(trim),
         performance: Some(perf),
         vn_diagram: Some(vn.clone()),
         structure: Some(struc),
@@ -136,9 +143,9 @@ fn build_baseline_report() -> AircraftReport {
 }
 
 #[test]
-fn schema_version_e_15_blocos_de_topo_presentes() {
+fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.0");
+    assert_eq!(report.schema_version, "4.1");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -147,15 +154,15 @@ fn schema_version_e_15_blocos_de_topo_presentes() {
 
     let expected_keys = [
         "schema_version", "revision", "validation_status", "wing", "propulsion",
-        "geometry", "empennage", "control_surfaces", "weight", "performance",
+        "geometry", "empennage", "control_surfaces", "weight", "trim", "performance",
         "vn_diagram", "structure", "landing_gear", "propeller", "mission",
         "electrical", "sizing", "fidelity", "violations", "warnings",
     ];
-    assert!(expected_keys.len() >= 15, "lista de chaves esperadas deveria ter pelo menos 15 entradas");
+    assert!(expected_keys.len() >= 16, "lista de chaves esperadas deveria ter pelo menos 16 entradas");
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.0");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.1");
 }
 
 #[test]

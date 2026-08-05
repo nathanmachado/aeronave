@@ -217,14 +217,111 @@ pub struct WeightSpec {
     /// confundir com `cg_limit_aft_pct_mac`, que é o limite ADMISSÍVEL.
     pub cg_mac_aft_pct: f64,
     pub static_margin_pct: f64,
-    /// Limite DIANTEIRO do envelope de CG admissível (%MAC) — vem de
-    /// `stability.sm_max` (proxy de autoridade de profundor). CG à frente
-    /// deste limite excede a margem estática máxima aceitável.
+    /// Limite DIANTEIRO do envelope de CG admissível (%MAC) — desde a task
+    /// trim-authority, vem do `TrimAuthorityAgent` (autoridade FÍSICA de
+    /// profundor em flare + rotação de decolagem), não mais do proxy
+    /// `stability.sm_max` (removido). É o PIOR CASO (maior %MAC) entre os
+    /// limites dianteiros por cenário (`TrimSpec::
+    /// rotation_limit_pct_mac_per_scenario`, cada um `max(flare, rotação)`
+    /// — a rotação varia com o peso do cenário) — um número agregado único
+    /// para compatibilidade estrutural com `cg_limit_aft_pct_mac`; o
+    /// veredito de aceite REAL por cenário usa `ScenarioResult::
+    /// inside_envelope` (finalizado por `WeightBalanceOutput::apply_trim`),
+    /// não este campo agregado isoladamente. CG à frente do limite do
+    /// PRÓPRIO cenário excede a autoridade de profundor disponível.
     pub cg_limit_fwd_pct_mac: f64,
     /// Limite TRASEIRO do envelope de CG admissível (%MAC) — vem de
     /// `stability.sm_min` (piso de estabilidade estática). CG atrás deste
     /// limite fica abaixo da margem estática mínima aceitável.
     pub cg_limit_aft_pct_mac: f64,
+}
+
+/// Um cenário do `WeightBalanceAgent`, com o limite dianteiro de ROTAÇÃO de
+/// decolagem calculado para ele (task trim-authority) — depende do PESO do
+/// cenário (`ScenarioResult::total_mass_kg`), ao contrário do limite de
+/// flare (constante, independe do peso — ver `TrimSpec::flare_limit_pct_mac`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScenarioTrimLimit {
+    /// Nome do cenário — mesmo `ScenarioResult::name` do `WeightBalanceAgent`.
+    pub scenario: String,
+    /// Limite dianteiro de CG (%MAC) pela rotação de decolagem NESTE
+    /// cenário — `agents::trim_authority::rotation_fwd_limit_m` convertido
+    /// para %MAC.
+    pub rotation_limit_pct_mac: f64,
+    /// Limite dianteiro EFETIVO deste cenário — `max(flare_limit_pct_mac,
+    /// rotation_limit_pct_mac)`, o mais restritivo das duas manobras
+    /// críticas nariz-para-cima.
+    pub governing_limit_pct_mac: f64,
+    /// Qual manobra governa NESTE cenário: `"flare"` ou `"rotacao"`.
+    pub governing: String,
+}
+
+/// Sensibilidade do limite de flare a `cl_h_max_down` (±0.05) — a
+/// autoridade de download da empenagem com o profundor no batente é um
+/// parâmetro semi-empírico (faixa típica 0.5–1.2, Gudmundsson/Roskam) sem
+/// medição direta neste projeto; pequenas variações deslocam o limite de
+/// flare de forma NÃO desprezível (ex.: 0.80→~9%, 0.85→~5,5%, 0.90→~2%
+/// MAC no baseline — ver task-1-brief.md). Reportado explicitamente para o
+/// consumidor de CAD não tratar `flare_limit_pct_mac` como um número exato
+/// — acompanha `fidelity["trim"] == "preliminary"`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrimSensitivity {
+    /// `cl_h_max_down − 0.05` usado neste recálculo.
+    pub cl_h_max_down_minus: f64,
+    /// Limite de flare (%MAC) recomputado com `cl_h_max_down_minus`.
+    pub flare_limit_pct_mac_minus: f64,
+    /// `cl_h_max_down + 0.05` usado neste recálculo.
+    pub cl_h_max_down_plus: f64,
+    /// Limite de flare (%MAC) recomputado com `cl_h_max_down_plus`.
+    pub flare_limit_pct_mac_plus: f64,
+}
+
+/// Saída do TrimAuthorityAgent (task trim-authority) — limite dianteiro
+/// FÍSICO do envelope de CG, derivado da autoridade de profundor nas duas
+/// manobras críticas de arfagem nariz-para-cima: flare no pouso
+/// (V_ref=1,3·Vs0, flap de pouso, balanço de momentos em torno do CG) e
+/// rotação na decolagem (Vr=1,1·Vs0, flap de decolagem, balanço de
+/// momentos em torno do TREM PRINCIPAL). Substitui o antigo proxy
+/// `stability.sm_max` (margem estática máxima, sem base física direta em
+/// autoridade de controle) — ver `agents::trim_authority` para a dedução
+/// completa e ACHADO DE PROJETO honesto: a rotação (não a flare) governa o
+/// limite dianteiro real desta aeronave, e é MAIS restritiva que o antigo
+/// proxy (o trem principal fica muito atrás do CG, `[gear].x_main_m`).
+///
+/// `governing`: `"flare"` se a flare governa em TODOS os cenários,
+/// `"rotacao"` se a rotação governa em TODOS os cenários, `"misto"` se
+/// varia por cenário — ver `governing` de cada `ScenarioTrimLimit` para o
+/// veredito POR cenário (o que efetivamente importa para `inside_envelope`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrimSpec {
+    /// Limite dianteiro de flare (%MAC) — independe do peso do cenário: o
+    /// CL de equilíbrio 1g na flare (`cl_max_flaps/1,69`) não depende de W.
+    pub flare_limit_pct_mac: f64,
+    /// Limite dianteiro de rotação (%MAC) POR CENÁRIO — depende do peso
+    /// (ver `ScenarioTrimLimit`); um valor por cenário do `WeightBalanceAgent`.
+    pub rotation_limit_pct_mac_per_scenario: Vec<ScenarioTrimLimit>,
+    /// Qual manobra governa, agregado sobre todos os cenários — ver
+    /// doc-comment da struct.
+    pub governing: String,
+    /// CL_h requerido no limite de flare resolvido — por construção
+    /// coincide com `cl_h_available` (é a própria definição do limite, ver
+    /// `agents::trim_authority::flare_fwd_limit_frac`); reportado como
+    /// checagem de sanidade para um consumidor externo.
+    pub cl_h_required_at_fwd_limit: f64,
+    /// CL_h disponível — `-cl_h_max_down·(1 − trim_margin)` (download
+    /// máximo da empenagem com o profundor no batente, com a margem de
+    /// trim reservada para efeito solo/certificação).
+    pub cl_h_available: f64,
+    /// Sensibilidade do limite de flare a `cl_h_max_down` (±0.05) — ver
+    /// `TrimSensitivity`.
+    pub sensitivity: TrimSensitivity,
+    // ─── Parâmetros ecoados (rastreabilidade sem reabrir o TOML) ────────
+    pub cm_ac: f64,
+    pub cm_flap_delta: f64,
+    pub cl_h_max_down: f64,
+    pub trim_margin: f64,
+    pub cl_ground_rotation: f64,
+    pub to_flap_cm_fraction: f64,
 }
 
 /// Saída do PerformanceAgent (preenchida na Fase seguinte)
@@ -519,7 +616,18 @@ pub struct ElectricalSpec {
 /// v4.0 (Task 6.1): adiciona `schema_version`, `geometry`, `sizing`,
 /// `fidelity`, `warnings` ao relatório v3 (que só tinha `revision` como
 /// string de versão livre, sem política declarada).
-pub const SCHEMA_VERSION: &str = "4.0";
+///
+/// v4.1 (task trim-authority): adiciona o bloco `trim` (`TrimSpec` —
+/// TrimAuthorityAgent) — mudança ADITIVA (novo bloco opcional), consumidores
+/// v4.0 continuam funcionando sem alteração. Acompanha, do lado da
+/// CONFIGURAÇÃO de entrada (não deste schema JSON): `[stability].sm_max`
+/// foi REMOVIDO de `aircraft.toml` (proxy de autoridade de profundor sem
+/// base física direta) e substituído por `[stability].cl_h_max_down`/
+/// `trim_margin`/`cl_ground_rotation`/`to_flap_cm_fraction` +
+/// `[wing].cm_ac`/`cm_flap_delta` — ver `docs/aircraft_spec.schema.md` §1 e
+/// `models::config::parse_aircraft` (erro de migração claro se `sm_max`
+/// ainda estiver presente no TOML).
+pub const SCHEMA_VERSION: &str = "4.1";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -607,6 +715,12 @@ pub struct AircraftReport {
     pub empennage: Option<EmpennageSpec>,
     pub control_surfaces: Option<ControlSurfacesSpec>,
     pub weight: Option<WeightSpec>,
+    /// Limite dianteiro FÍSICO do envelope de CG (task trim-authority) —
+    /// ver `TrimSpec`. Roda depois de `weight` (consome
+    /// `WeightBalanceOutput::scenarios`) e antes da finalização de
+    /// `weight.cg_limit_fwd_pct_mac`/`ScenarioResult::inside_envelope`
+    /// (`WeightBalanceOutput::apply_trim`).
+    pub trim: Option<TrimSpec>,
     pub performance: Option<PerformanceSpec>,
     pub vn_diagram: Option<VnDiagramSpec>,
     pub structure: Option<StructuralSpec>,

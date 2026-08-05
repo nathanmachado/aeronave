@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.0
+# `aircraft_spec.json` — contrato do schema v4.1
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -35,6 +35,23 @@ documentação a ser corrigido, não um comportamento aceitável.
   `geometry`/`sizing`/`fidelity`/`warnings` (que existiam calculados
   internamente, mas não eram serializados) e sem política de bump
   declarada. v4.0 (Task 6.1) formaliza o contrato.
+- **v4.1** (task trim-authority): adiciona o bloco `trim` (`TrimSpec` —
+  ver §4 abaixo) — mudança ADITIVA (novo bloco opcional), consumidores v4.0
+  continuam funcionando sem alteração.
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON):
+    `[stability].sm_max` (proxy de margem estática máxima usado como limite
+    dianteiro do envelope de CG, sem base física direta em autoridade de
+    controle) foi **REMOVIDO**. O limite dianteiro do bloco `weight`
+    (`weight.cg_limit_fwd_pct_mac`) agora é calculado FISICAMENTE pelo
+    `TrimAuthorityAgent` a partir de autoridade de profundor real — o
+    NOME/TIPO/UNIDADE do campo JSON `weight.cg_limit_fwd_pct_mac` não
+    mudou (ainda é `f64`, %MAC), só a fonte de cálculo, por isso a mudança
+    não quebra consumidores existentes. Configs `aircraft.toml` antigas com
+    `sm_max` presente são REJEITADAS com um erro de migração claro por
+    `models::config::parse_aircraft` — substitua `[stability].sm_max` por
+    `[stability].cl_h_max_down`/`trim_margin`/`cl_ground_rotation`/
+    `to_flap_cm_fraction` + `[wing].cm_ac`/`cm_flap_delta` (ver
+    `config/aircraft/baseline_4seat.toml` para valores de referência).
 
 ## 2. Convenção de eixos e unidades
 
@@ -82,6 +99,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
 | `weight` | preliminary (soma de itens de massa configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — a aritmética é exata, mas os valores de entrada são estimativas de catálogo/projeto, não massas medidas; erros aqui se propagam para MTOW/estrutura/trem de pouso |
+| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down` semi-empírico, Gudmundsson/Roskam) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `cl_h_max_down` (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
 | `performance` | computed (equações fechadas, atmosfera ISA padrão) | — |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
@@ -108,6 +126,7 @@ canônica de INTERPRETAÇÃO, o JSON em si é a fonte do texto exibido.
 | `empennage` | objeto (`EmpennageSpec`) ou `null` | sempre preenchido |
 | `control_surfaces` | objeto (`ControlSurfacesSpec`) ou `null` | sempre preenchido |
 | `weight` | objeto (`WeightSpec`) ou `null` | sempre preenchido |
+| `trim` | objeto (`TrimSpec`) ou `null` | sempre preenchido (novo na v4.1) |
 | `performance` | objeto (`PerformanceSpec`) ou `null` | sempre preenchido |
 | `vn_diagram` | objeto (`VnDiagramSpec`) ou `null` | sempre preenchido |
 | `structure` | objeto (`StructuralSpec`) ou `null` | sempre preenchido |
@@ -238,7 +257,51 @@ da superfície espelhada.
 | `fuel_mass_kg` | f64 | kg | Massa de combustível no cenário de peso |
 | `cg_mac_fwd_pct` / `cg_mac_aft_pct` | f64 | %MAC | CG mais dianteiro/traseiro OBSERVADO entre os cenários de carga |
 | `static_margin_pct` | f64 | % | Margem estática |
-| `cg_limit_fwd_pct_mac` / `cg_limit_aft_pct_mac` | f64 | %MAC | Limites ADMISSÍVEIS do envelope de CG (de `[stability]`) — não confundir com `cg_mac_*_pct` acima, que são valores OBSERVADOS |
+| `cg_limit_fwd_pct_mac` | f64 | %MAC | Limite DIANTEIRO admissível — desde a v4.1, o PIOR CASO (maior %MAC) entre os limites por cenário calculados pelo `TrimAuthorityAgent` (bloco `trim` abaixo), não mais o proxy `[stability].sm_max`. Não confundir com `cg_mac_fwd_pct` acima (valor OBSERVADO). O veredito de aceite por cenário fica em `trim.rotation_limit_pct_mac_per_scenario`/`violations`, não neste agregado isolado. |
+| `cg_limit_aft_pct_mac` | f64 | %MAC | Limite TRASEIRO admissível — de `[stability].sm_min` |
+
+### `trim` — `TrimSpec` (TrimAuthorityAgent — novo na v4.1)
+
+Limite dianteiro FÍSICO do envelope de CG, derivado da autoridade de
+profundor disponível nas duas manobras críticas de arfagem
+nariz-para-cima: **flare no pouso** (V_ref = 1,3·Vs0, flap de pouso,
+balanço de momentos em torno do CG) e **rotação na decolagem** (Vr =
+1,1·Vs0, flap de decolagem, balanço de momentos em torno do TREM
+PRINCIPAL). Substitui o proxy `[stability].sm_max` (removido — ver §1).
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `flare_limit_pct_mac` | f64 | %MAC | Limite dianteiro de flare — independe do peso do cenário |
+| `rotation_limit_pct_mac_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Um limite de rotação por cenário de carga (`weight`'s cenários) — depende do peso |
+| `governing` | string (`"flare"` \| `"rotacao"` \| `"misto"`) | — | Qual manobra governa, agregado sobre todos os cenários |
+| `cl_h_required_at_fwd_limit` | f64 | — | CL_h requerido no limite de flare resolvido (checagem de sanidade — coincide com `cl_h_available` por construção) |
+| `cl_h_available` | f64 | — | CL_h disponível — `-cl_h_max_down·(1−trim_margin)` |
+| `sensitivity` | objeto (`TrimSensitivity`) | — | Limite de flare recomputado a `cl_h_max_down ± 0,05` |
+| `cm_ac` / `cm_flap_delta` | f64 | — | Parâmetros ecoados de `[wing]` |
+| `cl_h_max_down` / `trim_margin` / `cl_ground_rotation` / `to_flap_cm_fraction` | f64 | — | Parâmetros ecoados de `[stability]` |
+
+Sub-bloco `ScenarioTrimLimit` (um por cenário de `weight`):
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `scenario` | string | — | Nome do cenário (mesmo do bloco `weight`) |
+| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação NESTE cenário |
+| `governing_limit_pct_mac` | f64 | %MAC | `max(flare_limit_pct_mac, rotation_limit_pct_mac)` — limite EFETIVO deste cenário |
+| `governing` | string (`"flare"` \| `"rotacao"`) | — | Qual manobra governa NESTE cenário |
+
+Sub-bloco `sensitivity` (`TrimSensitivity`):
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `cl_h_max_down_minus` / `cl_h_max_down_plus` | f64 | — | `cl_h_max_down ∓ 0,05` |
+| `flare_limit_pct_mac_minus` / `flare_limit_pct_mac_plus` | f64 | %MAC | Limite de flare recomputado com o parâmetro acima |
+
+**ACHADO DE PROJETO honesto** (baseline real, não um bug deste código): a
+ROTAÇÃO governa em TODOS os cenários (≈29,6%–40,2% MAC conforme o peso),
+MUITO mais restritiva que a flare (≈5,5% MAC) e que o antigo proxy
+`sm_max` (16,6% MAC) — causa física: o trem principal
+(`[gear].x_main_m`) fica muito atrás do CG desta célula. Ver
+`agents::trim_authority` (docstring do módulo) para a dedução completa.
 
 ### `performance` — `PerformanceSpec` (PerformanceAgent)
 

@@ -156,28 +156,37 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// sizing em si esteja quebrado.
 ///
 /// NOTA (Task 4.4 — achado honesto de projeto, NÃO um bug deste código): com
-/// o envelope de CG ADMISSÍVEL (limites vindos de `[stability]`
-/// sm_min=0.05/sm_max=0.25, não mais apenas `SM > 0.03` isolado), a
-/// aeronave-base real fica com `validation_status: FAIL`.
+/// o envelope de CG ADMISSÍVEL (limite traseiro de `[stability].sm_min`,
+/// não mais apenas `SM > 0.03` isolado), a aeronave-base real fica com
+/// `validation_status: FAIL`.
 ///
 /// ATUALIZAÇÃO (task de downwash + fuselagem/Multhopp): o ponto neutro
 /// agora conta com o downwash na empenagem (dε/dα≈0.327) e a contribuição
 /// desestabilizadora da fuselagem (Multhopp simplificado, `fuselage_kf`),
 /// além do modelo de área de cauda de Raymer (Task 4.1). NP≈3,4187m
 /// (≈41,6% MAC, MAC≈1,2463m) — bem mais à frente que os ~3,803m
-/// (≈72,5% MAC) do modelo anterior, que ignorava downwash e fuselagem. O
-/// envelope resultante fica em ~16,6%–36,6% MAC, cobrindo agora os
-/// cenários MAIS TRASEIROS (4 pax: ~19,1%–29,4% MAC, dentro) — só os DOIS
-/// cenários mais DIANTEIROS (Solo ~1,7% e 2 pax dianteiros ~6,5% MAC)
-/// continuam à frente do limite admissível (eram 6/6 fora antes desta
-/// task). Isso é uma descoberta de engenharia real sobre o layout atual de
-/// braços (não um erro de implementação) — decisão de projeto para revisão
-/// humana futura: mover o bordo de ataque da asa mais para trás
-/// (`wing.le_root_x_m`), revisar os braços de `[arms]`, adicionar lastro de
-/// cauda para os cenários leves/dianteiros, ou revisar `fuselage_kf`. O
-/// binário ainda sai com código 0 (não há `process::exit` condicionado a
-/// `validation_status`) — apenas o conteúdo do relatório reflete a falha,
-/// honestamente.
+/// (≈72,5% MAC) do modelo anterior, que ignorava downwash e fuselagem.
+///
+/// ATUALIZAÇÃO (task trim-authority): o limite DIANTEIRO deixou de ser o
+/// proxy `sm_max` (16,6% MAC) e passou a ser calculado fisicamente pelo
+/// `TrimAuthorityAgent` a partir da autoridade de profundor em flare
+/// (≈5,5% MAC — GENEROSO, o Cm_ac quase nulo do NACA 230015 ajuda) e
+/// rotação de decolagem (≈29,6%–40,2% MAC conforme o peso do cenário —
+/// GOVERNA, mais restritiva). Achado honesto: a ROTAÇÃO governa em TODOS os
+/// cenários, e o limite resultante (pior caso ≈40,2% MAC) fica À FRENTE de
+/// TODOS os 6 cenários reais (CG observado ~1,7%–29,4% MAC) — os 6/6
+/// cenários ficam FORA do envelope (eram 2/6 fora com o proxy `sm_max`
+/// antigo). Causa física: o trem principal (`[gear].x_main_m=3,85m`) fica
+/// muito atrás do CG desta célula (carga de nariz já em 20–24%, perto do
+/// teto de 25% da Task 4.5) — o braço de peso em torno do trem na rotação é
+/// grande demais para a autoridade de profundor disponível. Isso é uma
+/// descoberta de engenharia real sobre o layout atual do trem (não um erro
+/// de implementação) — decisão de projeto para revisão humana futura: mover
+/// o trem principal mais para a frente (`gear.x_main_m`), revisar os braços
+/// de `[arms]`/CG, ou aumentar a autoridade de profundor (`cl_h_max_down`,
+/// maior EH). O binário ainda sai com código 0 (não há `process::exit`
+/// condicionado a `validation_status`) — apenas o conteúdo do relatório
+/// reflete a falha, honestamente.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_converge_mas_reporta_fail_honesto_de_envelope_cg() {
     let out_path = std::env::temp_dir().join(format!(
