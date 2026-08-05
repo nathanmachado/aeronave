@@ -806,7 +806,9 @@ mod tests {
             cfg.fuselage.cabin_width_m, cfg.fuselage.length_m, cfg.stability.fuselage_kf,
         );
         println!("x_np (baseline, downwash+fuselagem) = {x_np:.4}m  MAC={mac:.4}m");
-        assert!((x_np - 3.4187).abs() < 0.005, "x_np = {x_np:.4}m (esperado ≈3.4187m ±0.005)");
+        // Campanha E1–E6 (2026-08-05): v_h 0.70→0.85 (S_h 2.58→3.13 m²) recua
+        // o NP — mais estabilizador. Pin antigo: 3.4187m. Novo: 3.5040m.
+        assert!((x_np - 3.5040).abs() < 0.005, "x_np = {x_np:.4}m (esperado ≈3.5040m ±0.005)");
     }
 
     /// Propriedade: aumentar V_h (coeficiente de volume da empenagem

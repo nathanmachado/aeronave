@@ -60,8 +60,9 @@ fn engine_flag_troca_motor_e_rotax_falha_honestamente_por_combustivel() {
          usado, mesmo que o sizing falhe depois — ver comentário acima):\n{stdout}");
 
     assert!(!output.status.success(),
-        "binário deveria sair com erro: o Rotax 915iS precisa de ~393 L contra os 260 L do \
-         tanque configurado — inviável por uma margem grande, não um caso de borda");
+        "binário deveria sair com erro: o Rotax 915iS precisa de ~401,8 L (pós campanha E1–E6, \
+         2026-08-05 — era ~393,3 L antes) contra os 260 L do tanque configurado — inviável por \
+         uma margem grande, não um caso de borda");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("combustível") || stderr.contains("Combustível"),
@@ -157,8 +158,8 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 ///
 /// NOTA (Task 4.4 — achado honesto de projeto, NÃO um bug deste código): com
 /// o envelope de CG ADMISSÍVEL (limite traseiro de `[stability].sm_min`,
-/// não mais apenas `SM > 0.03` isolado), a aeronave-base real fica com
-/// `validation_status: FAIL`.
+/// não mais apenas `SM > 0.03` isolado), a aeronave-base real ficava (até a
+/// campanha E1–E6, ver abaixo) com `validation_status: FAIL`.
 ///
 /// ATUALIZAÇÃO (task de downwash + fuselagem/Multhopp): o ponto neutro
 /// agora conta com o downwash na empenagem (dε/dα≈0.327) e a contribuição
@@ -186,9 +187,23 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// de `[arms]`/CG, ou aumentar a autoridade de profundor (`cl_h_max_down`,
 /// maior EH). O binário ainda sai com código 0 (não há `process::exit`
 /// condicionado a `validation_status`) — apenas o conteúdo do relatório
-/// reflete a falha, honestamente.
+/// refletia a falha, honestamente.
+///
+/// ATUALIZAÇÃO (campanha E1–E6, 2026-08-05): a decisão de projeto pedida na
+/// nota acima foi tomada — `gear.x_main_m` 3,85→3,55m (trem recuado),
+/// `empennage.v_h` 0,70→0,85 (EH maior, mais autoridade de profundor E mais
+/// estabilizador) e `stability.cl_h_max_down` 0,85→0,95 (mais download do
+/// profundor), validados experimentalmente (envelope [10,9%, 43,5%] MAC,
+/// 6/6 cenários dentro). A aeronave-base real agora converge com
+/// `validation_status: PASS` e ZERO violações de envelope de CG — primeiro
+/// PASS honesto do projeto. Teste renomeado e reescrito para refletir isso;
+/// o caminho de erro (envelope vazio/cenário fora do envelope) continua
+/// coberto por testes unitários com config mutada em código (ver
+/// `src/validation/constraint_checker.rs::tests::violacao_de_envelope_vazio_
+/// aparece_com_baseline_mutado_parametros_pre_e6` e
+/// `violacao_de_envelope_aparece_quando_cenario_esta_fora`).
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_converge_mas_reporta_fail_honesto_de_envelope_cg() {
+fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_pass_honesto_de_envelope_cg() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -216,13 +231,15 @@ fn engine_padrao_explicito_com_out_tempfile_converge_mas_reporta_fail_honesto_de
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Achado honesto (Task 4.4, ver nota acima): validation_status É FAIL —
-    // não mascarar isso re-testando por PASS.
-    assert!(json.contains("\"validation_status\": \"FAIL\""),
-        "JSON de saída deveria reportar validation_status FAIL (achado honesto do envelope \
-         de CG — ver comentário da task-4.4-report.md):\n{json}");
-    assert!(json.contains("fora do envelope de CG admissível"),
-        "violations do JSON deveriam citar cenários fora do envelope de CG admissível:\n{json}");
+    // Achado honesto pós-E6 (ver nota acima): validation_status É PASS —
+    // o envelope de CG está fechado, zero violações.
+    assert!(json.contains("\"validation_status\": \"PASS\""),
+        "JSON de saída deveria reportar validation_status PASS (envelope de CG fechado pela \
+         campanha E1–E6 — ver comentário acima e task-1-report.md da E6):\n{json}");
+    assert!(!json.contains("fora do envelope de CG admissível"),
+        "não deveria haver violações de cenário fora do envelope de CG admissível:\n{json}");
+    assert!(!json.contains("Envelope de CG VAZIO"),
+        "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
 
     let _ = std::fs::remove_file(&out_path);
 }

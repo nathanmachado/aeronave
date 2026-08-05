@@ -49,14 +49,23 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.fuel_system.capacity_l, 260.0);
     assert_eq!(cfg.gear.h_cg_ground_m, 1.05);
     assert_eq!(cfg.gear.x_nose_m, 1.40);
-    assert_eq!(cfg.gear.x_main_m, 3.85);
+    // Campanha E1–E6 (2026-08-05): 3.85 → 3.55 — trem principal recuado,
+    // causa raiz do fechamento do envelope de CG (ver comentário no TOML).
+    assert_eq!(cfg.gear.x_main_m, 3.55);
     assert_eq!(cfg.arms.engine_cg_m, 0.65);
     assert_eq!(cfg.arms.empennage_cg_m, 7.40);
     assert_eq!(cfg.structure.spar_material, "AA7075-T6");
     assert_eq!(cfg.structure.frame_spacing_mm, 300.0);
-    assert_eq!(cfg.masses.items.len(), 15);
+    // Campanha E1–E6: 15 → 16 itens — novo item "bateria_recolocada" (28kg,
+    // bateria realocada do painel para o cone de cauda, mudança 2).
+    assert_eq!(cfg.masses.items.len(), 16);
     assert_eq!(cfg.masses.item_mass("asa"), Some(130.0));
     assert_eq!(cfg.masses.item_mass("trem_principal"), Some(55.0));
+    // Campanha E1–E6: novos/alterados itens de massa — cobertura direta
+    // dos valores do brief (mudanças 2 e 8).
+    assert_eq!(cfg.masses.item_mass("avionicos"), Some(32.0));
+    assert_eq!(cfg.masses.item_mass("bateria_recolocada"), Some(28.0));
+    assert_eq!(cfg.masses.item_mass("emp_horizontal"), Some(27.0));
 }
 
 #[test]

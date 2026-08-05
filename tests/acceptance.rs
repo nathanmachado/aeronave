@@ -150,8 +150,14 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     let fuel_required = json["sizing"]["fuel_required_l"].as_f64()
         .expect("sizing.fuel_required_l deveria estar presente");
 
-    let mtow_expected = 1_025.2_f64;
-    let fuel_expected = 71.1_f64;
+    // Campanha E1–E6 (2026-08-05): mesma config de aeronave (agora com
+    // trem recuado, EH maior, bateria/bagageiro realocados — ver
+    // `config/aircraft/baseline_4seat.toml`) desloca levemente estes pins.
+    // mtow_mission_kg: 1.025,2 → 1.031,3 kg (+0,6%, dentro da tolerância
+    // ±1% de antes, mas atualizado para refletir o valor real medido).
+    // fuel_required_l: 71,1 → 72,7 L (+2,2%, mais CD0 do empennage).
+    let mtow_expected = 1_031.3_f64;
+    let fuel_expected = 72.7_f64;
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \

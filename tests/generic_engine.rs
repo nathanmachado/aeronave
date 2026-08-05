@@ -218,13 +218,16 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // de regressão do campo INFORMATIVO `prop.endurance_h`/`range_km`
     // (modelo de tanque cheio, consumo constante). O gate real do projeto
     // (`mission.block_time_h`) é verificado em outro teste, não aqui.
-    let endurance_pin_h = 7.902862;
+    // Campanha E1–E6 (2026-08-05): 7.902862 → 7.619800 h (mais CD0/MTOW
+    // reduz a autonomia informativa de tanque cheio/consumo constante).
+    let endurance_pin_h = 7.619800;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
-        "Autonomia (informativa) {:.6} h divergiu do pin pós-Task-5.2 {:.6} h",
+        "Autonomia (informativa) {:.6} h divergiu do pin pós-E6 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
-    let range_pin_km = 2_212.801240;
+    // 2.212,801240 → 2.133,543977 km.
+    let range_pin_km = 2_133.543977;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
-        "Alcance (informativo) {:.6} km divergiu do pin pós-Task-5.2 {:.6} km",
+        "Alcance (informativo) {:.6} km divergiu do pin pós-E6 {:.6} km",
         sized.prop.range_km, range_pin_km);
 
     // Achado honesto explícito: o campo informativo agora fica ABAIXO do
@@ -297,14 +300,29 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // esperado pelo controller: "verify mission still fits 260 L") — a
     // queda medida (~10,52 L) é maior que os "~2-3 L" estimados no brief,
     // mas ainda sobra folga confortável de 5,3%.
-    let margem_pin_l = 13.173515;
+    //
+    // Campanha E1–E6 (2026-08-05): a margem CAI de novo, e mais forte que a
+    // projeção do brief (~4,5-5%) — cd0 empennage 0.004→0.0046 (+2,6% no
+    // CD0 total) eleva o consumo de cruzeiro, que compõe com o MTOW maior
+    // (+12,1 kg, reconvergência do laço) para exigir mais combustível de
+    // missão: 246,826485 L → 255,271883 L (+8,445 L, +3,42%). Margem:
+    // 13,173515 L (~5,3372%) → 4,728117 L (~1,8522%). Investigado antes de
+    // prosseguir (ver task-1-report.md): a física é consistente e na
+    // mesma direção qualitativa da própria história deste teste (Task 5.2
+    // já mostrou a margem caindo MAIS que o projetado no brief pela mesma
+    // razão — a margem é um RESÍDUO de dois números grandes, então
+    // amplifica desproporcionalmente pequenas variações de CD0/MTOW).
+    // Ainda POSITIVA — não é um caso NEEDS_CONTEXT (que exigiria margem
+    // negativa) — mas está bem mais apertada (~1,85%) que o histórico
+    // recente; vale monitorar em revisões futuras.
+    let margem_pin_l = 4.728117;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
-        "margem de combustível {margem_l:.4} L divergiu do valor medido na Task 5.2 \
+        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E6 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 5.3372).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido na Task 5.2 ~5,3372%");
+    assert!((margem_pct - 1.8522).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-E6 ~1,8522%");
     assert!(margem_l > 0.0,
-        "achado central da Task 5.2: mesmo com CD0 elevado pelo arrasto de refrigeração, a \
+        "achado central pós-E6: mesmo com CD0 elevado e MTOW reconvergido mais alto, a \
          missão continua cabendo no tanque de 260 L (margem {margem_l:.2} L)");
 
     // Invariante honesto do modelo por segmentos (substitui a checagem
@@ -394,7 +412,12 @@ fn toyota_v_max_regressao_310kmh() {
     // honesta esperada da task, não uma regressão do resolvedor:
     // 310.25137319753946 km/h (pré-Task-5.2) → 306.066251 km/h (-4,185
     // km/h, -1,35%).
-    let v_max_pre_refactor_kmh = 306.066251;
+    // Campanha E1–E6 (2026-08-05): cd0 empennage 0.004→0.0046 eleva o CD0
+    // total desta asa mais um pouco (massa fixa de 1.461 kg aqui, não o
+    // MTOW convergido — só o efeito do CD0, sem o efeito composto de MTOW
+    // maior que aparece em `golden_toyota_baseline_regressao_task_2_1`):
+    // 306.066251 → 303.259465 km/h (-2,807 km/h, -0,92%).
+    let v_max_pre_refactor_kmh = 303.259465;
     assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
         "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pós-Task-5.2 \
          {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
@@ -555,10 +578,19 @@ fn golden_toyota_baseline_regressao_task_2_1() {
         sized.state.mtow_kg, sized.prop.endurance_h, sized.prop.fc_cruise_lph, sized.wb.oew_kg
     );
 
-    let mtow_convergido_kg = 1_532.334247200;
-    let endurance_h = 7.902861573;
-    let fc_lph = 29.609527870;
-    let oew_kg = 885.0;
+    // Campanha E1–E6 (2026-08-05): 1.532,334247 → 1.544,428382 kg (+12,09
+    // kg, +0,79%) — arrasto extra (cd0 empennage 0.004→0.0046) + massa
+    // extra da EH (22→27kg) reconvergem para um MTOW maior; ver tabela
+    // completa no comentário de `margem_de_combustivel_no_mtow_convergido`.
+    let mtow_convergido_kg = 1_544.428382;
+    // 7.902861573 → 7.619800 h (informativo, tanque cheio/consumo
+    // constante — mais CD0/MTOW reduz autonomia informativa).
+    let endurance_h = 7.619800;
+    // 29.609527870 → 30.709468 L/h (mais CD0/MTOW eleva consumo de cruzeiro).
+    let fc_lph = 30.709468;
+    // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
+    // massa alterado que afeta o OEW; avionicos/bateria se cancelam).
+    let oew_kg = 890.0;
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
         "MTOW convergido {:.6} kg divergiu do valor medido na Task 5.2 (cooling_drag_fraction) \
@@ -581,7 +613,13 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     let v_max_kmh = v_max_ms * 3.6;
     println!("golden: v_cruise_kmh={v_max_kmh:.6}");
     // Pré-Task-5.2: 308.752803 km/h (CD0 sem arrasto de refrigeração).
-    let v_max_pos_task_5_2_kmh = 304.412480;
+    // Campanha E1–E6 (2026-08-05): 304.412480 → 301.304773 km/h (-3,11
+    // km/h, -1,02%) — cd0 empennage 0.004→0.0046 (+2,6% no CD0 total,
+    // 0.0229→0.0235) e MTOW +12,1 kg (mais peso → mais arrasto induzido)
+    // reduzem V_max; queda maior que os "~0,5-1 km/h" estimados no brief
+    // (mesmo padrão de subestimativa de projeções já visto na Task 5.2 —
+    // efeitos compostos do laço de convergência de MTOW não são lineares).
+    let v_max_pos_task_5_2_kmh = 301.304773;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-5.2 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
@@ -669,8 +707,8 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
                                       &toyota, &req, &cfg.performance);
 
     println!(
-        "vx={:.3}km/h vy={:.3}km/h v_bg={:.3}km/h ld_max={:.3} gradiente={:.3}% \
-         to_50ft_pav={:.3}m to_50ft_grama={:.3}m ldg_50ft={:.3}m",
+        "vx={:.6}km/h vy={:.6}km/h v_bg={:.6}km/h ld_max={:.6} gradiente={:.6}% \
+         to_50ft_pav={:.6}m to_50ft_grama={:.6}m ldg_50ft={:.6}m",
         perf.vx_kmh, perf.vy_kmh, perf.best_glide_kmh, perf.glide_ratio,
         perf.climb_gradient_pct, perf.to_50ft_paved_m, perf.to_50ft_grass_m, perf.ldg_50ft_m
     );
@@ -684,15 +722,27 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // Pins ±1% (ou mais apertado quando o valor é robusto/determinístico) —
     // valores pós-Task 5.2 (cooling_drag_fraction, MTOW convergido
     // ~1.532,33 kg, ver tabela old→new acima).
+    // Campanha E1–E6 (2026-08-05): mais CD0 (empennage 0.004→0.0046) e MTOW
+    // (+12,1 kg) reduzem L/D em toda a varredura de desempenho — mesmo
+    // padrão qualitativo da Task 5.2, tabela old→new:
+    //   vx_kmh:             119.804471 → 120.276327  (+0,39% — MTOW maior)
+    //   vy_kmh:             150.611335 → 150.059037  (-0,37% — CD0 maior)
+    //   best_glide_kmh:     174.138910 → 173.652690  (-0,28%)
+    //   glide_ratio:         16.136831 →  15.921184  (-1,34% — L/Dmax cai
+    //                                       direto com CD0 mais alto)
+    //   climb_gradient_pct:  14.126792 →  13.841444  (-2,02%)
+    //   to_50ft_paved_m:    390.676592 → 397.158919  (+1,66%)
+    //   to_50ft_grass_m:    438.723163 → 445.966910  (+1,65%)
+    //   ldg_50ft_m:         543.197862 → 545.160189  (+0,36%)
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             119.804471, 0.01),
-        ("vy_kmh",              perf.vy_kmh,             150.611335, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     174.138910, 0.01),
-        ("glide_ratio",         perf.glide_ratio,         16.136831, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  14.126792, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    390.676592, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    438.723163, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         543.197862, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             120.276327, 0.01),
+        ("vy_kmh",              perf.vy_kmh,             150.059037, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     173.652690, 0.01),
+        ("glide_ratio",         perf.glide_ratio,         15.921184, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  13.841444, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    397.158919, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    445.966910, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         545.160189, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -702,36 +752,35 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     }
 
     // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
-    // real passa com folga confortável (~14.2%, quase 6 p.p. acima do piso).
+    // real passa com folga confortável (~13.8%, mais de 5 p.p. acima do piso).
     assert!(perf.climb_gradient_pct >= 8.3,
         "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
 
     // Tabela old→new (ver comentário acima) — `to_distance_*`/
     // `landing_distance_m` continuam "baseados em rolagem de solo"
-    // (decisão do controller). ATUALIZAÇÃO (Task 5.2): CD0 elevado por
-    // `cooling_drag_fraction` reduz a tração líquida disponível para
-    // acelerar (mais arrasto a qualquer V) e o MTOW convergido sobe —
-    // ambos alongam a corrida de decolagem: to_distance_paved_m
-    // 356.205694 → 360.349282 (+1,16%), to_distance_grass_m 427.446833 →
-    // 432.419139 (+1,16%), landing_distance_m 396.630927 → 397.878598
-    // (+0,31%, massa de pouso = MTOW - 60% combustível, também maior).
-    let to_distance_paved_novo_pin = 360.349282;
+    // (decisão do controller). ATUALIZAÇÃO (Campanha E1–E6, 2026-08-05):
+    // CD0 elevado (empennage 0.004→0.0046) e MTOW +12,1 kg alongam a
+    // corrida de decolagem/pouso, mesmo padrão qualitativo da Task 5.2:
+    // to_distance_paved_m 360.349282 → 366.059931 (+1,58%),
+    // to_distance_grass_m 432.419139 → 439.271917 (+1,58%),
+    // landing_distance_m 397.878598 → 399.586426 (+0,43%).
+    let to_distance_paved_novo_pin = 366.059931;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
-        "to_distance_paved_m {:.3} divergiu do pin pós-Task-5.2 {:.3}",
+        "to_distance_paved_m {:.3} divergiu do pin pós-E6 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 432.419139;
+    let to_distance_grass_novo_pin = 439.271917;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
-        "to_distance_grass_m {:.3} divergiu do pin pós-Task-5.2 {:.3}",
+        "to_distance_grass_m {:.3} divergiu do pin pós-E6 {:.3}",
         perf.to_distance_grass_m, to_distance_grass_novo_pin);
     // landing_distance_m: pequena variação refletindo o MTOW convergido —
     // tolerância alargada de "praticamente inalterado" (Task 4.7) para 1%
-    // (Task 5.1/5.2 deslocam o MTOW, não a fórmula).
-    let landing_distance_pin = 397.878598;
+    // (Task 5.1/5.2/E6 deslocam o MTOW, não a fórmula).
+    let landing_distance_pin = 399.586426;
     assert!((perf.landing_distance_m - landing_distance_pin).abs()
                 < landing_distance_pin * 0.01,
-        "landing_distance_m {:.3} divergiu do pin pós-Task-5.2 {:.3}",
+        "landing_distance_m {:.3} divergiu do pin pós-E6 {:.3}",
         perf.landing_distance_m, landing_distance_pin);
 
     // Decolagem/pouso sobre 15m devem exceder as estimativas ground-roll-
@@ -899,9 +948,13 @@ fn orchestrator_toyota_240l_insuficiente_de_novo_com_cooling_drag() {
             assert!((capacidade_l - 240.0).abs() < 1e-9);
             // Valor medido sob o CD0 elevado pelo arrasto de refrigeração
             // (Task 5.2) — ultrapassa os 240 L da mutação sintética.
-            let necessario_pin_l = 246.826484762;
+            // Campanha E1–E6 (2026-08-05): 246.826485 → 255.271883 L (mais
+            // CD0 do empennage + MTOW reconvergido maior — ver tabela em
+            // `margem_de_combustivel_no_mtow_convergido`), ultrapassa os
+            // 240 L por uma margem ainda maior (+15.271883 L, ~6,36%).
+            let necessario_pin_l = 255.271883;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-3,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 5.2 \
+                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E6 \
                  {necessario_pin_l:.6} L");
             assert!(necessario_l > capacidade_l,
                 "3ª reviravolta: a missão volta a exigir MAIS combustível do que os 240 L da \
@@ -962,9 +1015,12 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // alto eleva ainda mais o combustível exigido — 382.025744943 L
             // → 393.298621188 L (continua MUITO acima dos 260 L, ~51,3% —
             // não perto de virar, mesmo achado qualitativo da Task 5.1).
-            let necessario_pin_l = 393.298621188;
+            // Campanha E1–E6 (2026-08-05): 393.298621188 → 401.843487 L
+            // (mais CD0/MTOW, mesma causa das outras tabelas desta task) —
+            // continua MUITO acima dos 260 L (~54,6%), nem perto de virar.
+            let necessario_pin_l = 401.843487;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido na Task 5.2 \
+                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E6 \
                  {necessario_pin_l:.6} L");
         }
         other => panic!("esperava CombustivelInsuficiente para o Rotax, obtido: {other:?}"),
@@ -1014,7 +1070,9 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
     // (Task 5.2): `cooling_drag_fraction` eleva o MTOW convergido de novo,
     // para 1.532,33 kg (ver mesma tabela) → ws_actual = 1.532,33 kg ·
     // 9,807 / 14,2 m² ≈ 1.058,28 N/m² (era ≈1.052,18 N/m² pós-Finding-2).
-    let ws_actual_esperado = 1_058.28;
+    // Campanha E1–E6 (2026-08-05): MTOW convergido 1.532,33 → 1.544,43 kg
+    // (+12,1 kg) → ws_actual ≈ 1.058,28 → 1.066,63 N/m².
+    let ws_actual_esperado = 1_066.63;
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);

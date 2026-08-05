@@ -1,7 +1,7 @@
 {
   "schema_version": "4.1",
   "revision": "4.1",
-  "validation_status": "FAIL",
+  "validation_status": "PASS",
   "wing": {
     "span_m": 11.94,
     "area_m2": 14.2,
@@ -10,14 +10,14 @@
     "taper_ratio": 0.45,
     "thickness_ratio": 0.15,
     "oswald_efficiency": 0.7555832290782708,
-    "cd0": 0.02288,
-    "cl_cruise": 0.3655433969843189,
-    "cd_cruise": 0.028486933369558484,
+    "cd0": 0.023504,
+    "cl_cruise": 0.36846909959595003,
+    "cd_cruise": 0.029201045060976163,
     "cl_max": 1.72,
     "cl_max_clean": 1.45,
-    "stall_speed_flaps_kmh": 114.08237541932212,
-    "stall_speed_clean_kmh": 124.25068102460159,
-    "ld_ratio_cruise": 12.831967282759312
+    "stall_speed_flaps_kmh": 114.53800656214914,
+    "stall_speed_clean_kmh": 124.74692314424703,
+    "ld_ratio_cruise": 12.618353172858413
   },
   "propulsion": {
     "engine_model": "Toyota 1GD-FTV 2.8 Turbo Diesel",
@@ -32,13 +32,13 @@
     "prop_diameter_m": 1.95,
     "fuel_type": "Diesel S-10",
     "fuel_capacity_l": 260.0,
-    "fc_cruise_lph": 29.609527870349513,
-    "bsfc_cruise_gkwh": 214.715845693015,
-    "endurance_h": 7.902861572957525,
-    "range_km": 2212.801240428107,
+    "fc_cruise_lph": 30.709467767149054,
+    "bsfc_cruise_gkwh": 217.24620982621553,
+    "endurance_h": 7.619799918848403,
+    "range_km": 2133.543977277553,
     "prop_efficiency": 0.8103989574988021,
-    "thrust_cruise_n": 1170.7434861033778,
-    "p_req_cruise_kw": 112.36172733732073,
+    "thrust_cruise_n": 1200.0917350086431,
+    "p_req_cruise_kw": 115.17841603169633,
     "p_shaft_cruise_kw": 122.88722938820213,
     "cruise_feasible": true
   },
@@ -54,21 +54,21 @@
     "cabin_height_m": 1.2
   },
   "empennage": {
-    "s_horizontal_m2": 2.5809129985152786,
+    "s_horizontal_m2": 3.1339657839114095,
     "s_vertical_m2": 1.4129,
     "arm_h_m": 4.8,
     "arm_v_m": 4.8,
-    "span_h_m": 3.213044038612156,
+    "span_h_m": 3.5406020866013224,
     "span_v_m": 1.4557987498277363,
-    "chord_h_root_m": 1.0710146795373854,
-    "chord_h_tip_m": 0.5355073397686927,
+    "chord_h_root_m": 1.180200695533774,
+    "chord_h_tip_m": 0.590100347766887,
     "chord_v_root_m": 1.2940433331802101,
     "chord_v_tip_m": 0.6470216665901051,
     "ar_h": 4.0,
     "ar_v": 1.5,
     "taper_h": 0.5,
     "taper_v": 0.5,
-    "volume_h": 0.7,
+    "volume_h": 0.85,
     "volume_v": 0.04,
     "eta_h": 0.9
   },
@@ -88,11 +88,11 @@
       "end_m": 2.985
     },
     "elevator": {
-      "span_m": 1.4458698173754703,
-      "area_m2": 0.8400871810167231,
-      "chord_mean_m": 0.29051273182451576,
+      "span_m": 1.593270938970595,
+      "area_m2": 1.1658352716150442,
+      "chord_mean_m": 0.36586221561546994,
       "start_m": 0.0,
-      "end_m": 1.4458698173754703
+      "end_m": 1.593270938970595
     },
     "rudder": {
       "span_m": 1.3102188748449626,
@@ -103,119 +103,119 @@
     }
   },
   "weight": {
-    "oew_kg": 885.0,
-    "mtow_kg": 1543.4,
+    "oew_kg": 890.0,
+    "mtow_kg": 1548.4,
     "payload_kg": 440.0,
     "fuel_mass_kg": 218.4,
-    "cg_mac_fwd_pct": 1.6815099454598386,
-    "cg_mac_aft_pct": 29.373075431609326,
-    "static_margin_pct": 12.241655026133284,
-    "cg_limit_fwd_pct_mac": 39.926628338266454,
-    "cg_limit_aft_pct_mac": 36.61473045774263
+    "cg_mac_fwd_pct": 15.627497581865219,
+    "cg_mac_aft_pct": 37.17543384188608,
+    "static_margin_pct": 11.284602324860064,
+    "cg_limit_fwd_pct_mac": 10.94839237512672,
+    "cg_limit_aft_pct_mac": 43.460036166746164
   },
   "trim": {
-    "flare_limit_pct_mac": 7.908401162790693,
-    "rotation_limit_pct_mac": 39.926628338266454,
+    "flare_limit_pct_mac": -9.003880813953494,
+    "rotation_limit_pct_mac": 10.94839237512672,
     "rotation_margin_per_scenario": [
       {
         "scenario": "Solo (piloto)",
-        "rotation_authority_margin_pct": -51.30602628454818
+        "rotation_authority_margin_pct": 12.81026955386078
       },
       {
         "scenario": "2 pax dianteiros",
-        "rotation_authority_margin_pct": -47.92156081822173
+        "rotation_authority_margin_pct": 22.157395084341132
       },
       {
         "scenario": "4 pax sem bagagem",
-        "rotation_authority_margin_pct": -36.41837630368233
+        "rotation_authority_margin_pct": 89.92431651706055
       },
       {
         "scenario": "4 pax + bagagem + cheio",
-        "rotation_authority_margin_pct": -22.525507498254342
+        "rotation_authority_margin_pct": 175.10063043271887
       },
       {
         "scenario": "4 pax + bagagem + meia",
-        "rotation_authority_margin_pct": -25.291337195841525
+        "rotation_authority_margin_pct": 155.6993201490377
       },
       {
         "scenario": "4 pax + bagagem vazio",
-        "rotation_authority_margin_pct": -27.658914633529513
+        "rotation_authority_margin_pct": 140.17827192209236
       }
     ],
     "governing": "rotacao",
-    "cl_h_available": -0.765,
+    "cl_h_available": -0.855,
     "sensitivity": {
-      "cl_h_max_down_minus": 0.7999999999999999,
-      "flare_limit_pct_mac_minus": 10.69395348837209,
-      "cl_h_max_down_plus": 0.9,
-      "flare_limit_pct_mac_plus": 5.1228488372092995
+      "cl_h_max_down_minus": 0.8999999999999999,
+      "flare_limit_pct_mac_minus": -5.621424418604662,
+      "cl_h_max_down_plus": 1.0,
+      "flare_limit_pct_mac_plus": -12.386337209302342
     },
     "cm_ac": -0.008,
     "cm_flap_delta": -0.3,
-    "cl_h_max_down": 0.85,
+    "cl_h_max_down": 0.95,
     "trim_margin": 0.1,
     "cl_ground_rotation": 0.5,
     "to_flap_cm_fraction": 0.5
   },
   "performance": {
-    "v_cruise_kmh": 304.41248025513846,
-    "v_stall_kmh": 114.08237541932212,
-    "rc_sl_ms": 4.939309194417988,
-    "rc_cruise_alt_ms": 4.49837537309948,
+    "v_cruise_kmh": 301.3047731587565,
+    "v_stall_kmh": 114.53800656214914,
+    "rc_sl_ms": 4.847348728363765,
+    "rc_cruise_alt_ms": 4.400908258088128,
     "service_ceiling_m": 5200.0,
-    "to_distance_paved_m": 360.3492822558936,
-    "to_distance_grass_m": 432.41913870707236,
-    "landing_distance_m": 397.8785976004442,
-    "range_km": 2212.801240428107,
-    "endurance_h": 7.902861572957525,
-    "vx_kmh": 119.80447077768389,
-    "vy_kmh": 150.61133469194547,
-    "best_glide_kmh": 174.13890990565812,
-    "glide_ratio": 16.13683060676306,
-    "climb_gradient_pct": 14.126792326166592,
-    "to_50ft_paved_m": 390.67659235000656,
-    "to_50ft_grass_m": 438.723163317459,
-    "ldg_50ft_m": 543.1978621896211
+    "to_distance_paved_m": 366.0599308536306,
+    "to_distance_grass_m": 439.2719170243567,
+    "landing_distance_m": 399.5864262091741,
+    "range_km": 2133.543977277553,
+    "endurance_h": 7.619799918848403,
+    "vx_kmh": 120.27632724913352,
+    "vy_kmh": 150.05903685368085,
+    "best_glide_kmh": 173.65268987135295,
+    "glide_ratio": 15.921183979923345,
+    "climb_gradient_pct": 13.841443774275206,
+    "to_50ft_paved_m": 397.1589189672472,
+    "to_50ft_grass_m": 445.9669097477313,
+    "ldg_50ft_m": 545.1601892651072
   },
   "vn_diagram": {
-    "va_kmh": 242.20916702984982,
-    "vb_kmh": 235.49859908690098,
+    "va_kmh": 243.1765210069331,
+    "vb_kmh": 236.20778853975895,
     "vc_kmh": 280.0,
     "vd_kmh": 350.0,
     "n_lim_pos": 3.8,
     "n_lim_neg": -1.52,
-    "n_gust_vc": 3.5923537827122307,
-    "n_gust_vd": 2.6202211141951444,
-    "n_gust_vc_light": 4.2014761805864485,
-    "n_design": 4.2014761805864485,
+    "n_gust_vc": 3.58532675453976,
+    "n_gust_vd": 2.61582922158735,
+    "n_gust_vc_light": 4.190765743862235,
+    "n_design": 4.190765743862235,
     "points": [
       [
         0.0,
         0.0
       ],
       [
-        60.552291757462456,
+        60.79413025173327,
         0.23749999999999996
       ],
       [
-        121.10458351492491,
+        121.58826050346654,
         0.9499999999999998
       ],
       [
-        181.65687527238737,
+        182.38239075519982,
         2.1374999999999997
       ],
       [
-        242.20916702984982,
+        243.1765210069331,
         3.7999999999999994
       ],
       [
-        254.68286731796672,
-        4.2014761805864485
+        255.37391547132987,
+        4.190765743862235
       ],
       [
         350.0,
-        4.2014761805864485
+        4.190765743862235
       ],
       [
         350.0,
@@ -232,30 +232,30 @@
     ]
   },
   "structure": {
-    "design_load_factor_g": 4.2014761805864485,
-    "ultimate_load_factor_g": 6.302214270879673,
-    "wing_root_bending_limit_nm": 81710.23961302452,
-    "wing_root_bending_ult_nm": 122565.35941953678,
+    "design_load_factor_g": 4.190765743862235,
+    "ultimate_load_factor_g": 6.286148615793352,
+    "wing_root_bending_limit_nm": 81767.75832761303,
+    "wing_root_bending_ult_nm": 122651.63749141955,
     "spar_material": "AA7075-T6",
     "spar_height_root_m": 0.1476347253508924,
-    "spar_flange_area_cm2": 21.77080324812084,
+    "spar_flange_area_cm2": 21.786128483052494,
     "spar_web_thickness_mm": 2.0,
     "skin_min_thickness_mm": 1.5,
     "frame_spacing_mm": 300.0,
     "flutter_speed_kmh": 749.5537645327781,
     "design_dive_speed_kmh": 350.0,
-    "va_kmh": 242.20916702984982,
+    "va_kmh": 243.1765210069331,
     "fatigue_life_cycles": "infinita",
     "flutter_ok": true
   },
   "landing_gear": {
     "gear_type": "Retrátil Triciclo Elétrico",
     "track_width_m": 2.99911081415844,
-    "wheelbase_m": 2.45,
+    "wheelbase_m": 2.15,
     "tipover_angle_deg": 35.00000000000001,
-    "nose_load_fraction_pct": 23.833413111259834,
-    "main_gear_load_n": 22704.1857,
-    "nose_gear_load_n": 9018.637285714301,
+    "nose_load_fraction_pct": 8.682631133112666,
+    "main_gear_load_n": 22777.7382,
+    "nose_gear_load_n": 3296.1783139534946,
     "main_oleo_stroke_mm": 212.43329594507324,
     "nose_oleo_stroke_mm": 127.45997756704394,
     "main_tire": "6.00-6 (4 ply) — Aircraft Spruce",
@@ -281,19 +281,19 @@
   },
   "mission": {
     "fuel_taxi_kg": 2.52,
-    "fuel_climb_kg": 4.974328626483087,
-    "fuel_cruise_kg": 180.12773941640782,
-    "fuel_descent_kg": 0.8636112295518608,
-    "fuel_reserve_kg": 18.848567927244275,
-    "fuel_total_kg": 207.334247199687,
-    "fuel_total_l": 246.82648476153216,
-    "climb_time_min": 8.658363224576606,
-    "climb_distance_km": 22.795205977480915,
+    "fuel_climb_kg": 5.074467301257543,
+    "fuel_cruise_kg": 186.44473248354933,
+    "fuel_descent_kg": 0.8956928098751807,
+    "fuel_reserve_kg": 19.493489259468205,
+    "fuel_total_kg": 214.42838185415025,
+    "fuel_total_l": 255.2718831597027,
+    "climb_time_min": 8.832789902519032,
+    "climb_distance_km": 23.260023784699236,
     "descent_distance_km": 48.61111111111111,
-    "cruise_distance_km": 2168.593682911408,
-    "block_time_h": 8.06289460382337,
+    "cruise_distance_km": 2168.1288651041896,
+    "block_time_h": 8.0641416515252,
     "range_no_wind_km": 2240.0,
-    "breguet_range_full_tank_km": 2632.054177972583
+    "breguet_range_full_tank_km": 2548.8714481784414
   },
   "electrical": {
     "bus_voltage_v": 28.0,
@@ -303,33 +303,34 @@
     "margin_continuous_pct": 52.22222222222223
   },
   "sizing": {
-    "mtow_mission_kg": 1532.334247199687,
-    "mtow_envelope_kg": 1543.4,
+    "mtow_mission_kg": 1544.4283818541503,
+    "mtow_envelope_kg": 1548.4,
     "iterations": [
       1461.0,
-      1493.8956758885138,
-      1511.6068703971978,
-      1521.1592429904772,
-      1526.3158762527319,
-      1529.1013034917491,
-      1530.6062930461198,
-      1531.4194284126697,
-      1531.8590914838505,
-      1532.334247199687
+      1499.3180879635177,
+      1520.0096373153833,
+      1531.2059898713321,
+      1537.2716867468644,
+      1540.5599260427373,
+      1542.3432589797608,
+      1543.310454830884,
+      1543.8350712031338,
+      1544.119644352755,
+      1544.4283818541503
     ],
     "converged": true,
-    "fuel_required_l": 246.82648476153216,
+    "fuel_required_l": 255.2718831597027,
     "fuel_capacity_l": 260.0,
-    "fuel_margin_l": 13.173515238467843,
-    "fuel_margin_pct": 5.06673663017994,
+    "fuel_margin_l": 4.728116840297304,
+    "fuel_margin_pct": 1.8185064770374244,
     "constraints": {
       "ws_max_stall_n_m2": 1966.982929431489,
       "v_stall_ref_ms": 43.20987654320987,
-      "ws_optimal_cruise_n_m2": 2137.1350245323865,
-      "ws_actual_n_m2": 1058.281828330094,
-      "pw_min_climb_w_n": 5.1634325509254495,
-      "pw_actual_w_n": 9.598403728272867,
-      "recommended_wing_area_m2": 7.639924951779176,
+      "ws_optimal_cruise_n_m2": 2166.081738528191,
+      "ws_actual_n_m2": 1066.6344465382854,
+      "pw_min_climb_w_n": 5.198667045539091,
+      "pw_actual_w_n": 9.523240393720398,
+      "recommended_wing_area_m2": 7.700223989855018,
       "ws_chosen_n_m2": 1966.982929431489
     }
   },
@@ -350,15 +351,7 @@
     "weight": "preliminary (soma de itens de massa configurados não pesados — validar na balança antes da fabricação)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
-  "violations": [
-    "Envelope de CG VAZIO: limite dianteiro por rotação (39.9% MAC) fica ATRÁS do limite traseiro de estabilidade (36.6% MAC) — nenhum CG é admissível; causa: trem principal muito atrás do CG (gear.x_main_m). Revisar posição do trem.",
-    "Cenário 'Solo (piloto)': CG 1.7% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.399; x_cg=2.921m, limites em x: [3.398m, 3.356m])",
-    "Cenário '2 pax dianteiros': CG 6.5% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.351; x_cg=2.981m, limites em x: [3.398m, 3.356m])",
-    "Cenário '4 pax sem bagagem': CG 19.1% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.225; x_cg=3.138m, limites em x: [3.398m, 3.356m])",
-    "Cenário '4 pax + bagagem + cheio': CG 29.4% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.122; x_cg=3.266m, limites em x: [3.398m, 3.356m])",
-    "Cenário '4 pax + bagagem + meia': CG 27.6% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.140; x_cg=3.244m, limites em x: [3.398m, 3.356m])",
-    "Cenário '4 pax + bagagem vazio': CG 26.0% MAC fora do envelope de CG admissível [39.9%–36.6%] (SM=0.156; x_cg=3.225m, limites em x: [3.398m, 3.356m])"
-  ],
+  "violations": [],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
   ]

@@ -69,10 +69,14 @@ fn baseline_areas_pin_exato() {
         cs.aileron.area_m2, cs.flap.area_m2, cs.elevator.area_m2, cs.rudder.area_m2
     );
 
+    // Campanha E1–E6 (2026-08-05): elevator_chord_frac 0.35→0.40 e S_h
+    // (via v_h 0.70→0.85) elevam a área do profundor: 0.840087 → 1.165835
+    // m² (+38,8%). Aileron/flap/rudder não dependem de v_h/elevator_chord_
+    // frac — inalterados.
     let casos = [
         ("aileron", cs.aileron.area_m2, 1.030418_f64),
         ("flap", cs.flap.area_m2, 1.962538_f64),
-        ("elevator", cs.elevator.area_m2, 0.840087_f64),
+        ("elevator", cs.elevator.area_m2, 1.165835_f64),
         ("rudder", cs.rudder.area_m2, 0.459899_f64),
     ];
     for (nome, obtido, esperado) in casos {

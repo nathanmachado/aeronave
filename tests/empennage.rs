@@ -21,6 +21,10 @@ fn config_path(rel: &str) -> PathBuf {
 ///   c_r  = 2·14.2/(11.94·1.45)          = 1.6404 m
 ///   MAC  = (2/3)·c_r·(1+0.45+0.2025)/1.45 = 1.2463 m
 ///   S_h  = 0.70·14.2·1.2463/4.80        ≈ 2.581 m²
+///
+/// Campanha E1–E6 (2026-08-05): v_h 0.70→0.85 (EH maior — mais autoridade
+/// de profundor E mais estabilizador, fecha o envelope de CG):
+///   S_h  = 0.85·14.2·1.2463/4.80        ≈ 3.134 m²
 #[test]
 fn baseline_s_h_bate_calculo_manual() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -34,7 +38,7 @@ fn baseline_s_h_bate_calculo_manual() {
         emp.s_horizontal_m2, emp.s_vertical_m2, emp.span_h_m, emp.span_v_m
     );
 
-    let esperado_s_h = 2.581_f64;
+    let esperado_s_h = 3.134_f64;
     assert!((emp.s_horizontal_m2 - esperado_s_h).abs() < 0.05,
         "S_h = {:.4} m² (esperado ≈{esperado_s_h:.3} m² ±0.05)", emp.s_horizontal_m2);
 }

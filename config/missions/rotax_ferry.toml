@@ -2,15 +2,16 @@
 # 6.2). O motor Rotax 915 iS não sustenta a missão de projeto completa
 # (280 km/h / 8 h — ver tests/cli.rs,
 # `engine_flag_troca_motor_e_rotax_falha_honestamente_por_combustivel`: exige
-# ~393,3 L contra os 260 L do tanque). Essa é a resposta honesta do modelo
-# para aquela missão, não um bug.
+# ~401,8 L contra os 260 L do tanque, campanha E1–E6 2026-08-05; era ~393,3 L
+# antes). Essa é a resposta honesta do modelo para aquela missão, não um bug.
 #
 # Este arquivo existe para provar o espírito da genericidade — trocar dados
 # (motor + missão), não código, e obter uma segunda especificação completa e
 # fisicamente coerente — reduzindo passageiros/velocidade/autonomia para uma
 # missão de traslado ("ferry") que o Rotax sustenta com folga (verificado por
-# execução real antes de fixar este arquivo: 71,1 L requeridos contra 260 L
-# de capacidade, ~72,7% de margem — ver tests/acceptance.rs).
+# execução real antes de fixar este arquivo: 72,7 L requeridos contra 260 L
+# de capacidade, ~72,0% de margem — campanha E1–E6, 2026-08-05; era 71,1 L /
+# ~72,7% de margem antes — ver tests/acceptance.rs).
 passengers = 2
 pax_mass_kg = 90.0
 baggage_kg = 20.0

@@ -422,21 +422,74 @@ mod tests {
     /// o limite de rotação (invariante ao peso, ≈39,9% MAC) fica À FRENTE
     /// do limite traseiro de estabilidade (≈36,6% MAC), então os dois
     /// critérios físicos são mutuamente incompatíveis com esta
-    /// célula/trem. `ConstraintChecker::verify` deve reportar uma
-    /// violação DEDICADA "Envelope de CG VAZIO", distinta (e ALÉM) das
-    /// violações por cenário — citando os dois limites e a causa raiz
-    /// (`gear.x_main_m`).
+    /// Campanha E1–E6 (2026-08-05): o baseline real fecha o envelope de CG
+    /// (trem principal recuado, EH maior, bateria/bagageiro realocados —
+    /// ver comentários em `config/aircraft/baseline_4seat.toml`). Achado
+    /// honesto ANTERIOR (pré-E6): `violacao_de_envelope_vazio_aparece_no_
+    /// baseline_real` — o baseline tinha o limite dianteiro (rotação,
+    /// ≈39,9% MAC) À FRENTE do limite traseiro (≈36,6% MAC), envelope
+    /// vazio. Após a E6, `ConstraintChecker::verify` NÃO deve reportar
+    /// nenhuma violação de envelope — nem a dedicada "VAZIO", nem por
+    /// cenário. O caminho de erro (envelope vazio) continua coberto por
+    /// `violacao_de_envelope_vazio_aparece_com_baseline_mutado_x_main_antigo`
+    /// logo abaixo, que reproduz o `gear.x_main_m` pré-E6 (3.85m, causa
+    /// raiz original) em uma cópia mutada da config real.
     #[test]
-    fn violacao_de_envelope_vazio_aparece_no_baseline_real() {
+    fn envelope_de_cg_fechado_sem_violacao_no_baseline_real() {
         let toml = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
         ).expect("falha ao ler baseline_4seat.toml do disco");
         let cfg = crate::models::config::parse_aircraft(&toml)
             .expect("baseline real deveria ser uma configuração válida");
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical) = setup_with_cfg(cfg);
+        assert!(wb.spec.cg_limit_fwd_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
+            "pré-condição do teste: baseline real (pós E1–E6) deveria ter envelope de CG \
+             FECHADO (fwd={:.2}% <= aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac,
+            wb.spec.cg_limit_aft_pct_mac);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
+            "não deveria haver violação dedicada de envelope vazio no baseline pós-E6: {:?}",
+            report.violations);
+        assert!(!report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+            "não deveria haver violações de envelope de CG por cenário no baseline pós-E6: {:?}",
+            report.violations);
+    }
+
+    /// Caminho de erro preservado (achado histórico pré-E6, Task 4.4/
+    /// trim-authority): parte da config REAL do disco (já com todas as
+    /// demais mudanças da E6) e reverte, em uma cópia mutada em código, os
+    /// TRÊS parâmetros que juntos fecham o envelope (`gear.x_main_m`,
+    /// `empennage.v_h`, `stability.cl_h_max_down`) ao valor ANTIGO
+    /// pré-E6. Reverter só `gear.x_main_m` (a causa raiz citada na
+    /// violação) NÃO basta mais para reproduzir o envelope vazio — os
+    /// outros ganhos de autoridade/estabilidade da E6 (EH maior, mais
+    /// download do profundor) compensam sozinhos o trem principal antigo
+    /// (checado experimentalmente: com só x_main_m revertido, fwd=29.4% <
+    /// aft=43.5%, envelope ainda fechado; com x_main_m+v_h revertidos,
+    /// fwd=36.5% < aft=36.6%, quase fechado mas ainda dentro). Com os três
+    /// parâmetros revertidos juntos, confirma-se que
+    /// `ConstraintChecker::verify` ainda detecta e reporta corretamente um
+    /// envelope de CG vazio quando ele ocorre — a violação DEDICADA
+    /// "Envelope de CG VAZIO", citando os dois limites e a causa raiz
+    /// (`gear.x_main_m`), ALÉM das violações por cenário.
+    #[test]
+    fn violacao_de_envelope_vazio_aparece_com_baseline_mutado_parametros_pre_e6() {
+        let toml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
+        ).expect("falha ao ler baseline_4seat.toml do disco");
+        let mut cfg = crate::models::config::parse_aircraft(&toml)
+            .expect("baseline real deveria ser uma configuração válida");
+        cfg.gear.x_main_m = 3.85;           // valor pré-E6 — causa raiz original
+        cfg.empennage.v_h = 0.70;           // valor pré-E6
+        cfg.stability.cl_h_max_down = 0.85; // valor pré-E6
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
-            "pré-condição do teste: baseline real deveria ter envelope de CG vazio (fwd={:.2}% \
-             > aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
+            "pré-condição do teste: parâmetros pré-E6 (x_main_m=3.85, v_h=0.70, \
+             cl_h_max_down=0.85, config real mutada) deveriam reproduzir o envelope de CG \
+             vazio original (fwd={:.2}% > aft={:.2}%)",
+            wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical);
 

@@ -610,12 +610,27 @@ mod tests {
     // ─── Integração via pipeline real (baseline_4seat.toml) ─────────────────
 
     /// Roda o `TrimAuthorityAgent` sobre o pipeline completo do baseline
-    /// real e confirma: (1) o limite de flare CORRIGIDO bate; (2) o limite
-    /// de rotação (número ÚNICO) bate; (3) a ROTAÇÃO GOVERNA e fica À
-    /// FRENTE do limite traseiro — envelope de CG VAZIO (achado honesto,
-    /// ver docstring do módulo); (4) a margem de autoridade por cenário é
-    /// negativa em TODOS os cenários reais (nenhum tem autoridade
-    /// suficiente na sua própria CG).
+    /// real e confirma: (1) o limite de flare bate (agora NEGATIVO — nunca
+    /// governa, ver nota abaixo); (2) o limite de rotação (número ÚNICO)
+    /// bate; (3) a ROTAÇÃO ainda GOVERNA mas agora fica À FRENTE do limite
+    /// traseiro — envelope de CG FECHADO (campanha E1–E6, 2026-08-05); (4)
+    /// a margem de autoridade por cenário é POSITIVA em TODOS os cenários
+    /// reais.
+    ///
+    /// Campanha E1–E6 (2026-08-05): antes desta campanha (achado honesto
+    /// original, Task 4.4/trim-authority), flare_limit_pct_mac≈7.908%,
+    /// rotation_limit_pct_mac≈39.93% (À FRENTE do limite traseiro
+    /// ≈36.6% — envelope VAZIO), e a margem de autoridade de rotação era
+    /// NEGATIVA em todos os cenários. O trem principal recuado
+    /// (`gear.x_main_m` 3.85→3.55) e a EH maior/mais autoridade de
+    /// profundor (`v_h` 0.70→0.85, `cl_h_max_down` 0.85→0.95) fecham o
+    /// envelope: rotation_limit_pct_mac cai para ≈10.95% (bem à frente do
+    /// limite traseiro, agora ≈43.46%) e o flare_limit_pct_mac fica
+    /// NEGATIVO (≈-9.00% — fisicamente "antes do bordo de ataque", nunca
+    /// governa; documentado no print/schema, ver comentário do item 2 no
+    /// brief da E6). O caminho de erro (envelope vazio) continua coberto
+    /// por `trim_authority_agent_run_hand_check_baseline_mutado_parametros_
+    /// pre_e6` logo abaixo.
     #[test]
     fn trim_authority_agent_run_hand_check_baseline_real() {
         let toml = std::fs::read_to_string(
@@ -634,36 +649,98 @@ mod tests {
         );
 
         let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
-        println!("flare_limit_pct_mac = {:.3}", trim.flare_limit_pct_mac);
+        println!("flare_limit_pct_mac = {:.6}", trim.flare_limit_pct_mac);
+        // Pin antigo (pré-E6): ≈7.908% ±1%. Pin novo: ≈-9.004%.
         assert!(
-            (trim.flare_limit_pct_mac - 7.908).abs() < 1.0,
-            "flare_limit_pct_mac = {:.3} (esperado ≈7.908% ±1%)",
+            (trim.flare_limit_pct_mac - (-9.004)).abs() < 1.0,
+            "flare_limit_pct_mac = {:.3} (esperado ≈-9.004% ±1%)",
             trim.flare_limit_pct_mac
         );
 
-        println!("rotation_limit_pct_mac = {:.3}", trim.rotation_limit_pct_mac);
+        println!("rotation_limit_pct_mac = {:.6}", trim.rotation_limit_pct_mac);
+        println!("cg_limit_aft_pct_mac = {:.6}", wb.spec.cg_limit_aft_pct_mac);
+        // Pin antigo (pré-E6): ≈39.93% ±1.5%. Pin novo: ≈10.948%.
         assert!(
-            (trim.rotation_limit_pct_mac - 39.93).abs() < 1.5,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈39.93% ±1.5%)",
+            (trim.rotation_limit_pct_mac - 10.948).abs() < 1.5,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈10.948% ±1.5%)",
             trim.rotation_limit_pct_mac
         );
 
-        // Achado honesto: a rotação governa E fica à frente do limite
-        // traseiro (envelope vazio) — ver docstring do módulo.
+        // A rotação ainda governa (é o critério mais restritivo), mas
+        // agora fica ATRÁS do limite traseiro — envelope de CG FECHADO
+        // (achado honesto pós-E6).
         assert!(trim.rotation_limit_pct_mac > trim.flare_limit_pct_mac);
         assert_eq!(trim.governing, "rotacao",
-            "governing deveria ser 'rotacao' (achado honesto do baseline real)");
-        assert!(trim.rotation_limit_pct_mac > wb.spec.cg_limit_aft_pct_mac,
-            "limite de rotação ({:.2}%) deveria ficar À FRENTE do limite traseiro ({:.2}%) — \
-             envelope de CG vazio no baseline real",
+            "governing deveria continuar 'rotacao' (mais restritiva que a flare, agora \
+             negativa) no baseline real pós-E6");
+        assert!(trim.rotation_limit_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
+            "limite de rotação ({:.2}%) deveria ficar ATRÁS (ou igual) do limite traseiro \
+             ({:.2}%) — envelope de CG fechado no baseline real pós-E6",
             trim.rotation_limit_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
         for sc in &trim.rotation_margin_per_scenario {
-            assert!(sc.rotation_authority_margin_pct < 0.0,
-                "cenário '{}': margem de autoridade de rotação deveria ser NEGATIVA no \
-                 baseline real (nenhum cenário tem CG atrás o bastante) — obtido {:.2}%",
+            assert!(sc.rotation_authority_margin_pct > 0.0,
+                "cenário '{}': margem de autoridade de rotação deveria ser POSITIVA no \
+                 baseline real pós-E6 (todos os cenários têm CG atrás o bastante) — obtido \
+                 {:.2}%",
                 sc.scenario, sc.rotation_authority_margin_pct);
         }
+    }
+
+    /// Caminho de erro preservado (achado histórico pré-E6): mesma
+    /// mutação de três parâmetros usada em
+    /// `constraint_checker::tests::violacao_de_envelope_vazio_aparece_com_
+    /// baseline_mutado_parametros_pre_e6` (`gear.x_main_m`, `empennage.v_h`,
+    /// `stability.cl_h_max_down` revertidos ao valor pré-E6) — reproduz o
+    /// achado honesto original: rotação governa E fica À FRENTE do limite
+    /// traseiro (envelope de CG vazio). Nota: esta mutação reverte só os
+    /// TRÊS parâmetros de trim/geometria da EH, não `arms.baggage_m` nem
+    /// os itens de massa (2, 3, 8) — o cenário mais pesado ("4 pax +
+    /// bagagem + cheio") já reflete o bagageiro avançado da E6, então
+    /// tem CG deslocado o bastante para ter margem POSITIVA mesmo com a
+    /// física de trim revertida; os demais cenários continuam com margem
+    /// negativa. A checagem por-cenário abaixo exige só que ALGUM
+    /// cenário fique com autoridade insuficiente (não mais TODOS, como no
+    /// achado pré-E6 original com a config antiga completa).
+    #[test]
+    fn trim_authority_agent_run_hand_check_baseline_mutado_parametros_pre_e6() {
+        let toml = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
+        )
+        .expect("falha ao ler baseline_4seat.toml do disco");
+        let mut cfg = crate::models::config::parse_aircraft(&toml)
+            .expect("baseline real deveria ser uma configuração válida");
+        cfg.gear.x_main_m = 3.85;           // valor pré-E6 — causa raiz original
+        cfg.empennage.v_h = 0.70;           // valor pré-E6
+        cfg.stability.cl_h_max_down = 0.85; // valor pré-E6
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let state = crate::models::aircraft_state::AircraftState::from_config(&cfg);
+        let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);
+        let emp = crate::agents::empennage::EmpennageAgent::run(&wing, &cfg);
+        let engine = crate::models::engine::test_fixtures::motor_generico_teste();
+        let wb = crate::agents::weight_balance::WeightBalanceAgent::run(
+            &state, &wing, &engine, &cfg, &req, &emp,
+        );
+
+        let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
+
+        // Achado honesto: com os parâmetros pré-E6, a rotação governa E
+        // fica à frente do limite traseiro (envelope vazio).
+        assert!(trim.rotation_limit_pct_mac > trim.flare_limit_pct_mac);
+        assert_eq!(trim.governing, "rotacao",
+            "governing deveria ser 'rotacao' (achado honesto pré-E6)");
+        assert!(trim.rotation_limit_pct_mac > wb.spec.cg_limit_aft_pct_mac,
+            "limite de rotação ({:.2}%) deveria ficar À FRENTE do limite traseiro ({:.2}%) — \
+             envelope de CG vazio com parâmetros pré-E6",
+            trim.rotation_limit_pct_mac, wb.spec.cg_limit_aft_pct_mac);
+
+        assert!(trim.rotation_margin_per_scenario.iter()
+                .any(|sc| sc.rotation_authority_margin_pct < 0.0),
+            "com parâmetros pré-E6, ao menos um cenário deveria ter margem de autoridade de \
+             rotação NEGATIVA: {:?}",
+            trim.rotation_margin_per_scenario.iter()
+                .map(|sc| (sc.scenario.as_str(), sc.rotation_authority_margin_pct))
+                .collect::<Vec<_>>());
     }
 
     /// Sensibilidade: o limite de flare recomputado a `cl_h_max_down ±
