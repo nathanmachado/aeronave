@@ -68,6 +68,39 @@ pub fn nose_load_fraction(x_cg_m: f64, x_nose_m: f64, x_main_m: f64) -> f64 {
     l_main / total
 }
 
+// ─── TIPBACK / TAIL-STRIKE (Task 2, refino-ciclo2) ────────────────────────────
+
+/// Ângulo de tipback — o ângulo entre a vertical do trem principal e a
+/// linha que vai até o CG mais TRASEIRO real (envelope de carregamento
+/// observado, não o limite admissível — ver `LandingGearAgent::run`), a
+/// partir da altura do CG acima do solo:
+///
+///   θ = atan((x_main − x_cg_aft) / h_cg)
+///
+/// Abaixo de `[gear].tipback_min_deg`, a aeronave pode tombar sobre a
+/// cauda (ex.: carregamento traseiro pesado, empurrão de solo) — Raymer,
+/// "Aircraft Design: A Conceptual Approach", cap. 11.
+pub fn tipback_angle_deg(x_main_m: f64, x_cg_aft_m: f64, h_cg_m: f64) -> f64 {
+    ((x_main_m - x_cg_aft_m) / h_cg_m).atan().to_degrees()
+}
+
+/// Folga angular de tail-strike — aproximação geométrica simplificada: o
+/// ângulo entre o solo (no eixo do trem principal) e a linha até o ponto
+/// mais baixo do cone de cauda:
+///
+///   folga = atan(tail_cone_height_m / (tail_cone_x_m − x_main_m))
+///
+/// `tail_cone_height_m` já é tratado como a altura do FUNDO do cone ao solo
+/// em atitude ESTÁTICA (trem estendido, aeronave nivelada) — a aproximação
+/// NÃO desconta a elevação adicional do cone conforme a aeronave gira em
+/// torno do eixo do trem principal durante a rotação (efeito de segunda
+/// ordem, pequeno para ângulos de rotação moderados — documentado, não
+/// modelado). A folga precisa ser >= `[gear].rotation_attitude_deg` para a
+/// cauda não tocar o solo na rotação de decolagem/flare.
+pub fn tail_strike_margin_deg(tail_cone_height_m: f64, tail_cone_x_m: f64, x_main_m: f64) -> f64 {
+    (tail_cone_height_m / (tail_cone_x_m - x_main_m)).atan().to_degrees()
+}
+
 // ─── CARGAS DE IMPACTO NO POUSO ───────────────────────────────────────────────
 
 /// Carga de impacto no trem principal por perna (N).
@@ -156,13 +189,22 @@ impl LandingGearAgent {
     /// massas totais das pernas de `[[masses.items]]`, que são a fonte
     /// única do peso total do sistema — `gear_cfg.mass_main_leg_kg` é só o
     /// dado de "uma perna" usado no dimensionamento do atuador):
-    ///   x_cg_aft_m: CG mais traseiro (maior carga no nariz)
+    ///   x_cg_fwd_m: CG mais DIANTEIRO real dos cenários de carga
+    ///     (WeightBalanceAgent — `wb.spec.cg_mac_fwd_pct`, não o limite
+    ///     admissível) — pior caso para o TETO de carga de nariz (25%) e
+    ///     para a carga estrutural MÁXIMA real do trem de nariz (Task 2,
+    ///     refino-ciclo2: quanto mais perto do trem de nariz o CG fica,
+    ///     maior a fração de carga nele — ver `nose_load_fraction`).
+    ///   x_cg_aft_m: CG mais TRASEIRO real dos cenários de carga — pior
+    ///     caso para o PISO de carga de nariz (8%, tração/direção em solo)
+    ///     e para o ângulo de tipback.
     ///   gear_cfg:   geometria/parâmetros do trem
     ///   main_gear_total_mass_kg: massa TOTAL do trem principal (ambas as
     ///     pernas) — item `trem_principal` de `[[masses.items]]`
     ///   nose_gear_mass_kg: massa do trem de nariz — item `trem_nariz`
     pub fn run(
         mtow_kg: f64,
+        x_cg_fwd_m: f64,
         x_cg_aft_m: f64,
         gear_cfg: &GearCfg,
         main_gear_total_mass_kg: f64,
@@ -182,9 +224,21 @@ impl LandingGearAgent {
         let track = min_track_width_m(h_cg_ground).max(2.80); // mínimo 2.80m
         let tipover = tipover_angle_deg(h_cg_ground, track);
 
-        // Fração de carga no nariz (cenário com CG mais traseiro = pior para nariz)
-        let f_nose_frac = nose_load_fraction(x_cg_aft_m, x_nose_m, x_main_m);
+        // Fração de carga no nariz nos DOIS extremos reais dos cenários de
+        // carga (Task 2, refino-ciclo2) — substitui o único valor anterior
+        // (calculado só no CG mais traseiro, rotulado "pior para nariz" —
+        // rótulo impreciso: o CG traseiro é o pior caso para o PISO de 8%,
+        // não para a carga estrutural, que é MAIOR no CG dianteiro).
+        let f_nose_max_frac = nose_load_fraction(x_cg_fwd_m, x_nose_m, x_main_m); // teto 25%
+        let f_nose_min_frac = nose_load_fraction(x_cg_aft_m, x_nose_m, x_main_m); // piso 8%
         let wheelbase = x_main_m - x_nose_m;
+
+        // Tipback (Raymer cap. 11) e tail-strike (Task 2, refino-ciclo2) —
+        // ver docstrings de `tipback_angle_deg`/`tail_strike_margin_deg`.
+        let theta_tipback = tipback_angle_deg(x_main_m, x_cg_aft_m, h_cg_ground);
+        let tail_strike_margin = tail_strike_margin_deg(
+            gear_cfg.tail_cone_height_m, gear_cfg.tail_cone_x_m, x_main_m,
+        );
 
         // Cargas
         // `f_main_static` (carga estática por perna do trem principal) não
@@ -194,9 +248,15 @@ impl LandingGearAgent {
         // amortecedor, sempre maior que a estática). Mantida no cálculo
         // (não removida) por simetria com `f_nose_static`, que É consumida
         // por `f_nose_impact`, e como documentação explícita da carga
-        // estática de referência.
-        let _f_main_static = mtow_kg * G * (1.0 - f_nose_frac) / 2.0; // por perna
-        let f_nose_static = mtow_kg * G * f_nose_frac;
+        // estática de referência. Usa `f_nose_min_frac` (CG traseiro) porque
+        // esse É o pior caso REAL para a carga do trem PRINCIPAL (fração de
+        // nariz mínima ⇒ fração de trem principal MÁXIMA) — o par correto,
+        // simétrico ao `f_nose_max_frac` usado abaixo para o trem de nariz.
+        let _f_main_static = mtow_kg * G * (1.0 - f_nose_min_frac) / 2.0; // por perna
+        // Carga estática do trem de nariz dimensiona para o PIOR CASO real
+        // (CG mais dianteiro, `f_nose_max_frac`) — não mais o CG traseiro,
+        // que subestimava a carga estrutural do trem de nariz.
+        let f_nose_static = mtow_kg * G * f_nose_max_frac;
 
         // Curso do amortecedor principal
         let stroke_main = min_oleo_stroke_m(mtow_kg, sink_rate, n_g_max, eta_oleo)
@@ -230,7 +290,10 @@ impl LandingGearAgent {
             track_width_m:          track,
             wheelbase_m:            wheelbase,
             tipover_angle_deg:      tipover,
-            nose_load_fraction_pct: f_nose_frac * 100.0,
+            nose_load_max_pct:      f_nose_max_frac * 100.0,
+            nose_load_min_pct:      f_nose_min_frac * 100.0,
+            tipback_angle_deg:      theta_tipback,
+            tail_strike_margin_deg: tail_strike_margin,
             main_gear_load_n:       f_main_impact,
             nose_gear_load_n:       f_nose_impact,
             main_oleo_stroke_mm:    stroke_main * 1_000.0,
@@ -315,22 +378,78 @@ mod tests {
             mass_nose_kg: 22.0,
             retraction_time_s: 7.0,
             actuators_doors_mass_kg: 20.0,
+            // Valores do hand-check do brief (task-2-brief.md) — Raymer
+            // cap. 11 (tipback típico 15°).
+            tipback_min_deg: 15.0,
+            rotation_attitude_deg: 11.0,
+            tail_cone_x_m: 7.80,
+            tail_cone_height_m: 1.10,
         }
     }
 
     #[test]
     fn relatorio_completo_trem() {
         let gear_cfg = gear_cfg_teste();
-        let gear = LandingGearAgent::run(MTOW, 3.263, &gear_cfg, 55.0, 22.0);
+        // x_cg_fwd (3.00m) < x_cg_aft (3.263m) — extremos ilustrativos, não
+        // pinados contra nenhum cenário real (esse é o papel dos testes de
+        // `tests/gear_tipback.rs`, contra o baseline real do disco).
+        let gear = LandingGearAgent::run(MTOW, 3.00, 3.263, &gear_cfg, 55.0, 22.0);
         println!("Bitola:    {:.2}m", gear.track_width_m);
         println!("Empeno:    {:.2}m", gear.wheelbase_m);
         println!("Tombamento:{:.1}°", gear.tipover_angle_deg);
-        println!("Carga nariz:{:.1}%", gear.nose_load_fraction_pct);
+        println!("Carga nariz max:{:.1}%  min:{:.1}%", gear.nose_load_max_pct, gear.nose_load_min_pct);
+        println!("Tipback:   {:.1}°  Folga tail-strike: {:.1}°",
+                 gear.tipback_angle_deg, gear.tail_strike_margin_deg);
         println!("Stroke main:{:.0}mm", gear.main_oleo_stroke_mm);
         println!("F_main:     {:.0}N", gear.main_gear_load_n);
         println!("Peso total: {:.0}kg", gear.total_weight_kg);
         assert!(gear.tipover_angle_deg < 55.0);
-        assert!(gear.nose_load_fraction_pct >= 8.0);
+        assert!(gear.nose_load_min_pct >= 8.0);
+        assert!(gear.nose_load_max_pct >= gear.nose_load_min_pct,
+            "CG mais dianteiro deveria produzir fração de nariz >= CG mais traseiro");
         assert_eq!(gear.total_weight_kg, 55.0 + 22.0 + 20.0);
+    }
+
+    // ─── Task 2 (refino-ciclo2): tipback/tail-strike — hand-checks do brief ──
+    //
+    // Valores literais de `task-2-brief.md` (calculados contra a geometria
+    // pós-Task-1: x_main_m=3.55, x_nose_m=1.40, h_cg_ground_m=1.05,
+    // tail_cone_x_m=7.80, tail_cone_height_m=1.10). O CG mais traseiro/
+    // dianteiro EXATO usado no brief (3.35m / 3.077m, via %MAC arredondado)
+    // é uma APROXIMAÇÃO do runtime real — ver `tests/gear_tipback.rs` para
+    // os números honestos do pipeline completo contra o baseline real do
+    // disco (pequeno delta, documentado lá).
+
+    #[test]
+    fn tipback_hand_check_do_brief() {
+        // θ = atan((x_main − x_cg_aft)/h_cg) = atan((3.55−3.35)/1.05) = 10.8°
+        let theta = tipback_angle_deg(3.55, 3.35, 1.05);
+        println!("θ tipback (hand-check do brief) = {theta:.2}°");
+        assert!((theta - 10.8).abs() < 0.1,
+            "θ={theta:.2}° — esperado ≈10.8° (hand-check do brief)");
+        // Achado honesto ESPERADO: abaixo do piso de 15° (Raymer cap. 11) —
+        // NÃO é um bug, é o resultado a ser reportado (ver ConstraintChecker).
+        assert!(theta < 15.0,
+            "achado honesto esperado: θ={theta:.2}° deveria ficar ABAIXO do piso de 15°");
+    }
+
+    #[test]
+    fn tail_strike_hand_check_do_brief() {
+        // folga = atan(1.10/(7.80−3.55)) = atan(1.10/4.25) = 14.5°
+        let folga = tail_strike_margin_deg(1.10, 7.80, 3.55);
+        println!("Folga tail-strike (hand-check do brief) = {folga:.2}°");
+        assert!((folga - 14.5).abs() < 0.1,
+            "folga={folga:.2}° — esperado ≈14.5° (hand-check do brief)");
+        assert!(folga >= 11.0, "folga deveria satisfazer o piso de 11° (rotation_attitude_deg)");
+    }
+
+    #[test]
+    fn nose_load_max_hand_check_do_brief() {
+        // CG dianteiro 14.2% MAC ≈ 3.077m: nose_max = (3.55−3.077)/(3.55−1.40) = 22.0%
+        let frac = nose_load_fraction(3.077, 1.40, 3.55);
+        let pct = frac * 100.0;
+        println!("nose_load_max (hand-check do brief) = {pct:.1}%");
+        assert!((pct - 22.0).abs() < 0.5, "nose_max={pct:.1}% — esperado ≈22.0%");
+        assert!(pct <= 25.0, "nose_max deveria satisfazer o teto de 25%");
     }
 }

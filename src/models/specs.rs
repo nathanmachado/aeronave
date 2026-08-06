@@ -518,8 +518,26 @@ pub struct GearSpec {
     pub wheelbase_m: f64,
     /// Ângulo anti-tombamento lateral (< 55°)
     pub tipover_angle_deg: f64,
-    /// Fração de carga no trem de nariz (ideal: 8–20%)
-    pub nose_load_fraction_pct: f64,
+    /// Fração de carga no nariz no CG mais DIANTEIRO real dos cenários de
+    /// carga (`WeightBalanceAgent` — não o limite admissível) — pior caso
+    /// para o TETO de 25% e para a carga estrutural máxima real do trem de
+    /// nariz (Task 2, refino-ciclo2). **v4.3**: substitui o antigo campo
+    /// único `nose_load_fraction_pct` (renomeado, não é mais o único
+    /// extremo avaliado — ver `nose_load_min_pct` para o piso).
+    pub nose_load_max_pct: f64,
+    /// Fração de carga no nariz no CG mais TRASEIRO real dos cenários de
+    /// carga — pior caso para o PISO de 8% (tração/direção em solo).
+    /// **v4.3** (novo).
+    pub nose_load_min_pct: f64,
+    /// Ângulo de tipback — trem principal → CG mais TRASEIRO real, medido
+    /// a partir da altura do CG acima do solo (Raymer cap. 11). Deve ser >=
+    /// `[gear].tipback_min_deg` para a aeronave não tombar sobre a cauda em
+    /// solo/carregamento traseiro. **v4.3** (novo, Task 2 refino-ciclo2).
+    pub tipback_angle_deg: f64,
+    /// Folga angular de tail-strike — geometria simplificada do cone de
+    /// cauda (ver `agents::landing_gear::tail_strike_margin_deg`). Deve ser
+    /// >= `[gear].rotation_attitude_deg`. **v4.3** (novo).
+    pub tail_strike_margin_deg: f64,
     /// Carga máxima no trem principal (N) — por perna
     pub main_gear_load_n: f64,
     /// Carga máxima no trem de nariz (N)
@@ -712,7 +730,26 @@ pub struct ElectricalSpec {
 /// dimensionada) — todos com erro de migração claro em
 /// `models::config::parse_aircraft` se ainda presentes no TOML. Ver
 /// `docs/aircraft_spec.schema.md` §1 e §4.
-pub const SCHEMA_VERSION: &str = "4.2";
+///
+/// v4.3 (Task 2, refino-ciclo2): `GearSpec::nose_load_fraction_pct`
+/// (único, calculado só no CG mais traseiro) foi RENOMEADO/SUBSTITUÍDO por
+/// dois campos, `nose_load_max_pct` (CG mais dianteiro real, teto de 25%) e
+/// `nose_load_min_pct` (CG mais traseiro real, piso de 8%) — mudança que
+/// QUEBRA compatibilidade estrita (campo removido), mas versionada como
+/// bump MINOR por diretriz explícita desta task (o novo par de campos
+/// substitui integralmente o antigo com semântica equivalente para o
+/// extremo traseiro — `nose_load_min_pct` é numericamente o antigo
+/// `nose_load_fraction_pct`; consumidores devem atualizar a leitura do
+/// campo, mas nenhum outro bloco muda). `GearSpec` também ganha dois campos
+/// NOVOS, `tipback_angle_deg` e `tail_strike_margin_deg` (checagens de
+/// Raymer cap. 11, ver `agents::landing_gear`). Acompanha, do lado da
+/// CONFIGURAÇÃO de entrada (não deste schema JSON): `[gear]` ganha quatro
+/// campos NOVOS obrigatórios — `tipback_min_deg`, `rotation_attitude_deg`,
+/// `tail_cone_x_m`, `tail_cone_height_m` (sem valor padrão implícito; TOMLs
+/// antigos sem esses campos falham o parse do `toml` crate por campo
+/// ausente, não um erro de migração dedicado). Ver
+/// `docs/aircraft_spec.schema.md` §1 e §4.
+pub const SCHEMA_VERSION: &str = "4.3";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver

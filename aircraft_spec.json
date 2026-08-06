@@ -1,7 +1,7 @@
 {
-  "schema_version": "4.2",
-  "revision": "4.2",
-  "validation_status": "PASS",
+  "schema_version": "4.3",
+  "revision": "4.3",
+  "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
     "area_m2": 14.2,
@@ -260,9 +260,12 @@
     "track_width_m": 2.99911081415844,
     "wheelbase_m": 2.15,
     "tipover_angle_deg": 35.00000000000001,
-    "nose_load_fraction_pct": 8.682628772026787,
+    "nose_load_max_pct": 21.173577043498366,
+    "nose_load_min_pct": 8.682628772026787,
+    "tipback_angle_deg": 10.081119110996953,
+    "tail_strike_margin_deg": 14.51105950016907,
     "main_gear_load_n": 22777.738458877324,
-    "nose_gear_load_n": 3296.1774550791556,
+    "nose_gear_load_n": 8038.103335594913,
     "main_oleo_stroke_mm": 212.4332959450732,
     "nose_oleo_stroke_mm": 127.45997756704391,
     "main_tire": "6.00-6 (4 ply) — Aircraft Spruce",
@@ -358,7 +361,9 @@
     "weight": "preliminary (soma de itens de massa configurados não pesados — validar na balança antes da fabricação)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
-  "violations": [],
+  "violations": [
+    "Tipback: ângulo 10.1° abaixo do piso de 15.0° (Raymer cap. 11) — risco de tombar sobre a cauda com o CG mais traseiro real dos cenários de carga (trem principal em x_main=3.55m)"
+  ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
   ]

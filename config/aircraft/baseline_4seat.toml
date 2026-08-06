@@ -143,6 +143,27 @@ mass_main_leg_kg = 27.5
 mass_nose_kg = 22.0
 retraction_time_s = 7.0
 actuators_doors_mass_kg = 20.0
+# Tipback/tail-strike (Task 2, refino-ciclo2) — Raymer, "Aircraft Design",
+# cap. 11. tipback_min_deg=15° é o piso típico de projeto; rotation_
+# attitude_deg=11° é a atitude de picada nominal de rotação/flare desta
+# célula (ver [performance] rotation_time_s/flare_time_s, tempos — não
+# ângulos — do mesmo evento). tail_cone_x_m/tail_cone_height_m descrevem a
+# geometria SIMPLIFICADA do cone de cauda (ver agents::landing_gear::
+# tail_strike_margin_deg para a aproximação exata).
+#
+# ACHADO HONESTO (Task 2): com o trem recuado pela Task 1/campanha E1–E6
+# (x_main 3.85→3.55m, para abrir o envelope de CG via autoridade de
+# rotação), o ângulo de tipback real cai para ≈10,1° — ABAIXO do piso de
+# 15°. Isto é esperado e REPORTADO como violação (ver
+# ConstraintChecker::verify, checks #15-#17, e a varredura informativa de
+# x_main impressa por `main.rs`) — não mascarado por config. Tail-strike e
+# carga de nariz (dois extremos) continuam OK. Decisão de projeto (recuar
+# o trem mais, ou aceitar o tipback e mitigar operacionalmente — ex. cauda
+# reforçada/skid) fica para revisão humana.
+tipback_min_deg = 15.0
+rotation_attitude_deg = 11.0
+tail_cone_x_m = 7.80
+tail_cone_height_m = 1.10
 
 [arms]      # braços de momento (m do datum no nariz)
 engine_cg_m = 0.65

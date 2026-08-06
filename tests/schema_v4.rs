@@ -73,15 +73,17 @@ fn build_baseline_report() -> AircraftReport {
     let wing_mass_kg = cfg.masses.item_mass("asa").unwrap();
     let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
 
+    let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
     let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
     let mass_main_total = cfg.masses.item_mass("trem_principal").unwrap();
     let mass_nose = cfg.masses.item_mass("trem_nariz").unwrap();
-    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
+    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
 
     let electrical = ElectricalAgent::run(&cfg);
 
     let report = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
-                                            &propeller, &perf, mission, &electrical);
+                                            &propeller, &perf, mission, &electrical,
+                                            &gear, &cfg.gear);
     let all_ok = report.all_satisfied();
 
     let geometry = GeometrySpec {
@@ -145,7 +147,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.2");
+    assert_eq!(report.schema_version, "4.3");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -162,7 +164,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.2");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.3");
 }
 
 #[test]

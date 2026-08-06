@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.2
+# `aircraft_spec.json` — contrato do schema v4.3
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -86,6 +86,35 @@ documentação a ser corrigido, não um comportamento aceitável.
     calibrados (reproduzem os antigos valores fixos na área/autoridade
     runtime desta config, dentro de resíduo de arredondamento
     desprezível — ver task-1-report.md).
+- **v4.3** (Task 2, refino-ciclo2): `GearSpec::nose_load_fraction_pct`
+  (campo único, calculado só no CG mais TRASEIRO real) foi RENOMEADO por
+  DOIS campos — `nose_load_max_pct` (CG mais DIANTEIRO real, teto de 25%) e
+  `nose_load_min_pct` (CG mais TRASEIRO real, piso de 8% — numericamente o
+  antigo `nose_load_fraction_pct`). Esta é, estritamente, uma mudança que
+  QUEBRA compatibilidade (campo removido) — versionada como bump MINOR por
+  diretriz explícita desta task, não como exceção à política de §1 acima
+  (consumidores que leem `nose_load_fraction_pct` devem migrar para
+  `nose_load_min_pct`, equivalente). `GearSpec` também ganha dois campos
+  NOVOS (aditivos): `tipback_angle_deg` e `tail_strike_margin_deg` — ver
+  `agents::landing_gear` (Raymer, "Aircraft Design", cap. 11).
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON):
+    `[gear]` ganha QUATRO campos NOVOS **obrigatórios** (sem default
+    implícito) — `tipback_min_deg` (faixa (8, 25)°, típico 15°),
+    `rotation_attitude_deg` (faixa (5, 18)°, típico 11°), `tail_cone_x_m`
+    (faixa (3.0, 12.0) m, deve ser maior que `x_main_m`) e
+    `tail_cone_height_m` (faixa (0.3, 2.5) m). TOMLs antigos sem esses
+    campos falham o parse (`missing field`) — não há um erro de migração
+    dedicado (diferente das remoções da v4.1/v4.2), porque não há um
+    campo antigo equivalente para detectar e redirecionar; a mensagem de
+    erro do parser TOML já nomeia o campo ausente. Ver
+    `config/aircraft/baseline_4seat.toml` §`[gear]` para valores de
+    referência.
+  - **Achado honesto NOVO** (não uma mudança de contrato, mas relevante
+    para consumidores): a aeronave-base real reporta `tipback_angle_deg
+    ≈ 10.1°`, abaixo do piso de 15° — `validation_status` do baseline real
+    volta a `"FAIL"` (era `"PASS"` desde a v4.1/campanha E1–E6). Ver
+    `ConstraintChecker::verify` (checks #15-17) e
+    `tests/gear_tipback.rs`/`tests/cli.rs`.
 
 ## 2. Convenção de eixos e unidades
 
@@ -445,8 +474,11 @@ dedução completa.
 | `gear_type` | string | — | Tipo de trem |
 | `track_width_m` | f64 | m | Bitola do trem principal |
 | `wheelbase_m` | f64 | m | Distância entre eixos |
-| `tipover_angle_deg` | f64 | deg | Ângulo anti-tombamento lateral (deve ser < 55°) |
-| `nose_load_fraction_pct` | f64 | % | Fração de carga no trem de nariz (ideal 8–20%) |
+| `tipover_angle_deg` | f64 | deg | Ângulo anti-tombamento LATERAL (deve ser < 55°) — distinto de `tipback_angle_deg` (fore/aft) |
+| `nose_load_max_pct` | f64 | % | **v4.3**: fração de carga no nariz no CG mais DIANTEIRO real dos cenários de carga — teto 25% (substitui `nose_load_fraction_pct`) |
+| `nose_load_min_pct` | f64 | % | **v4.3**: fração de carga no nariz no CG mais TRASEIRO real dos cenários de carga — piso 8% |
+| `tipback_angle_deg` | f64 (**novo v4.3**) | deg | Ângulo de tipback (trem principal → CG mais TRASEIRO real, Raymer cap. 11) — deve ser >= `[gear].tipback_min_deg` |
+| `tail_strike_margin_deg` | f64 (**novo v4.3**) | deg | Folga angular de tail-strike (geometria simplificada do cone de cauda) — deve ser >= `[gear].rotation_attitude_deg` |
 | `main_gear_load_n` | f64 | N | Carga máxima no trem principal (por perna) |
 | `nose_gear_load_n` | f64 | N | Carga máxima no trem de nariz |
 | `main_oleo_stroke_mm` / `nose_oleo_stroke_mm` | f64 | mm | Curso do amortecedor |

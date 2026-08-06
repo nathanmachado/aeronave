@@ -227,6 +227,30 @@ pub struct GearCfg {
     /// Massa dos atuadores elétricos + portas do trem (kg) — soma ao peso
     /// total do sistema junto com as massas das pernas de `[masses]`.
     pub actuators_doors_mass_kg: f64,
+    /// Ângulo MÍNIMO de tipback (Task 2, refino-ciclo2) — Raymer, "Aircraft
+    /// Design", cap. 11: `θ = atan((x_main − x_cg_aft)/h_cg)` medido do
+    /// trem principal ao CG mais TRASEIRO real (`agents::landing_gear::
+    /// tipback_angle_deg`) precisa ser >= este piso para a aeronave não
+    /// tombar sobre a cauda em solo/carregamento traseiro. Típico 15°.
+    /// Faixa validada (8, 25).
+    pub tipback_min_deg: f64,
+    /// Atitude de rotação na decolagem (ângulo de picada, nariz para cima,
+    /// graus) — usada como piso na checagem de folga de tail-strike
+    /// (`agents::landing_gear::tail_strike_margin_deg`). Típico 11°. Faixa
+    /// validada (5, 18).
+    pub rotation_attitude_deg: f64,
+    /// Posição longitudinal do ponto mais baixo do cone de cauda (m do
+    /// nariz) — geometria SIMPLIFICADA para a checagem de tail-strike (ver
+    /// docstring de `agents::landing_gear::tail_strike_margin_deg`). Deve
+    /// ser maior que `x_main_m` (o cone fica atrás do trem principal).
+    /// Faixa validada (3.0, 12.0).
+    pub tail_cone_x_m: f64,
+    /// Altura do ponto mais baixo do cone de cauda ao solo, em atitude
+    /// ESTÁTICA (trem estendido, aeronave nivelada, m) — aproximação:
+    /// tratada como a altura já disponível ao rotacionar (não subtrai raio
+    /// de pneu/geometria do trem, ver docstring do agente). Faixa validada
+    /// (0.3, 2.5).
+    pub tail_cone_height_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -545,6 +569,15 @@ pub mod test_fixtures {
                 mass_nose_kg: 21.0,
                 retraction_time_s: 7.5,
                 actuators_doors_mass_kg: 19.0,
+                // Levemente diferente do baseline real (15.0/11.0/7.80/1.10,
+                // Task 2 refino-ciclo2) — mesma justificativa de "nenhum
+                // destes números coincide com o baseline real" usada nas
+                // demais seções desta fixture. tail_cone_x_m (7.20) > x_main_m
+                // (3.75), como a validação exige.
+                tipback_min_deg: 14.0,
+                rotation_attitude_deg: 10.0,
+                tail_cone_x_m: 7.20,
+                tail_cone_height_m: 1.00,
             },
             arms: ArmsCfg {
                 engine_cg_m: 0.60,

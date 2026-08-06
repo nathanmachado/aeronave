@@ -194,16 +194,32 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// `empennage.v_h` 0,70→0,85 (EH maior, mais autoridade de profundor E mais
 /// estabilizador) e `stability.cl_h_max_down` 0,85→0,95 (mais download do
 /// profundor), validados experimentalmente (envelope [10,9%, 43,5%] MAC,
-/// 6/6 cenários dentro). A aeronave-base real agora converge com
+/// 6/6 cenários dentro). A aeronave-base real convergia então com
 /// `validation_status: PASS` e ZERO violações de envelope de CG — primeiro
-/// PASS honesto do projeto. Teste renomeado e reescrito para refletir isso;
-/// o caminho de erro (envelope vazio/cenário fora do envelope) continua
-/// coberto por testes unitários com config mutada em código (ver
-/// `src/validation/constraint_checker.rs::tests::violacao_de_envelope_vazio_
-/// aparece_com_baseline_mutado_parametros_pre_e6` e
+/// PASS honesto do projeto. O caminho de erro (envelope vazio/cenário fora
+/// do envelope) continua coberto por testes unitários com config mutada em
+/// código (ver `src/validation/constraint_checker.rs::tests::violacao_de_
+/// envelope_vazio_aparece_com_baseline_mutado_parametros_pre_e6` e
 /// `violacao_de_envelope_aparece_quando_cenario_esta_fora`).
+///
+/// ATUALIZAÇÃO (Task 2, refino-ciclo2, 2026-08-06): NOVO achado honesto —
+/// exatamente o preço antecipado pela nota da campanha E1–E6 acima ("mover
+/// o trem principal mais para a frente" para abrir o envelope de CG via
+/// autoridade de rotação). Recuar `gear.x_main_m` de 3,85 para 3,55m
+/// reduziu a distância horizontal ao CG mais TRASEIRO real dos cenários de
+/// carga, e portanto o ângulo de TIPBACK (Raymer cap. 11): θ ≈ 10,1° (CG
+/// aft real ≈3,363m/37,2% MAC, x_main=3,55m, h_cg=1,05m) — ABAIXO do piso
+/// de 15° (`[gear].tipback_min_deg`, ver checagem nova #15 de
+/// `ConstraintChecker::verify`). `validation_status` volta a `FAIL` — não
+/// é uma regressão desta task, é a checagem NOVA pegando uma tensão física
+/// real do triciclo que já existia, mas nunca tinha sido verificada. O
+/// envelope de CG continua FECHADO (zero violações de cenário/vazio) e a
+/// checagem de tail-strike/carga de nariz nos dois extremos (também novas
+/// desta task) PASSAM — só o tipback falha. Ver a varredura informativa de
+/// `x_main` impressa por `main.rs` para o trade-off tipback×rotação; a
+/// decisão de mover o trem fica para revisão humana (não automatizada).
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_pass_honesto_de_envelope_cg() {
+fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_fail_honesto_de_tipback() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -224,22 +240,32 @@ fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_pass_honesto_de_e
 
     assert!(output.status.success(),
         "binário deveria convergir e sair com sucesso (código 0) com o motor/aeronave/missão \
-         reais passados explicitamente — o achado do envelope de CG (ver nota acima) aparece \
-         no CONTEÚDO do relatório, não no código de saída: stderr={}",
+         reais passados explicitamente — o achado de tipback (ver nota acima) aparece no \
+         CONTEÚDO do relatório, não no código de saída: stderr={}",
         String::from_utf8_lossy(&output.stderr));
 
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Achado honesto pós-E6 (ver nota acima): validation_status É PASS —
-    // o envelope de CG está fechado, zero violações.
-    assert!(json.contains("\"validation_status\": \"PASS\""),
-        "JSON de saída deveria reportar validation_status PASS (envelope de CG fechado pela \
-         campanha E1–E6 — ver comentário acima e task-1-report.md da E6):\n{json}");
+    // Achado honesto NOVO (Task 2, ver nota acima): validation_status É
+    // FAIL — tipback abaixo do piso de 15°. Não mascarar tunando config.
+    assert!(json.contains("\"validation_status\": \"FAIL\""),
+        "JSON de saída deveria reportar validation_status FAIL (tipback abaixo do piso de \
+         15° — achado honesto da Task 2, refino-ciclo2 — ver comentário acima):\n{json}");
+    assert!(json.contains("Tipback:") && json.contains("abaixo do piso"),
+        "violações deveriam citar a checagem de tipback nova:\n{json}");
+    // O envelope de CG (Task 4.4/E1–E6) continua FECHADO — só o tipback
+    // (achado NOVO desta task) falha, não uma regressão do envelope.
     assert!(!json.contains("fora do envelope de CG admissível"),
         "não deveria haver violações de cenário fora do envelope de CG admissível:\n{json}");
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
+    // Tail-strike e carga de nariz nos dois extremos (também novas desta
+    // task) PASSAM no baseline real — só o tipback falha.
+    assert!(!json.contains("Tail-strike:"),
+        "não deveria haver violação de tail-strike no baseline real:\n{json}");
+    assert!(!json.contains("Carga de nariz:"),
+        "não deveria haver violação de carga de nariz (dois extremos) no baseline real:\n{json}");
 
     let _ = std::fs::remove_file(&out_path);
 }

@@ -437,9 +437,14 @@ fn main() {
 
     // ── Agente 6: Trem de Pouso ───────────────────────────────────────────────
     println!("[ AGENTE 6 ] LandingGearAgent — Trem Retrátil Elétrico");
-    // CG mais traseiro do envelope = cenário "4 pax + bagagem + cheio" (29.1% MAC)
-    // x_cg = x_mac_le + 0.291 × MAC — x_mac_le vem de [wing] le_root_x_m
-    // (única fonte da posição do bordo de ataque).
+    // CG mais dianteiro/traseiro REAIS dos cenários de carga
+    // (`WeightBalanceAgent` — não o limite ADMISSÍVEL do envelope de CG,
+    // ver bloco [ AGENTE 3 ] acima) — Task 2 (refino-ciclo2): tipback/
+    // tail-strike e carga de nariz nos dois extremos usam o envelope de
+    // carregamento REAL observado, não o limite físico de autoridade de
+    // profundor. x_cg = x_mac_le + %MAC/100 × MAC — x_mac_le vem de
+    // [wing] le_root_x_m (única fonte da posição do bordo de ataque).
+    let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
     let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
     let mass_main_total = cfg.masses.item_mass("trem_principal")
         .expect("item de massa 'trem_principal' ausente na configuração da aeronave");
@@ -448,12 +453,17 @@ fn main() {
     // Trem de pouso também dimensiona para o envelope estrutural (mesma
     // razão da StructuralAgent acima) — as cargas de pouso/solo devem
     // suportar o pior caso legal, não o MTOW de missão.
-    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
+    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
     println!("  Tipo: {}",     gear.gear_type);
-    println!("  Bitola: {:.2}m  |  Empeno: {:.2}m  |  Anti-tombamento: {:.1}°",
+    println!("  Bitola: {:.2}m  |  Empeno: {:.2}m  |  Anti-tombamento (lateral): {:.1}°",
              gear.track_width_m, gear.wheelbase_m, gear.tipover_angle_deg);
-    println!("  Carga nariz: {:.1}%  |  Main: {:.0}N/perna  |  Nariz: {:.0}N",
-             gear.nose_load_fraction_pct, gear.main_gear_load_n, gear.nose_gear_load_n);
+    println!("  Carga nariz: máx(CG dianteiro)={:.1}%  min(CG traseiro)={:.1}%  |  \
+              Main: {:.0}N/perna  |  Nariz: {:.0}N",
+             gear.nose_load_max_pct, gear.nose_load_min_pct,
+             gear.main_gear_load_n, gear.nose_gear_load_n);
+    println!("  Tipback (Raymer cap. 11): {:.1}°  |  piso: {:.1}°  |  Folga tail-strike: {:.1}°  |  piso: {:.1}°",
+             gear.tipback_angle_deg, cfg.gear.tipback_min_deg,
+             gear.tail_strike_margin_deg, cfg.gear.rotation_attitude_deg);
     println!("  Oleo main: {:.0}mm  |  Nariz: {:.0}mm  |  Sink rate: {:.1}m/s",
              gear.main_oleo_stroke_mm, gear.nose_oleo_stroke_mm, gear.max_sink_rate_ms);
     println!("  Pneu main: {}  |  {:.0}psi",
@@ -461,6 +471,44 @@ fn main() {
     println!("  Retração: {:.0}s  |  Atuador: {:.0}W ({:.1}A @28V)  |  Peso total: {:.0}kg\n",
              gear.retraction_time_s, gear.actuator_power_w,
              gear.actuator_power_w / 28.0, gear.total_weight_kg);
+
+    // Varredura INFORMATIVA de posição do trem principal (Task 2,
+    // refino-ciclo2) — o achado acima (tipback abaixo do piso de 15°) é a
+    // tensão fundamental do triciclo: recuar o trem (x_main maior) melhora
+    // o tipback, mas empurra o limite de rotação (TrimAuthorityAgent) para
+    // trás, arriscando tirar cenários de CG dianteiro do envelope admissível
+    // — e reduz ainda mais a carga de nariz (piso de 8%). Reexecuta o
+    // pipeline REAL (WeightBalanceAgent + TrimAuthorityAgent, não uma
+    // aproximação) para cada x_main candidato — só impresso aqui, NUNCA
+    // altera `cfg`/o baseline.
+    println!("  [ VARREDURA INFORMATIVA ] posição do trem principal (x_main) — NÃO altera o baseline:");
+    println!("  {:>8}  {:>9}  {:>10}  {:>10}  {:>18}  {:>10}",
+             "x_main", "tipback", "tail-str.", "nose_max%", "envelope CG (fwd)", "6/6 dentro");
+    let x_main_candidatos = [cfg.gear.x_main_m, 3.60, 3.65, 3.70, 3.75, 3.80, 3.85];
+    for &x_main in &x_main_candidatos {
+        let mut cfg_var = cfg.clone();
+        cfg_var.gear.x_main_m = x_main;
+        match aeronave::orchestrator::size_aircraft(&cfg_var, &engine, &req) {
+            Ok(sized_var) => {
+                let wb_var = &sized_var.wb;
+                let x_cg_fwd_var = cfg_var.wing.le_root_x_m + wb_var.spec.cg_mac_fwd_pct / 100.0 * wb_var.mac_m;
+                let x_cg_aft_var = cfg_var.wing.le_root_x_m + wb_var.spec.cg_mac_aft_pct / 100.0 * wb_var.mac_m;
+                let theta_var = aeronave::agents::landing_gear::tipback_angle_deg(
+                    x_main, x_cg_aft_var, cfg_var.gear.h_cg_ground_m);
+                let folga_var = aeronave::agents::landing_gear::tail_strike_margin_deg(
+                    cfg_var.gear.tail_cone_height_m, cfg_var.gear.tail_cone_x_m, x_main);
+                let nose_max_var = aeronave::agents::landing_gear::nose_load_fraction(
+                    x_cg_fwd_var, cfg_var.gear.x_nose_m, x_main) * 100.0;
+                let todos_dentro = wb_var.scenarios.iter().all(|s| s.inside_envelope);
+                println!("  {:>7.2}m  {:>8.1}°  {:>9.1}°  {:>9.1}%  {:>17.1}%  {:>10}",
+                         x_main, theta_var, folga_var, nose_max_var,
+                         wb_var.spec.cg_limit_fwd_pct_mac,
+                         if todos_dentro { "✓ sim" } else { "✗ não" });
+            }
+            Err(e) => println!("  {x_main:>7.2}m  (não convergiu: {e})"),
+        }
+    }
+    println!();
 
     // ── Orçamento Elétrico (Task 5.2) ─────────────────────────────────────────
     println!("[ ELÉTRICO ] ElectricalAgent — Orçamento de Cargas");
@@ -474,12 +522,16 @@ fn main() {
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
     let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
-                                             &propeller, &perf, mission, &electrical);
+                                             &propeller, &perf, mission, &electrical,
+                                             &gear, &cfg.gear);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
     let tip_ok  = gear.tipover_angle_deg < 55.0;
-    let nose_ok = gear.nose_load_fraction_pct >= 8.0 && gear.nose_load_fraction_pct <= 25.0;
+    // Carga de nariz (dois extremos), tipback e tail-strike (Task 2,
+    // refino-ciclo2) migraram para dentro de `ConstraintChecker::verify`
+    // (checks #15-#17) — substituem o antigo `nose_ok` ad hoc daqui, que só
+    // checava um único CG (o traseiro) contra os dois limites.
 
     // Finding 3 da revisão final: literais de requisito hardcoded (280 km/h,
     // "≥ 8 h") divergiam de `req.*` para qualquer missão diferente da
@@ -489,9 +541,10 @@ fn main() {
     // aeronave sustentava com folga o requisito REAL daquela missão.
     // Rótulos agora formatados com `req.cruise_speed_min_kmh`/
     // `req.endurance_min_h` — corretos para qualquer `mission.toml`.
-    let checks: [(bool, String); 10] = [
+    let checks: [(bool, String); 9] = [
         (report.all_satisfied(),
-            "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65".to_string()),
+            "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65, \
+             tipback, tail-strike, carga de nariz".to_string()),
         (perf.v_cruise_kmh >= req.cruise_speed_min_kmh,
             format!("V_cruzeiro ≥ {:.0} km/h", req.cruise_speed_min_kmh)),
         // Task 5.1 (achado da revisão, Finding 1): gate honesto sobre o
@@ -503,8 +556,7 @@ fn main() {
         (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar".to_string()),
         (ceil_ok,                             "Teto de serviço ≥ 3.000 m".to_string()),
         (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)".to_string()),
-        (tip_ok,                              "Anti-tombamento < 55°".to_string()),
-        (nose_ok,                             "Carga nariz 8–25%".to_string()),
+        (tip_ok,                              "Anti-tombamento (lateral) < 55°".to_string()),
         (all_stable,                          "Estabilidade longitudinal (todos cenários, SM>3%, referência)".to_string()),
         (all_inside_envelope,                 "Envelope de CG admissível (todos cenários, Task 4.4)".to_string()),
     ];

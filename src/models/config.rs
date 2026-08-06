@@ -589,6 +589,49 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     require_positive("gear.mass_nose_kg", cfg.gear.mass_nose_kg)?;
     require_positive("gear.retraction_time_s", cfg.gear.retraction_time_s)?;
     require_non_negative("gear.actuators_doors_mass_kg", cfg.gear.actuators_doors_mass_kg)?;
+    // Task 2 (refino-ciclo2): tipback/tail-strike — ver
+    // `agents::landing_gear::tipback_angle_deg`/`tail_strike_margin_deg`.
+    require_finite("gear.tipback_min_deg", cfg.gear.tipback_min_deg)?;
+    if cfg.gear.tipback_min_deg <= 8.0 || cfg.gear.tipback_min_deg >= 25.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.tipback_min_deg deve estar em \
+             (8.0, 25.0) graus — Raymer cap. 11 (valor: {})",
+            cfg.gear.tipback_min_deg
+        )));
+    }
+    require_finite("gear.rotation_attitude_deg", cfg.gear.rotation_attitude_deg)?;
+    if cfg.gear.rotation_attitude_deg <= 5.0 || cfg.gear.rotation_attitude_deg >= 18.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.rotation_attitude_deg deve estar em \
+             (5.0, 18.0) graus (valor: {})",
+            cfg.gear.rotation_attitude_deg
+        )));
+    }
+    require_positive("gear.tail_cone_x_m", cfg.gear.tail_cone_x_m)?;
+    if cfg.gear.tail_cone_x_m <= 3.0 || cfg.gear.tail_cone_x_m >= 12.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.tail_cone_x_m deve estar em \
+             (3.0, 12.0) m (valor: {})",
+            cfg.gear.tail_cone_x_m
+        )));
+    }
+    require_positive("gear.tail_cone_height_m", cfg.gear.tail_cone_height_m)?;
+    if cfg.gear.tail_cone_height_m <= 0.3 || cfg.gear.tail_cone_height_m >= 2.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.tail_cone_height_m deve estar em \
+             (0.3, 2.5) m (valor: {})",
+            cfg.gear.tail_cone_height_m
+        )));
+    }
+    if cfg.gear.tail_cone_x_m <= cfg.gear.x_main_m {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.tail_cone_x_m ({}) deve ser maior que \
+             gear.x_main_m ({}) — o cone de cauda fica atrás do trem principal, senão a \
+             checagem de tail-strike (agents::landing_gear::tail_strike_margin_deg) divide \
+             por um denominador não-positivo",
+            cfg.gear.tail_cone_x_m, cfg.gear.x_main_m
+        )));
+    }
 
     // [arms] — braços de momento: não-negativos e finitos.
     require_non_negative("arms.engine_cg_m", cfg.arms.engine_cg_m)?;
@@ -1185,6 +1228,10 @@ mod tests {
             mass_nose_kg = 20.0
             retraction_time_s = 7.0
             actuators_doors_mass_kg = 18.0
+            tipback_min_deg = 15.0
+            rotation_attitude_deg = 11.0
+            tail_cone_x_m = 7.5
+            tail_cone_height_m = 1.05
             [arms]
             engine_cg_m = 0.6
             avionics_m = 1.0
@@ -1708,6 +1755,66 @@ mod tests {
             .replace("elevator_deflection_max_deg = 25.0", "elevator_deflection_max_deg = 5.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("elevator_deflection_max_deg"), "{err}");
+    }
+
+    // ─── [gear] tipback/tail-strike (Task 2, refino-ciclo2) ────────────────
+
+    #[test]
+    fn rejeita_tipback_min_deg_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("tipback_min_deg = 15.0", "tipback_min_deg = 30.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tipback_min_deg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tipback_min_deg_muito_baixo() {
+        let toml = aircraft_toml_valido()
+            .replace("tipback_min_deg = 15.0", "tipback_min_deg = 5.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tipback_min_deg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_rotation_attitude_deg_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("rotation_attitude_deg = 11.0", "rotation_attitude_deg = 20.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("rotation_attitude_deg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_rotation_attitude_deg_muito_baixo() {
+        let toml = aircraft_toml_valido()
+            .replace("rotation_attitude_deg = 11.0", "rotation_attitude_deg = 3.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("rotation_attitude_deg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tail_cone_x_m_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("tail_cone_x_m = 7.5", "tail_cone_x_m = 15.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tail_cone_x_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tail_cone_height_m_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("tail_cone_height_m = 1.05", "tail_cone_height_m = 3.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tail_cone_height_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tail_cone_x_m_atras_ou_igual_ao_trem_principal() {
+        // x_main_m = 3.5 no TOML válido — tail_cone_x_m precisa ficar atrás dele.
+        let toml = aircraft_toml_valido()
+            .replace("tail_cone_x_m = 7.5", "tail_cone_x_m = 3.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tail_cone_x_m") && err.to_string().contains("x_main_m"),
+            "{err}");
     }
 
     // ─── [empennage] mass_per_area_{h,v}_kg_m2 / cd0_area_factor (task
