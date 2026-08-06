@@ -347,14 +347,22 @@ pub fn rotation_fwd_limit_m(
 // um extremo. Documentado aqui e ecoado em `TrimSpec::cg_reference_scenario`
 // para rastreabilidade.
 //
-// Balanço de momentos (mesma dedução algébrica de `cl_h_required_flare`,
-// mas SEM o termo `+0,25` do braço TOTAL da empenagem cancelando com o CL da
-// asa — aqui o termo `(l_h/MAC+0,25−x̄)` permanece no denominador porque o
-// fechamento vertical não foi aplicado da mesma forma; ver a dedução direta
-// abaixo):
+// Balanço de momentos — Σ M_cg = 0, com `CL_cruise` (do polar da asa) usado
+// DIRETO como o CL da asa isolada (SEM o fechamento vertical
+// `CL_w = CL_total − η_h·(S_h/S_w)·CL_h` que `cl_h_required_flare` aplica —
+// ver a nota de aproximação logo abaixo, "Aproximação documentada", para a
+// justificativa de desprezar esse termo de 2ª ordem aqui):
 //
 //   0 = cm_ac + CL_cruise·(x̄_cg − 0,25) − η_h·(S_h/S_w)·CL_h_trim·(l_h/MAC + 0,25 − x̄_cg)
 //   ⟹ CL_h_trim = [cm_ac + CL_cruise·(x̄_cg − 0,25)] / [η_h·(S_h/S_w)·(l_h/MAC + 0,25 − x̄_cg)]
+//
+// Diferença chave em relação a `cl_h_required_flare`: LÁ o fechamento
+// vertical faz o termo `(l_h/MAC+0,25−x̄)` do denominador se CANCELAR com o
+// `(x̄−0,25)` que aparece ao expandir `CL_w·(x̄−0,25)`, sobrando só `l_h/MAC`
+// (constante, sem pólo). AQUI, sem esse fechamento, o termo
+// `(l_h/MAC+0,25−x̄)` COMPLETO permanece no denominador — a fórmula acima
+// não tem essa simplificação algébrica (mantém `x̄` também no denominador,
+// não só no numerador).
 //
 // Sinal: CG ATRÁS do CA da asa (x̄_cg > 0,25, caso típico deste baseline)
 // produz um momento de peso PICANDO NARIZ-PARA-CIMA (nose-up, cauda-pesada)

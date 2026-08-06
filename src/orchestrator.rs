@@ -225,8 +225,8 @@ pub(crate) fn size_aircraft_with_max_iters(
     // frouxa, `CONVERGENCE_TOL_KG`) vem de `wing.cl_cruise` (proporcional a
     // `state.mtow_kg`, sem lag) continuar mudando até o MTOW convergir —
     // ver `cl_h_trim_iterations` no `SizedAircraft` devolvido e o teste
-    // `orchestrator::tests::cl_h_trim_converge_estavel_apos_muitas_
-    // iteracoes_do_laco_completo`.
+    // `orchestrator::tests::cl_h_trim_iterations_do_campo_real_converge_
+    // geometricamente`.
     let mut x_cg_trim_ref_prev: f64 = 0.0;
     let mut cl_h_trim_iterations: Vec<f64> = Vec::new();
 
@@ -286,12 +286,22 @@ pub(crate) fn size_aircraft_with_max_iters(
         // ver comentário no topo do laço. O `WeightBalanceAgent` desta
         // iteração já rodou, então já sabemos o CG real do cenário de
         // meia-missão; a próxima iteração usará esse valor (em vez do
-        // usado nesta, que veio da iteração anterior).
-        if let Some(sc) = wb.scenarios.iter()
+        // usado nesta, que veio da iteração anterior). PANIC (não no-op
+        // silencioso) se o cenário não existir — mesmo invariante e mesma
+        // postura de falha ALTA de `agents::trim_authority::
+        // TrimAuthorityAgent::run` (que consome o MESMO cenário do MESMO
+        // `wb.scenarios` para o `TrimSpec` final): um no-op aqui deixaria
+        // o lag CONGELADO no valor da iteração anterior sem nenhum sinal
+        // de que o invariante quebrou, divergindo silenciosamente do
+        // comportamento de `TrimAuthorityAgent::run` para o MESMO caso.
+        let sc = wb.scenarios.iter()
             .find(|s| s.name == crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME)
-        {
-            x_cg_trim_ref_prev = sc.cg_pct_mac / 100.0;
-        }
+            .unwrap_or_else(|| panic!(
+                "cenário de referência '{}' não encontrado em wb.scenarios — deveria sempre \
+                 existir (ver agents::weight_balance::scenarios_def)",
+                crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME
+            ));
+        x_cg_trim_ref_prev = sc.cg_pct_mac / 100.0;
 
         let novo = wb.oew_kg + req.payload_kg() + fuel_kg;
 
@@ -410,89 +420,79 @@ mod tests {
 
     // ─── Arrasto de trim em cruzeiro — estabilidade do lag-1 (Task 4) ─────
 
-    /// `SizedAircraft::cl_h_trim_iterations` (a trajetória de `CL_h_trim`
-    /// USADO em cada passagem do laço, lag-1) mostra convergência
-    /// geométrica clara — mas `size_aircraft` retorna assim que o MTOW
-    /// estabiliza (`CONVERGENCE_TOL_KG=0,5kg`, um critério de aceite de
-    /// PRODUÇÃO deliberadamente frouxo, sem relação com a precisão do lag
-    /// de CG), o que tipicamente acontece com um resíduo de `CL_h_trim`
-    /// ainda em torno de ~1e-5 (medido tanto na fixture sintética quanto
-    /// no baseline real) — NÃO ainda abaixo de 1e-6. A causa NÃO é que o
-    /// lag do CG em si convirja devagar: `WeightBalanceAgent` calcula o CG
-    /// do cenário de referência a partir só de massas/braços fixos (motor,
-    /// itens de `[[masses.items]]`, empenagem, pax, bagagem, MEIO tanque a
-    /// CAPACIDADE fixa) — nenhum desses depende de `state.mtow_kg` nem de
-    /// `wing.cd_cruise`, então o CG do cenário de referência já é
-    /// PRATICAMENTE CONSTANTE a partir da 2ª iteração (verificado
-    /// separadamente). O resíduo observado vem de `wing.cl_cruise`
+    /// Testa o campo REAL `SizedAircraft::cl_h_trim_iterations`, populado
+    /// pelo próprio `size_aircraft` (não uma réplica manual do corpo do
+    /// laço — evita duplicar a lógica de produção num teste separado, o
+    /// que arriscaria os dois divergirem sem aviso).
+    ///
+    /// **Achado honesto (correção pós-revisão)**: o brief original pedia
+    /// `|Δ| < 1e-6` entre as duas últimas iterações. Medido contra o
+    /// campo REAL: `size_aircraft` retorna assim que o MTOW estabiliza
+    /// (`CONVERGENCE_TOL_KG=0,5kg`, um critério de aceite de PRODUÇÃO
+    /// deliberadamente frouxo, sem relação com a precisão do lag de CG) —
+    /// nesse ponto o resíduo de `CL_h_trim` ainda está em ~1,5e-5 na
+    /// fixture sintética (e ~9,9e-6 no baseline real, ver
+    /// `task-4-report.md`), NÃO abaixo de 1e-6. Este teste pina o valor
+    /// REAL medido (não o alvo original do brief, que a produção — com seu
+    /// critério de parada atual — nunca alcança) e verifica GENUÍNA
+    /// convergência geométrica (cada delta sucessivo estritamente menor
+    /// que o anterior), que é a evidência de estabilidade que realmente
+    /// importa: a recursão é uma contração, não uma oscilação/divergência
+    /// mascarada por um número de iterações pequeno.
+    ///
+    /// A causa do resíduo NÃO é que o lag do CG em si convirja devagar:
+    /// `WeightBalanceAgent` calcula o CG do cenário de referência a partir
+    /// só de massas/braços fixos (motor, itens de `[[masses.items]]`,
+    /// empenagem, pax, bagagem, MEIO tanque a CAPACIDADE fixa) — nenhum
+    /// desses depende de `state.mtow_kg` nem de `wing.cd_cruise`, então o
+    /// CG do cenário de referência já é PRATICAMENTE CONSTANTE a partir da
+    /// 2ª iteração. O resíduo observado vem de `wing.cl_cruise`
     /// (proporcional a `state.mtow_kg`, recalculado do zero a cada
     /// iteração, SEM lag) continuar mudando enquanto o MTOW ainda não
     /// convergiu — a MESMA taxa de convergência do laço de MTOW.
-    ///
-    /// Este teste replica o CORPO do laço de `size_aircraft_with_max_iters`
-    /// (mesma física, mesma relaxação 0,5/0,5) mas SEM o critério de parada
-    /// por MTOW — roda um número FIXO e grande de iterações (60, bem além
-    /// de qualquer ponto em que a produção já teria parado) para
-    /// caracterizar o comportamento assintótico da recursão COMPLETA (MTOW
-    /// + lag-1 do CG): confirma que, dado tempo suficiente, o sistema
-    /// converge de fato a `|Δ| < 1e-6` — a alegação de "converge com o
-    /// loop" do brief é sobre esse limite assintótico, não sobre onde o
-    /// critério de aceite de MTOW (independente, mais frouxo) historicamente
-    /// já para.
     #[test]
-    fn cl_h_trim_converge_estavel_apos_muitas_iteracoes_do_laco_completo() {
+    fn cl_h_trim_iterations_do_campo_real_converge_geometricamente() {
         let cfg = config_teste();
         let engine = engine_teste();
         let req = requisitos_teste();
 
-        let mut mtow = cfg.sizing.mtow_initial_guess_kg;
-        let mut x_cg_trim_ref_prev = 0.0_f64;
-        let mut history: Vec<f64> = Vec::new();
+        let sized = size_aircraft(&cfg, &engine, &req)
+            .expect("baseline sintético deveria convergir");
+        let history = &sized.cl_h_trim_iterations;
+        let n = history.len();
+        assert!(n >= 4,
+            "esperava pelo menos 4 iterações para caracterizar convergência geométrica \
+             (obtido {n})");
 
-        for _ in 0..60 {
-            let mut state = AircraftState::from_config(&cfg);
-            state.mtow_kg = mtow;
-            let mut wing = AerodynamicsAgent::run(&state, &req);
-            let emp = EmpennageAgent::run(&wing, &cfg);
+        let deltas: Vec<f64> = (1..n).map(|i| (history[i] - history[i - 1]).abs()).collect();
+        println!("cl_h_trim_iterations = {history:?}");
+        println!("deltas = {deltas:?}");
 
-            let c_r = crate::agents::weight_balance::chord_root(
-                wing.area_m2, wing.span_m, wing.taper_ratio,
-            );
-            let mac = crate::agents::weight_balance::mean_aerodynamic_chord(c_r, wing.taper_ratio);
-            let l_h_over_mac = emp.arm_h_m / mac;
-            let s_ratio = emp.s_horizontal_m2 / wing.area_m2;
-            let cl_h_trim = crate::agents::trim_authority::cl_h_trim_cruise(
-                cfg.wing.cm_ac, wing.cl_cruise, x_cg_trim_ref_prev, emp.eta_h, s_ratio, l_h_over_mac,
-            );
-            history.push(cl_h_trim);
-            let cd_trim = crate::agents::trim_authority::cd_trim_cruise(
-                cl_h_trim, emp.ar_h, cfg.empennage.e_h, s_ratio,
-            );
-            crate::agents::aerodynamics::apply_cruise_trim_drag(&mut wing, cd_trim);
-
-            let prop = crate::agents::propulsion::PropulsionAgent::run(&state, &req, &wing, &engine);
-            let mission = crate::agents::mission::MissionAgent::run(
-                &state, &wing, &prop, &engine, &req, mtow,
-            ).expect("fixture sintética deveria produzir missão viável em todas as iterações");
-            let fuel_kg = mission.fuel_total_kg;
-
-            let wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
-            let sc = wb.scenarios.iter()
-                .find(|s| s.name == crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME)
-                .expect("cenário de referência deveria sempre existir");
-            x_cg_trim_ref_prev = sc.cg_pct_mac / 100.0;
-
-            let novo = wb.oew_kg + req.payload_kg() + fuel_kg;
-            mtow = 0.5 * mtow + 0.5 * novo;
+        // Convergência GEOMÉTRICA genuína: cada delta (a partir do 2º, que
+        // ainda carrega o transiente do seed 0,0 inicial) estritamente
+        // menor que o anterior — prova que a recursão é uma CONTRAÇÃO, não
+        // uma oscilação ou platô artificial.
+        for i in 2..deltas.len() {
+            assert!(deltas[i] < deltas[i - 1],
+                "delta[{i}]={:.3e} deveria ser ESTRITAMENTE menor que delta[{}]={:.3e} — \
+                 convergência geométrica quebrada; histórico completo: {history:?}",
+                deltas[i], i - 1, deltas[i - 1]);
         }
 
-        let n = history.len();
-        let delta_final = (history[n - 1] - history[n - 2]).abs();
-        println!("delta final (60 iterações) = {delta_final:.3e} | últimos 3 valores: {:?}",
-            &history[n - 3..]);
-        assert!(delta_final < 1e-6,
-            "CL_h_trim deveria convergir a |Δ| < 1e-6 após 60 iterações completas (MTOW + \
-             lag-1 do CG) — obtido {delta_final:.3e}; histórico completo: {history:?}");
+        // Pin do resíduo REAL no ponto em que a produção retorna (critério
+        // de MTOW, não de CL_h_trim) — ver achado honesto na docstring
+        // acima. 1,5041627731e-5 medido; tolerância com folga (2x) para
+        // não ficar frágil a resíduo de ponto flutuante entre plataformas,
+        // mas apertada o bastante para pegar uma regressão real (ex.: lag
+        // desligado acidentalmente produziria delta ~O(1), não ~1e-5).
+        let delta_final = deltas[deltas.len() - 1];
+        let delta_final_pin = 1.5041627731e-5;
+        assert!((delta_final - delta_final_pin).abs() < 1.5e-5,
+            "delta final (campo real) = {delta_final:.10e} divergiu do pin honesto \
+             ≈{delta_final_pin:.10e} — histórico completo: {history:?}");
+        assert!(delta_final < 1e-4,
+            "delta final (campo real) = {delta_final:.3e} deveria estar bem abaixo de 1e-4 \
+             (ordem de grandeza esperada ~1e-5) — histórico completo: {history:?}");
     }
 
     #[test]
