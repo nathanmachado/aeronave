@@ -386,6 +386,34 @@ pub struct TrimSpec {
     pub trim_margin: f64,
     pub cl_ground_rotation: f64,
     pub to_flap_cm_fraction: f64,
+    // ─── Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) ─────────────
+    /// `CL_h_trim` — sustentação/download que a empenagem horizontal precisa
+    /// gerar em cruzeiro (sem flap), no CG de referência da missão
+    /// (`cg_reference_scenario`), para equilibrar o momento de arfagem em
+    /// voo nivelado 1g. Positivo = upload (CG atrás do CA da asa, caso
+    /// típico deste baseline); negativo = download (CG à frente do CA). Ver
+    /// `agents::trim_authority::cl_h_trim_cruise`. Calculado aqui com o CG
+    /// JÁ CONVERGIDO (`wb.scenarios`, não o valor lag-1 usado dentro do
+    /// laço de convergência — ver `orchestrator::size_aircraft` para a
+    /// distinção entre os dois usos).
+    pub cl_h_trim_cruise: f64,
+    /// `ΔCD_trim` — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`,
+    /// já somado a `WingSpec::cd_cruise` no polar de cruzeiro (o valor aqui
+    /// é o mesmo delta, ecoado para rastreabilidade — ver
+    /// `agents::trim_authority::cd_trim_cruise`/`agents::aerodynamics::
+    /// apply_cruise_trim_drag`).
+    pub cd_trim: f64,
+    /// Nome do cenário de carga (`agents::weight_balance::LoadScenario::name`)
+    /// usado como CG de referência da missão para o cálculo acima —
+    /// "4 pax + bagagem + meia" (meia-missão, ver docstring de
+    /// `agents::trim_authority::cl_h_trim_cruise` para a justificativa da
+    /// escolha).
+    pub cg_reference_scenario: String,
+    /// CG de referência (%MAC) do cenário acima, JÁ CONVERGIDO — o valor
+    /// efetivamente usado para calcular `cl_h_trim_cruise`/`cd_trim` neste
+    /// `TrimSpec` final (distinto do valor lag-1 usado dentro do laço, ver
+    /// `cl_h_trim_cruise` acima).
+    pub cg_reference_pct_mac: f64,
 }
 
 /// Saída do PerformanceAgent (preenchida na Fase seguinte)
@@ -749,7 +777,21 @@ pub struct ElectricalSpec {
 /// antigos sem esses campos falham o parse do `toml` crate por campo
 /// ausente, não um erro de migração dedicado). Ver
 /// `docs/aircraft_spec.schema.md` §1 e §4.
-pub const SCHEMA_VERSION: &str = "4.3";
+/// v4.4 (Task 4, refino-ciclo2): `TrimSpec` ganha QUATRO campos NOVOS —
+/// `cl_h_trim_cruise`, `cd_trim`, `cg_reference_scenario`,
+/// `cg_reference_pct_mac` (arrasto de trim em cruzeiro, ver
+/// `agents::trim_authority::cl_h_trim_cruise`/`cd_trim_cruise`) — mudança
+/// ADITIVA (campos novos num bloco já existente; nenhum campo removido nem
+/// mudou de tipo/unidade), consumidores v4.3 continuam funcionando sem
+/// alteração. `WingSpec::cd_cruise`/`ld_ratio_cruise` PERMANECEM com o
+/// MESMO significado e forma — só o VALOR muda (agora inclui o arrasto de
+/// trim, `agents::aerodynamics::apply_cruise_trim_drag`). Acompanha, do lado
+/// da CONFIGURAÇÃO de entrada (não deste schema JSON): `[empennage]` ganha
+/// um campo NOVO obrigatório, `e_h` (eficiência de Oswald da empenagem
+/// horizontal, faixa 0,5–0,95) — sem valor padrão implícito; TOMLs antigos
+/// sem esse campo falham o parse do `toml` crate por campo ausente, não um
+/// erro de migração dedicado. Ver `docs/aircraft_spec.schema.md` §1 e §4.
+pub const SCHEMA_VERSION: &str = "4.4";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver

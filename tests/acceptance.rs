@@ -63,7 +63,7 @@ fn toyota_missao_default_gera_spec_completo_v4() {
     let json: serde_json::Value = serde_json::from_str(&json_text)
         .expect("saída deveria ser JSON válido");
 
-    assert_eq!(json["schema_version"], "4.3", "schema_version deveria ser 4.3:\n{json_text}");
+    assert_eq!(json["schema_version"], "4.4", "schema_version deveria ser 4.4:\n{json_text}");
     assert!(json["propulsion"]["engine_model"].as_str().unwrap_or_default().contains("Toyota"),
         "engine_model deveria conter 'Toyota':\n{json_text}");
 
@@ -136,7 +136,7 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     let json: serde_json::Value = serde_json::from_str(&json_text)
         .expect("saída deveria ser JSON válido");
 
-    assert_eq!(json["schema_version"], "4.3");
+    assert_eq!(json["schema_version"], "4.4");
     assert_eq!(json["propulsion"]["engine_model"], "Rotax 915 iS",
         "engine_model deveria ser exatamente 'Rotax 915 iS':\n{json_text}");
 
@@ -156,8 +156,19 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // mtow_mission_kg: 1.025,2 → 1.031,3 kg (+0,6%, dentro da tolerância
     // ±1% de antes, mas atualizado para refletir o valor real medido).
     // fuel_required_l: 71,1 → 72,7 L (+2,2%, mais CD0 do empennage).
-    let mtow_expected = 1_031.3_f64;
-    let fuel_expected = 72.7_f64;
+    //
+    // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): achado honesto
+    // NOVO — o Rotax (84 kg) é muito mais leve que o Toyota (195 kg) para o
+    // qual esta célula foi dimensionada; sem o motor pesado no nariz, o CG
+    // de meia-missão fica bem mais ATRÁS (~54,2% MAC, vs ~35,4% MAC com o
+    // Toyota), exigindo um CL_h_trim de cruzeiro bem maior (~0,178, vs
+    // ~0,044) e portanto um ΔCD_trim bem maior (~7,96e-4, ~3,4% do CD0 —
+    // NÃO desprezível, ao contrário do caso Toyota). Isso eleva o
+    // combustível de missão desproporcionalmente mais que no caso Toyota:
+    // mtow_mission_kg 1.031,3 → **1.032,6 kg**; fuel_required_l 72,7 →
+    // **74,4 L** (old→new).
+    let mtow_expected = 1_032.6_f64;
+    let fuel_expected = 74.4_f64;
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \
@@ -183,7 +194,11 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // reporta_fail_honesto_de_tipback`).
     let fuel_margin_pct = json["sizing"]["fuel_margin_pct"].as_f64()
         .expect("sizing.fuel_margin_pct deveria estar presente");
-    let fuel_margin_pct_expected = 72.04_f64;
+    // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): 72,04% → **71,39%**
+    // (old→new) — ver comentário acima sobre o ΔCD_trim bem maior do Rotax
+    // nesta célula (CG de meia-missão bem mais atrás sem o motor pesado no
+    // nariz). Continua MUITO acima do piso de 5% — nenhuma violação nova.
+    let fuel_margin_pct_expected = 71.39_f64;
     assert!((fuel_margin_pct - fuel_margin_pct_expected).abs() < 1.0,
         "margem de combustível ({fuel_margin_pct:.2}%) deveria estar próxima do pin honesto \
          ~{fuel_margin_pct_expected}% (mudou o comportamento do sizing? atualize o pin)");

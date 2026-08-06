@@ -147,7 +147,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.3");
+    assert_eq!(report.schema_version, "4.4");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -164,7 +164,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.3");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.4");
 }
 
 #[test]

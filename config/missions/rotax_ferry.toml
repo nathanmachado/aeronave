@@ -9,9 +9,12 @@
 # (motor + missão), não código, e obter uma segunda especificação completa e
 # fisicamente coerente — reduzindo passageiros/velocidade/autonomia para uma
 # missão de traslado ("ferry") que o Rotax sustenta com folga (verificado por
-# execução real antes de fixar este arquivo: 72,7 L requeridos contra 260 L
-# de capacidade, ~72,0% de margem — campanha E1–E6, 2026-08-05; era 71,1 L /
-# ~72,7% de margem antes — ver tests/acceptance.rs).
+# execução real antes de fixar este arquivo: 74,4 L requeridos contra 260 L
+# de capacidade, ~71,4% de margem — task 4, refino-ciclo2 (arrasto de trim
+# em cruzeiro): era 72,7 L / ~72,0% (campanha E1-E6); o CG de meia-missão
+# desta célula com o Rotax fica bem mais atrás (motor mais leve no nariz),
+# exigindo mais CL_h_trim/ΔCD_trim que no caso Toyota — ver
+# tests/acceptance.rs).
 passengers = 2
 pax_mass_kg = 90.0
 baggage_kg = 20.0

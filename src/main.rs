@@ -360,12 +360,20 @@ fn main() {
              trim.cl_h_max_down, trim.flare_limit_pct_mac,
              trim.sensitivity.cl_h_max_down_plus, trim.sensitivity.flare_limit_pct_mac_plus);
     println!("  Sensibilidade a elevator_deflection_max_deg (±2°): {:.0}°→{:.2}% MAC  |  \
-              {:.0}°(nominal)={:.2}%  |  {:.0}°→{:.2}% MAC\n",
+              {:.0}°(nominal)={:.2}%  |  {:.0}°→{:.2}% MAC",
              trim.sensitivity.elevator_deflection_max_deg_minus,
              trim.sensitivity.flare_limit_pct_mac_deflection_minus,
              cfg.control_surfaces.elevator_deflection_max_deg, trim.flare_limit_pct_mac,
              trim.sensitivity.elevator_deflection_max_deg_plus,
              trim.sensitivity.flare_limit_pct_mac_deflection_plus);
+    // Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) — já somado a
+    // wing.cd_cruise/ld_ratio_cruise acima ([ AGENTE 1 ]); aqui só o
+    // detalhamento do balanço de momentos que o produziu.
+    println!("  Arrasto de trim em cruzeiro: CL_h_trim={:.4} ({})  |  ΔCD_trim={:.2e}  |  \
+              CG de referência: '{}' ({:.1}% MAC)\n",
+             trim.cl_h_trim_cruise,
+             if trim.cl_h_trim_cruise >= 0.0 { "upload" } else { "download" },
+             trim.cd_trim, trim.cg_reference_scenario, trim.cg_reference_pct_mac);
 
     // ── Diagrama V-n completo com rajadas (Task 4.3, CS 23.333/.341) ───────────
     // Roda após o WeightBalanceAgent (precisa do MTOW de envelope e da massa

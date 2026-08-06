@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.3
+# `aircraft_spec.json` — contrato do schema v4.4
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -134,6 +134,60 @@ documentação a ser corrigido, não um comportamento aceitável.
     5% (`min_fuel_margin_fraction` do `default.toml`) — mais uma entrada em
     `violations` (`validation_status` já era `"FAIL"` por causa do
     tipback). Ver `tests/gear_tipback.rs`/`tests/cli.rs`.
+- **v4.4** (Task 4, refino-ciclo2): `TrimSpec` ganha QUATRO campos NOVOS —
+  `cl_h_trim_cruise`, `cd_trim`, `cg_reference_scenario`,
+  `cg_reference_pct_mac` (arrasto de trim em cruzeiro — ver §4 abaixo) —
+  mudança ADITIVA (campos novos num bloco já existente; nenhum campo
+  removido nem mudou de tipo/unidade), consumidores v4.3 continuam
+  funcionando sem alteração. `wing.cd_cruise`/`wing.ld_ratio_cruise`
+  PERMANECEM com o MESMO nome/tipo/unidade — só o VALOR muda (agora inclui
+  o arrasto de trim de cruzeiro, `ΔCD_trim`, somado por
+  `agents::aerodynamics::apply_cruise_trim_drag`).
+  - **Física**: em cruzeiro (sem flap), a empenagem horizontal precisa
+    gerar `CL_h_trim` (upload OU download) para equilibrar o momento de
+    arfagem no CG de REFERÊNCIA da missão (cenário "4 pax + bagagem +
+    meia" — meia-missão, escolhido por representar o CG médio ao longo do
+    voo de cruzeiro, não um extremo — ver `agents::trim_authority::
+    cl_h_trim_cruise`):
+    ```
+    CL_h_trim = [cm_ac + CL_cruise·(x̄_cg−0,25)] / [η_h·(S_h/S_w)·(l_h/MAC+0,25−x̄_cg)]
+    ΔCD_trim = (CL_h_trim²/(π·ar_h·e_h))·(S_h/S_w)
+    ```
+    `cm_ac` é o coeficiente de momento do perfil ISOLADO (sem
+    `cm_flap_delta` — cruzeiro é sem flap, ao contrário do balanço de
+    flare/rotação). `e_h` é a eficiência de Oswald da empenagem horizontal
+    (config nova, ver abaixo). Aproximação documentada: a contribuição de
+    sustentação extra que a asa precisaria gerar para compensar o
+    upload/download da cauda é DESPREZADA (efeito de 2ª ordem, ver
+    docstring da função).
+  - **Acoplamento no laço de convergência de MTOW** (`orchestrator::
+    size_aircraft`): `CL_h_trim` depende do CG (`WeightBalanceAgent`), que
+    só fica disponível DEPOIS da aerodinâmica rodar na MESMA iteração — em
+    vez de resolver por bisseção, usa-se o CG da iteração ANTERIOR do
+    próprio laço de MTOW (lag-1; seed inicial 0,0). `TrimSpec.
+    cl_h_trim_cruise`/`cd_trim` no relatório final, por outro lado, são
+    recalculados com o CG JÁ CONVERGIDO (não o lag) — ver docstring de
+    `TrimSpec::cl_h_trim_cruise` em `src/models/specs.rs`.
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON):
+    `[empennage]` ganha um campo NOVO **obrigatório** — `e_h` (eficiência
+    de Oswald da empenagem horizontal, faixa (0.5, 0.95)). TOMLs antigos
+    sem esse campo falham o parse (`missing field`) — não há um erro de
+    migração dedicado (mesmo padrão da v4.3, não há campo antigo
+    equivalente). Ver `config/aircraft/baseline_4seat.toml` §`[empennage]`
+    para valor de referência (0,70).
+  - **Achado honesto NOVO**: no baseline real (motor padrão), o CG de
+    meia-missão fica bem mais atrás do CA da asa (upload de trim,
+    `CL_h_trim ≈ +0,044`), gerando `ΔCD_trim ≈ 4,9e-5` (~0,17% do CD0) —
+    pequeno, quase neutro. Com o Rotax 915 iS (motor bem mais leve,
+    montado no nariz), o CG de meia-missão fica proporcionalmente mais
+    atrás ainda (sem o peso do motor no nariz), exigindo `CL_h_trim ≈
+    +0,18` e `ΔCD_trim ≈ 8,0e-4` (~3,4% do CD0 — NÃO desprezível) —
+    penalidade de arrasto de trim mais visível para motores mais leves que
+    o Toyota para o qual esta célula foi dimensionada. Nos dois casos, o
+    MTOW convergido sobe levemente e a margem de combustível cai um pouco
+    (~0,1–0,7 pontos percentuais, dependendo da missão) — ver
+    `tests/gear_tipback.rs`/`tests/generic_engine.rs`/`tests/acceptance.rs`
+    para os pins atualizados.
 
 ## 2. Convenção de eixos e unidades
 
@@ -243,12 +297,12 @@ esperado na saída atual do pipeline**.
 | `oswald_efficiency` | f64 | — | Fator de eficiência de Oswald (e) |
 | `cd0` | f64 | — | Arrasto parasita da asa em cruzeiro |
 | `cl_cruise` | f64 | — | CL de cruzeiro |
-| `cd_cruise` | f64 | — | CD de cruzeiro |
+| `cd_cruise` | f64 | — | CD de cruzeiro. **v4.4**: inclui o arrasto de trim de cruzeiro (`ΔCD_trim`, ver bloco `trim` §4/`cd_trim`) somado ao `cd0+cdi` do build-up — nome/tipo/unidade inalterados, só o VALOR mudou |
 | `cl_max` | f64 | — | CL_max com flap/slat (configuração pouso/decolagem) |
 | `cl_max_clean` | f64 | — | CL_max em configuração limpa (cruzeiro) |
 | `stall_speed_flaps_kmh` | f64 | km/h | VS0 — stall com flap |
 | `stall_speed_clean_kmh` | f64 | km/h | VS1 — stall configuração limpa |
-| `ld_ratio_cruise` | f64 | — | L/D em cruzeiro |
+| `ld_ratio_cruise` | f64 | — | L/D em cruzeiro. **v4.4**: recalculado com `cd_cruise` já incluindo o arrasto de trim (ver acima) |
 
 ### `propulsion` — `PropulsionSpec` (PropulsionAgent)
 
@@ -408,6 +462,10 @@ completa (em português) na docstring de
 | `tau_elevator` | f64 (**novo v4.2**) | — | Eficácia de superfície do profundor τ(c_e/c), ajuste de Nelson |
 | `capped_by_stall` | bool (**novo v4.2**) | — | `true` quando `cl_h_max_down_calc` excede `[stability].cl_h_stall_limit` — o teto de stall, não a geometria do profundor, é o fator limitante |
 | `trim_margin` / `cl_ground_rotation` / `to_flap_cm_fraction` | f64 | — | Parâmetros ecoados de `[stability]` |
+| `cl_h_trim_cruise` | f64 (**novo v4.4**) | — | CL_h de TRIM em cruzeiro (sem flap) — upload (positivo, CG atrás do CA da asa) ou download (negativo, CG à frente), calculado no CG de REFERÊNCIA da missão (`cg_reference_scenario`, JÁ CONVERGIDO — não o valor lag-1 usado dentro do laço de MTOW). Ver fórmula/dedução em §1 (v4.4) |
+| `cd_trim` | f64 (**novo v4.4**) | — | ΔCD_trim — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`, já somado a `wing.cd_cruise`/refletido em `wing.ld_ratio_cruise` (este campo é o mesmo delta, ecoado para rastreabilidade) |
+| `cg_reference_scenario` | string (**novo v4.4**) | — | Nome do cenário de carga (`weight`) usado como CG de referência da missão — sempre `"4 pax + bagagem + meia"` neste modelo (meia-missão) |
+| `cg_reference_pct_mac` | f64 (**novo v4.4**) | %MAC | CG do cenário acima, JÁ CONVERGIDO — o valor efetivamente usado para calcular `cl_h_trim_cruise`/`cd_trim` |
 
 Sub-bloco `ScenarioTrimLimit` (um por cenário de `weight`) — `rotation_margin_per_scenario`:
 

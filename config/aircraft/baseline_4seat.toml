@@ -78,6 +78,13 @@ eta_h = 0.90
 mass_per_area_h_kg_m2 = 8.6153
 mass_per_area_v_kg_m2 = 11.3242
 cd0_area_factor = 0.014366
+# Task refino-ciclo2 (Task 4): eficiência de Oswald da empenagem horizontal —
+# usada no arrasto de trim de cruzeiro (agents::trim_authority::cd_trim_cruise).
+# 0.70 é um valor conservador/típico de literatura para superfícies de cauda
+# de baixo alongamento (Raymer/Gudmundsson) — sem medição direta neste
+# projeto (mesma classe de parâmetro semi-empírico que cl_h_max_down era
+# antes da Task 1a). Faixa 0.5–0.95.
+e_h = 0.70
 
 [propeller]
 diameter_m = 1.95

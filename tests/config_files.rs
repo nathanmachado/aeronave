@@ -80,6 +80,10 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.empennage.mass_per_area_h_kg_m2, 8.6153);
     assert_eq!(cfg.empennage.mass_per_area_v_kg_m2, 11.3242);
     assert_eq!(cfg.empennage.cd0_area_factor, 0.014366);
+    // Task 4 (refino-ciclo2): eficiência de Oswald da empenagem horizontal
+    // — usada em `agents::trim_authority::cd_trim_cruise` (arrasto de trim
+    // em cruzeiro).
+    assert_eq!(cfg.empennage.e_h, 0.70);
 }
 
 #[test]

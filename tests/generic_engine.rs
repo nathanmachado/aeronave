@@ -220,12 +220,15 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // (`mission.block_time_h`) é verificado em outro teste, não aqui.
     // Campanha E1–E6 (2026-08-05): 7.902862 → 7.619800 h (mais CD0/MTOW
     // reduz a autonomia informativa de tanque cheio/consumo constante).
-    let endurance_pin_h = 7.619800;
+    // Task 4 (refino-ciclo2, arrasto de trim): 7.619800 → **7.599257 h**
+    // (old→new, ΔCD_trim eleva o consumo/hora).
+    let endurance_pin_h = 7.599257;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E6 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
-    // 2.212,801240 → 2.133,543977 km.
-    let range_pin_km = 2_133.543977;
+    // 2.212,801240 → 2.133,543977 km. Task 4: 2.133,543977 →
+    // **2.127,792006 km** (old→new).
+    let range_pin_km = 2_127.792006;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E6 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -330,12 +333,16 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // maior a margem — por isso este teste, que só olha a razão relativa
     // ao combustível exigido, não deve ser comparado byte-a-byte com o
     // campo `fuel_margin_pct` do JSON de saída.
-    let margem_pin_l = 4.728117;
+    // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): ΔCD_trim≈4,86e-5
+    // eleva o consumo de cruzeiro, exigindo mais combustível de missão —
+    // margem cai de novo: 4,728117 L (~1,8522%) → **4,099348 L (~1,6019%)**
+    // (old→new). Continua POSITIVA — achado central pós-E6 permanece válido.
+    let margem_pin_l = 4.099348;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
-        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E6 \
+        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-Task-4 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 1.8522).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-E6 ~1,8522%");
+    assert!((margem_pct - 1.6019).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-Task-4 ~1,6019%");
     assert!(margem_l > 0.0,
         "achado central pós-E6: mesmo com CD0 elevado e MTOW reconvergido mais alto, a \
          missão continua cabendo no tanque de 260 L (margem {margem_l:.2} L)");
@@ -608,14 +615,22 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // exatamente na área runtime — resíduo de arredondamento MINÚSCULO
     // (5ª–6ª casa decimal), não uma mudança de comportamento: 1.544,428382
     // → 1.544,428619 kg (+0,000237 kg, +0,000015%).
-    let mtow_convergido_kg = 1_544.428619;
-    // 7.902861573 → 7.619800 → 7.619791 h (task refino-ciclo2: -0,000009 h,
-    // resíduo de arredondamento da calibração de massa/cd0 da empenagem).
-    let endurance_h = 7.619791;
-    // 29.609527870 → 30.709468 → 30.709502 L/h (task refino-ciclo2:
-    // +0,000034 L/h, mesmo resíduo — tolerância do assert abaixo apertada
-    // para 5e-5, ~1,5× de margem sobre este resíduo).
-    let fc_lph = 30.709502;
+    //
+    // Task 4 (refino-ciclo2): arrasto de trim em cruzeiro
+    // (`agents::trim_authority::cd_trim_cruise`, ΔCD_trim≈4,86e-5 somado ao
+    // polar) — mais arrasto ⟹ mais combustível de cruzeiro (Breguet) ⟹
+    // MTOW converge mais pesado: 1.544,428619 → **1.544,956565 kg** (old→new,
+    // +0,528 kg).
+    let mtow_convergido_kg = 1_544.956565;
+    // 7.902861573 → 7.619800 → 7.619791 h (task refino-ciclo2, 1a+1b). Task
+    // 4: mais CD_cruise reduz o consumo informativo de tanque cheio (mais
+    // arrasto ⟹ mais L/h ⟹ menos horas com o mesmo tanque): 7.619791 →
+    // **7.599257 h** (old→new).
+    let endurance_h = 7.599257165;
+    // 29.609527870 → 30.709468 → 30.709502 L/h (task refino-ciclo2, 1a+1b).
+    // Task 4: 30.709502 → **30.792483 L/h** (old→new, ΔCD_trim eleva o
+    // arrasto/potência requerida em cruzeiro).
+    let fc_lph = 30.792483387;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -623,7 +638,8 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // reproduzir 27,0/16,0 kg na área runtime; resíduo de +0,000018 kg
     // (calibração com 4 casas decimais, não exata) — documentado, não
     // investigado (bem abaixo de qualquer tolerância de fabricação);
-    // tolerância do assert abaixo apertada para 5e-5, ~2,8× de margem.
+    // tolerância do assert abaixo apertada para 5e-5, ~2,8× de margem. Task
+    // 4 (arrasto de trim) NÃO afeta massa — OEW inalterado.
     let oew_kg = 890.000018;
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
@@ -653,12 +669,15 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // reduzem V_max; queda maior que os "~0,5-1 km/h" estimados no brief
     // (mesmo padrão de subestimativa de projeções já visto na Task 5.2 —
     // efeitos compostos do laço de convergência de MTOW não são lineares).
-    // Task refino-ciclo2: 301.304773 → 301.304678 km/h (-0,000095 km/h,
-    // resíduo de arredondamento da calibração de cd0_area_factor — dentro
-    // da tolerância original de 1e-3, não precisou de novo pin).
-    let v_max_pos_task_5_2_kmh = 301.304773;
+    // Task refino-ciclo2 (1a+1b): 301.304773 → 301.304678 km/h (-0,000095
+    // km/h, resíduo de arredondamento da calibração de cd0_area_factor —
+    // dentro da tolerância original de 1e-3, não precisou de novo pin).
+    // Task 4 (arrasto de trim em cruzeiro): ΔCD_trim eleva o CD_cruise no
+    // MTOW convergido — 301.304773 → **301.291776 km/h** (old→new,
+    // -0,013 km/h).
+    let v_max_pos_task_5_2_kmh = 301.291776;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
-        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-5.2 \
+        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-4 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
 }
 
@@ -989,7 +1008,9 @@ fn orchestrator_toyota_240l_insuficiente_de_novo_com_cooling_drag() {
             // CD0 do empennage + MTOW reconvergido maior — ver tabela em
             // `margem_de_combustivel_no_mtow_convergido`), ultrapassa os
             // 240 L por uma margem ainda maior (+15.271883 L, ~6,36%).
-            let necessario_pin_l = 255.271883;
+            // Task 4 (refino-ciclo2, arrasto de trim): 255.271883 →
+            // **255.886995 L** (old→new, ΔCD_trim eleva o consumo de cruzeiro).
+            let necessario_pin_l = 255.886995;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-3,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E6 \
                  {necessario_pin_l:.6} L");
@@ -1055,7 +1076,9 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // Campanha E1–E6 (2026-08-05): 393.298621188 → 401.843487 L
             // (mais CD0/MTOW, mesma causa das outras tabelas desta task) —
             // continua MUITO acima dos 260 L (~54,6%), nem perto de virar.
-            let necessario_pin_l = 401.843487;
+            // Task 4 (refino-ciclo2, arrasto de trim): 401.843487 →
+            // **407.563944 L** (old→new).
+            let necessario_pin_l = 407.563944;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E6 \
                  {necessario_pin_l:.6} L");

@@ -494,6 +494,17 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.empennage.cd0_area_factor
         )));
     }
+    // Task refino-ciclo2 (Task 4): eficiência de Oswald da empenagem
+    // horizontal, usada no arrasto de trim de cruzeiro
+    // (`agents::trim_authority::cd_trim_cruise`).
+    require_finite("empennage.e_h", cfg.empennage.e_h)?;
+    if cfg.empennage.e_h <= 0.5 || cfg.empennage.e_h >= 0.95 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.e_h deve estar em (0.5, 0.95) \
+             (valor: {})",
+            cfg.empennage.e_h
+        )));
+    }
     // Task trim-authority (fix de revisão): braço de cauda mínimo relativo
     // à MAC — o modelo de flare linearizado de `agents::trim_authority::
     // cl_h_required_flare` divide por `η_h·(S_h/S_w)·(l_h/MAC)`; um braço
@@ -1219,6 +1230,7 @@ mod tests {
             mass_per_area_h_kg_m2 = 9.0
             mass_per_area_v_kg_m2 = 11.0
             cd0_area_factor = 0.014
+            e_h = 0.75
             [propeller]
             diameter_m = 1.8
             blades = 2
@@ -1853,6 +1865,35 @@ mod tests {
         let toml = aircraft_toml_valido().replace("cd0_area_factor = 0.014", "cd0_area_factor = 0.05");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("empennage.cd0_area_factor"), "{err}");
+    }
+
+    // ─── [empennage] e_h (task refino-ciclo2, Task 4 — arrasto de trim) ───
+
+    #[test]
+    fn rejeita_e_h_fora_da_faixa_acima() {
+        let toml = aircraft_toml_valido().replace("e_h = 0.75", "e_h = 0.96");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.e_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_e_h_fora_da_faixa_abaixo() {
+        let toml = aircraft_toml_valido().replace("e_h = 0.75", "e_h = 0.4");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.e_h"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_e_h_nao_finito() {
+        let toml = aircraft_toml_valido().replace("e_h = 0.75", "e_h = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.e_h"), "{err}");
+    }
+
+    #[test]
+    fn aceita_e_h_dentro_da_faixa() {
+        let toml = aircraft_toml_valido().replace("e_h = 0.75", "e_h = 0.70");
+        assert!(parse_aircraft(&toml).is_ok());
     }
 
     // ─── Migrações (task refino-ciclo2) ──────────────────────────────────

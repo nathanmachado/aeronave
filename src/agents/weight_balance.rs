@@ -81,6 +81,15 @@ impl MassItem {
     }
 }
 
+/// Nome do cenário de carga usado como CG de REFERÊNCIA DA MISSÃO para o
+/// arrasto de trim de cruzeiro (Task 4, refino-ciclo2) — "meia-missão"
+/// (tanque pela metade), ver `agents::trim_authority::cl_h_trim_cruise` para
+/// a justificativa da escolha. Única fonte deste nome — usado tanto em
+/// `scenarios_def` (abaixo) quanto em `agents::trim_authority`/
+/// `orchestrator::size_aircraft` para localizar o cenário certo em
+/// `WeightBalanceOutput::scenarios` sem duplicar o literal.
+pub const MID_MISSION_SCENARIO_NAME: &str = "4 pax + bagagem + meia";
+
 /// Cenário de carga (quem e o que embarcou)
 #[derive(Debug, Clone)]
 pub struct LoadScenario {
@@ -497,7 +506,7 @@ impl WeightBalanceAgent {
             LoadScenario { name: "2 pax dianteiros",        pax_front: 2, pax_rear: 0, baggage_kg: 20.0, fuel_fraction: 1.0 },
             LoadScenario { name: "4 pax sem bagagem",       pax_front: 2, pax_rear: 2, baggage_kg:  0.0, fuel_fraction: 1.0 },
             LoadScenario { name: "4 pax + bagagem + cheio", pax_front: 2, pax_rear: 2, baggage_kg: 80.0, fuel_fraction: 1.0 },
-            LoadScenario { name: "4 pax + bagagem + meia",  pax_front: 2, pax_rear: 2, baggage_kg: 80.0, fuel_fraction: 0.5 },
+            LoadScenario { name: MID_MISSION_SCENARIO_NAME,  pax_front: 2, pax_rear: 2, baggage_kg: 80.0, fuel_fraction: 0.5 },
             LoadScenario { name: "4 pax + bagagem vazio",   pax_front: 2, pax_rear: 2, baggage_kg: 80.0, fuel_fraction: 0.1 },
         ];
 
@@ -1065,6 +1074,10 @@ mod tests {
             trim_margin: 0.10,
             cl_ground_rotation: 0.5,
             to_flap_cm_fraction: 0.5,
+            cl_h_trim_cruise: 0.04,
+            cd_trim: 5.0e-5,
+            cg_reference_scenario: MID_MISSION_SCENARIO_NAME.to_string(),
+            cg_reference_pct_mac: 35.0,
         }
     }
 

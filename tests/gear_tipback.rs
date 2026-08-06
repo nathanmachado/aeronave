@@ -172,12 +172,17 @@ fn margem_de_combustivel_do_baseline_real_fica_abaixo_do_piso_pin_honesto() {
     let fuel_margin_pct = (cfg.fuel_system.capacity_l - mission.fuel_total_l)
         / cfg.fuel_system.capacity_l * 100.0;
     println!("margem de combustível (baseline real) = {fuel_margin_pct:.4}% da capacidade");
-    // Pin honesto pós-Task-2 (Task 1 recalibrou cd0 quase igual — ver
-    // task-3-report.md): ≈1.8184% — mesmo número já pinado em
-    // `tests/generic_engine.rs` (`sizing.fuel_margin_pct`).
-    assert!((fuel_margin_pct - 1.8184).abs() < 0.05,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-Task-2 \
-         ≈1.8184%");
+    // Pin honesto pós-Task-3: ≈1.8184%. Task 4 (refino-ciclo2, arrasto de
+    // trim em cruzeiro) soma ΔCD_trim≈4.86e-5 ao polar de cruzeiro — mais
+    // arrasto ⟹ mais combustível de cruzeiro (Breguet) ⟹ MTOW converge
+    // levemente mais pesado (1544.43→1544.96 kg) ⟹ margem cai
+    // **1.8184%→1.5767%** (old→new; ~0.63 L a mais de combustível exigido
+    // sobre 260 L de tanque — pequeno, honesto, ver task-4-report.md).
+    // Mesmo número (novo) pinado em `tests/generic_engine.rs`
+    // (`sizing.fuel_margin_pct`).
+    assert!((fuel_margin_pct - 1.5767).abs() < 0.05,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-Task-4 \
+         ≈1.5767%");
     assert!(fuel_margin_pct < 5.0,
         "achado honesto esperado: margem ({fuel_margin_pct:.2}%) deveria ficar ABAIXO do piso \
          de 5% (min_fuel_margin_fraction) — NÃO É BUG");

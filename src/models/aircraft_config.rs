@@ -168,6 +168,19 @@ pub struct EmpennageCfg {
     /// baseline E6: `0,0046·S_w/(S_h+S_v) ≈ 0,014366` (ver
     /// task-1-report.md).
     pub cd0_area_factor: f64,
+    /// Eficiência de Oswald da empenagem horizontal (adimensional) — task
+    /// refino-ciclo2 (Task 4): usada em `agents::trim_authority::
+    /// cd_trim_cruise` para o arrasto INDUZIDO da própria empenagem ao gerar
+    /// `cl_h_trim` (download/upload de trim em cruzeiro,
+    /// `ΔCD_trim = CL_h_trim²/(π·ar_h·e_h)·(S_h/S_w)`, mesma forma de
+    /// `agents::aerodynamics::cd_induced` aplicada à empenagem). Distinto de
+    /// `oswald_efficiency` (asa, calculado por `agents::aerodynamics::
+    /// oswald_efficiency` a partir do AR — a EH não tem esse cálculo
+    /// dedicado, e seu Oswald tende a ser um pouco mais baixo que o da asa
+    /// por causa da razão de aspecto menor e da interferência da fuselagem/
+    /// esteira da asa). Faixa 0,5–0,95 (Raymer/Gudmundsson, superfícies de
+    /// cauda de baixo alongamento).
+    pub e_h: f64,
 }
 
 /// Configuração da hélice — dimensionamento/validação em
@@ -547,6 +560,10 @@ pub mod test_fixtures {
                 mass_per_area_h_kg_m2: 9.2,
                 mass_per_area_v_kg_m2: 10.7,
                 cd0_area_factor: 0.0135,
+                // Distinto do baseline real (0.70, task refino-ciclo2 Task 4)
+                // — mesma justificativa de "nenhum destes números coincide
+                // com o baseline real" usada nas demais seções desta fixture.
+                e_h: 0.80,
             },
             propeller: PropellerCfg {
                 diameter_m: Some(1.90),

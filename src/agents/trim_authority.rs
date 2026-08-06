@@ -328,6 +328,84 @@ pub fn rotation_fwd_limit_m(
     x_main_m - moment_per_unit_weight
 }
 
+// ─── ARRASTO DE TRIM EM CRUZEIRO (Task 4, refino-ciclo2) ─────────────────────
+//
+// Em cruzeiro (sem flap), a empenagem horizontal precisa gerar uma força
+// (para cima OU para baixo, `CL_h_trim`) para equilibrar o momento de
+// arfagem em torno do CG de referência da missão — diferente da flare/
+// rotação (que usam o CL_max com flap no batente de profundor), aqui é o
+// balanço de TRIM em voo nivelado 1g, sem flap: `cm_ac` isolado (SEM
+// `cm_flap_delta`), no CG de referência da missão (não no CG do cenário mais
+// crítico) e no `CL_cruise` do polar.
+//
+// Cenário de referência escolhido: **"4 pax + bagagem + meia"** (meia-
+// missão, tanque pela metade) — representa o CG médio ao longo da missão de
+// cruzeiro (nem o CG mais dianteiro do início do voo, tanque cheio, nem o
+// mais traseiro do fim, tanque quase vazio — ver `agents::weight_balance::
+// WeightBalanceAgent::run`, `scenarios_def`), consistente com a prática de
+// projeto preliminar de reportar o arrasto de trim "típico" de cruzeiro, não
+// um extremo. Documentado aqui e ecoado em `TrimSpec::cg_reference_scenario`
+// para rastreabilidade.
+//
+// Balanço de momentos (mesma dedução algébrica de `cl_h_required_flare`,
+// mas SEM o termo `+0,25` do braço TOTAL da empenagem cancelando com o CL da
+// asa — aqui o termo `(l_h/MAC+0,25−x̄)` permanece no denominador porque o
+// fechamento vertical não foi aplicado da mesma forma; ver a dedução direta
+// abaixo):
+//
+//   0 = cm_ac + CL_cruise·(x̄_cg − 0,25) − η_h·(S_h/S_w)·CL_h_trim·(l_h/MAC + 0,25 − x̄_cg)
+//   ⟹ CL_h_trim = [cm_ac + CL_cruise·(x̄_cg − 0,25)] / [η_h·(S_h/S_w)·(l_h/MAC + 0,25 − x̄_cg)]
+//
+// Sinal: CG ATRÁS do CA da asa (x̄_cg > 0,25, caso típico deste baseline)
+// produz um momento de peso PICANDO NARIZ-PARA-CIMA (nose-up, cauda-pesada)
+// que precisa ser equilibrado por uma força para CIMA na cauda
+// (`CL_h_trim > 0`, "upload") — contra-intuitivo à primeira vista (a
+// empenagem SUSTENTA, não gera download), mas correto: CG atrás do CA
+// desestabiliza no sentido nariz-para-cima, a cauda precisa empurrar para
+// CIMA para conter esse momento. Ver hand-check no teste
+// `cl_h_trim_cruise_hand_check_baseline_meia_missao` para o caso numérico.
+//
+// Aproximação documentada (brief): a contribuição de sustentação EXTRA que
+// a asa precisaria gerar para compensar o upload/download da cauda (efeito
+// de 2ª ordem sobre `CL_cruise`, análogo ao fechamento vertical de
+// `cl_h_required_flare`) é DESPREZADA aqui — `CL_cruise` já vem fechado do
+// polar da asa (`AerodynamicsAgent`, `W = q·S·CL_cruise`), sem realimentação
+// do `CL_h_trim`. Justificativa: `CL_h_trim` em cruzeiro é tipicamente
+// pequeno (ver hand-check, ~0,04), então `η_h·(S_h/S_w)·CL_h_trim` é uma
+// fração pequena de `CL_cruise` — o erro de 2ª ordem introduzido é
+// desprezível frente às demais incertezas do modelo (Cm_ac semi-empírico,
+// eficiência de Oswald da cauda).
+pub fn cl_h_trim_cruise(
+    cm_ac: f64,
+    cl_cruise: f64,
+    x_bar_cg: f64,
+    eta_h: f64,
+    s_h_over_s_w: f64,
+    l_h_over_mac: f64,
+) -> f64 {
+    let num = cm_ac + cl_cruise * (x_bar_cg - 0.25);
+    let den = eta_h * s_h_over_s_w * (l_h_over_mac + 0.25 - x_bar_cg);
+    num / den
+}
+
+/// Arrasto INDUZIDO de trim (adimensional, somado ao `CD_cruise` do polar
+/// da asa) — a empenagem horizontal, ao gerar `CL_h_trim` para equilibrar o
+/// momento de arfagem, produz seu PRÓPRIO arrasto induzido, na mesma forma
+/// de `agents::aerodynamics::cd_induced` (modelo elíptico generalizado),
+/// mas com o alongamento/Oswald DA EMPENAGEM (`ar_h`/`e_h`, não da asa) e
+/// referenciado à área da ASA (`×S_h/S_w`, para somar diretamente ao
+/// `CD_cruise` da aeronave, que já é referenciado a `S_w`):
+///
+///   ΔCD_trim = (CL_h_trim² / (π·ar_h·e_h)) · (S_h/S_w)
+///
+/// `e_h` é `[empennage].e_h` (task refino-ciclo2, Task 4) — eficiência de
+/// Oswald da empenagem horizontal, parâmetro semi-empírico distinto de
+/// `agents::aerodynamics::oswald_efficiency` (que é calculado por AR para a
+/// ASA; a EH não tem esse cálculo dedicado neste modelo).
+pub fn cd_trim_cruise(cl_h_trim: f64, ar_h: f64, e_h: f64, s_h_over_s_w: f64) -> f64 {
+    crate::agents::aerodynamics::cd_induced(cl_h_trim, ar_h, e_h) * s_h_over_s_w
+}
+
 // ─── AGENTE PRINCIPAL ────────────────────────────────────────────────────────
 
 pub struct TrimAuthorityAgent;
@@ -445,6 +523,28 @@ impl TrimAuthorityAgent {
             cl_h_available(cl_deflection_plus, cfg.stability.trim_margin),
         );
 
+        // Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) — CG de
+        // REFERÊNCIA da missão (meia-missão, `MID_MISSION_SCENARIO_NAME`),
+        // JÁ CONVERGIDO (`wb.scenarios`, saída do `WeightBalanceAgent` desta
+        // MESMA iteração — distinto do valor lag-1 usado dentro do laço de
+        // `orchestrator::size_aircraft` para acoplar `cd_trim` ao polar
+        // ANTES do `WeightBalanceAgent` rodar; ver docstring de
+        // `TrimSpec::cl_h_trim_cruise`). `cm_ac` ISOLADO (sem
+        // `cm_flap_delta` — cruzeiro é sem flap, ao contrário de
+        // `cm_ac_total` usado em flare/rotação acima).
+        let cg_ref = wb.scenarios.iter()
+            .find(|sc| sc.name == crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME)
+            .unwrap_or_else(|| panic!(
+                "cenário de referência '{}' não encontrado em wb.scenarios — deveria sempre \
+                 existir (ver agents::weight_balance::scenarios_def)",
+                crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME
+            ));
+        let x_bar_cg_ref = cg_ref.cg_pct_mac / 100.0;
+        let cl_h_trim_cruise_val = cl_h_trim_cruise(
+            cfg.wing.cm_ac, wing.cl_cruise, x_bar_cg_ref, emp.eta_h, s_ratio, l_h_over_mac,
+        );
+        let cd_trim_val = cd_trim_cruise(cl_h_trim_cruise_val, emp.ar_h, cfg.empennage.e_h, s_ratio);
+
         TrimSpec {
             flare_limit_pct_mac: flare_limit_pct,
             rotation_limit_pct_mac: rotation_limit_pct,
@@ -470,6 +570,10 @@ impl TrimAuthorityAgent {
             trim_margin: cfg.stability.trim_margin,
             cl_ground_rotation: cfg.stability.cl_ground_rotation,
             to_flap_cm_fraction: cfg.stability.to_flap_cm_fraction,
+            cl_h_trim_cruise: cl_h_trim_cruise_val,
+            cd_trim: cd_trim_val,
+            cg_reference_scenario: cg_ref.name.to_string(),
+            cg_reference_pct_mac: cg_ref.cg_pct_mac,
         }
     }
 }
@@ -876,6 +980,26 @@ mod tests {
                  obtido {:.2}%",
                 sc.scenario, sc.rotation_authority_margin_pct);
         }
+
+        // Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) — hand-check
+        // com o MTOW de PALPITE inicial (este teste NÃO passa pelo laço de
+        // convergência do orchestrator, ver `AircraftState::from_config`
+        // acima) — x̄_cg (meia-missão) ≈42,480201%, CL_cruise≈0,400245:
+        //   num = −0,008+0,400245·(0,424802−0,25) = 0,061964
+        //   den = 0,9·0,220702·(3,851350+0,25−0,424802) = 0,730279
+        //   CL_h_trim = 0,061964/0,730279 ≈ +0,084849
+        //   ΔCD_trim = (0,084849²/(π·4·0,70))·0,220702 ≈ 1,806e-4
+        println!("cl_h_trim_cruise = {:.6}  cd_trim = {:.8}  cg_reference = '{}' ({:.4}% MAC)",
+            trim.cl_h_trim_cruise, trim.cd_trim, trim.cg_reference_scenario, trim.cg_reference_pct_mac);
+        assert_eq!(trim.cg_reference_scenario,
+            crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME);
+        assert!((trim.cl_h_trim_cruise - 0.084849).abs() < 1e-4,
+            "cl_h_trim_cruise = {:.6} (esperado ≈0.084849 ±1e-4)", trim.cl_h_trim_cruise);
+        assert!((trim.cd_trim - 1.806e-4).abs() < 1e-6,
+            "cd_trim = {:.8} (esperado ≈1.806e-4 ±1e-6)", trim.cd_trim);
+        assert!(trim.cl_h_trim_cruise > 0.0,
+            "CG de referência atrás do CA (x̄≈42,5% > 25%) deveria produzir upload \
+             (CL_h_trim_cruise > 0) — obtido {:.6}", trim.cl_h_trim_cruise);
     }
 
     /// Caminho de erro preservado (achado histórico pré-E6): mesma
@@ -981,4 +1105,98 @@ mod tests {
             "mais autoridade (cl_h_max_down+0.05) deveria mover o limite de flare para a \
              FRENTE (%MAC menor)");
     }
+
+    // ─── Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) ──────────────
+    //
+    // Hand-check com valores REAIS do runtime pós-refino-ciclo2 (Tasks 1-3
+    // já aplicadas — geometria da empenagem/asa não muda, só os checks
+    // novos foram adicionados): baseline real (motor padrão + missão de
+    // projeto), MTOW convergido, cenário "4 pax + bagagem + meia": x̄_cg=35,444372%
+    // MAC=0,35444372, CL_cruise=0,38847654, cm_ac=−0,008, MAC=1,24631614m,
+    // l_h=4,80m ⟹ l_h/MAC=3,8513503; S_h/S_w=3,13396578/14,2=0,2207018;
+    // η_h=0,90; e_h=0,70; ar_h=4,0 (ver task-4-report.md para a dedução
+    // completa em Python).
+    //
+    //   num = −0,008+0,38847654·(0,35444372−0,25) = 0,0325739
+    //   den = 0,90·0,2207018·(3,8513503+0,25−0,35444372) = 0,744254
+    //   CL_h_trim = 0,0325739/0,744254 ≈ +0,043767  (upload — CG atrás do CA)
+    //   ΔCD_trim = (0,043767²/(π·4·0,70))·0,2207018 ≈ 4,806e-5
+
+    #[test]
+    fn cl_h_trim_cruise_hand_check_baseline_meia_missao() {
+        let mac = 1.24631614_f64;
+        let l_h_over_mac = 4.80 / mac;
+        let s_ratio = 3.13396578 / 14.2;
+        let cl_h_trim = cl_h_trim_cruise(-0.008, 0.38847654, 0.35444372, 0.90, s_ratio, l_h_over_mac);
+        println!("cl_h_trim (meia-missão) = {cl_h_trim:.6}");
+        assert!((cl_h_trim - 0.043767).abs() < 1e-4,
+            "cl_h_trim = {cl_h_trim:.6} (esperado ≈0.043767 ±1e-4)");
+        assert!(cl_h_trim > 0.0,
+            "CG atrás do CA (x̄=0.354 > 0.25) deveria produzir CL_h_trim POSITIVO (upload) — \
+             obtido {cl_h_trim:.6}");
+    }
+
+    #[test]
+    fn cd_trim_cruise_hand_check_baseline_meia_missao() {
+        let s_ratio = 3.13396578 / 14.2;
+        let cd_trim = cd_trim_cruise(0.043767, 4.0, 0.70, s_ratio);
+        println!("cd_trim (meia-missão) = {cd_trim:.8}");
+        assert!((cd_trim - 4.806e-5).abs() < 1e-6,
+            "cd_trim = {cd_trim:.8} (esperado ≈4.806e-5 ±1e-6)");
+    }
+
+    /// CG à FRENTE do CA (x̄_cg < 0,25, ex.: cenário "Solo (piloto)" do
+    /// baseline real, x̄≈15,59% MAC) inverte o sinal — a cauda precisa
+    /// gerar DOWNLOAD (CL_h_trim negativo) para equilibrar o momento de
+    /// peso picando NARIZ-PARA-BAIXO. Hand-check: x̄=0,15592128 →
+    /// CL_h_trim≈−0,056843, ΔCD_trim≈8,107e-5 (maior que o de meia-missão —
+    /// CG mais longe do CA exige mais autoridade de trim).
+    #[test]
+    fn cl_h_trim_cruise_hand_check_cg_dianteiro_e_negativo() {
+        let mac = 1.24631614_f64;
+        let l_h_over_mac = 4.80 / mac;
+        let s_ratio = 3.13396578 / 14.2;
+        let cl_h_trim = cl_h_trim_cruise(-0.008, 0.38847654, 0.15592128, 0.90, s_ratio, l_h_over_mac);
+        println!("cl_h_trim (CG dianteiro) = {cl_h_trim:.6}");
+        assert!((cl_h_trim - (-0.056843)).abs() < 1e-4,
+            "cl_h_trim = {cl_h_trim:.6} (esperado ≈-0.056843 ±1e-4)");
+        assert!(cl_h_trim < 0.0,
+            "CG à frente do CA (x̄=0.156 < 0.25) deveria produzir CL_h_trim NEGATIVO \
+             (download) — obtido {cl_h_trim:.6}");
+
+        let cd_trim = cd_trim_cruise(cl_h_trim, 4.0, 0.70, s_ratio);
+        println!("cd_trim (CG dianteiro) = {cd_trim:.8}");
+        assert!((cd_trim - 8.107e-5).abs() < 1e-6,
+            "cd_trim = {cd_trim:.8} (esperado ≈8.107e-5 ±1e-6)");
+    }
+
+    /// Propriedade: `cd_trim_cruise` depende de `CL_h_trim²` — o sinal do
+    /// CL_h_trim não importa, só a magnitude. Um download (negativo) e um
+    /// upload (positivo) de mesma MAGNITUDE devem produzir o MESMO
+    /// ΔCD_trim.
+    #[test]
+    fn cd_trim_cruise_e_simetrico_no_sinal_de_cl_h_trim() {
+        let s_ratio = 0.22;
+        let cd_pos = cd_trim_cruise(0.05, 4.0, 0.70, s_ratio);
+        let cd_neg = cd_trim_cruise(-0.05, 4.0, 0.70, s_ratio);
+        println!("cd_trim(+0.05)={cd_pos:.8}  cd_trim(-0.05)={cd_neg:.8}");
+        assert!((cd_pos - cd_neg).abs() < 1e-12,
+            "ΔCD_trim deveria ser simétrico no sinal de CL_h_trim: +0.05→{cd_pos:.8} \
+             -0.05→{cd_neg:.8}");
+    }
+
+    /// Propriedade: `cd_trim_cruise` aumenta ESTRITAMENTE quando `e_h`
+    /// (eficiência de Oswald da empenagem) DIMINUI — menos eficiência ⟹
+    /// mais arrasto induzido para o mesmo CL_h_trim.
+    #[test]
+    fn cd_trim_cruise_aumenta_quando_e_h_diminui() {
+        let s_ratio = 0.22;
+        let cd_alto_e_h = cd_trim_cruise(0.05, 4.0, 0.90, s_ratio);
+        let cd_baixo_e_h = cd_trim_cruise(0.05, 4.0, 0.55, s_ratio);
+        println!("cd_trim(e_h=0.90)={cd_alto_e_h:.8}  cd_trim(e_h=0.55)={cd_baixo_e_h:.8}");
+        assert!(cd_baixo_e_h > cd_alto_e_h,
+            "cd_trim com e_h menor ({cd_baixo_e_h:.8}) deveria ser MAIOR que com e_h maior \
+             ({cd_alto_e_h:.8})");
+    }
 }
+

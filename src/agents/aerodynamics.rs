@@ -98,6 +98,23 @@ pub fn ld_ratio(cl: f64, cd: f64) -> f64 {
     cl / cd
 }
 
+/// Aplica o arrasto de trim em cruzeiro (Task 4, refino-ciclo2) ao polar já
+/// calculado por `AerodynamicsAgent::run` — soma `cd_trim` a `cd_cruise` e
+/// recalcula `ld_ratio_cruise` de forma consistente (mantém o invariante
+/// `ld_ratio_cruise == cl_cruise/cd_cruise` após a soma). Separado de `run`
+/// porque `cd_trim` depende da geometria da empenagem (`EmpennageSpec`),
+/// calculada DEPOIS da asa por `EmpennageAgent::run(&wing, cfg)` — e do CG
+/// (`WeightBalanceAgent`, que por sua vez depende da asa/empenagem já
+/// prontas) — não pode ser calculado dentro do próprio
+/// `AerodynamicsAgent::run` sem introduzir uma dependência circular. Ver
+/// `agents::trim_authority::cl_h_trim_cruise`/`cd_trim_cruise` para a física
+/// do arrasto de trim, e `orchestrator::size_aircraft` para o acoplamento
+/// completo no laço de convergência (lag-1 no CG).
+pub fn apply_cruise_trim_drag(wing: &mut WingSpec, cd_trim: f64) {
+    wing.cd_cruise += cd_trim;
+    wing.ld_ratio_cruise = ld_ratio(wing.cl_cruise, wing.cd_cruise);
+}
+
 /// Número de Mach da ponta da hélice (verificação de compressibilidade).
 /// `a_ms`: velocidade do som local (m/s) — de `Isa::speed_of_sound_ms`, na
 /// altitude/ΔISA relevantes (ex.: cruzeiro). Antes da Task 4.6 este valor
@@ -258,5 +275,35 @@ mod tests {
         let a_ms = crate::models::atmosphere::Isa::speed_of_sound_ms(2_500.0, 0.0);
         let m = mach_tip(1.95, 1_500.0, 77.8, a_ms);
         assert!(m < 0.75, "Mach ponta hélice {m:.3} excede limite 0.75");
+    }
+
+    // ─── apply_cruise_trim_drag (Task 4, refino-ciclo2) ───────────────────
+
+    /// `apply_cruise_trim_drag` deve somar `cd_trim` EXATAMENTE a
+    /// `cd_cruise` e recalcular `ld_ratio_cruise = cl_cruise/cd_cruise` de
+    /// forma consistente (não deixar os dois campos dessincronizados).
+    #[test]
+    fn apply_cruise_trim_drag_soma_cd_trim_e_recalcula_ld() {
+        let cfg = config_teste();
+        let state = AircraftState::from_config(&cfg);
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let mut wing = AerodynamicsAgent::run(&state, &req);
+        let cd_antes = wing.cd_cruise;
+        let cl = wing.cl_cruise;
+        let cd_trim = 5.0e-5;
+
+        apply_cruise_trim_drag(&mut wing, cd_trim);
+
+        println!("cd_cruise antes={cd_antes:.6}  depois={:.6}  cd_trim={cd_trim:.6}", wing.cd_cruise);
+        assert!((wing.cd_cruise - (cd_antes + cd_trim)).abs() < 1e-12,
+            "cd_cruise depois ({:.8}) deveria ser exatamente cd_antes+cd_trim ({:.8})",
+            wing.cd_cruise, cd_antes + cd_trim);
+        assert!((wing.ld_ratio_cruise - cl / wing.cd_cruise).abs() < 1e-9,
+            "ld_ratio_cruise ({:.4}) deveria ser recalculado como cl_cruise/cd_cruise ({:.4})",
+            wing.ld_ratio_cruise, cl / wing.cd_cruise);
+        // cd_trim > 0 deve reduzir L/D estritamente em relação ao valor sem trim.
+        assert!(wing.ld_ratio_cruise < cl / cd_antes,
+            "L/D com trim ({:.4}) deveria ser MENOR que sem trim ({:.4})",
+            wing.ld_ratio_cruise, cl / cd_antes);
     }
 }
