@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 837 1273" font-family="Iosevka, Menlo, monospace">
+<rect width="837" height="1273" fill="#f7f5ef"/>
+<text x="418.5" y="38" text-anchor="middle" fill="#1a2b45" font-size="19" font-weight="bold">AERONAVE 4 LUGARES — BASELINE E7 (rascunho em escala)</text>
+<text x="418.5" y="56" text-anchor="middle" fill="#8895ac" font-size="12">gerado de aircraft_spec.json — 2026-08-06 — PASS, 0 violações</text>
+<defs><marker id="ar" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L8,4 L0,7" fill="none" stroke="#8895ac"/></marker></defs>
+<text x="109" y="76" fill="#1a2b45" font-size="14" text-anchor="start">VISTA SUPERIOR</text>
+<polyline points="108.6,460.1 703.8,460.1" fill="none" stroke="#5b7395" stroke-width="0.8" stroke-linejoin="round" stroke-dasharray="10 5"/>
+<polyline points="164.4,460.1 173.7,442.8 207.8,427.9 263.6,421.1 431.0,421.1 548.8,439.1 635.6,450.2 672.8,453.9 672.8,466.3 635.6,470.1 548.8,481.2 431.0,499.2 263.6,499.2 207.8,492.4 173.7,477.5 164.4,460.1" fill="none" stroke="#1a2b45" stroke-width="2.2" stroke-linejoin="round"/>
+<polyline points="344.2,422.9 358.2,90.0 404.0,90.0 445.9,422.9" fill="none" stroke="#1a2b45" stroke-width="2.2" stroke-linejoin="round"/>
+<polyline points="344.2,497.3 358.2,830.3 404.0,830.3 445.9,497.3" fill="none" stroke="#1a2b45" stroke-width="2.2" stroke-linejoin="round"/>
+<polyline points="599.6,452.1 627.1,350.4 663.7,350.4 672.8,452.1" fill="none" stroke="#1a2b45" stroke-width="2.0" stroke-linejoin="round"/>
+<polyline points="599.6,468.2 627.1,569.9 663.7,569.9 672.8,468.2" fill="none" stroke="#1a2b45" stroke-width="2.0" stroke-linejoin="round"/>
+<ellipse cx="172" cy="460" rx="6" ry="60" fill="none" stroke="#5b7395" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="180" y="394" fill="#5b7395" font-size="11" text-anchor="start">hélice Ø 1.95 m</text>
+<rect x="371" y="361" width="40" height="12" rx="6" fill="none" stroke="#5b7395" stroke-width="1.6"/>
+<rect x="371" y="547" width="40" height="12" rx="6" fill="none" stroke="#5b7395" stroke-width="1.6"/>
+<rect x="235" y="455" width="32" height="11" rx="6" fill="none" stroke="#5b7395" stroke-width="1.6"/>
+<line x1="357" y1="460" x2="373" y2="460" stroke="#1a2b45" stroke-width="5"/>
+<circle cx="365" cy="460" r="7" fill="#fff" stroke="#1a2b45" stroke-width="1.6"/>
+<path d="M 365 460 L 372 460 A 7 7 0 0 1 365 467 Z M 365 460 L 358 460 A 7 7 0 0 1 365 453 Z" fill="#1a2b45"/>
+<text x="377" y="482" fill="#1a2b45" font-size="11" text-anchor="start">CG 16–37% MAC</text>
+<line x1="164" y1="805.2799999999999" x2="673" y2="805.2799999999999" stroke="#8895ac" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<text x="419" y="800" fill="#8895ac" font-size="11" text-anchor="middle">comprimento 8.20 m</text>
+<line x1="735" y1="90" x2="735" y2="830" stroke="#8895ac" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<text x="749" y="460" fill="#8895ac" font-size="11" transform="rotate(90 749 460)" text-anchor="middle">envergadura 11.94 m</text>
+<text x="109" y="914" fill="#1a2b45" font-size="14" text-anchor="start">VISTA LATERAL</text>
+<polyline points="108.6,1183.1 753.4,1183.1" fill="none" stroke="#5b7395" stroke-width="1.4" stroke-linejoin="round"/>
+<polyline points="108.6,1183.1 99.9,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="135.5,1183.1 126.8,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="162.3,1183.1 153.7,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="189.2,1183.1 180.5,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="216.1,1183.1 207.4,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="242.9,1183.1 234.3,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="269.8,1183.1 261.1,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="296.7,1183.1 288.0,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="323.5,1183.1 314.9,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="350.4,1183.1 341.7,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="377.3,1183.1 368.6,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="404.1,1183.1 395.5,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="431.0,1183.1 422.3,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="457.9,1183.1 449.2,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="484.7,1183.1 476.1,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="511.6,1183.1 502.9,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="538.5,1183.1 529.8,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="565.3,1183.1 556.7,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="592.2,1183.1 583.5,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="619.1,1183.1 610.4,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="645.9,1183.1 637.3,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="672.8,1183.1 664.1,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="699.7,1183.1 691.0,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="726.5,1183.1 717.9,1191.8" fill="none" stroke="#5b7395" stroke-width="1.0" stroke-linejoin="round"/>
+<polyline points="164.4,1105.6 179.9,1079.6 257.4,1071.5 300.8,1059.1 406.2,1059.1 474.4,1087.0 567.4,1105.6 672.8,1111.8 672.8,1118.0 648.0,1114.9 443.4,1145.9 220.2,1145.9 164.4,1131.7 164.4,1105.6" fill="none" stroke="#1a2b45" stroke-width="2.2" stroke-linejoin="round"/>
+<polyline points="300.8,1059.1 334.9,1076.5" fill="none" stroke="#5b7395" stroke-width="1.4" stroke-linejoin="round"/>
+<polyline points="341.1,1137.3 362.8,1128.6 445.9,1134.8 445.9,1138.5 362.8,1144.7 341.1,1139.7 341.1,1137.3" fill="none" stroke="#1a2b45" stroke-width="2.0" stroke-linejoin="round"/>
+<polyline points="592.6,1111.8 611.0,975.1 651.1,975.1 680.2,1111.8" fill="none" stroke="#1a2b45" stroke-width="2.2" stroke-linejoin="round"/>
+<polyline points="599.6,1110.6 675.9,1106.3 610.8,1099.4 599.6,1110.6" fill="none" stroke="#1a2b45" stroke-width="1.8" stroke-linejoin="round"/>
+<ellipse cx="171" cy="1106" rx="4" ry="60" fill="none" stroke="#5b7395" stroke-width="1.4" stroke-dasharray="6 4"/>
+<polyline points="251.2,1145.9 251.2,1168.3" fill="none" stroke="#1a2b45" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="251" cy="1168" r="15" fill="none" stroke="#1a2b45" stroke-width="2.2"/>
+<polyline points="391.3,1127.3 391.3,1168.3" fill="none" stroke="#1a2b45" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="391" cy="1168" r="15" fill="none" stroke="#1a2b45" stroke-width="2.2"/>
+<circle cx="373" cy="1118" r="5" fill="#1a2b45"/>
+<text x="363" y="1092" fill="#8895ac" font-size="10.5" text-anchor="end">CG traseiro</text>
+<polyline points="370.1,1099.4 373.2,1114.3" fill="none" stroke="#8895ac" stroke-width="0.9" stroke-linejoin="round"/>
+<polyline points="391.3,1183.1 373.2,1118.0" fill="none" stroke="#8895ac" stroke-width="1.2" stroke-linejoin="round" stroke-dasharray="5 4"/>
+<polyline points="391.3,1183.1 391.3,1102.5" fill="none" stroke="#8895ac" stroke-width="0.9" stroke-linejoin="round" stroke-dasharray="2 4"/>
+<text x="397" y="1115" fill="#8895ac" font-size="11" text-anchor="start">tipback 15.6°</text>
+<polyline points="391.3,1183.1 648.0,1114.9 648.0,1114.9" fill="none" stroke="#8895ac" stroke-width="1.2" stroke-linejoin="round" stroke-dasharray="5 4"/>
+<text x="512" y="1145" fill="#8895ac" font-size="11" text-anchor="start">tail-strike 14.9°</text>
+<line x1="251" y1="1209.1395224893195" x2="391" y2="1209.1395224893195" stroke="#8895ac" stroke-width="1" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<text x="321" y="1204" fill="#8895ac" font-size="11" text-anchor="middle">entre-eixos 2.26 m</text>
+<text x="399" y="1227" fill="#8895ac" font-size="11" text-anchor="start">trem principal x = 3.66 m</text>
+<rect x="420.79999999999995" y="60" width="252" height="105" rx="8" fill="#fffdf8" stroke="#8895ac" stroke-width="1"/>
+<text x="433" y="76" fill="#1a2b45" font-size="11.5" text-anchor="start">MTOW 1548 kg · OEW 890 kg</text>
+<text x="433" y="93" fill="#1a2b45" font-size="11.5" text-anchor="start">S 14.2 m² · AR 10.0</text>
+<text x="433" y="110" fill="#1a2b45" font-size="11.5" text-anchor="start">cruzeiro 302 km/h</text>
+<text x="433" y="127" fill="#1a2b45" font-size="11.5" text-anchor="start">autonomia 7.7 h + reserva</text>
+<text x="433" y="144" fill="#1a2b45" font-size="11.5" text-anchor="start">tanque 260 L · margem 14%</text>
+</svg>
