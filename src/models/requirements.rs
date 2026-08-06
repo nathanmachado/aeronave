@@ -34,6 +34,20 @@ pub struct Requirements {
     pub airfield_altitude_m: f64,
     /// Desvio ISA em °C (ex.: ISA+20 → 20.0)
     pub isa_delta_c: f64,
+    /// Margem mínima de combustível exigida (Task 3, refino-ciclo2) — fração
+    /// da CAPACIDADE do tanque (`[fuel_system].capacity_l`), não do
+    /// combustível exigido pela missão (ver nota de convenção em
+    /// `validation::constraint_checker::ConstraintChecker::verify`, checagem
+    /// #18, e `tests/generic_engine.rs::margem_de_combustivel_no_mtow_
+    /// convergido`, que documenta as DUAS percentagens que coexistem no
+    /// projeto). É um requisito de PROJETO (piso de segurança operacional —
+    /// combustível não planejado para contingência além da reserva já
+    /// embutida em `fuel_reserve_fraction`), não uma propriedade física
+    /// calculada — por isso vive em `Requirements`/`mission.toml`, ao lado
+    /// de `fuel_reserve_fraction`. Faixa válida: [0, 0.3] (acima de 30%
+    /// seria um piso irrealisticamente alto, provavelmente um erro de
+    /// digitação de fração vs. percentual).
+    pub min_fuel_margin_fraction: f64,
     /// Parâmetros da análise de missão por segmentos (Task 5.1) — táxi,
     /// subida integrada e descida. Ver `AnalysisCfg`.
     pub analysis: AnalysisCfg,
@@ -98,6 +112,10 @@ pub mod test_fixtures {
             cruise_altitude_m: 2_400.0,
             airfield_altitude_m: 0.0,
             isa_delta_c: 0.0,
+            // Distinto do valor real de `config/missions/default.toml`
+            // (0.05) — mesma filosofia de fixture sintética das demais
+            // (ver docstring do módulo).
+            min_fuel_margin_fraction: 0.08,
             analysis: AnalysisCfg {
                 taxi_fuel_l: 2.5,
                 descent_rate_ms: 3.5,

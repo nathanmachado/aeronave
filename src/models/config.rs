@@ -1059,6 +1059,18 @@ fn validate_mission(req: &Requirements) -> Result<(), ConfigError> {
         )));
     }
 
+    // Task 3 (refino-ciclo2): margem mínima de combustível — fração da
+    // CAPACIDADE do tanque (ver docstring de `Requirements::
+    // min_fuel_margin_fraction`).
+    require_finite_missao("min_fuel_margin_fraction", req.min_fuel_margin_fraction)?;
+    if req.min_fuel_margin_fraction < 0.0 || req.min_fuel_margin_fraction > 0.3 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: min_fuel_margin_fraction deve estar em [0, 0.3] \
+             (valor: {})",
+            req.min_fuel_margin_fraction
+        )));
+    }
+
     require_positive_missao("analysis.taxi_fuel_l", req.analysis.taxi_fuel_l)?;
     require_positive_missao("analysis.descent_rate_ms", req.analysis.descent_rate_ms)?;
 
@@ -2143,6 +2155,7 @@ mod tests {
             cruise_altitude_m = 2500.0
             airfield_altitude_m = 0.0
             isa_delta_c = 0.0
+            min_fuel_margin_fraction = 0.05
 
             [analysis]
             taxi_fuel_l = 3.0
@@ -2233,6 +2246,44 @@ mod tests {
         let toml = mission_toml_valido().replace("cruise_altitude_m = 2500.0", "cruise_altitude_m = 12000.0");
         let err = parse_mission(&toml).unwrap_err();
         assert!(err.to_string().contains("cruise_altitude_m"), "{err}");
+    }
+
+    // ─── min_fuel_margin_fraction (Task 3, refino-ciclo2) ───────────────────
+
+    #[test]
+    fn rejeita_min_fuel_margin_fraction_negativo() {
+        let toml = mission_toml_valido()
+            .replace("min_fuel_margin_fraction = 0.05", "min_fuel_margin_fraction = -0.01");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("min_fuel_margin_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_min_fuel_margin_fraction_acima_de_0_3() {
+        let toml = mission_toml_valido()
+            .replace("min_fuel_margin_fraction = 0.05", "min_fuel_margin_fraction = 0.31");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("min_fuel_margin_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_min_fuel_margin_fraction_nao_finito() {
+        let toml = mission_toml_valido()
+            .replace("min_fuel_margin_fraction = 0.05", "min_fuel_margin_fraction = nan");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("min_fuel_margin_fraction"), "{err}");
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    #[test]
+    fn aceita_min_fuel_margin_fraction_nos_extremos_da_faixa() {
+        let toml_zero = mission_toml_valido()
+            .replace("min_fuel_margin_fraction = 0.05", "min_fuel_margin_fraction = 0.0");
+        parse_mission(&toml_zero).expect("0.0 (extremo inferior) deveria ser aceito");
+
+        let toml_max = mission_toml_valido()
+            .replace("min_fuel_margin_fraction = 0.05", "min_fuel_margin_fraction = 0.3");
+        parse_mission(&toml_max).expect("0.3 (extremo superior) deveria ser aceito");
     }
 
     // ─── [analysis] (Task 5.1) ──────────────────────────────────────────────

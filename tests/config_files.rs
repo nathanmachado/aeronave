@@ -94,6 +94,7 @@ fn carrega_missao_default_do_disco_campo_a_campo() {
     assert_eq!(req.cruise_altitude_m, 2500.0);
     assert_eq!(req.airfield_altitude_m, 0.0);
     assert_eq!(req.isa_delta_c, 0.0);
+    assert_eq!(req.min_fuel_margin_fraction, 0.05);
     assert_eq!(req.analysis.taxi_fuel_l, 3.0);
     assert_eq!(req.analysis.descent_rate_ms, 4.0);
     assert_eq!(req.analysis.descent_power_fraction, 0.20);

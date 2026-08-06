@@ -171,6 +171,28 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     assert!(fuel_required < fuel_capacity,
         "combustível requerido ({fuel_required:.1}L) deveria caber no tanque ({fuel_capacity:.1}L)");
 
+    // Margem mínima de combustível (Task 3, refino-ciclo2): a missão ferry
+    // (`config/missions/rotax_ferry.toml`, `min_fuel_margin_fraction =
+    // 0.05`) foi escolhida deliberadamente com folga grande — verificado
+    // por execução real antes de fixar este pin: margem ≈72,0% da
+    // capacidade do tanque, MUITO acima do piso de 5%. Não deveria gerar a
+    // violação nova de margem de combustível (checagem #18 de
+    // `ConstraintChecker::verify`), diferente do que acontece na missão de
+    // projeto completa (`config/missions/default.toml`, ver
+    // `tests/cli.rs::engine_padrao_explicito_com_out_tempfile_converge_e_
+    // reporta_fail_honesto_de_tipback`).
+    let fuel_margin_pct = json["sizing"]["fuel_margin_pct"].as_f64()
+        .expect("sizing.fuel_margin_pct deveria estar presente");
+    let fuel_margin_pct_expected = 72.04_f64;
+    assert!((fuel_margin_pct - fuel_margin_pct_expected).abs() < 1.0,
+        "margem de combustível ({fuel_margin_pct:.2}%) deveria estar próxima do pin honesto \
+         ~{fuel_margin_pct_expected}% (mudou o comportamento do sizing? atualize o pin)");
+    let violations = json["violations"].as_array()
+        .expect("violations deveria ser um array presente");
+    assert!(!violations.iter().any(|v| v.as_str().unwrap_or_default().contains("Margem de combustível")),
+        "não deveria haver violação de margem de combustível na missão ferry (folga ~72%): \
+         {violations:?}");
+
     let _ = std::fs::remove_file(&out_path);
 }
 

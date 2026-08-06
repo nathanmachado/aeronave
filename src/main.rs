@@ -523,7 +523,7 @@ fn main() {
     sep();
     let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
                                              &propeller, &perf, mission, &electrical,
-                                             &gear, &cfg.gear);
+                                             &gear, &cfg.gear, cfg.fuel_system.capacity_l);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -531,7 +531,10 @@ fn main() {
     // Carga de nariz (dois extremos), tipback e tail-strike (Task 2,
     // refino-ciclo2) migraram para dentro de `ConstraintChecker::verify`
     // (checks #15-#17) — substituem o antigo `nose_ok` ad hoc daqui, que só
-    // checava um único CG (o traseiro) contra os dois limites.
+    // checava um único CG (o traseiro) contra os dois limites. Margem
+    // mínima de combustível (Task 3, refino-ciclo2, check #18) também vive
+    // só em `ConstraintChecker::verify` — não há gate ad hoc equivalente
+    // aqui.
 
     // Finding 3 da revisão final: literais de requisito hardcoded (280 km/h,
     // "≥ 8 h") divergiam de `req.*` para qualquer missão diferente da
@@ -544,7 +547,7 @@ fn main() {
     let checks: [(bool, String); 9] = [
         (report.all_satisfied(),
             "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65, \
-             tipback, tail-strike, carga de nariz".to_string()),
+             tipback, tail-strike, carga de nariz, margem de combustível".to_string()),
         (perf.v_cruise_kmh >= req.cruise_speed_min_kmh,
             format!("V_cruzeiro ≥ {:.0} km/h", req.cruise_speed_min_kmh)),
         // Task 5.1 (achado da revisão, Finding 1): gate honesto sobre o

@@ -13,6 +13,18 @@ cruise_altitude_m = 2500.0
 airfield_altitude_m = 0.0
 isa_delta_c = 0.0
 
+# Margem mínima de combustível como requisito (Task 3, refino-ciclo2) —
+# fração da CAPACIDADE do tanque (`[fuel_system].capacity_l`), não do
+# combustível exigido pela missão (ver nota de convenção em
+# `validation::constraint_checker::ConstraintChecker::verify`, checagem
+# #18). Achado honesto do baseline real (Toyota + esta missão): margem
+# ≈1,82% da capacidade (260 L de tanque, ~255,3 L exigidos) — ABAIXO deste
+# piso de 5%. VIOLAÇÃO ESPERADA e reportada honestamente (o requisito
+# funcionando) — não mascarada aumentando o tanque ou reduzindo a missão;
+# a decisão de projeto (tanque maior, missão menor, ou aceitar o risco)
+# fica para revisão humana.
+min_fuel_margin_fraction = 0.05
+
 # Análise de missão por segmentos (Task 5.1) — táxi, subida integrada,
 # cruzeiro Breguet e descida substituem o antigo modelo de consumo
 # constante. Ver `agents::mission::MissionAgent` e

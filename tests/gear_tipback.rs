@@ -139,7 +139,7 @@ fn constraint_checker_reporta_so_tipback_entre_as_tres_checagens_novas() {
 
     let report = ConstraintChecker::verify(
         &req, wing, prop, sized.state.mtow_kg, &engine, wb, &propeller, &perf, mission,
-        &electrical, &gear, &cfg.gear,
+        &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l,
     );
 
     assert!(report.violations.iter().any(|v| v.starts_with("Tipback:")),
@@ -148,4 +148,54 @@ fn constraint_checker_reporta_so_tipback_entre_as_tres_checagens_novas() {
         "não deveria haver violação de tail-strike no baseline real: {:?}", report.violations);
     assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:")),
         "não deveria haver violação de carga de nariz no baseline real: {:?}", report.violations);
+}
+
+/// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de
+/// `ConstraintChecker::verify`) contra o baseline real (Toyota + missão de
+/// projeto completa): achado honesto — margem ≈1,82% da capacidade do
+/// tanque (260 L), abaixo do piso de 5% (`config/missions/default.toml`,
+/// `min_fuel_margin_fraction`). NÃO tunar o tanque nem a missão para
+/// mascarar este resultado — é o requisito novo funcionando (PASS→FAIL
+/// honesto, ver `task-3-report.md`). Mesma folga física de
+/// `tests/generic_engine.rs::margem_de_combustivel_no_mtow_convergido`
+/// (que mede a MESMA margem com a convenção %-do-combustível-NECESSÁRIO,
+/// não %-da-capacidade — ver nota de convenção nesse teste).
+#[test]
+fn margem_de_combustivel_do_baseline_real_fica_abaixo_do_piso_pin_honesto() {
+    let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
+    let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
+    let sized = size_aircraft(&cfg, &engine, &req)
+        .expect("aeronave-base + Toyota deveria convergir com o tanque de 260 L");
+    let mission = &sized.mission;
+
+    let fuel_margin_pct = (cfg.fuel_system.capacity_l - mission.fuel_total_l)
+        / cfg.fuel_system.capacity_l * 100.0;
+    println!("margem de combustível (baseline real) = {fuel_margin_pct:.4}% da capacidade");
+    // Pin honesto pós-Task-2 (Task 1 recalibrou cd0 quase igual — ver
+    // task-3-report.md): ≈1.8184% — mesmo número já pinado em
+    // `tests/generic_engine.rs` (`sizing.fuel_margin_pct`).
+    assert!((fuel_margin_pct - 1.8184).abs() < 0.05,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-Task-2 \
+         ≈1.8184%");
+    assert!(fuel_margin_pct < 5.0,
+        "achado honesto esperado: margem ({fuel_margin_pct:.2}%) deveria ficar ABAIXO do piso \
+         de 5% (min_fuel_margin_fraction) — NÃO É BUG");
+
+    let propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, &sized.prop, &req);
+    let perf = aeronave::agents::performance::PerformanceAgent::run(
+        &sized.state, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &req,
+        &cfg.performance,
+    );
+    let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
+    let gear = gear_real();
+
+    let report = ConstraintChecker::verify(
+        &req, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &sized.wb, &propeller,
+        &perf, mission, &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l,
+    );
+
+    assert!(report.violations.iter().any(|v| v.contains("Margem de combustível")),
+        "achado honesto esperado: margem real (~1,82%) abaixo do piso de 5% \
+         (min_fuel_margin_fraction) deveria gerar violação, obteve: {:?}", report.violations);
 }

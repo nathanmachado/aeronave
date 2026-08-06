@@ -362,7 +362,8 @@
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
-    "Tipback: ângulo 10.1° abaixo do piso de 15.0° (Raymer cap. 11) — risco de tombar sobre a cauda com o CG mais traseiro real dos cenários de carga (trem principal em x_main=3.55m)"
+    "Tipback: ângulo 10.1° abaixo do piso de 15.0° (Raymer cap. 11) — risco de tombar sobre a cauda com o CG mais traseiro real dos cenários de carga (trem principal em x_main=3.55m)",
+    "Margem de combustível: 1.82% da capacidade do tanque abaixo do mínimo de 5.0% (combustível exigido pela missão 255.3 L, capacidade do tanque 260.0 L, margem 4.7 L)"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"

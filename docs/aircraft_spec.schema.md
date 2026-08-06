@@ -115,6 +115,25 @@ documentação a ser corrigido, não um comportamento aceitável.
     volta a `"FAIL"` (era `"PASS"` desde a v4.1/campanha E1–E6). Ver
     `ConstraintChecker::verify` (checks #15-17) e
     `tests/gear_tipback.rs`/`tests/cli.rs`.
+- **Task 3, refino-ciclo2 (ainda v4.3 — SEM mudança de forma do JSON)**:
+  margem mínima de combustível como requisito de projeto — check NOVO #18
+  de `ConstraintChecker::verify`. Não altera nenhum campo/bloco deste
+  schema (`violations` já era `array de string` genérico; `sizing.
+  fuel_margin_pct`, já existente desde a v4.0, já usava a convenção
+  %-da-CAPACIDADE do tanque — ver a tabela do bloco `sizing` abaixo — o
+  gate novo só passou a comparar esse número já existente contra um piso
+  configurável).
+  - **Migração de CONFIGURAÇÃO** (`mission.toml`, não deste schema JSON):
+    ganha um campo NOVO **obrigatório** — `min_fuel_margin_fraction`
+    (faixa [0, 0.3], fração da CAPACIDADE do tanque, não do combustível
+    exigido pela missão). TOMLs de missão antigos sem esse campo falham o
+    parse (`missing field`). Ver `config/missions/default.toml`/
+    `rotax_ferry.toml` para valores de referência.
+  - **Achado honesto NOVO**: a aeronave-base real (missão de projeto
+    completa) reporta `sizing.fuel_margin_pct ≈ 1.82%`, abaixo do piso de
+    5% (`min_fuel_margin_fraction` do `default.toml`) — mais uma entrada em
+    `violations` (`validation_status` já era `"FAIL"` por causa do
+    tipback). Ver `tests/gear_tipback.rs`/`tests/cli.rs`.
 
 ## 2. Convenção de eixos e unidades
 

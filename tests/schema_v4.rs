@@ -83,7 +83,7 @@ fn build_baseline_report() -> AircraftReport {
 
     let report = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
                                             &propeller, &perf, mission, &electrical,
-                                            &gear, &cfg.gear);
+                                            &gear, &cfg.gear, cfg.fuel_system.capacity_l);
     let all_ok = report.all_satisfied();
 
     let geometry = GeometrySpec {

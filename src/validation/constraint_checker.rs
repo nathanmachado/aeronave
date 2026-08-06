@@ -45,6 +45,7 @@ impl ConstraintChecker {
         electrical: &ElectricalSpec,
         gear: &GearSpec,
         gear_cfg: &GearCfg,
+        fuel_capacity_l: f64,
     ) -> ConstraintReport {
         let mut violations = Vec::new();
         let mut warnings   = Vec::new();
@@ -355,6 +356,32 @@ impl ConstraintChecker {
             ));
         }
 
+        // 18. Margem mínima de combustível (Task 3, refino-ciclo2): a folga
+        // entre a capacidade do tanque e o combustível exigido pela missão
+        // no ponto de MTOW convergido precisa ser >=
+        // `req.min_fuel_margin_fraction`. CONVENÇÃO (padronizada nesta
+        // task): a margem aqui é fração/percentual da CAPACIDADE do tanque
+        // — a MESMA convenção de `sizing.fuel_margin_pct`
+        // (`fuel_margin_l / fuel_capacity_l · 100`, ver `main.rs`), NÃO a
+        // convenção de %-do-combustível-NECESSÁRIO usada por
+        // `tests/generic_engine.rs::margem_de_combustivel_no_mtow_
+        // convergido` (que mede a mesma folga com outro denominador — ver a
+        // nota de convenção nesse teste). Achado honesto conhecido do
+        // baseline real (missão de projeto completa): margem ≈1,82% da
+        // capacidade — abaixo do piso de 5% — não mascarado por ajuste de
+        // tanque/missão (decisão de projeto fica para revisão humana).
+        let fuel_margin_pct = (fuel_capacity_l - mission.fuel_total_l) / fuel_capacity_l * 100.0;
+        let fuel_margin_min_pct = req.min_fuel_margin_fraction * 100.0;
+        if fuel_margin_pct < fuel_margin_min_pct {
+            violations.push(format!(
+                "Margem de combustível: {:.2}% da capacidade do tanque abaixo do mínimo de \
+                 {:.1}% (combustível exigido pela missão {:.1} L, capacidade do tanque {:.1} L, \
+                 margem {:.1} L)",
+                fuel_margin_pct, fuel_margin_min_pct,
+                mission.fuel_total_l, fuel_capacity_l, fuel_capacity_l - mission.fuel_total_l
+            ));
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -441,7 +468,7 @@ mod tests {
         prop.p_req_cruise_kw = 150.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "esperava violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -457,7 +484,7 @@ mod tests {
         prop.p_req_cruise_kw = 90.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "não deveria haver violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -479,7 +506,7 @@ mod tests {
             "pré-condição do teste: fixture sintética deveria ter ao menos um \
              cenário fora do envelope (achado honesto, replicado do baseline real)");
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
             "esperava violação de envelope de CG, obteve: {:?}", report.violations);
@@ -512,13 +539,14 @@ mod tests {
         ).expect("falha ao ler baseline_4seat.toml do disco");
         let cfg = crate::models::config::parse_aircraft(&toml)
             .expect("baseline real deveria ser uma configuração válida");
+        let fuel_capacity_l = cfg.fuel_system.capacity_l;
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: baseline real (pós E1–E6) deveria ter envelope de CG \
              FECHADO (fwd={:.2}% <= aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac,
             wb.spec.cg_limit_aft_pct_mac);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l);
 
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
             "não deveria haver violação dedicada de envelope vazio no baseline pós-E6: {:?}",
@@ -564,6 +592,7 @@ mod tests {
         // `agents::trim_authority::tests::trim_authority_agent_run_hand_
         // check_baseline_mutado_parametros_pre_e6`.
         cfg.control_surfaces.elevator_chord_frac = 0.30;
+        let fuel_capacity_l = cfg.fuel_system.capacity_l;
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: parâmetros pré-E6 (x_main_m=3.85, v_h=0.70, \
@@ -571,7 +600,7 @@ mod tests {
              CG vazio original (fwd={:.2}% > aft={:.2}%)",
             wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l);
 
         assert!(report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
             "esperava violação dedicada de envelope vazio, obteve: {:?}", report.violations);
@@ -598,7 +627,7 @@ mod tests {
             sc.inside_envelope = true;
         }
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
             "não deveria haver violação de envelope de CG, obteve: {:?}", report.violations);
@@ -612,7 +641,7 @@ mod tests {
         propeller.ok_mach_static = false;
         propeller.tip_mach_static = 0.99;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.violations.iter().any(|v| v.contains("Mach de ponta ESTÁTICO")),
             "esperava violação de Mach de ponta estático, obteve: {:?}", report.violations);
@@ -633,7 +662,7 @@ mod tests {
              ground_clearance_min_m=0.25) deveria falhar na folga de solo — obtido \
              ground_clearance_m={:.3}", propeller.ground_clearance_m);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.violations.iter().any(|v| v.contains("folga de solo")),
             "esperava violação de folga de solo, obteve: {:?}", report.violations);
@@ -649,7 +678,7 @@ mod tests {
         propeller.ok_mach_cruise = true;
         propeller.ok_clearance = true;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.violations.iter().any(|v| v.contains("Hélice:")),
             "não deveria haver violação de hélice, obteve: {:?}", report.violations);
@@ -684,7 +713,7 @@ mod tests {
              divergir do provisório ({:.4}) usado pela busca de cruzeiro",
             propeller.diameter_m, prop.prop_diameter_m);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
             "esperava aviso de divergência de diâmetro, obteve: {:?}", report.warnings);
@@ -710,7 +739,7 @@ mod tests {
             propeller.diameter_m, prop.prop_diameter_m
         );
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
             "não deveria haver aviso de divergência de diâmetro quando a folga governa, \
@@ -754,7 +783,7 @@ mod tests {
         let perf = performance_spec_com_gradiente(6.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.violations.iter().any(|v| v.contains("Gradiente de subida")),
             "esperava violação de gradiente de subida, obteve: {:?}", report.violations);
@@ -770,7 +799,7 @@ mod tests {
         let perf = performance_spec_com_gradiente(9.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.violations.iter().any(|v| v.contains("Gradiente de subida")),
             "não deveria haver violação de gradiente quando climb_gradient_pct (9.0%) >= \
@@ -799,7 +828,7 @@ mod tests {
         let electrical = electrical_spec(900.0, 750.0, 750.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.violations.iter().any(|v| v.contains("carga contínua")),
             "esperava violação de carga elétrica contínua, obteve: {:?}", report.violations);
@@ -815,7 +844,7 @@ mod tests {
         let electrical = electrical_spec(900.0, 430.0, 1_260.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.violations.iter().any(|v| v.contains("carga contínua")),
             "não deveria haver violação de carga contínua, obteve: {:?}", report.violations);
@@ -828,7 +857,7 @@ mod tests {
         let electrical = electrical_spec(900.0, 430.0, 1_260.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(report.warnings.iter().any(|w| w.contains("carga de pico")),
             "esperava aviso de pico elétrico, obteve: {:?}", report.warnings);
@@ -843,7 +872,7 @@ mod tests {
         let electrical = electrical_spec(900.0, 430.0, 800.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
 
         assert!(!report.warnings.iter().any(|w| w.contains("carga de pico")),
             "não deveria haver aviso de pico elétrico quando peak_load_w (800 W) <= \
@@ -866,7 +895,7 @@ mod tests {
 
         let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg) = setup();
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical_real, &gear, &gear_cfg);
+                                                 &propeller, &perf, &mission, &electrical_real, &gear, &gear_cfg, 220.0);
 
         assert!(!report.violations.iter().any(|v| v.contains("carga contínua")),
             "baseline real (430 W contínuo / 900 W alternador, ~52,2% de margem) não deveria \
@@ -875,4 +904,56 @@ mod tests {
             "baseline real (pico 1.260 W > alternador 900 W) deveria disparar o aviso de \
              pico: {:?}", report.warnings);
     }
+
+    // ─── Task 3 (refino-ciclo2): margem mínima de combustível ──────────────
+
+    /// `requisitos_teste()` fixa `min_fuel_margin_fraction = 0.08` (8%).
+    /// Sobrescreve `mission.fuel_total_l` e passa uma capacidade de tanque
+    /// sintética diretamente (não a de `config_teste()`) para isolar
+    /// exatamente a checagem #18 — mesmo padrão de `electrical_spec()`
+    /// acima, que constrói valores sintéticos em vez de depender do
+    /// resultado real dos demais agentes. 100 L de capacidade − 95 L
+    /// exigidos = 5 L de margem = 5% da capacidade, abaixo do piso de 8%.
+    #[test]
+    fn violacao_de_margem_de_combustivel_aparece_quando_abaixo_do_minimo() {
+        let (req, wing, prop, engine, wb, propeller, perf, mut mission, electrical, gear, gear_cfg) = setup();
+        mission.fuel_total_l = 95.0;
+        let fuel_capacity_l = 100.0;
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, fuel_capacity_l);
+
+        assert!(report.violations.iter().any(|v| v.contains("Margem de combustível")),
+            "esperava violação de margem de combustível, obteve: {:?}", report.violations);
+        // A mensagem deve citar a margem observada (5.00%) e o piso da missão (8.0%).
+        assert!(report.violations.iter().any(|v| v.contains("5.00%") && v.contains("8.0%")),
+            "violação deveria citar a margem observada (5.00%) e o piso (8.0%): {:?}",
+            report.violations);
+    }
+
+    /// Sanidade inversa: 100 L de capacidade − 70 L exigidos = 30 L de
+    /// margem = 30% da capacidade, acima do piso de 8% — nenhuma violação.
+    #[test]
+    fn sem_violacao_de_margem_de_combustivel_quando_acima_do_minimo() {
+        let (req, wing, prop, engine, wb, propeller, perf, mut mission, electrical, gear, gear_cfg) = setup();
+        mission.fuel_total_l = 70.0;
+        let fuel_capacity_l = 100.0;
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, fuel_capacity_l);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),
+            "não deveria haver violação de margem de combustível, obteve: {:?}", report.violations);
+    }
+
+    // Regressão contra o baseline REAL (motor real + missão de projeto
+    // completa) — deliberadamente NÃO fica aqui: um teste que carrega um
+    // TOML de motor de catálogo por caminho literal citaria o nome do
+    // motor dentro de `src/` e quebraria
+    // `tests/acceptance.rs::src_nao_contem_nomes_de_motor_especificos`
+    // (genericidade motor-agnóstica). Ver
+    // `tests/gear_tipback.rs::margem_de_combustivel_do_baseline_real_fica_
+    // abaixo_do_piso_pin_honesto`.
 }

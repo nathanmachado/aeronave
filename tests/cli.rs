@@ -215,9 +215,20 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// real do triciclo que já existia, mas nunca tinha sido verificada. O
 /// envelope de CG continua FECHADO (zero violações de cenário/vazio) e a
 /// checagem de tail-strike/carga de nariz nos dois extremos (também novas
-/// desta task) PASSAM — só o tipback falha. Ver a varredura informativa de
-/// `x_main` impressa por `main.rs` para o trade-off tipback×rotação; a
-/// decisão de mover o trem fica para revisão humana (não automatizada).
+/// desta task) PASSAM — só o tipback falha.
+///
+/// ATUALIZAÇÃO (Task 3, refino-ciclo2, 2026-08-06): SEGUNDO achado honesto
+/// NOVO, independente do tipback — a margem de combustível
+/// (`config/missions/default.toml`, `min_fuel_margin_fraction = 0.05`,
+/// checagem nova #18 de `ConstraintChecker::verify`) também falha: a
+/// missão exige ≈255,3 L contra 260 L de capacidade, margem ≈1,82% da
+/// capacidade — abaixo do piso de 5%. `validation_status` continua `FAIL`
+/// (já era, por causa do tipback) — agora por DOIS motivos independentes.
+/// Não mascarado tunando o tanque/missão; a decisão de projeto (tanque
+/// maior, missão menor, ou aceitar o risco) fica para revisão humana. Ver
+/// a varredura informativa de `x_main` impressa por `main.rs` para o
+/// trade-off tipback×rotação; tail-strike e carga de nariz continuam
+/// PASSANDO — só tipback e margem de combustível falham.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_fail_honesto_de_tipback() {
     let out_path = std::env::temp_dir().join(format!(
@@ -254,14 +265,20 @@ fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_fail_honesto_de_t
          15° — achado honesto da Task 2, refino-ciclo2 — ver comentário acima):\n{json}");
     assert!(json.contains("Tipback:") && json.contains("abaixo do piso"),
         "violações deveriam citar a checagem de tipback nova:\n{json}");
-    // O envelope de CG (Task 4.4/E1–E6) continua FECHADO — só o tipback
-    // (achado NOVO desta task) falha, não uma regressão do envelope.
+    // Achado honesto NOVO (Task 3, ver nota acima): margem de combustível
+    // (checagem #18) também viola — segundo motivo independente do FAIL.
+    assert!(json.contains("Margem de combustível:") && json.contains("abaixo do mínimo"),
+        "violações deveriam citar a checagem nova de margem de combustível \
+         (Task 3, refino-ciclo2, achado honesto — não mascarar):\n{json}");
+    // O envelope de CG (Task 4.4/E1–E6) continua FECHADO — tipback e margem
+    // de combustível (achados NOVOS) falham, não uma regressão do envelope.
     assert!(!json.contains("fora do envelope de CG admissível"),
         "não deveria haver violações de cenário fora do envelope de CG admissível:\n{json}");
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
-    // Tail-strike e carga de nariz nos dois extremos (também novas desta
-    // task) PASSAM no baseline real — só o tipback falha.
+    // Tail-strike e carga de nariz nos dois extremos (também novas desde a
+    // Task 2) PASSAM no baseline real — só tipback e margem de combustível
+    // falham.
     assert!(!json.contains("Tail-strike:"),
         "não deveria haver violação de tail-strike no baseline real:\n{json}");
     assert!(!json.contains("Carga de nariz:"),
