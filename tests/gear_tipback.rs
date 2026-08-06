@@ -53,7 +53,7 @@ fn gear_real() -> aeronave::models::specs::GearSpec {
 /// envelope de CG via autoridade de rotação — o preço é um ângulo de
 /// tipback abaixo do piso de 15° (Raymer cap. 11). NÃO tunar
 /// `[gear].tipback_min_deg` nem `x_main_m` para mascarar este resultado —
-/// é um achado de projeto genuíno (ver `ConstraintChecker::verify` #16 e
+/// é um achado de projeto genuíno (ver `ConstraintChecker::verify` #15 e
 /// `tests/cli.rs::engine_padrao_explicito_com_out_tempfile_converge_e_
 /// reporta_fail_honesto_de_tipback`).
 #[test]

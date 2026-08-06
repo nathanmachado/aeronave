@@ -28,8 +28,8 @@ isa_delta_c = 0.0
 # Margem mínima de combustível como requisito (Task 3, refino-ciclo2) —
 # mesmo piso de `config/missions/default.toml` (5%, fração da CAPACIDADE
 # do tanque). Verificado por execução real antes de fixar este arquivo:
-# Rotax 915 iS + esta missão exige ~72,7 L contra 260 L de capacidade —
-# margem ≈72,0% da capacidade, MUITO acima do piso (a missão ferry foi
+# Rotax 915 iS + esta missão exige ~74,4 L contra 260 L de capacidade —
+# margem ≈71,4% da capacidade, MUITO acima do piso (a missão ferry foi
 # escolhida deliberadamente com folga, não é um caso-limite) — ver
 # `tests/acceptance.rs::rotax_missao_ferry_gera_spec_completo_data_driven`.
 min_fuel_margin_fraction = 0.05

@@ -130,10 +130,11 @@ documentação a ser corrigido, não um comportamento aceitável.
     parse (`missing field`). Ver `config/missions/default.toml`/
     `rotax_ferry.toml` para valores de referência.
   - **Achado honesto NOVO**: a aeronave-base real (missão de projeto
-    completa) reporta `sizing.fuel_margin_pct ≈ 1.82%`, abaixo do piso de
-    5% (`min_fuel_margin_fraction` do `default.toml`) — mais uma entrada em
-    `violations` (`validation_status` já era `"FAIL"` por causa do
-    tipback). Ver `tests/gear_tipback.rs`/`tests/cli.rs`.
+    completa) reportava `sizing.fuel_margin_pct ≈ 1,82%` na v4.3; ver v4.4
+    — abaixo do piso de 5% (`min_fuel_margin_fraction` do `default.toml`)
+    — mais uma entrada em `violations` (`validation_status` já era
+    `"FAIL"` por causa do tipback). Ver `tests/gear_tipback.rs`/
+    `tests/cli.rs`.
 - **v4.4** (Task 4, refino-ciclo2): `TrimSpec` ganha QUATRO campos NOVOS —
   `cl_h_trim_cruise`, `cd_trim`, `cg_reference_scenario`,
   `cg_reference_pct_mac` (arrasto de trim em cruzeiro — ver §4 abaixo) —
@@ -463,7 +464,7 @@ completa (em português) na docstring de
 | `capped_by_stall` | bool (**novo v4.2**) | — | `true` quando `cl_h_max_down_calc` excede `[stability].cl_h_stall_limit` — o teto de stall, não a geometria do profundor, é o fator limitante |
 | `trim_margin` / `cl_ground_rotation` / `to_flap_cm_fraction` | f64 | — | Parâmetros ecoados de `[stability]` |
 | `cl_h_trim_cruise` | f64 (**novo v4.4**) | — | CL_h de TRIM em cruzeiro (sem flap) — upload (positivo, CG atrás do CA da asa) ou download (negativo, CG à frente), calculado no CG de REFERÊNCIA da missão (`cg_reference_scenario`, JÁ CONVERGIDO — não o valor lag-1 usado dentro do laço de MTOW). Ver fórmula/dedução em §1 (v4.4) |
-| `cd_trim` | f64 (**novo v4.4**) | — | ΔCD_trim — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`, já somado a `wing.cd_cruise`/refletido em `wing.ld_ratio_cruise` (este campo é o mesmo delta, ecoado para rastreabilidade) |
+| `cd_trim` | f64 (**novo v4.4**) | — | ΔCD_trim — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`. O delta somado a `wing.cd_cruise`/refletido em `wing.ld_ratio_cruise` usa o CG LAG-1 do laço de convergência do MTOW; este campo é RECALCULADO no CG JÁ CONVERGIDO (mesma distinção de `cl_h_trim_cruise` acima) — na prática os dois coincidem a um resíduo de convergência (~1e-9), não são estritamente o mesmo número ecoado |
 | `cg_reference_scenario` | string (**novo v4.4**) | — | Nome do cenário de carga (`weight`) usado como CG de referência da missão — sempre `"4 pax + bagagem + meia"` neste modelo (meia-missão) |
 | `cg_reference_pct_mac` | f64 (**novo v4.4**) | %MAC | CG do cenário acima, JÁ CONVERGIDO — o valor efetivamente usado para calcular `cl_h_trim_cruise`/`cd_trim` |
 
@@ -557,7 +558,7 @@ dedução completa.
 | `tipback_angle_deg` | f64 (**novo v4.3**) | deg | Ângulo de tipback (trem principal → CG mais TRASEIRO real, Raymer cap. 11) — deve ser >= `[gear].tipback_min_deg` |
 | `tail_strike_margin_deg` | f64 (**novo v4.3**) | deg | Folga angular de tail-strike (geometria simplificada do cone de cauda) — deve ser >= `[gear].rotation_attitude_deg` |
 | `main_gear_load_n` | f64 | N | Carga máxima no trem principal (por perna) |
-| `nose_gear_load_n` | f64 | N | Carga máxima no trem de nariz |
+| `nose_gear_load_n` | f64 | N | Carga máxima no trem de nariz. **v4.3**: agora dimensionada no CG mais dianteiro real (antes: CG traseiro, que subestimava — 3.296→8.038 N) |
 | `main_oleo_stroke_mm` / `nose_oleo_stroke_mm` | f64 | mm | Curso do amortecedor |
 | `main_tire` / `nose_tire` | string | — | Designação do pneu |
 | `tire_pressure_psi` | f64 | **psi** (não SI) | Pressão dos pneus |

@@ -221,7 +221,7 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// NOVO, independente do tipback — a margem de combustível
 /// (`config/missions/default.toml`, `min_fuel_margin_fraction = 0.05`,
 /// checagem nova #18 de `ConstraintChecker::verify`) também falha: a
-/// missão exige ≈255,3 L contra 260 L de capacidade, margem ≈1,82% da
+/// missão exige ≈255,9 L contra 260 L de capacidade, margem ≈1,58% da
 /// capacidade — abaixo do piso de 5%. `validation_status` continua `FAIL`
 /// (já era, por causa do tipback) — agora por DOIS motivos independentes.
 /// Não mascarado tunando o tanque/missão; a decisão de projeto (tanque

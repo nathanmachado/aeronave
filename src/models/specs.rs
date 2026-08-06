@@ -397,11 +397,14 @@ pub struct TrimSpec {
     /// laço de convergência — ver `orchestrator::size_aircraft` para a
     /// distinção entre os dois usos).
     pub cl_h_trim_cruise: f64,
-    /// `ΔCD_trim` — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`,
-    /// já somado a `WingSpec::cd_cruise` no polar de cruzeiro (o valor aqui
-    /// é o mesmo delta, ecoado para rastreabilidade — ver
-    /// `agents::trim_authority::cd_trim_cruise`/`agents::aerodynamics::
-    /// apply_cruise_trim_drag`).
+    /// `ΔCD_trim` — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`.
+    /// O delta somado a `WingSpec::cd_cruise` no polar de cruzeiro usa o CG
+    /// LAG-1 do laço de convergência do MTOW; este campo aqui é
+    /// RECALCULADO com o CG JÁ CONVERGIDO (mesma distinção de
+    /// `cl_h_trim_cruise` acima) — na prática os dois coincidem a um
+    /// resíduo de convergência (~1e-9), não são estritamente o mesmo
+    /// número ecoado. Ver `agents::trim_authority::cd_trim_cruise`/
+    /// `agents::aerodynamics::apply_cruise_trim_drag`.
     pub cd_trim: f64,
     /// Nome do cenário de carga (`agents::weight_balance::LoadScenario::name`)
     /// usado como CG de referência da missão para o cálculo acima —

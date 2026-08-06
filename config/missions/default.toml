@@ -18,7 +18,7 @@ isa_delta_c = 0.0
 # combustível exigido pela missão (ver nota de convenção em
 # `validation::constraint_checker::ConstraintChecker::verify`, checagem
 # #18). Achado honesto do baseline real (Toyota + esta missão): margem
-# ≈1,82% da capacidade (260 L de tanque, ~255,3 L exigidos) — ABAIXO deste
+# ≈1,58% da capacidade (260 L de tanque, ~255,9 L exigidos) — ABAIXO deste
 # piso de 5%. VIOLAÇÃO ESPERADA e reportada honestamente (o requisito
 # funcionando) — não mascarada aumentando o tanque ou reduzindo a missão;
 # a decisão de projeto (tanque maior, missão menor, ou aceitar o risco)
