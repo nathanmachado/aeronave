@@ -120,7 +120,9 @@ ground_clearance_min_m = 0.23
 # ORIGINAL de 240 L, que motivou o aumento acima, teria sido SUFICIENTE
 # sob a hipótese de CRUZEIRO BREGUET A L/D CONSTANTE (ver
 # `agents::mission`) usada neste modelo — margem apertada, ~1,5%
-# (`tests/generic_engine.rs::orchestrator_toyota_240l_agora_suficiente_com_missao_por_segmentos`).
+# (`tests/generic_engine.rs::orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h`,
+# renomeado várias vezes conforme este número oscila entre campanhas — ver
+# nome/comentário atuais nesse teste para o estado mais recente).
 # Achado da revisão desta task (Finding 4): essa suficiência NÃO deve ser
 # lida como "não é uma restrição física permanente" em geral — é
 # específica da hipótese de L/D constante ao longo do cruzeiro; um modelo
@@ -130,6 +132,12 @@ ground_clearance_min_m = 0.23
 # (não revertido): decisão de projeto já tomada que continua dando MAIS
 # margem sob o modelo novo, não menos, e não depende dessa hipótese
 # apertada de 240 L.
+#
+# ATUALIZAÇÃO (campanha E7, 2026-08-06): `mission.endurance_min_h` 8,0→7,0h
+# (decisão de requisito do cliente, ver `config/missions/default.toml`)
+# reduz o combustível exigido pela missão (255,9→≈223,7 L) — margem sobre
+# os 260 L sobe de ~1,58% para ≈13,97%. Mantido em 260 L (decisão de
+# projeto já tomada, continua dando mais margem, não menos).
 capacity_l = 260.0
 
 [gear]
@@ -145,7 +153,17 @@ x_nose_m = 1.40
 # e a carga de nariz cai de ~23.8% para ~9% (ainda dentro de 8–25%, ver
 # [performance]/LandingGearAgent). Validado experimentalmente (campanha
 # E1–E6, variantes de scratchpad). x_main_m antigo: 3.85.
-x_main_m = 3.55
+#
+# Campanha E7 (2026-08-06): 3.55 → 3.66 — fecha o tipback (10,1°→15,58°
+# ≥ piso de 15°, ver bloco tipback_min_deg abaixo) mantendo a carga de
+# nariz ≤25% (≈24,8%) e o envelope de CG fechado 6/6 cenários. Só é
+# viável porque a autoridade DATCOM de profundor (ciclo 2,
+# TrimAuthorityAgent) alargou o limite de rotação para ~13,0% MAC nesta
+# posição — sem essa folga o trem não poderia recuar mais. Janela viável
+# da campanha: 3,65–3,66 m; 3,66 escolhido pela melhor pior-margem entre
+# os 6 cenários de carga. Validado experimentalmente (campanha E7, 48
+# execuções do pipeline real). x_main_m antigo (E1–E6): 3.55.
+x_main_m = 3.66
 mass_main_leg_kg = 27.5
 mass_nose_kg = 22.0
 retraction_time_s = 7.0
@@ -158,15 +176,23 @@ actuators_doors_mass_kg = 20.0
 # geometria SIMPLIFICADA do cone de cauda (ver agents::landing_gear::
 # tail_strike_margin_deg para a aproximação exata).
 #
-# ACHADO HONESTO (Task 2): com o trem recuado pela Task 1/campanha E1–E6
-# (x_main 3.85→3.55m, para abrir o envelope de CG via autoridade de
-# rotação), o ângulo de tipback real cai para ≈10,1° — ABAIXO do piso de
-# 15°. Isto é esperado e REPORTADO como violação (ver
+# ACHADO HONESTO (Task 2, baseline E6): com o trem recuado pela Task
+# 1/campanha E1–E6 (x_main 3.85→3.55m, para abrir o envelope de CG via
+# autoridade de rotação), o ângulo de tipback real caiu para ≈10,1° —
+# ABAIXO do piso de 15°. Isto foi reportado como violação (ver
 # ConstraintChecker::verify, checks #15-#17, e a varredura informativa de
 # x_main impressa por `main.rs`) — não mascarado por config. Tail-strike e
-# carga de nariz (dois extremos) continuam OK. Decisão de projeto (recuar
+# carga de nariz (dois extremos) continuaram OK. Decisão de projeto (recuar
 # o trem mais, ou aceitar o tipback e mitigar operacionalmente — ex. cauda
-# reforçada/skid) fica para revisão humana.
+# reforçada/skid) ficou para revisão humana.
+#
+# RESOLVIDO na campanha E7 (2026-08-06): x_main_m 3.55→3.66 (ver acima),
+# viável porque a autoridade de rotação DATCOM (ciclo 2) alargou o limite
+# dianteiro. Tipback sobe para ≈15,58° (≥ 15° piso), tail-strike ≈14,88°
+# (folga mantida), carga de nariz ≈13,0–24,8% (dentro de 8–25%). Gate
+# permanece ativo — continua detectando a violação em configs sintéticas
+# mutadas (ver tests/gear_tipback.rs, tests/cli.rs — cobertura do check
+# #15 preservada).
 tipback_min_deg = 15.0
 rotation_attitude_deg = 11.0
 tail_cone_x_m = 7.80

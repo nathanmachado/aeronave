@@ -67,9 +67,11 @@ fn toyota_missao_default_gera_spec_completo_v4() {
     assert!(json["propulsion"]["engine_model"].as_str().unwrap_or_default().contains("Toyota"),
         "engine_model deveria conter 'Toyota':\n{json_text}");
 
-    // Bloco de validação presente (mesmo que o conteúdo seja FAIL — ver nota
-    // no achado do envelope de CG, Task 4.4/tests/cli.rs — "presente" aqui
-    // significa estrutural, não um veredito específico).
+    // Bloco de validação presente (independente do veredito ser PASS ou
+    // FAIL — ver `tests/cli.rs::engine_padrao_explicito_com_out_tempfile_
+    // converge_e_reporta_pass_honesto` para o veredito honesto atual do
+    // baseline real, pós-campanha-E7 — "presente" aqui significa
+    // estrutural, não um veredito específico).
     let status = json["validation_status"].as_str()
         .expect("validation_status deveria ser uma string presente no JSON");
     assert!(status == "PASS" || status == "FAIL",
@@ -188,10 +190,15 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // por execução real antes de fixar este pin: margem ≈72,0% da
     // capacidade do tanque, MUITO acima do piso de 5%. Não deveria gerar a
     // violação nova de margem de combustível (checagem #18 de
-    // `ConstraintChecker::verify`), diferente do que acontece na missão de
-    // projeto completa (`config/missions/default.toml`, ver
+    // `ConstraintChecker::verify`). Histórico: até a campanha E7
+    // (2026-08-06), isso era diferente do que acontecia na missão de
+    // projeto completa (`config/missions/default.toml`, margem ≈1,58%,
+    // abaixo do piso de 5%) — desde E7 (`endurance_min_h` 8h→7h), a missão
+    // de projeto também fica bem acima do piso (≈13,97%, ver
     // `tests/cli.rs::engine_padrao_explicito_com_out_tempfile_converge_e_
-    // reporta_fail_honesto_de_tipback`).
+    // reporta_pass_honesto`) — este teste (missão ferry) continua sendo o
+    // caso com a MAIOR folga das duas missões, não mais o único sem
+    // violação.
     let fuel_margin_pct = json["sizing"]["fuel_margin_pct"].as_f64()
         .expect("sizing.fuel_margin_pct deveria estar presente");
     // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): 72,04% → **71,39%**

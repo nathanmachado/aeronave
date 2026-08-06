@@ -51,7 +51,9 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.gear.x_nose_m, 1.40);
     // Campanha E1–E6 (2026-08-05): 3.85 → 3.55 — trem principal recuado,
     // causa raiz do fechamento do envelope de CG (ver comentário no TOML).
-    assert_eq!(cfg.gear.x_main_m, 3.55);
+    // Campanha E7 (2026-08-06): 3.55 → 3.66 — fecha o tipback do baseline
+    // real (ver comentário no TOML).
+    assert_eq!(cfg.gear.x_main_m, 3.66);
     assert_eq!(cfg.arms.engine_cg_m, 0.65);
     assert_eq!(cfg.arms.empennage_cg_m, 7.40);
     assert_eq!(cfg.structure.spar_material, "AA7075-T6");
@@ -93,7 +95,9 @@ fn carrega_missao_default_do_disco_campo_a_campo() {
     assert_eq!(req.pax_mass_kg, 90.0);
     assert_eq!(req.baggage_kg, 80.0);
     assert_eq!(req.cruise_speed_min_kmh, 280.0);
-    assert_eq!(req.endurance_min_h, 8.0);
+    // Campanha E7 (2026-08-06): 8.0 → 7.0 — decisão de requisito do cliente
+    // (autonomia 7h + reserva, ver comentário no TOML).
+    assert_eq!(req.endurance_min_h, 7.0);
     assert_eq!(req.fuel_reserve_fraction, 0.10);
     assert_eq!(req.cruise_altitude_m, 2500.0);
     assert_eq!(req.airfield_altitude_m, 0.0);

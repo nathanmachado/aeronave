@@ -917,6 +917,16 @@ mod tests {
     /// (envelope vazio) continua coberto por
     /// `trim_authority_agent_run_hand_check_baseline_mutado_parametros_
     /// pre_e6` logo abaixo.
+    ///
+    /// Campanha E7 (2026-08-06): `gear.x_main_m` 3.55→3.66m (fecha o
+    /// tipback, ver `config/aircraft/baseline_4seat.toml`) recua o trem
+    /// principal, o que por sua vez recua o limite de ROTAÇÃO (invariante
+    /// ao peso — depende só de `x_main_m`, `x_nose_m`, geometria/
+    /// autoridade de profundor, não do CG do cenário): rotation_limit_pct_
+    /// mac **6.099%→12.995%** — ainda BEM à frente do limite traseiro
+    /// (≈43.46%, inalterado pelo trem, só depende de NP/sm_min), envelope
+    /// de CG continua FECHADO com margem ampla. flare_limit_pct_mac e
+    /// cg_limit_aft_pct_mac não mudam (nenhum depende de x_main_m).
     #[test]
     fn trim_authority_agent_run_hand_check_baseline_real() {
         let toml = std::fs::read_to_string(
@@ -961,10 +971,11 @@ mod tests {
 
         println!("rotation_limit_pct_mac = {:.6}", trim.rotation_limit_pct_mac);
         println!("cg_limit_aft_pct_mac = {:.6}", wb.spec.cg_limit_aft_pct_mac);
-        // Pin pré-refino-ciclo2: ≈10.948%. Pin novo: ≈6.099%.
+        // Pin pré-refino-ciclo2: ≈10.948%. Pin pré-E7 (refino-ciclo2): ≈6.099%.
+        // Pin novo (campanha E7, 2026-08-06, gear.x_main_m 3.55→3.66m): ≈12.995%.
         assert!(
-            (trim.rotation_limit_pct_mac - 6.099).abs() < 1.5,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈6.099% ±1.5%)",
+            (trim.rotation_limit_pct_mac - 12.995).abs() < 1.5,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈12.995% ±1.5%)",
             trim.rotation_limit_pct_mac
         );
 
@@ -997,14 +1008,22 @@ mod tests {
         //   den = 0,9·0,220702·(3,851350+0,25−0,424802) = 0,730279
         //   CL_h_trim = 0,061964/0,730279 ≈ +0,084849
         //   ΔCD_trim = (0,084849²/(π·4·0,70))·0,220702 ≈ 1,806e-4
+        //
+        // Campanha E7 (2026-08-06): `gear.x_main_m` 3.55→3.66m desloca o
+        // braço do item de massa `trem_principal` (arm_ref="gear_main")
+        // ~0,11m para trás, o que desloca x̄_cg (meia-missão) um pouco para
+        // trás também: 42,480201%→**42,834789%** MAC. CL_cruise não muda
+        // (independe do trem). Novo pin (recalculado pela mesma fórmula,
+        // ver código-fonte): CL_h_trim_cruise 0,084849→**0,086877**,
+        // ΔCD_trim 1,806e-4→**1,8937e-4**.
         println!("cl_h_trim_cruise = {:.6}  cd_trim = {:.8}  cg_reference = '{}' ({:.4}% MAC)",
             trim.cl_h_trim_cruise, trim.cd_trim, trim.cg_reference_scenario, trim.cg_reference_pct_mac);
         assert_eq!(trim.cg_reference_scenario,
             crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME);
-        assert!((trim.cl_h_trim_cruise - 0.084849).abs() < 1e-4,
-            "cl_h_trim_cruise = {:.6} (esperado ≈0.084849 ±1e-4)", trim.cl_h_trim_cruise);
-        assert!((trim.cd_trim - 1.806e-4).abs() < 1e-6,
-            "cd_trim = {:.8} (esperado ≈1.806e-4 ±1e-6)", trim.cd_trim);
+        assert!((trim.cl_h_trim_cruise - 0.086877).abs() < 1e-4,
+            "cl_h_trim_cruise = {:.6} (esperado ≈0.086877 ±1e-4, pin pós-campanha-E7)", trim.cl_h_trim_cruise);
+        assert!((trim.cd_trim - 1.8937e-4).abs() < 1e-6,
+            "cd_trim = {:.8} (esperado ≈1.8937e-4 ±1e-6, pin pós-campanha-E7)", trim.cd_trim);
         assert!(trim.cl_h_trim_cruise > 0.0,
             "CG de referência atrás do CA (x̄≈42,5% > 25%) deveria produzir upload \
              (CL_h_trim_cruise > 0) — obtido {:.6}", trim.cl_h_trim_cruise);

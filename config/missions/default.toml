@@ -7,7 +7,14 @@ passengers = 4
 pax_mass_kg = 90.0
 baggage_kg = 80.0
 cruise_speed_min_kmh = 280.0
-endurance_min_h = 8.0
+# Campanha E7 (2026-08-06): 8.0 → 7.0 — decisão de requisito do cliente:
+# autonomia de 7h de voo + reserva (fuel_reserve_fraction abaixo
+# inalterada). Fecha, junto com gear.x_main_m (ver [gear] em
+# baseline_4seat.toml), a margem de combustível insuficiente do baseline
+# E6 (ver histórico no bloco min_fuel_margin_fraction abaixo). Validado
+# experimentalmente (campanha E7, 48 execuções do pipeline real).
+# endurance_min_h antigo: 8.0.
+endurance_min_h = 7.0
 fuel_reserve_fraction = 0.10   # 10% + 45 min embutidos no endurance
 cruise_altitude_m = 2500.0
 airfield_altitude_m = 0.0
@@ -17,12 +24,19 @@ isa_delta_c = 0.0
 # fração da CAPACIDADE do tanque (`[fuel_system].capacity_l`), não do
 # combustível exigido pela missão (ver nota de convenção em
 # `validation::constraint_checker::ConstraintChecker::verify`, checagem
-# #18). Achado honesto do baseline real (Toyota + esta missão): margem
+# #18). Achado honesto do baseline E6 (Toyota + missão de 8h): margem
 # ≈1,58% da capacidade (260 L de tanque, ~255,9 L exigidos) — ABAIXO deste
-# piso de 5%. VIOLAÇÃO ESPERADA e reportada honestamente (o requisito
-# funcionando) — não mascarada aumentando o tanque ou reduzindo a missão;
-# a decisão de projeto (tanque maior, missão menor, ou aceitar o risco)
-# fica para revisão humana.
+# piso de 5%. VIOLAÇÃO REPORTADA honestamente (o requisito funcionando) —
+# não mascarada aumentando o tanque ou reduzindo a missão; a decisão de
+# projeto (tanque maior, missão menor, ou aceitar o risco) ficou para
+# revisão humana.
+#
+# RESOLVIDO na campanha E7 (2026-08-06): decisão do cliente reduziu a
+# missão para endurance_min_h=7.0 (ver acima). Combustível exigido cai
+# para ~223,7 L (260 L de tanque), margem sobe para ~13,97% — acima do
+# piso de 5%. Gate permanece ativo (não relaxado): continua detectando a
+# violação em configs sintéticas mutadas (ver
+# tests/generic_engine.rs — cobertura da checagem #18 preservada).
 min_fuel_margin_fraction = 0.05
 
 # Análise de missão por segmentos (Task 5.1) — táxi, subida integrada,

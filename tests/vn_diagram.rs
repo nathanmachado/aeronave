@@ -79,7 +79,13 @@ fn vn_diagram_baseline_pin_velocidades_e_n_gust() {
     // do empennage reconverge o laço mais alto, ver
     // `tests/generic_engine.rs::golden_toyota_baseline_regressao_task_2_1`)
     // — VS1/VA sobem proporcional a √MTOW: 242.209167 → 243.176521 km/h.
-    assert!((vn.va_kmh - 243.177).abs() < 1.0, "VA {:.1} km/h fora do pin (~243.177)", vn.va_kmh);
+    // ATUALIZAÇÃO (Campanha E7, 2026-08-06): `endurance_min_h` 8.0→7.0h
+    // (missão menor, ver `config/missions/default.toml`) reduz o
+    // combustível exigido e portanto o MTOW de PROJETO convergido, de
+    // ~1.544,43 kg para ~1.517,89 kg (ver
+    // `tests/generic_engine.rs::golden_toyota_baseline_regressao_task_2_1`)
+    // — VS1/VA caem proporcional a √MTOW: 243.176521 → ~241.074 km/h.
+    assert!((vn.va_kmh - 241.074).abs() < 1.0, "VA {:.1} km/h fora do pin (~241.074)", vn.va_kmh);
     assert!((vn.vc_kmh - 280.0).abs() < 0.1, "VC {:.1} km/h fora do pin (280.0, requisito de missão)", vn.vc_kmh);
     assert!((vn.vd_kmh - 350.0).abs() < 0.1, "VD {:.1} km/h fora do pin (350.0 = 1.25×VC)", vn.vd_kmh);
     assert!(vn.vb_kmh > 0.0 && vn.vb_kmh < vn.vd_kmh,

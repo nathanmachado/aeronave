@@ -18,6 +18,17 @@
 //!     (36.1% MAC).
 //! O delta vem só de o brief ter sido escrito contra números arredondados
 //! de %MAC; a física (fórmulas) é idêntica — ver `agents::landing_gear`.
+//!
+//! ATUALIZAÇÃO (campanha E7, 2026-08-06): `[gear].x_main_m` 3.55→3.66m
+//! (fecha o tipback, decisão de projeto — ver
+//! `config/aircraft/baseline_4seat.toml`) e `mission.endurance_min_h`
+//! 8.0→7.0h (decisão de requisito do cliente — ver
+//! `config/missions/default.toml`) mudam os números honestos abaixo:
+//! tipback sobe de ≈10.08° (abaixo do piso de 15°) para ≈15.58° (acima),
+//! tail-strike/carga de nariz/margem de combustível se movem também (o
+//! trem mais atrás e o MTOW de missão mais leve deslocam ligeiramente o
+//! CG e a massa de todos os cenários — ver comentários em cada teste
+//! abaixo). `validation_status` do baseline real vira `PASS`.
 
 use std::path::PathBuf;
 
@@ -48,38 +59,52 @@ fn gear_real() -> aeronave::models::specs::GearSpec {
     LandingGearAgent::run(wb.spec.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose)
 }
 
-/// Achado honesto ESPERADO (Task 2, refino-ciclo2): o trem principal foi
+/// Achado honesto HISTÓRICO (Task 2, refino-ciclo2): o trem principal foi
 /// recuado pela Task 1/campanha E1–E6 (`x_main_m` 3.85→3.55m) para abrir o
-/// envelope de CG via autoridade de rotação — o preço é um ângulo de
-/// tipback abaixo do piso de 15° (Raymer cap. 11). NÃO tunar
-/// `[gear].tipback_min_deg` nem `x_main_m` para mascarar este resultado —
-/// é um achado de projeto genuíno (ver `ConstraintChecker::verify` #15 e
-/// `tests/cli.rs::engine_padrao_explicito_com_out_tempfile_converge_e_
-/// reporta_fail_honesto_de_tipback`).
+/// envelope de CG via autoridade de rotação — o preço era um ângulo de
+/// tipback abaixo do piso de 15° (Raymer cap. 11). NÃO mascarado por
+/// `[gear].tipback_min_deg`/`x_main_m` na época — era um achado de projeto
+/// genuíno (ver `ConstraintChecker::verify` #15).
+///
+/// RESOLVIDO na campanha E7 (2026-08-06): `x_main_m` 3.55→3.66m recua o
+/// trem mais um pouco, viável porque a autoridade de rotação DATCOM
+/// (ciclo 2) alargou o limite dianteiro do envelope de CG para ≈13,0% MAC
+/// nesta posição — fecha o tipback ACIMA do piso de 15° (ver comentário em
+/// `config/aircraft/baseline_4seat.toml`). Renomeado (o nome antigo dizia
+/// "fica_abaixo"). O caminho de erro (tipback abaixo do piso) continua
+/// coberto por config sintética mutada em código — ver
+/// `validation::constraint_checker::tests::violacao_de_tipback_aparece_
+/// quando_abaixo_do_piso` (em `src/`, checagem #15 — sobrescreve só
+/// `gear.tipback_angle_deg`, sem depender de nenhum `x_main_m` real).
 #[test]
-fn tipback_do_baseline_real_fica_abaixo_do_piso_pin_honesto() {
+fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     let gear = gear_real();
     println!("θ tipback (baseline real) = {:.4}°", gear.tipback_angle_deg);
-    // old (brief hand-check, pré-precisão): ≈10.8° — new (runtime honesto): ≈10.08°
-    assert!((gear.tipback_angle_deg - 10.08).abs() < 0.05,
-        "θ tipback = {:.4}° — pin honesto esperado ≈10.08° (tolerância ±0.05°)",
+    // old (pré-E7, x_main=3.55m): ≈10.08° (abaixo do piso) — new (campanha
+    // E7, x_main=3.66m): ≈15.58° (acima do piso).
+    assert!((gear.tipback_angle_deg - 15.58).abs() < 0.05,
+        "θ tipback = {:.4}° — pin honesto esperado ≈15.58° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
-    assert!(gear.tipback_angle_deg < 15.0,
-        "achado honesto esperado: θ={:.2}° deveria ficar ABAIXO do piso de 15° \
-         (tipback_min_deg) — NÃO É BUG", gear.tipback_angle_deg);
+    assert!(gear.tipback_angle_deg >= 15.0,
+        "achado honesto esperado (campanha E7): θ={:.2}° deveria ficar NO piso de 15° ou acima \
+         (tipback_min_deg) — resolvido por gear.x_main_m 3.55→3.66m", gear.tipback_angle_deg);
 }
 
 /// Tail-strike do baseline real: independe do CG (só geometria de
 /// `[gear]`), então bate quase exatamente com o hand-check do brief —
-/// `x_main_m=3.55` é o MESMO valor usado no brief.
+/// `x_main_m=3.55` era o MESMO valor usado no brief.
+///
+/// ATUALIZAÇÃO (campanha E7, 2026-08-06): `x_main_m` 3.55→3.66m (fecha o
+/// tipback) reduz a distância entre o trem principal e o cone de cauda
+/// (`tail_cone_x_m` fixo), o que aumenta ligeiramente o ângulo de folga —
+/// continua bem acima do piso de 11°.
 #[test]
 fn tail_strike_do_baseline_real_satisfaz_o_piso_pin_honesto() {
     let gear = gear_real();
     println!("Folga tail-strike (baseline real) = {:.4}°", gear.tail_strike_margin_deg);
-    // old (brief hand-check) == new (runtime honesto): 14.5° — geometria
-    // independe do CG, só de gear.tail_cone_x_m/height_m/x_main_m.
-    assert!((gear.tail_strike_margin_deg - 14.51).abs() < 0.05,
-        "folga tail-strike = {:.4}° — pin honesto esperado ≈14.51° (tolerância ±0.05°)",
+    // old (pré-E7, x_main=3.55m): 14.51° — new (campanha E7, x_main=3.66m): ≈14.88°.
+    assert!((gear.tail_strike_margin_deg - 14.88).abs() < 0.05,
+        "folga tail-strike = {:.4}° — pin honesto esperado ≈14.88° (tolerância ±0.05°)",
         gear.tail_strike_margin_deg);
     assert!(gear.tail_strike_margin_deg >= 11.0,
         "folga tail-strike deveria satisfazer o piso de 11° (rotation_attitude_deg)");
@@ -95,31 +120,44 @@ fn tail_strike_do_baseline_real_satisfaz_o_piso_pin_honesto() {
 /// de ser o único valor reportado. O que é genuinamente NOVO nesta task é
 /// `nose_load_max_pct` (CG mais dianteiro, teto de 25%) — nunca antes
 /// calculado.
+/// ATUALIZAÇÃO (campanha E7, 2026-08-06): `x_main_m` 3.55→3.66m recua o
+/// trem principal, o que reduz o braço `(x_main − x_nose)` na base da
+/// fração de carga de nariz e aumenta AMBOS os extremos — nose_load_max
+/// sobe para perto do teto de 25% (a folga que a autoridade de rotação
+/// DATCOM alargada torna aceitável), nose_load_min sobe também mas segue
+/// bem acima do piso de 8%.
 #[test]
 fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     let gear = gear_real();
     println!("nose_load_max_pct={:.4}%  nose_load_min_pct={:.4}%",
              gear.nose_load_max_pct, gear.nose_load_min_pct);
-    // old (brief hand-check, CG dianteiro≈3.077m): ≈22.0% — new (runtime
-    // honesto, CG dianteiro=3.094768m): ≈21.17%.
-    assert!((gear.nose_load_max_pct - 21.17).abs() < 0.1,
-        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈21.17% (tolerância ±0.1%)",
+    // old (pré-E7, x_main=3.55m): ≈21.17% — new (campanha E7, x_main=3.66m): ≈24.79%.
+    assert!((gear.nose_load_max_pct - 24.79).abs() < 0.1,
+        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈24.79% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
     assert!(gear.nose_load_max_pct <= 25.0, "nose_load_max_pct deveria satisfazer o teto de 25%");
-    // old (relatado antes desta task como "Carga nariz: 8.7%", único
-    // valor, mesmo cálculo) == new (agora nose_load_min_pct): ≈8.68%.
-    assert!((gear.nose_load_min_pct - 8.68).abs() < 0.05,
-        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈8.68% (tolerância ±0.05%)",
+    // old (pré-E7, x_main=3.55m): ≈8.68% — new (campanha E7, x_main=3.66m): ≈12.95%.
+    assert!((gear.nose_load_min_pct - 12.95).abs() < 0.05,
+        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈12.95% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
 }
 
-/// `ConstraintChecker::verify` contra o baseline real: exatamente UMA
-/// violação nova de trem de pouso (tipback) — tail-strike e carga de
-/// nariz (dois extremos) PASSAM. Regressão de ponta a ponta (não só as
-/// funções puras acima) — confirma a fiação real em `main.rs`.
+/// `ConstraintChecker::verify` contra o baseline real: HISTORICAMENTE
+/// (pré-E7) exatamente UMA violação de trem de pouso (tipback) — tail-
+/// strike e carga de nariz (dois extremos) já PASSAVAM.
+///
+/// RESOLVIDO na campanha E7 (2026-08-06): `gear.x_main_m` 3.55→3.66m fecha
+/// também o tipback — as TRÊS checagens de trem de pouso (#15 tipback, #16
+/// tail-strike, #17 carga de nariz) PASSAM agora no baseline real. Renomeado
+/// (o nome antigo dizia "reporta_so_tipback"). Regressão de ponta a ponta
+/// (não só as funções puras acima) — confirma a fiação real em `main.rs`.
+/// O caminho de erro (violação de tipback) continua coberto por config
+/// sintética mutada em código — ver
+/// `validation::constraint_checker::tests::violacao_de_tipback_aparece_
+/// quando_abaixo_do_piso` (em `src/`).
 #[test]
-fn constraint_checker_reporta_so_tipback_entre_as_tres_checagens_novas() {
+fn constraint_checker_nao_reporta_violacoes_de_trem_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
@@ -142,8 +180,8 @@ fn constraint_checker_reporta_so_tipback_entre_as_tres_checagens_novas() {
         &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l,
     );
 
-    assert!(report.violations.iter().any(|v| v.starts_with("Tipback:")),
-        "esperava violação de tipback, obteve: {:?}", report.violations);
+    assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
+        "não deveria haver violação de tipback no baseline real pós-E7: {:?}", report.violations);
     assert!(!report.violations.iter().any(|v| v.starts_with("Tail-strike:")),
         "não deveria haver violação de tail-strike no baseline real: {:?}", report.violations);
     assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:")),
@@ -152,16 +190,27 @@ fn constraint_checker_reporta_so_tipback_entre_as_tres_checagens_novas() {
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de
 /// `ConstraintChecker::verify`) contra o baseline real (Toyota + missão de
-/// projeto completa): achado honesto — margem ≈1,82% da capacidade do
-/// tanque (260 L), abaixo do piso de 5% (`config/missions/default.toml`,
-/// `min_fuel_margin_fraction`). NÃO tunar o tanque nem a missão para
-/// mascarar este resultado — é o requisito novo funcionando (PASS→FAIL
-/// honesto, ver `task-3-report.md`). Mesma folga física de
+/// projeto completa): achado honesto HISTÓRICO — margem ≈1,58% da
+/// capacidade do tanque (260 L), abaixo do piso de 5%
+/// (`config/missions/default.toml`, `min_fuel_margin_fraction`). NÃO
+/// mascarado por tanque/missão na época — era o requisito novo funcionando
+/// (PASS→FAIL honesto, ver `task-3-report.md`).
+///
+/// RESOLVIDO na campanha E7 (2026-08-06): `mission.endurance_min_h`
+/// 8,0→7,0h (decisão de requisito do cliente — autonomia 7h + reserva, ver
+/// comentário em `config/missions/default.toml`) reduz o combustível
+/// exigido pela missão (255,9→≈223,7 L) — margem sobe para ≈13,97% da
+/// capacidade, bem acima do piso de 5%. Renomeado (o nome antigo dizia
+/// "fica_abaixo"). Mesma folga física de
 /// `tests/generic_engine.rs::margem_de_combustivel_no_mtow_convergido`
 /// (que mede a MESMA margem com a convenção %-do-combustível-NECESSÁRIO,
-/// não %-da-capacidade — ver nota de convenção nesse teste).
+/// não %-da-capacidade — ver nota de convenção nesse teste). O caminho de
+/// erro (margem abaixo do piso) continua coberto por configs sintéticas
+/// mutadas em código — ver
+/// `validation::constraint_checker::tests::violacao_de_margem_de_
+/// combustivel_aparece_quando_abaixo_do_minimo` (em `src/`).
 #[test]
-fn margem_de_combustivel_do_baseline_real_fica_abaixo_do_piso_pin_honesto() {
+fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
@@ -172,20 +221,14 @@ fn margem_de_combustivel_do_baseline_real_fica_abaixo_do_piso_pin_honesto() {
     let fuel_margin_pct = (cfg.fuel_system.capacity_l - mission.fuel_total_l)
         / cfg.fuel_system.capacity_l * 100.0;
     println!("margem de combustível (baseline real) = {fuel_margin_pct:.4}% da capacidade");
-    // Pin honesto pós-Task-3: ≈1.8184%. Task 4 (refino-ciclo2, arrasto de
-    // trim em cruzeiro) soma ΔCD_trim≈4.86e-5 ao polar de cruzeiro — mais
-    // arrasto ⟹ mais combustível de cruzeiro (Breguet) ⟹ MTOW converge
-    // levemente mais pesado (1544.43→1544.96 kg) ⟹ margem cai
-    // **1.8184%→1.5767%** (old→new; ~0.63 L a mais de combustível exigido
-    // sobre 260 L de tanque — pequeno, honesto, ver task-4-report.md).
-    // Mesmo número (novo) pinado em `tests/generic_engine.rs`
-    // (`sizing.fuel_margin_pct`).
-    assert!((fuel_margin_pct - 1.5767).abs() < 0.05,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-Task-4 \
-         ≈1.5767%");
-    assert!(fuel_margin_pct < 5.0,
-        "achado honesto esperado: margem ({fuel_margin_pct:.2}%) deveria ficar ABAIXO do piso \
-         de 5% (min_fuel_margin_fraction) — NÃO É BUG");
+    // Pin honesto pós-Task-4 (pré-E7): ≈1.5767%. Pin novo (campanha E7,
+    // 2026-08-06, endurance_min_h 8h→7h): ≈13.9712% — mesmo número (novo)
+    // pinado em `tests/generic_engine.rs` (`sizing.fuel_margin_pct`).
+    assert!((fuel_margin_pct - 13.9712).abs() < 0.1,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-E7 ≈13.9712%");
+    assert!(fuel_margin_pct >= 5.0,
+        "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
+         piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");
 
     let propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, &sized.prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
@@ -200,7 +243,7 @@ fn margem_de_combustivel_do_baseline_real_fica_abaixo_do_piso_pin_honesto() {
         &perf, mission, &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l,
     );
 
-    assert!(report.violations.iter().any(|v| v.contains("Margem de combustível")),
-        "achado honesto esperado: margem real (~1,82%) abaixo do piso de 5% \
-         (min_fuel_margin_fraction) deveria gerar violação, obteve: {:?}", report.violations);
+    assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),
+        "não deveria haver violação de margem de combustível no baseline real pós-E7: {:?}",
+        report.violations);
 }

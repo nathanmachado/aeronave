@@ -229,8 +229,27 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// a varredura informativa de `x_main` impressa por `main.rs` para o
 /// trade-off tipback×rotação; tail-strike e carga de nariz continuam
 /// PASSANDO — só tipback e margem de combustível falham.
+///
+/// ATUALIZAÇÃO (campanha E7, 2026-08-06): AMBOS os achados acima foram
+/// RESOLVIDOS por decisão de projeto/cliente — dados, não física:
+/// `mission.endurance_min_h` 8,0→7,0h (autonomia 7h + reserva, decisão do
+/// cliente) fecha a margem de combustível (1,58%→≈13,97%, bem acima do
+/// piso de 5%) e reduz o MTOW de missão convergido; `gear.x_main_m`
+/// 3,55→3,66m fecha o tipback (10,1°→≈15,58° ≥ piso de 15°), viável porque
+/// a autoridade de rotação DATCOM (ciclo 2) alargou o limite dianteiro do
+/// envelope de CG para ≈13,0% MAC nesta posição. `validation_status` vira
+/// `PASS` — primeiro PASS honesto com os 18 checks do ciclo 2 todos
+/// ativos, zero violações (só o aviso elétrico de pico permanece, não é
+/// violação). Renomeado (o nome antigo dizia "fail_honesto_de_tipback") —
+/// os DOIS caminhos de erro (#15 tipback, #18 margem de combustível)
+/// continuam cobertos por configs sintéticas mutadas em código: ver
+/// `tests/gear_tipback.rs::constraint_checker_nao_reporta_violacoes_de_
+/// trem_no_baseline_real` (regressão real) e
+/// `validation::constraint_checker::tests::violacao_de_tipback_aparece_
+/// quando_abaixo_do_piso`/`violacao_de_margem_de_combustivel_aparece_
+/// quando_abaixo_do_minimo` (violação sintética, em `src/`).
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_fail_honesto_de_tipback() {
+fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_pass_honesto() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -251,38 +270,35 @@ fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_fail_honesto_de_t
 
     assert!(output.status.success(),
         "binário deveria convergir e sair com sucesso (código 0) com o motor/aeronave/missão \
-         reais passados explicitamente — o achado de tipback (ver nota acima) aparece no \
-         CONTEÚDO do relatório, não no código de saída: stderr={}",
+         reais passados explicitamente: stderr={}",
         String::from_utf8_lossy(&output.stderr));
 
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Achado honesto NOVO (Task 2, ver nota acima): validation_status É
-    // FAIL — tipback abaixo do piso de 15°. Não mascarar tunando config.
-    assert!(json.contains("\"validation_status\": \"FAIL\""),
-        "JSON de saída deveria reportar validation_status FAIL (tipback abaixo do piso de \
-         15° — achado honesto da Task 2, refino-ciclo2 — ver comentário acima):\n{json}");
-    assert!(json.contains("Tipback:") && json.contains("abaixo do piso"),
-        "violações deveriam citar a checagem de tipback nova:\n{json}");
-    // Achado honesto NOVO (Task 3, ver nota acima): margem de combustível
-    // (checagem #18) também viola — segundo motivo independente do FAIL.
-    assert!(json.contains("Margem de combustível:") && json.contains("abaixo do mínimo"),
-        "violações deveriam citar a checagem nova de margem de combustível \
-         (Task 3, refino-ciclo2, achado honesto — não mascarar):\n{json}");
-    // O envelope de CG (Task 4.4/E1–E6) continua FECHADO — tipback e margem
-    // de combustível (achados NOVOS) falham, não uma regressão do envelope.
+    // Achado honesto NOVO (campanha E7, ver nota acima): validation_status
+    // É PASS — tipback e margem de combustível fechados por decisão de
+    // projeto (endurance_min_h 8h→7h, x_main_m 3,55→3,66m).
+    assert!(json.contains("\"validation_status\": \"PASS\""),
+        "JSON de saída deveria reportar validation_status PASS (achado honesto da campanha E7, \
+         2026-08-06 — ver comentário acima):\n{json}");
+    assert!(json.contains("\"violations\": []"),
+        "JSON de saída deveria reportar ZERO violações no baseline real pós-E7:\n{json}");
+    // Nenhuma das checagens de trem/combustível deveria aparecer como
+    // violação — tipback, tail-strike e carga de nariz (dois extremos)
+    // PASSAM, assim como a margem de combustível.
+    assert!(!json.contains("Tipback:") && !json.contains("Tail-strike:")
+        && !json.contains("Carga de nariz:") && !json.contains("Margem de combustível:"),
+        "não deveria haver violação de trem de pouso/combustível no baseline real pós-E7:\n{json}");
+    // O envelope de CG (Task 4.4/E1–E6) continua FECHADO.
     assert!(!json.contains("fora do envelope de CG admissível"),
         "não deveria haver violações de cenário fora do envelope de CG admissível:\n{json}");
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
-    // Tail-strike e carga de nariz nos dois extremos (também novas desde a
-    // Task 2) PASSAM no baseline real — só tipback e margem de combustível
-    // falham.
-    assert!(!json.contains("Tail-strike:"),
-        "não deveria haver violação de tail-strike no baseline real:\n{json}");
-    assert!(!json.contains("Carga de nariz:"),
-        "não deveria haver violação de carga de nariz (dois extremos) no baseline real:\n{json}");
+    // O aviso elétrico de pico (não é violação) continua presente — só
+    // confirma que o pipeline real ainda reporta avisos quando aplicável.
+    assert!(json.contains("Orçamento elétrico:") && json.contains("banco de baterias"),
+        "aviso elétrico de pico esperado (pico 1.260 W > alternador 900 W, não é violação):\n{json}");
 
     let _ = std::fs::remove_file(&out_path);
 }
