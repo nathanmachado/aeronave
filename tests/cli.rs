@@ -255,11 +255,15 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// 16,0–37,5% MAC para **8,3–31,7% MAC**. Consequência direta, NÃO
 /// mascarada:
 ///   - 2 dos 6 cenários caem À FRENTE do limite dianteiro de rotação
-///     (13,0% MAC): "Solo (piloto)" (8,3%) e "2 pax dianteiros" (11,8%);
+///     (13,0% MAC): "Solo (piloto)" (8,3%, RE-MEDIDO ciclo 4 Task 2 — W_dg
+///     de envelope com lag-1 — em 9,1%) e "2 pax dianteiros" (11,8%,
+///     RE-MEDIDO em 12,5%);
 ///   - a carga no trem de NARIZ no CG mais dianteiro sobe de 24,8% para
-///     **29,0%**, acima do teto de 25% (checagem #16).
+///     **29,0%** (RE-MEDIDO em **28,6%**), acima do teto de 25% (checagem
+///     #16).
 /// `validation_status` volta a `FAIL`, com 3 violações nomeadas. Tipback
-/// (19,2° ≥ 15°), tail-strike, margem de combustível (14,56%) e hélice
+/// (19,2° ≥ 15°, RE-MEDIDO em 18,85°), tail-strike, margem de combustível
+/// (14,56%, RE-MEDIDO em 14,33%) e hélice
 /// continuam PASSANDO — o CG mais traseiro também avançou, o que na
 /// verdade FOLGOU o tipback. A decisão de projeto (recuar de novo o
 /// bagageiro/bateria, mover a asa, ou aceitar) fica para revisão humana:
@@ -324,15 +328,17 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
         "esperava EXATAMENTE 3 violações honestas no baseline real pós-ciclo-3: {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("Solo (piloto)")
             && v.contains("fora do envelope de CG admissível")),
-        "esperava violação de envelope para o cenário 'Solo (piloto)' (CG ≈8,3% MAC, à frente \
-         do limite de rotação de 13,0%): {violations:#?}");
+        "esperava violação de envelope para o cenário 'Solo (piloto)' (CG ≈9,1% MAC, à frente \
+         do limite de rotação de 13,0%; 8,3% no achado honesto original do ciclo 3, RE-MEDIDO \
+         em 9,1% na Task 2 do ciclo 4 — W_dg de envelope com lag-1): {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("2 pax dianteiros")
             && v.contains("fora do envelope de CG admissível")),
-        "esperava violação de envelope para o cenário '2 pax dianteiros' (CG ≈11,8% MAC): \
-         {violations:#?}");
+        "esperava violação de envelope para o cenário '2 pax dianteiros' (CG ≈12,5% MAC; \
+         11,8%→12,5%, mesmo re-medição do ciclo 4 Task 2): {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("Carga de nariz:")
             && v.contains("excede o teto")),
-        "esperava violação de carga de nariz (≈29,0% > teto de 25,0%): {violations:#?}");
+        "esperava violação de carga de nariz (≈28,6% > teto de 25,0%; 29,0%→28,6%, mesma \
+         re-medição do ciclo 4 Task 2): {violations:#?}");
     // Os DEMAIS cenários continuam DENTRO do envelope — o achado é de dois
     // cenários leves/dianteiros, não do envelope inteiro nem de um
     // envelope vazio.
@@ -345,8 +351,10 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
     // Tipback, tail-strike e margem de combustível continuam PASSANDO — o
     // CG mais traseiro também avançou, o que FOLGOU o tipback (15,58° →
-    // 19,17°); a aeronave mais leve reduziu o combustível de missão
-    // (margem 13,97% → 14,56%).
+    // 19,17° no achado original do ciclo 3, RE-MEDIDO em 18,85° na Task 2
+    // do ciclo 4 — W_dg de envelope com lag-1); a aeronave mais leve
+    // reduziu o combustível de missão (margem 13,97% → 14,56% do ciclo 3,
+    // RE-MEDIDO em 14,33% no ciclo 4).
     assert!(!json.contains("Tipback:") && !json.contains("Tail-strike:")
         && !json.contains("Margem de combustível:"),
         "tipback/tail-strike/margem de combustível deveriam continuar sem violação:\n{json}");

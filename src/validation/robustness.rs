@@ -15,6 +15,15 @@
 //! ×(1−σ)) e outro que o empurra o mais para TRÁS possível (o oposto) —
 //! ver `adversarial_masses`.
 //!
+//! A classificação dianteiro/traseiro usa o CG VAZIO (`x_cg_oew`) como
+//! pivô, não o CG carregado de cada cenário — isso só é um PIOR-CASO EXATO
+//! enquanto nenhum braço estrutural cair DENTRO da banda de CG carregado
+//! dos cenários (verdadeiro no baseline atual: os 7 braços estruturais vão
+//! de 1,40 a 7,40 m, fora da banda de CG carregado de 3,01–3,30 m); se um
+//! braço estrutural algum dia cair dentro dessa banda, a classificação por
+//! `x_cg_oew` deixa de garantir o pior caso para os cenários cujo CG fica
+//! do lado oposto do CG vazio.
+//!
 //! Consumido por `main.rs` (chamado logo após o `LandingGearAgent`) e por
 //! `validation::constraint_checker::ConstraintChecker::verify` (checagem
 //! #19 — um `flip` gera uma violação nomeada) desde a Task 4 do ciclo
@@ -36,8 +45,7 @@
 use crate::agents::landing_gear::LandingGearAgent;
 use crate::agents::mass_model::StructuralMasses;
 use crate::agents::weight_balance::{
-    cg_from_items, oew_items, ArmConfig, WeightBalanceAgent, WeightBalanceOutput,
-    EMP_VERTICAL_ARM_OFFSET_M,
+    cg_from_items, oew_items, structural_arms, WeightBalanceAgent, WeightBalanceOutput,
 };
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::aircraft_state::AircraftState;
@@ -69,8 +77,11 @@ pub fn adversarial_masses(
 ) -> (StructuralMasses, StructuralMasses) {
     let items = oew_items(cfg, engine, masses);
     let (_, x_cg_oew) = cg_from_items(&items);
-    let arms = ArmConfig::from_config(cfg);
-    let emp_v_arm = arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M;
+    // FONTE ÚNICA do mapeamento componente→braço (ver docstring de
+    // `structural_arms`) — MESMA usada por `oew_items` para montar os 7
+    // itens estruturais, evitando divergência silenciosa entre os dois.
+    let [(_, asa_arm), (_, fuselagem_arm), (_, emp_h_arm), (_, emp_v_arm),
+         (_, trem_principal_arm), (_, trem_nariz_arm), (_, tanques_arm)] = structural_arms(cfg);
 
     // `fwd_heavier`: true monta o conjunto CG-mais-DIANTEIRO (componentes
     // dianteiros ficam mais pesados); false monta o conjunto
@@ -81,22 +92,22 @@ pub fn adversarial_masses(
     };
 
     let fwd = StructuralMasses {
-        asa_kg:            scale(masses.asa_kg,            arms.wing_struct_m,     true),
-        fuselagem_kg:      scale(masses.fuselagem_kg,       arms.fuselage_struct_m, true),
-        emp_h_kg:          scale(masses.emp_h_kg,           arms.empenagem_cg_m,    true),
-        emp_v_kg:          scale(masses.emp_v_kg,           emp_v_arm,              true),
-        trem_principal_kg: scale(masses.trem_principal_kg,  arms.gear_main_m,       true),
-        trem_nariz_kg:     scale(masses.trem_nariz_kg,      arms.gear_nose_m,       true),
-        tanques_kg:        scale(masses.tanques_kg,         arms.fuel_cg_m,         true),
+        asa_kg:            scale(masses.asa_kg,            asa_arm,            true),
+        fuselagem_kg:      scale(masses.fuselagem_kg,      fuselagem_arm,      true),
+        emp_h_kg:          scale(masses.emp_h_kg,           emp_h_arm,         true),
+        emp_v_kg:          scale(masses.emp_v_kg,           emp_v_arm,         true),
+        trem_principal_kg: scale(masses.trem_principal_kg,  trem_principal_arm, true),
+        trem_nariz_kg:     scale(masses.trem_nariz_kg,      trem_nariz_arm,    true),
+        tanques_kg:        scale(masses.tanques_kg,         tanques_arm,       true),
     };
     let aft = StructuralMasses {
-        asa_kg:            scale(masses.asa_kg,            arms.wing_struct_m,     false),
-        fuselagem_kg:      scale(masses.fuselagem_kg,       arms.fuselage_struct_m, false),
-        emp_h_kg:          scale(masses.emp_h_kg,           arms.empenagem_cg_m,    false),
-        emp_v_kg:          scale(masses.emp_v_kg,           emp_v_arm,              false),
-        trem_principal_kg: scale(masses.trem_principal_kg,  arms.gear_main_m,       false),
-        trem_nariz_kg:     scale(masses.trem_nariz_kg,      arms.gear_nose_m,       false),
-        tanques_kg:        scale(masses.tanques_kg,         arms.fuel_cg_m,         false),
+        asa_kg:            scale(masses.asa_kg,            asa_arm,            false),
+        fuselagem_kg:      scale(masses.fuselagem_kg,      fuselagem_arm,      false),
+        emp_h_kg:          scale(masses.emp_h_kg,           emp_h_arm,         false),
+        emp_v_kg:          scale(masses.emp_v_kg,           emp_v_arm,         false),
+        trem_principal_kg: scale(masses.trem_principal_kg,  trem_principal_arm, false),
+        trem_nariz_kg:     scale(masses.trem_nariz_kg,      trem_nariz_arm,    false),
+        tanques_kg:        scale(masses.tanques_kg,         tanques_arm,       false),
     };
     (fwd, aft)
 }
@@ -121,6 +132,10 @@ impl RobustnessAgent {
         wb_nominal: &WeightBalanceOutput,
         gear_nominal: &GearSpec,
     ) -> RobustnessSpec {
+        debug_assert!(wb_nominal.spec.cg_limit_fwd_pct_mac.is_finite(),
+            "RobustnessAgent exige um wb NOMINAL já com apply_trim (cg_limit_fwd_pct_mac = NaN)");
+        debug_assert!(wb_nominal.spec.cg_limit_aft_pct_mac.is_finite(),
+            "RobustnessAgent exige um wb NOMINAL já com apply_trim (cg_limit_aft_pct_mac = NaN)");
         let sigma = cfg.mass_model.sigma_mass_fraction;
         let (m_fwd, m_aft) = adversarial_masses(cfg, engine, masses, sigma);
 
@@ -255,8 +270,10 @@ mod tests {
     }
 
     /// Classificação direcional: cada um dos 7 componentes entra no lado
-    /// certo do conjunto adversarial comparando o braço real (`ArmConfig`)
-    /// com o CG VAZIO nominal (`cg_from_items(oew_items(...))`).
+    /// certo do conjunto adversarial comparando o braço REAL — achado por
+    /// nome na saída de `oew_items`, não uma cópia manual do mapeamento
+    /// componente→braço — com o CG VAZIO nominal
+    /// (`cg_from_items(oew_items(...))`).
     #[test]
     fn conjuntos_adversariais_perturbam_na_direcao_certa() {
         let n = nominal_pipeline(config_teste());
@@ -264,20 +281,29 @@ mod tests {
 
         let items = oew_items(&n.cfg, &n.engine, &n.masses);
         let (_, x_cg_oew) = cg_from_items(&items);
-        let arms = ArmConfig::from_config(&n.cfg);
-        let emp_v_arm = arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M;
         println!("x_cg_oew = {x_cg_oew:.4}");
 
         let (fwd, aft) = adversarial_masses(&n.cfg, &n.engine, &n.masses, sigma);
 
+        // Braço de cada componente vindo da saída REAL de `oew_items`
+        // (achado pelo `MassItem::name`) — evita uma 3ª cópia manual do
+        // mapeamento componente→braço (fonte única em
+        // `agents::weight_balance::structural_arms`, consumida tanto por
+        // `oew_items` quanto por `adversarial_masses`); se as duas
+        // divergirem, este teste detecta.
+        let braco = |nome_item: &str| items.iter()
+            .find(|i| i.name == nome_item)
+            .unwrap_or_else(|| panic!("oew_items deveria conter o item '{nome_item}'"))
+            .arm_m;
+
         let componentes: [(&str, f64, f64, f64, f64); 7] = [
-            ("asa",            n.masses.asa_kg,            arms.wing_struct_m,     fwd.asa_kg,            aft.asa_kg),
-            ("fuselagem",      n.masses.fuselagem_kg,      arms.fuselage_struct_m, fwd.fuselagem_kg,      aft.fuselagem_kg),
-            ("emp_h",          n.masses.emp_h_kg,          arms.empenagem_cg_m,    fwd.emp_h_kg,          aft.emp_h_kg),
-            ("emp_v",          n.masses.emp_v_kg,          emp_v_arm,              fwd.emp_v_kg,          aft.emp_v_kg),
-            ("trem_principal", n.masses.trem_principal_kg, arms.gear_main_m,       fwd.trem_principal_kg, aft.trem_principal_kg),
-            ("trem_nariz",     n.masses.trem_nariz_kg,     arms.gear_nose_m,       fwd.trem_nariz_kg,     aft.trem_nariz_kg),
-            ("tanques",        n.masses.tanques_kg,        arms.fuel_cg_m,         fwd.tanques_kg,        aft.tanques_kg),
+            ("asa",            n.masses.asa_kg,            braco("asa"),            fwd.asa_kg,            aft.asa_kg),
+            ("fuselagem",      n.masses.fuselagem_kg,      braco("fuselagem"),      fwd.fuselagem_kg,      aft.fuselagem_kg),
+            ("emp_h",          n.masses.emp_h_kg,          braco("emp_horizontal"), fwd.emp_h_kg,          aft.emp_h_kg),
+            ("emp_v",          n.masses.emp_v_kg,          braco("emp_vertical"),   fwd.emp_v_kg,          aft.emp_v_kg),
+            ("trem_principal", n.masses.trem_principal_kg, braco("trem_principal"), fwd.trem_principal_kg, aft.trem_principal_kg),
+            ("trem_nariz",     n.masses.trem_nariz_kg,     braco("trem_nariz"),     fwd.trem_nariz_kg,     aft.trem_nariz_kg),
+            ("tanques",        n.masses.tanques_kg,        braco("tanques"),        fwd.tanques_kg,        aft.tanques_kg),
         ];
 
         for (nome, massa_nominal, braco, massa_fwd, massa_aft) in componentes {
@@ -309,7 +335,7 @@ mod tests {
     #[test]
     fn sigma_zero_nao_produz_flips() {
         let mut cfg = config_teste();
-        cfg.mass_model.sigma_mass_fraction = 1e-12; // ~0, dentro da faixa validada (0.05,0.30) não se aplica aqui (construído em memória, não via parse_aircraft)
+        cfg.mass_model.sigma_mass_fraction = 1e-12; // σ efetivamente nulo — construído em memória, portanto não passa pela faixa validada (0.05, 0.30) de parse_aircraft
         let n = nominal_pipeline(cfg);
 
         let out = RobustnessAgent::run(

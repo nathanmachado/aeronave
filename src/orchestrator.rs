@@ -622,9 +622,15 @@ mod tests {
         assert!((delta_final - delta_final_pin).abs() < delta_final_pin,
             "delta final (campo real) = {delta_final:.10e} divergiu do pin honesto \
              ≈{delta_final_pin:.10e} — histórico completo: {history:?}");
-        assert!(delta_final < 1e-4,
-            "delta final (campo real) = {delta_final:.3e} deveria estar bem abaixo de 1e-4 \
-             (ordem de grandeza esperada ~1e-6) — histórico completo: {history:?}");
+        // Guard secundário apertado a ~10× o pin acima (2,497194172366296e-6
+        // → 2,5e-5): o pin já cobre a igualdade fina, este guard existe só
+        // para falhar alto e sem ambiguidade se o pin for solto/removido no
+        // futuro sem que este limite acompanhe — folgado o bastante para
+        // não duplicar o pin, apertado o bastante para pegar a mesma
+        // regressão de ordem de grandeza (lag desligado ~O(0,16)).
+        assert!(delta_final < 2.5e-5,
+            "delta final (campo real) = {delta_final:.3e} deveria estar bem abaixo de 2.5e-5 \
+             (~10x o pin de {delta_final_pin:.3e}) — histórico completo: {history:?}");
     }
 
     // ─── n_design — estabilidade do lag-1 (Task 3, plano oew-parametrico) ──
@@ -708,9 +714,13 @@ mod tests {
         assert!((delta_final - delta_final_pin).abs() < 1.6e-11,
             "residual do lag de n_design = {delta_final:.6e} divergiu do pin honesto \
              ≈{delta_final_pin:.6e}; histórico completo: {h:?}");
-        assert!(delta_final < 1e-3,
-            "residual do lag de n_design = {delta_final:.3e} deveria estar bem abaixo de 1e-3 \
-             (ordem de grandeza esperada ~1e-11); histórico completo: {h:?}");
+        // Guard secundário apertado a ~10× o pin acima
+        // (1,5766055128096923e-11 → 1,6e-10), mesma disciplina do guard de
+        // `cl_h_trim_iterations` acima: falha alto e sem ambiguidade se o
+        // pin fino for solto/removido sem que este limite acompanhe.
+        assert!(delta_final < 1.6e-10,
+            "residual do lag de n_design = {delta_final:.3e} deveria estar bem abaixo de 1.6e-10 \
+             (~10x o pin de {delta_final_pin:.3e}); histórico completo: {h:?}");
         // + structural_masses do SizedAircraft finitas e positivas:
         for (nome, v) in [("asa", sized.structural_masses.asa_kg),
                           ("fuselagem", sized.structural_masses.fuselagem_kg),

@@ -174,6 +174,32 @@ impl ArmConfig {
 /// aqui em vez de um campo de TOML.
 pub const EMP_VERTICAL_ARM_OFFSET_M: f64 = -0.2;
 
+/// FONTE ÚNICA do mapeamento estático componente→braço das 7 massas
+/// ESTRUTURAIS COMPUTADAS (ciclo 3, `agents::mass_model::StructuralMasses`).
+/// Consumida por `oew_items` (abaixo) e por
+/// `validation::robustness::adversarial_masses` — antes desta função o
+/// mesmo mapeamento existia em 3 cópias manuais (`oew_items`,
+/// `adversarial_masses` e o teste
+/// `robustness::tests::conjuntos_adversariais_perturbam_na_direcao_certa`),
+/// com risco de divergência silenciosa entre elas (falso-PASS na checagem
+/// #19 de robustez). As chaves aqui ("asa", "fuselagem", "emp_h", "emp_v",
+/// "trem_principal", "trem_nariz", "tanques") são internas a este
+/// mapeamento — NÃO são os `MassItem::name` usados por `oew_items`
+/// ("emp_horizontal"/"emp_vertical" em vez de "emp_h"/"emp_v"), que
+/// permanecem inalterados para não quebrar consumidores/pins.
+pub fn structural_arms(cfg: &AircraftConfig) -> [(&'static str, f64); 7] {
+    let arms = ArmConfig::from_config(cfg);
+    [
+        ("asa", arms.wing_struct_m),
+        ("fuselagem", arms.fuselage_struct_m),
+        ("emp_h", arms.empenagem_cg_m),
+        ("emp_v", arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M),
+        ("trem_principal", arms.gear_main_m),
+        ("trem_nariz", arms.gear_nose_m),
+        ("tanques", arms.fuel_cg_m),
+    ]
+}
+
 /// Retorna os itens de peso do avião vazio operacional (OEW):
 ///   - o motor (massa de `EngineSpec`);
 ///   - os itens NÃO-estruturais de `[[masses.items]]` da configuração
@@ -219,15 +245,20 @@ pub fn oew_items(
         });
     }
     // Itens estruturais COMPUTADOS (ciclo 3, agents::mass_model) — mapeamento
-    // estático componente→braço, MESMOS arm_refs dos antigos itens de
-    // [[masses.items]] (removidos; erro de migração se presentes):
-    items.push(MassItem { name: "asa".into(), mass_kg: masses.asa_kg, arm_m: arms.wing_struct_m });
-    items.push(MassItem { name: "fuselagem".into(), mass_kg: masses.fuselagem_kg, arm_m: arms.fuselage_struct_m });
-    items.push(MassItem { name: "emp_horizontal".into(), mass_kg: masses.emp_h_kg, arm_m: arms.empenagem_cg_m });
-    items.push(MassItem { name: "emp_vertical".into(), mass_kg: masses.emp_v_kg, arm_m: arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M });
-    items.push(MassItem { name: "trem_principal".into(), mass_kg: masses.trem_principal_kg, arm_m: arms.gear_main_m });
-    items.push(MassItem { name: "trem_nariz".into(), mass_kg: masses.trem_nariz_kg, arm_m: arms.gear_nose_m });
-    items.push(MassItem { name: "tanques".into(), mass_kg: masses.tanques_kg, arm_m: arms.fuel_cg_m });
+    // estático componente→braço vindo da FONTE ÚNICA `structural_arms`,
+    // MESMOS arm_refs dos antigos itens de [[masses.items]] (removidos; erro
+    // de migração se presentes). Os `MassItem::name` abaixo permanecem
+    // EXATAMENTE os de sempre ("emp_horizontal"/"emp_vertical"), mesmo as
+    // chaves internas de `structural_arms` sendo "emp_h"/"emp_v".
+    let [(_, asa_arm), (_, fuselagem_arm), (_, emp_h_arm), (_, emp_v_arm),
+         (_, trem_principal_arm), (_, trem_nariz_arm), (_, tanques_arm)] = structural_arms(cfg);
+    items.push(MassItem { name: "asa".into(), mass_kg: masses.asa_kg, arm_m: asa_arm });
+    items.push(MassItem { name: "fuselagem".into(), mass_kg: masses.fuselagem_kg, arm_m: fuselagem_arm });
+    items.push(MassItem { name: "emp_horizontal".into(), mass_kg: masses.emp_h_kg, arm_m: emp_h_arm });
+    items.push(MassItem { name: "emp_vertical".into(), mass_kg: masses.emp_v_kg, arm_m: emp_v_arm });
+    items.push(MassItem { name: "trem_principal".into(), mass_kg: masses.trem_principal_kg, arm_m: trem_principal_arm });
+    items.push(MassItem { name: "trem_nariz".into(), mass_kg: masses.trem_nariz_kg, arm_m: trem_nariz_arm });
+    items.push(MassItem { name: "tanques".into(), mass_kg: masses.tanques_kg, arm_m: tanques_arm });
     items
 }
 

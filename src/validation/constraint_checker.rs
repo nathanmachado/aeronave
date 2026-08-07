@@ -410,7 +410,7 @@ impl ConstraintChecker {
         // por flip (zero flips ⇒ zero violações desta checagem).
         for flip in &robustness.flips {
             violations.push(format!(
-                "Robustez: {} passa no nominal mas reprova com massas estruturais ±{:.0}% \
+                "Robustez: {} passa no nominal mas reprova com massas estruturais ±{:.1}% \
                  (pior caso {}): {:.2} vs {:.2}",
                 flip.check, robustness.sigma_mass_fraction * 100.0, flip.caso,
                 flip.valor, flip.limite
@@ -1193,6 +1193,8 @@ mod tests {
         assert!(v.contains("12.34"), "violação deveria citar o valor do flip (12.34): {v}");
         assert!(v.contains("15.00") || v.contains("15.0"),
             "violação deveria citar o limite do flip (15.0): {v}");
-        assert!(v.contains("15%"), "violação deveria citar σ formatado como percentual (±15%): {v}");
+        assert!(v.contains("15.0%"), "violação deveria citar σ formatado sem arredondamento \
+            enganoso (±15.0%, {{:.1}} em vez de {{:.0}} — 0.125 arredondaria para \"13%\" com \
+            {{:.0}}): {v}");
     }
 }

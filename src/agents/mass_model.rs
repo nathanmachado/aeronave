@@ -170,7 +170,7 @@ impl MassModelAgent {
         cfg: &AircraftConfig, engine: &EngineSpec, req: &Requirements,
         wing: &WingSpec, emp: &EmpennageSpec, w_dg_envelope_kg: f64, n_design: f64,
     ) -> StructuralMasses {
-        assert!(w_dg_envelope_kg > 0.0, "MTOW deve ser positivo, obtido {w_dg_envelope_kg}");
+        assert!(w_dg_envelope_kg > 0.0, "W_dg de envelope deve ser positivo, obtido {w_dg_envelope_kg}");
         assert!(n_design > 0.0, "n_design deve ser positivo, obtido {n_design}");
         let mm = &cfg.mass_model;
         let rho = Isa::density_kgm3(req.cruise_altitude_m, req.isa_delta_c);
