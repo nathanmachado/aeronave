@@ -18,15 +18,19 @@
 use crate::agents::aerodynamics::AerodynamicsAgent;
 use crate::agents::constraint_diagram::{wing_loading_limits, WingLoadingReport};
 use crate::agents::empennage::EmpennageAgent;
+use crate::agents::mass_model::{MassModelAgent, StructuralMasses};
 use crate::agents::mission::{MissionAgent, MissionError};
 use crate::agents::propulsion::PropulsionAgent;
 use crate::agents::trim_authority::TrimAuthorityAgent;
+use crate::agents::vn_diagram::VnDiagramAgent;
 use crate::agents::weight_balance::{WeightBalanceAgent, WeightBalanceOutput};
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
-use crate::models::specs::{EmpennageSpec, MissionSpec, PropulsionSpec, TrimSpec, WingSpec};
+use crate::models::specs::{
+    EmpennageSpec, MissionSpec, PropulsionSpec, TrimSpec, VnDiagramSpec, WingSpec,
+};
 
 /// Número máximo de iterações do laço de ponto fixo antes de desistir.
 const MAX_ITERATIONS: u32 = 50;
@@ -96,6 +100,31 @@ pub struct SizedAircraft {
     /// recalculado com o CG JÁ CONVERGIDO desta última iteração, não lido
     /// daqui).
     pub cl_h_trim_iterations: Vec<f64>,
+    /// Massas estruturais por componente (Raymer, Task 3 do plano
+    /// oew-parametrico), calculadas na iteração CONVERGIDA com o `n_design`
+    /// lag-1 (ver `n_design_iterations` abaixo). Nesta task ainda NÃO
+    /// alimenta o `WeightBalanceAgent` (consumido a partir da Task 4) — o
+    /// baseline numérico desta task permanece inalterado.
+    pub structural_masses: StructuralMasses,
+    /// Diagrama V-n (Task 4.3) da iteração CONVERGIDA — mesmo valor que
+    /// `main.rs` computava localmente antes desta task (entradas idênticas:
+    /// `wing`/`wb.spec.mtow_kg`/massa do cenário mais leve/`req`/categoria,
+    /// todos já estáveis no ponto fixo de MTOW).
+    pub vn: VnDiagramSpec,
+    /// Trajetória de `n_design` (fator de carga de projeto do V-n, CS
+    /// 23.333/.341) ao longo das iterações — o valor USADO em CADA
+    /// iteração é o da iteração ANTERIOR (lag-1, mesmo padrão de
+    /// `cl_h_trim_iterations`/`x_cg_trim_ref_prev`): `MassModelAgent::run`
+    /// precisa de `n_design` para fechar N_z ultimate, mas o V-n desta
+    /// MESMA iteração só fica disponível depois de `WeightBalanceAgent`
+    /// rodar (precisa do MTOW/massa leve do cenário). O seed da primeira
+    /// entrada é 3.8 (fator de manobra normal típico, N_z ultimate =
+    /// 1.5×3.8 = 5.70 — spec do plano) — ver comentário em
+    /// `size_aircraft_with_max_iters`. Diagnóstico/teste de estabilidade do
+    /// lag — não usado por nenhum agente a jusante (`vn`, acima, é
+    /// recalculado com os dados JÁ CONVERGIDOS desta última iteração, não
+    /// lido daqui).
+    pub n_design_iterations: Vec<f64>,
 }
 
 /// Erros do laço de convergência de MTOW.
@@ -230,6 +259,22 @@ pub(crate) fn size_aircraft_with_max_iters(
     let mut x_cg_trim_ref_prev: f64 = 0.0;
     let mut cl_h_trim_iterations: Vec<f64> = Vec::new();
 
+    // `n_design` (Task 3, plano oew-parametrico) — mesmo acoplamento LAG-1
+    // do CG acima, agora entre `MassModelAgent` e `VnDiagramAgent`:
+    // `MassModelAgent::run` precisa de `n_design` para fechar N_z ultimate
+    // (×1.5) das equações de massa estrutural, mas o `VnDiagramSpec` desta
+    // MESMA iteração só existe DEPOIS de `WeightBalanceAgent` rodar (o V-n
+    // precisa do MTOW de envelope e da massa do cenário mais leve,
+    // `wb.spec.mtow_kg`/`wb.scenarios[].total_mass_kg`). Em vez de resolver
+    // a dependência circular por iteração interna, usa-se o `n_design` da
+    // iteração ANTERIOR do próprio laço de MTOW — seed 3.8 (fator de
+    // manobra normal típico, N_z ultimate = 1.5×3.8 = 5.70) na primeira
+    // iteração, atualizado ao final de CADA iteração com o `n_design` real
+    // que acabou de ser calculado. Ver `n_design_iterations` no
+    // `SizedAircraft` devolvido.
+    let mut n_design_prev: f64 = 3.8;
+    let mut n_design_iterations: Vec<f64> = Vec::new();
+
     for _ in 0..max_iters {
         iterations.push(mtow);
 
@@ -241,6 +286,18 @@ pub(crate) fn size_aircraft_with_max_iters(
         // só de `wing`/`cfg.empennage`, não de MTOW), calculada logo após a
         // asa e usada pelo NP dentro do WeightBalanceAgent abaixo.
         let emp = EmpennageAgent::run(&wing, cfg);
+
+        // Massas estruturais (Task 3, plano oew-parametrico) — usa o
+        // `n_design` LAG-1 da iteração anterior (ver comentário no topo do
+        // laço). Nesta task `masses` ainda NÃO alimenta o
+        // `WeightBalanceAgent` — consumido a partir da Task 4; aqui só é
+        // calculado e carregado no `SizedAircraft` devolvido. Registra o
+        // valor de `n_design` efetivamente USADO nesta iteração ANTES de
+        // ser sobrescrito abaixo (mesmo padrão de `iterations.push(mtow)`
+        // no topo do laço — o histórico mostra a entrada, não a saída, de
+        // cada iteração).
+        let masses = MassModelAgent::run(cfg, engine, req, &wing, &emp, mtow, n_design_prev);
+        n_design_iterations.push(n_design_prev);
 
         // Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) — usa o CG
         // lag-1 (`x_cg_trim_ref_prev`, ver comentário acima) para fechar
@@ -303,6 +360,18 @@ pub(crate) fn size_aircraft_with_max_iters(
             ));
         x_cg_trim_ref_prev = sc.cg_pct_mac / 100.0;
 
+        // V-n diagram (Task 4.3) desta iteração — roda aqui porque precisa
+        // de `wb` (MTOW de envelope + massa do cenário mais leve), que só
+        // ficou disponível acima. Atualiza o LAG-1 de `n_design` (ver
+        // comentário no topo do laço) para a PRÓXIMA iteração.
+        let mass_light_kg = wb.scenarios.iter()
+            .map(|s| s.total_mass_kg)
+            .fold(f64::INFINITY, f64::min);
+        let vn = VnDiagramAgent::run(
+            &wing, wb.spec.mtow_kg, mass_light_kg, req, &cfg.structure.design_category,
+        );
+        n_design_prev = vn.n_design;
+
         let novo = wb.oew_kg + req.payload_kg() + fuel_kg;
 
         // Bail-out de DIVERGÊNCIA (não é a checagem de aceite): se o
@@ -363,6 +432,9 @@ pub(crate) fn size_aircraft_with_max_iters(
                 iterations,
                 cl_h_trim_iterations,
                 constraints,
+                structural_masses: masses,
+                vn,
+                n_design_iterations,
             });
         }
 
@@ -493,6 +565,48 @@ mod tests {
         assert!(delta_final < 1e-4,
             "delta final (campo real) = {delta_final:.3e} deveria estar bem abaixo de 1e-4 \
              (ordem de grandeza esperada ~1e-5) — histórico completo: {history:?}");
+    }
+
+    // ─── n_design — estabilidade do lag-1 (Task 3, plano oew-parametrico) ──
+
+    /// Testa o campo REAL `SizedAircraft::n_design_iterations`, populado
+    /// pelo próprio `size_aircraft` (não uma réplica manual do corpo do
+    /// laço — mesma lição de `cl_h_trim_iterations_do_campo_real_converge_
+    /// geometricamente`: nunca duplicar a lógica de produção num teste
+    /// separado, o que arriscaria os dois divergirem sem aviso).
+    #[test]
+    fn n_design_iterations_do_campo_real_converge() {
+        let sized = size_aircraft(&config_teste(), &engine_teste(), &requisitos_teste())
+            .expect("baseline sintético deveria convergir");
+        let h = &sized.n_design_iterations;
+        println!("n_design_iterations = {h:?}");
+        assert!(h.len() >= 2);
+        // seed 3.8 na primeira entrada (N_z = 1.5×3.8 = 5.70, spec):
+        assert!((h[0] - 3.8).abs() < 1e-12, "seed do lag deveria ser 3.8, obtido {}", h[0]);
+        let delta_final = (h[h.len() - 1] - h[h.len() - 2]).abs();
+        println!("delta_final (n_design) = {delta_final:.6e}");
+        // PIN HONESTO (medido): delta_final = 0.0 EXATO (bit-a-bit), a
+        // partir de h[1] em diante — não ~1e-5 como o lag de CL_h_trim.
+        // Explicação: `VnDiagramAgent::run` só depende de (a) geometria da
+        // asa (`wing.area_m2/aspect_ratio/taper_ratio`, vindos de `[wing]`
+        // no TOML — fixos, não recalculados a partir do candidato de MTOW
+        // do laço) e (b) `wb.spec.mtow_kg`/`mass_light_kg` (cenários de
+        // envelope/leve do `WeightBalanceAgent`, hoje somados a partir de
+        // `[[masses.items]]` ESTÁTICOS — o `StructuralMasses` desta task
+        // ainda NÃO alimenta o WB, ver Task 4). Nenhuma dessas entradas
+        // muda com o candidato de MTOW do laço nesta task, então o V-n (e
+        // portanto `n_design`) já está no ponto fixo desde a 1ª iteração —
+        // zero resíduo genuíno a medir, não uma coincidência de tolerância.
+        // Tolerância (1e-9, não 0.0 exato) só para não ficar frágil a
+        // ruído de ponto flutuante entre plataformas/otimizações.
+        assert!(delta_final < 1e-9, "residual do lag de n_design = {delta_final:.3e} — \
+            esperado ≈0.0 (ver comentário acima); histórico completo: {h:?}");
+        // + structural_masses do SizedAircraft finitas e positivas:
+        for (nome, v) in [("asa", sized.structural_masses.asa_kg),
+                          ("fuselagem", sized.structural_masses.fuselagem_kg),
+                          ("tanques", sized.structural_masses.tanques_kg)] {
+            assert!(v.is_finite() && v > 0.0, "{nome} = {v}");
+        }
     }
 
     #[test]

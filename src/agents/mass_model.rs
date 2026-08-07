@@ -4,6 +4,12 @@
 //! Interface em SI; internamente as equações usam unidades imperiais
 //! (fidelidade à fonte — expoentes empíricos não-dimensionalizáveis).
 
+use crate::models::aircraft_config::AircraftConfig;
+use crate::models::atmosphere::Isa;
+use crate::models::engine::EngineSpec;
+use crate::models::requirements::Requirements;
+use crate::models::specs::{EmpennageSpec, WingSpec};
+
 /// lb por kg (NIST)
 pub const LB_PER_KG: f64 = 2.20462;
 /// ft² por m²
@@ -123,6 +129,59 @@ pub fn fuel_system_mass_raymer_kg(capacity_l: f64) -> f64 {
     w_lb / LB_PER_KG
 }
 
+/// Agente que aplica as funções puras acima com as entradas derivadas da
+/// configuração/estado corrente da aeronave (q de cruzeiro, W_fw, S_f
+/// molhada, N_z ultimate) e os fatores de composto de `[mass_model]`.
+pub struct MassModelAgent;
+
+impl MassModelAgent {
+    /// `n_design`: fator de carga LIMITE (o agente aplica ×1.5 para o
+    /// ultimate N_z). No laço do orchestrator vem com LAG-1 (iteração
+    /// anterior; seed 3.8 → N_z 5.70) — ver `orchestrator::size_aircraft`.
+    /// q de cruzeiro vem do REQUISITO (cruise_speed_min_kmh + ISA na
+    /// altitude de missão), não da velocidade real da iteração — expoentes
+    /// de q são fracos (0.006–0.241), erro ≤3% (spec).
+    pub fn run(
+        cfg: &AircraftConfig, engine: &EngineSpec, req: &Requirements,
+        wing: &WingSpec, emp: &EmpennageSpec, mtow_kg: f64, n_design: f64,
+    ) -> StructuralMasses {
+        assert!(mtow_kg > 0.0, "MTOW deve ser positivo, obtido {mtow_kg}");
+        assert!(n_design > 0.0, "n_design deve ser positivo, obtido {n_design}");
+        let mm = &cfg.mass_model;
+        let rho = Isa::density_kgm3(req.cruise_altitude_m, req.isa_delta_c);
+        let v_ms = req.cruise_speed_min_kmh / 3.6;
+        let q_pa = 0.5 * rho * v_ms * v_ms;
+        let w_fw_kg = cfg.fuel_system.capacity_l * engine.fuel.density_kg_per_l;
+        let n_z_ult = 1.5 * n_design;
+        let t_c = cfg.wing.thickness_ratio; // aproximação: mesmo t/c nas empenagens
+        let s_f_m2 = mm.fuselage_wetted_coeff * std::f64::consts::PI
+            * mm.d_fus_equiv_m * cfg.fuselage.length_m;
+        let l_over_d = cfg.fuselage.length_m / mm.d_fus_equiv_m;
+        StructuralMasses {
+            asa_kg: wing_mass_raymer_kg(wing.area_m2, w_fw_kg, wing.aspect_ratio,
+                q_pa, wing.taper_ratio, t_c, n_z_ult, mtow_kg)
+                * mm.composite_factor_wing,
+            emp_h_kg: htail_mass_raymer_kg(n_z_ult, mtow_kg, q_pa,
+                emp.s_horizontal_m2, t_c, emp.ar_h, emp.taper_h)
+                * mm.composite_factor_tail,
+            emp_v_kg: vtail_mass_raymer_kg(n_z_ult, mtow_kg, q_pa,
+                emp.s_vertical_m2, t_c, emp.ar_v, emp.taper_v)
+                * mm.composite_factor_tail,
+            fuselagem_kg: fuselage_mass_raymer_kg(s_f_m2, n_z_ult, mtow_kg,
+                emp.arm_h_m, l_over_d, q_pa)
+                * mm.composite_factor_fuselage,
+            trem_principal_kg: main_gear_mass_raymer_kg(
+                mm.landing_load_factor_ult, mtow_kg, mm.main_strut_length_m)
+                * mm.composite_factor_gear,
+            trem_nariz_kg: nose_gear_mass_raymer_kg(
+                mm.landing_load_factor_ult, mtow_kg, mm.nose_strut_length_m)
+                * mm.composite_factor_gear,
+            tanques_kg: fuel_system_mass_raymer_kg(cfg.fuel_system.capacity_l)
+                * mm.composite_factor_fuel_system,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +258,115 @@ mod tests {
         let fs_base = fuel_system_mass_raymer_kg(260.0);
         let fs_maior = fuel_system_mass_raymer_kg(320.0);
         assert!(fs_maior > fs_base, "∂m_tanques/∂capacidade > 0");
+    }
+
+    // ─── MassModelAgent — integração com as demais specs (Task 3) ─────────
+
+    use crate::agents::aerodynamics::AerodynamicsAgent;
+    use crate::agents::empennage::EmpennageAgent;
+    use crate::models::aircraft_config::test_fixtures::config_teste;
+    use crate::models::aircraft_state::AircraftState;
+    use crate::models::engine::test_fixtures::motor_generico_teste;
+    use crate::models::requirements::test_fixtures::requisitos_teste;
+
+    #[test]
+    fn agente_aplica_fatores_de_composto_sobre_as_funcoes_puras() {
+        let cfg = config_teste();
+        let engine = motor_generico_teste();
+        let req = requisitos_teste();
+        let state = AircraftState::from_config(&cfg);
+        let wing = AerodynamicsAgent::run(&state, &req);
+        let emp = EmpennageAgent::run(&wing, &cfg);
+        let mtow = 1_400.0;
+        let n_design = 4.0;
+        let m = MassModelAgent::run(&cfg, &engine, &req, &wing, &emp, mtow, n_design);
+
+        // Reconstrói as MESMAS entradas derivadas que o agente deve usar:
+        let rho = Isa::density_kgm3(req.cruise_altitude_m, req.isa_delta_c);
+        let v_ms = req.cruise_speed_min_kmh / 3.6;
+        let q_pa = 0.5 * rho * v_ms * v_ms;
+        let w_fw = cfg.fuel_system.capacity_l * engine.fuel.density_kg_per_l;
+        let n_z_ult = 1.5 * n_design;
+        let t_c = cfg.wing.thickness_ratio;
+
+        let esperado_asa = wing_mass_raymer_kg(
+            wing.area_m2, w_fw, wing.aspect_ratio, q_pa, wing.taper_ratio,
+            t_c, n_z_ult, mtow,
+        ) * cfg.mass_model.composite_factor_wing;
+        assert!((m.asa_kg - esperado_asa).abs() < 1e-9,
+            "asa_kg = {:.4} (esperado {esperado_asa:.4})", m.asa_kg);
+
+        let esperado_emp_h = htail_mass_raymer_kg(
+            n_z_ult, mtow, q_pa, emp.s_horizontal_m2, t_c, emp.ar_h, emp.taper_h,
+        ) * cfg.mass_model.composite_factor_tail;
+        assert!((m.emp_h_kg - esperado_emp_h).abs() < 1e-9,
+            "emp_h_kg = {:.4} (esperado {esperado_emp_h:.4})", m.emp_h_kg);
+
+        let esperado_emp_v = vtail_mass_raymer_kg(
+            n_z_ult, mtow, q_pa, emp.s_vertical_m2, t_c, emp.ar_v, emp.taper_v,
+        ) * cfg.mass_model.composite_factor_tail;
+        assert!((m.emp_v_kg - esperado_emp_v).abs() < 1e-9,
+            "emp_v_kg = {:.4} (esperado {esperado_emp_v:.4})", m.emp_v_kg);
+
+        let mm = &cfg.mass_model;
+        let s_f_m2 = mm.fuselage_wetted_coeff * std::f64::consts::PI
+            * mm.d_fus_equiv_m * cfg.fuselage.length_m;
+        let l_over_d = cfg.fuselage.length_m / mm.d_fus_equiv_m;
+        let esperado_fuselagem = fuselage_mass_raymer_kg(
+            s_f_m2, n_z_ult, mtow, emp.arm_h_m, l_over_d, q_pa,
+        ) * cfg.mass_model.composite_factor_fuselage;
+        assert!((m.fuselagem_kg - esperado_fuselagem).abs() < 1e-9,
+            "fuselagem_kg = {:.4} (esperado {esperado_fuselagem:.4})", m.fuselagem_kg);
+
+        let esperado_trem_principal = main_gear_mass_raymer_kg(
+            mm.landing_load_factor_ult, mtow, mm.main_strut_length_m,
+        ) * mm.composite_factor_gear;
+        assert!((m.trem_principal_kg - esperado_trem_principal).abs() < 1e-9,
+            "trem_principal_kg = {:.4} (esperado {esperado_trem_principal:.4})",
+            m.trem_principal_kg);
+
+        let esperado_trem_nariz = nose_gear_mass_raymer_kg(
+            mm.landing_load_factor_ult, mtow, mm.nose_strut_length_m,
+        ) * mm.composite_factor_gear;
+        assert!((m.trem_nariz_kg - esperado_trem_nariz).abs() < 1e-9,
+            "trem_nariz_kg = {:.4} (esperado {esperado_trem_nariz:.4})", m.trem_nariz_kg);
+
+        let esperado_tanques = fuel_system_mass_raymer_kg(cfg.fuel_system.capacity_l)
+            * mm.composite_factor_fuel_system;
+        assert!((m.tanques_kg - esperado_tanques).abs() < 1e-9,
+            "tanques_kg = {:.4} (esperado {esperado_tanques:.4})", m.tanques_kg);
+
+        assert!(m.asa_kg > 0.0 && m.tanques_kg > 0.0);
+    }
+
+    // Empenagem responde a v_h NOS DOIS SENTIDOS (spec, Testes item 2) —
+    // substitui a property de mass_per_area do ciclo 2.
+    #[test]
+    fn massa_da_empenagem_horizontal_responde_a_v_h_nos_dois_sentidos() {
+        let cfg_base = config_teste();
+        let engine = motor_generico_teste();
+        let req = requisitos_teste();
+        let state = AircraftState::from_config(&cfg_base);
+        let wing = AerodynamicsAgent::run(&state, &req);
+        let mtow = 1_400.0;
+        let n_design = 4.0;
+
+        let emp_base = EmpennageAgent::run(&wing, &cfg_base);
+        let m_base = MassModelAgent::run(&cfg_base, &engine, &req, &wing, &emp_base, mtow, n_design);
+
+        let mut cfg_maior = cfg_base.clone();
+        cfg_maior.empennage.v_h *= 1.2;
+        let emp_maior = EmpennageAgent::run(&wing, &cfg_maior);
+        let m_maior = MassModelAgent::run(&cfg_maior, &engine, &req, &wing, &emp_maior, mtow, n_design);
+
+        let mut cfg_menor = cfg_base.clone();
+        cfg_menor.empennage.v_h *= 0.8;
+        let emp_menor = EmpennageAgent::run(&wing, &cfg_menor);
+        let m_menor = MassModelAgent::run(&cfg_menor, &engine, &req, &wing, &emp_menor, mtow, n_design);
+
+        assert!(m_maior.emp_h_kg > m_base.emp_h_kg,
+            "m_maior={:.4} deveria ser > m_base={:.4}", m_maior.emp_h_kg, m_base.emp_h_kg);
+        assert!(m_base.emp_h_kg > m_menor.emp_h_kg,
+            "m_base={:.4} deveria ser > m_menor={:.4}", m_base.emp_h_kg, m_menor.emp_h_kg);
     }
 }

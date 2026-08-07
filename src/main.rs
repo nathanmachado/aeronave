@@ -381,12 +381,15 @@ fn main() {
     // StructuralAgent (que consome `n_design` — o fator de carga que governa
     // o dimensionamento, manobra OU rajada, o que for maior).
     println!("[ V-n ] VnDiagramAgent — Diagrama V-n completo com rajadas (CS 23.333/.341)");
+    // Calculado dentro do laço de convergência (`orchestrator::
+    // size_aircraft_with_max_iters`) na iteração já convergida — mesmas
+    // entradas que este bloco computava localmente antes desta task,
+    // valores idênticos. `mass_light_kg` recalculado aqui só para o print
+    // abaixo (mesma expressão usada dentro do orchestrator).
+    let vn = &sized.vn;
     let mass_light_kg = wb.scenarios.iter()
         .map(|s| s.total_mass_kg)
         .fold(f64::INFINITY, f64::min);
-    let vn = aeronave::agents::vn_diagram::VnDiagramAgent::run(
-        wing, envelope_mtow_kg, mass_light_kg, &req, &cfg.structure.design_category,
-    );
     println!("  VA={:.0}km/h  VB={:.0}km/h  VC={:.0}km/h  VD={:.0}km/h",
              vn.va_kmh, vn.vb_kmh, vn.vc_kmh, vn.vd_kmh);
     println!("  n_lim: +{:.2}g / {:.2}g (manobra, CS 23.337)  |  n_gust_vc: {:.2}g (envelope, {:.0}kg)  |  n_gust_vc_light: {:.2}g (leve, {:.0}kg)",
