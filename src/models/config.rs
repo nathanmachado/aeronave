@@ -585,6 +585,18 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.empennage.e_h
         )));
     }
+    // Ciclo 4: t/c dedicado da empenagem (antes usava-se o t/c da asa como
+    // aproximação, ver histórico em `agents::mass_model`). Faixa (0.06,
+    // 0.18) — perfis simétricos finos típicos de empenagem GA (NACA
+    // 0006–0018), mesma ordem de grandeza da faixa de `wing.thickness_ratio`.
+    require_finite("empennage.thickness_ratio", cfg.empennage.thickness_ratio)?;
+    if cfg.empennage.thickness_ratio <= 0.06 || cfg.empennage.thickness_ratio >= 0.18 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: empennage.thickness_ratio deve estar em \
+             (0.06, 0.18) — valor: {}",
+            cfg.empennage.thickness_ratio
+        )));
+    }
     // Task trim-authority (fix de revisão): braço de cauda mínimo relativo
     // à MAC — o modelo de flare linearizado de `agents::trim_authority::
     // cl_h_required_flare` divide por `η_h·(S_h/S_w)·(l_h/MAC)`; um braço
@@ -1360,6 +1372,7 @@ mod tests {
             eta_h = 0.90
             cd0_area_factor = 0.014
             e_h = 0.75
+            thickness_ratio = 0.12
             [propeller]
             diameter_m = 1.8
             blades = 2
@@ -1992,6 +2005,17 @@ mod tests {
     fn aceita_e_h_dentro_da_faixa() {
         let toml = aircraft_toml_valido().replace("e_h = 0.75", "e_h = 0.70");
         assert!(parse_aircraft(&toml).is_ok());
+    }
+
+    // ─── [empennage] thickness_ratio (ciclo 4 — t/c dedicado) ─────────────
+
+    #[test]
+    fn rejeita_thickness_ratio_da_empenagem_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("thickness_ratio = 0.12", "thickness_ratio = 0.30");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("empennage.thickness_ratio"), "{err}");
+        assert!(err.to_string().contains("(0.06, 0.18)"), "{err}");
     }
 
     // ─── Migrações (task refino-ciclo2) ──────────────────────────────────

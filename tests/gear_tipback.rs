@@ -90,8 +90,13 @@ fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     // TRASEIRO real dos cenários (37,5%→31,7% MAC), o que AUMENTA a
     // distância `(x_main − x_cg_aft)` e portanto FOLGA o tipback:
     // 15.58°→**≈19.17°** (old→new, tolerância INALTERADA).
-    assert!((gear.tipback_angle_deg - 19.17).abs() < 0.05,
-        "θ tipback = {:.4}° — pin honesto esperado ≈19.17° (tolerância ±0.05°)",
+    // Ciclo 4 (t/c dedicado da empenagem, `[empennage].thickness_ratio`,
+    // 2026-08-07): a cauda mais pesada (braço TRASEIRO) RECUA o CG vazio
+    // e o CG mais traseiro real, o que REDUZ a distância `(x_main −
+    // x_cg_aft)` e portanto aperta ligeiramente o tipback: 19.17°→
+    // **≈18.91°** (old→new). Continua bem acima do piso de 15°.
+    assert!((gear.tipback_angle_deg - 18.91).abs() < 0.05,
+        "θ tipback = {:.4}° — pin honesto esperado ≈18.91° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
     assert!(gear.tipback_angle_deg >= 15.0,
         "achado honesto esperado: θ={:.2}° deveria ficar NO piso de 15° ou acima \
@@ -145,8 +150,14 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // quanto mais perto do trem de nariz fica o CG, MAIOR a fração de
     // carga nele: 24.79%→**≈29.03%** (old→new, tolerância INALTERADA) —
     // ACIMA do teto de 25%. FAIL honesto, asserido abaixo, não mascarado.
-    assert!((gear.nose_load_max_pct - 29.03).abs() < 0.1,
-        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈29.03% (tolerância ±0.1%)",
+    // Ciclo 4 (t/c dedicado da empenagem): a cauda mais pesada RECUA o CG
+    // mais dianteiro também (mesma causa física de todos os pins deste
+    // ciclo — massa em braço TRASEIRO recua o CG), afastando-o um pouco
+    // do trem de nariz: 29.03%→**≈28.71%** (old→new). Continua ACIMA do
+    // teto de 25% — achado honesto do ciclo 3 permanece, só com margem
+    // ligeiramente MENOR.
+    assert!((gear.nose_load_max_pct - 28.71).abs() < 0.1,
+        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈28.71% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
     assert!(gear.nose_load_max_pct > 25.0,
         "achado honesto do ciclo 3: nose_load_max_pct = {:.2}% deveria EXCEDER o teto de 25% \
@@ -155,8 +166,11 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // old (pré-E7, x_main=3.55m): ≈8.68%; E7: ≈12.95%. Ciclo 3: o CG mais
     // TRASEIRO também avançou (37,5%→31,7% MAC), subindo a carga MÍNIMA de
     // nariz: 12.95%→**≈16.15%** — continua bem acima do piso de 8%.
-    assert!((gear.nose_load_min_pct - 16.15).abs() < 0.05,
-        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈16.15% (tolerância ±0.05%)",
+    // Ciclo 4 (t/c dedicado da empenagem): CG mais traseiro RECUA (cauda
+    // mais pesada), reduzindo a carga MÍNIMA de nariz: 16.15%→**≈15.92%**
+    // (old→new). Continua bem acima do piso de 8%.
+    assert!((gear.nose_load_min_pct - 15.92).abs() < 0.05,
+        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈15.92% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
 }

@@ -171,6 +171,12 @@ pub struct EmpennageCfg {
     /// esteira da asa). Faixa 0,5–0,95 (Raymer/Gudmundsson, superfícies de
     /// cauda de baixo alongamento).
     pub e_h: f64,
+    /// Espessura relativa (t/c) dos perfis da empenagem (ciclo 4) — perfis
+    /// simétricos finos típicos de empenagem (NACA 0009–0012). Consumido por
+    /// `agents::mass_model` (expoentes de (100·t/c): EH −0.12, EV −0.49 —
+    /// empenagem mais fina é mais PESADA). Antes do ciclo 4 usava-se o t/c da
+    /// ASA como aproximação (subestimava EV ~21%).
+    pub thickness_ratio: f64,
 }
 
 /// Configuração da hélice — dimensionamento/validação em
@@ -580,6 +586,10 @@ pub mod test_fixtures {
                 // — mesma justificativa de "nenhum destes números coincide
                 // com o baseline real" usada nas demais seções desta fixture.
                 e_h: 0.80,
+                // Ciclo 4 (t/c dedicado): DISTINTO do baseline real (0.10) —
+                // mesma justificativa de "nenhum destes números coincide com
+                // o baseline real" usada nas demais seções desta fixture.
+                thickness_ratio: 0.12,
             },
             propeller: PropellerCfg {
                 diameter_m: Some(1.90),

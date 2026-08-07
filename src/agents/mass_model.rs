@@ -4,20 +4,20 @@
 //! Interface em SI; internamente as equações usam unidades imperiais
 //! (fidelidade à fonte — expoentes empíricos não-dimensionalizáveis).
 //!
-//! **Aproximação conhecida — t/c das empenagens**: `htail_mass_raymer_kg`/
-//! `vtail_mass_raymer_kg` usam o MESMO espessura relativa da ASA
-//! (`[wing].thickness_ratio`, 0,15 no baseline) porque `EmpennageCfg` não
-//! tem um campo dedicado — empenagens GA tipicamente usam perfis mais finos
-//! (t/c ~0,10). O expoente de `(100·t/c)` é −0,49 na equação do EV e −0,12
-//! na do EH (Raymer Tab. 15.2), então usar 0,15 em vez de ~0,10 SUBESTIMA a
-//! massa do EV em ~21% e a do EH em ~5% — (1,5)^0,49 ≈ 1,22 e (1,5)^0,12 ≈
-//! 1,05, onde 1,5 = 0,15/0,10. Impacto medido no baseline: ~+2 kg de massa
-//! de empenagem, a um braço de ~7,3 m do CG, o que desloca o CG vazio em
-//! ~0,8 pp de MAC para a frente — dentro do gap de 4,7 pp identificado no
-//! achado do ciclo (ver task-4-report.md/task-1-report.md desta task de
-//! revisão). Refinamento futuro: um campo dedicado
-//! `[empennage].thickness_ratio` (com fallback para `[wing].
-//! thickness_ratio` se ausente, para não quebrar TOMLs existentes).
+//! **Nota histórica — t/c das empenagens (RESOLVIDO no ciclo 4)**: antes do
+//! ciclo 4, `htail_mass_raymer_kg`/`vtail_mass_raymer_kg` usavam o MESMO
+//! espessura relativa da ASA (`[wing].thickness_ratio`, 0,15 no baseline)
+//! porque `EmpennageCfg` não tinha um campo dedicado — empenagens GA
+//! tipicamente usam perfis mais finos (t/c ~0,10). O expoente de
+//! `(100·t/c)` é −0,49 na equação do EV e −0,12 na do EH (Raymer Tab.
+//! 15.2), então usar 0,15 em vez de ~0,10 SUBESTIMAVA a massa do EV em
+//! ~21% e a do EH em ~5% — (1,5)^0,49 ≈ 1,22 e (1,5)^0,12 ≈ 1,05, onde
+//! 1,5 = 0,15/0,10. Impacto medido no baseline (pré-ciclo-4): ~+2 kg de
+//! massa de empenagem, a um braço de ~7,3 m do CG, o que deslocava o CG
+//! vazio em ~0,8 pp de MAC para a frente — dentro do gap de 4,7 pp
+//! identificado no achado do ciclo (ver task-4-report.md/task-1-report.md
+//! da task de revisão que precedeu este ciclo). Resolvido no ciclo 4:
+//! `[empennage].thickness_ratio`, campo dedicado consumido abaixo.
 
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::atmosphere::Isa;
@@ -168,19 +168,20 @@ impl MassModelAgent {
         let q_pa = 0.5 * rho * v_ms * v_ms;
         let w_fw_kg = cfg.fuel_system.capacity_l * engine.fuel.density_kg_per_l;
         let n_z_ult = 1.5 * n_design;
-        let t_c = cfg.wing.thickness_ratio; // aproximação: mesmo t/c nas empenagens
+        let t_c_asa = cfg.wing.thickness_ratio;
+        let t_c_emp = cfg.empennage.thickness_ratio; // ciclo 4: campo dedicado
         let s_f_m2 = mm.fuselage_wetted_coeff * std::f64::consts::PI
             * mm.d_fus_equiv_m * cfg.fuselage.length_m;
         let l_over_d = cfg.fuselage.length_m / mm.d_fus_equiv_m;
         StructuralMasses {
             asa_kg: wing_mass_raymer_kg(wing.area_m2, w_fw_kg, wing.aspect_ratio,
-                q_pa, wing.taper_ratio, t_c, n_z_ult, mtow_kg)
+                q_pa, wing.taper_ratio, t_c_asa, n_z_ult, mtow_kg)
                 * mm.composite_factor_wing,
             emp_h_kg: htail_mass_raymer_kg(n_z_ult, mtow_kg, q_pa,
-                emp.s_horizontal_m2, t_c, emp.ar_h, emp.taper_h)
+                emp.s_horizontal_m2, t_c_emp, emp.ar_h, emp.taper_h)
                 * mm.composite_factor_tail,
             emp_v_kg: vtail_mass_raymer_kg(n_z_ult, mtow_kg, q_pa,
-                emp.s_vertical_m2, t_c, emp.ar_v, emp.taper_v)
+                emp.s_vertical_m2, t_c_emp, emp.ar_v, emp.taper_v)
                 * mm.composite_factor_tail,
             fuselagem_kg: fuselage_mass_raymer_kg(s_f_m2, n_z_ult, mtow_kg,
                 emp.arm_h_m, l_over_d, q_pa)
@@ -226,6 +227,28 @@ mod tests {
         let raw = vtail_mass_raymer_kg(N_Z_ULT, W_DG_KG, Q_PA, 1.412900, 0.15, 1.5, 0.5);
         assert!((raw - 7.60).abs() < 0.1, "EV raw = {raw:.2} kg (esperado 7.60 ±0.1)");
         assert!((raw * 0.83 - 6.31).abs() < 0.1);
+    }
+
+    // Ciclo 4 (t/c dedicado da empenagem): pins congelados do plano com
+    // t/c=0.10 (perfil mais fino que o da asa, 0.15) — demais entradas E7.
+    #[test]
+    fn hand_check_empenagens_com_t_c_dedicado_0_10() {
+        let eh = htail_mass_raymer_kg(N_Z_ULT, W_DG_KG, Q_PA, 3.133966, 0.10, 4.0, 0.5);
+        assert!((eh - 17.596).abs() < 0.1, "EH raw t/c=0.10 = {eh:.3} (esperado 17.596 ±0.1)");
+        assert!((eh * 0.83 - 14.605).abs() < 0.1);
+        let ev = vtail_mass_raymer_kg(N_Z_ULT, W_DG_KG, Q_PA, 1.412900, 0.10, 1.5, 0.5);
+        assert!((ev - 9.270).abs() < 0.1, "EV raw t/c=0.10 = {ev:.3} (esperado 9.270 ±0.1)");
+        assert!((ev * 0.83 - 7.694).abs() < 0.1);
+    }
+
+    // Propriedade: empenagem mais FINA é mais PESADA (expoentes negativos
+    // de t/c nas equações Raymer — EH^-0.12, EV^-0.49).
+    #[test]
+    fn empenagem_mais_fina_e_mais_pesada() {
+        let ev_grosso = vtail_mass_raymer_kg(N_Z_ULT, W_DG_KG, Q_PA, 1.4129, 0.15, 1.5, 0.5);
+        let ev_fino   = vtail_mass_raymer_kg(N_Z_ULT, W_DG_KG, Q_PA, 1.4129, 0.10, 1.5, 0.5);
+        assert!(ev_fino > ev_grosso,
+            "EV t/c=0.10 ({ev_fino:.2}) deveria pesar mais que t/c=0.15 ({ev_grosso:.2})");
     }
 
     #[test]
@@ -302,23 +325,24 @@ mod tests {
         let q_pa = 0.5 * rho * v_ms * v_ms;
         let w_fw = cfg.fuel_system.capacity_l * engine.fuel.density_kg_per_l;
         let n_z_ult = 1.5 * n_design;
-        let t_c = cfg.wing.thickness_ratio;
+        let t_c_asa = cfg.wing.thickness_ratio;
+        let t_c_emp = cfg.empennage.thickness_ratio;
 
         let esperado_asa = wing_mass_raymer_kg(
             wing.area_m2, w_fw, wing.aspect_ratio, q_pa, wing.taper_ratio,
-            t_c, n_z_ult, mtow,
+            t_c_asa, n_z_ult, mtow,
         ) * cfg.mass_model.composite_factor_wing;
         assert!((m.asa_kg - esperado_asa).abs() < 1e-9,
             "asa_kg = {:.4} (esperado {esperado_asa:.4})", m.asa_kg);
 
         let esperado_emp_h = htail_mass_raymer_kg(
-            n_z_ult, mtow, q_pa, emp.s_horizontal_m2, t_c, emp.ar_h, emp.taper_h,
+            n_z_ult, mtow, q_pa, emp.s_horizontal_m2, t_c_emp, emp.ar_h, emp.taper_h,
         ) * cfg.mass_model.composite_factor_tail;
         assert!((m.emp_h_kg - esperado_emp_h).abs() < 1e-9,
             "emp_h_kg = {:.4} (esperado {esperado_emp_h:.4})", m.emp_h_kg);
 
         let esperado_emp_v = vtail_mass_raymer_kg(
-            n_z_ult, mtow, q_pa, emp.s_vertical_m2, t_c, emp.ar_v, emp.taper_v,
+            n_z_ult, mtow, q_pa, emp.s_vertical_m2, t_c_emp, emp.ar_v, emp.taper_v,
         ) * cfg.mass_model.composite_factor_tail;
         assert!((m.emp_v_kg - esperado_emp_v).abs() < 1e-9,
             "emp_v_kg = {:.4} (esperado {esperado_emp_v:.4})", m.emp_v_kg);

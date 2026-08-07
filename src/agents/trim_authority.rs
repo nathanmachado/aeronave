@@ -1046,14 +1046,23 @@ mod tests {
         // 42,834789%→**35,4739%** MAC. Novos pins (recalculados pela mesma
         // fórmula, TOLERÂNCIAS INALTERADAS): CL_h_trim_cruise
         // 0,086877→**0,045581**, ΔCD_trim 1,8937e-4→**5,213e-5**.
+        //
+        // Ciclo 4 (t/c dedicado da empenagem, `[empennage].thickness_ratio`,
+        // 2026-08-07): a cauda fica mais pesada (braço TRASEIRO) — o CG
+        // vazio RECUA, e com ele o CG de todos os cenários (efeito oposto
+        // ao ciclo 3, mesma causa física — massa em braço traseiro recua o
+        // CG). x̄_cg (meia-missão) 35,4739%→**35,9158%** MAC. Novos pins
+        // (recalculados pela mesma fórmula, TOLERÂNCIAS INALTERADAS):
+        // CL_h_trim_cruise 0,045581→**0,048015**, ΔCD_trim
+        // 5,213e-5→**5,784e-5**.
         println!("cl_h_trim_cruise = {:.6}  cd_trim = {:.8}  cg_reference = '{}' ({:.4}% MAC)",
             trim.cl_h_trim_cruise, trim.cd_trim, trim.cg_reference_scenario, trim.cg_reference_pct_mac);
         assert_eq!(trim.cg_reference_scenario,
             crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME);
-        assert!((trim.cl_h_trim_cruise - 0.045581).abs() < 1e-4,
-            "cl_h_trim_cruise = {:.6} (esperado ≈0.045581 ±1e-4, pin pós-ciclo-3)", trim.cl_h_trim_cruise);
-        assert!((trim.cd_trim - 5.213e-5).abs() < 1e-6,
-            "cd_trim = {:.8} (esperado ≈5.213e-5 ±1e-6, pin pós-ciclo-3)", trim.cd_trim);
+        assert!((trim.cl_h_trim_cruise - 0.048015).abs() < 1e-4,
+            "cl_h_trim_cruise = {:.6} (esperado ≈0.048015 ±1e-4, pin pós-ciclo-4)", trim.cl_h_trim_cruise);
+        assert!((trim.cd_trim - 5.784e-5).abs() < 1e-6,
+            "cd_trim = {:.8} (esperado ≈5.784e-5 ±1e-6, pin pós-ciclo-4)", trim.cd_trim);
         assert!(trim.cl_h_trim_cruise > 0.0,
             "CG de referência atrás do CA (x̄≈35,5% > 25%) deveria produzir upload \
              (CL_h_trim_cruise > 0) — obtido {:.6}", trim.cl_h_trim_cruise);

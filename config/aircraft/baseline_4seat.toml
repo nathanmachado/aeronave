@@ -79,6 +79,9 @@ cd0_area_factor = 0.014366
 # projeto (mesma classe de parâmetro semi-empírico que cl_h_max_down era
 # antes da Task 1a). Faixa 0.5–0.95.
 e_h = 0.70
+# Espessura relativa dos perfis da empenagem (ciclo 4) — NACA 0009–0012
+# típicos; alimenta as equações de massa Raymer (EH^-0.12, EV^-0.49).
+thickness_ratio = 0.10
 
 [propeller]
 diameter_m = 1.95
