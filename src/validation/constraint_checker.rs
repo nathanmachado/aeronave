@@ -449,7 +449,17 @@ mod tests {
         let engine = motor_generico_teste();
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
         let emp    = EmpennageAgent::run(&wing, &cfg);
-        let mut wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
+        // Massas estruturais COMPUTADAS (ciclo 3, `agents::mass_model`) —
+        // mesma sequência do orchestrator, com o MTOW do estado (palpite
+        // inicial de `[sizing]`, esta fixture não itera o ponto fixo) e o
+        // seed 3,8 do lag-1 de `n_design` (ver
+        // `orchestrator::size_aircraft_with_max_iters`). Alimentam tanto o
+        // OEW (`WeightBalanceAgent`) quanto o `LandingGearAgent` abaixo —
+        // uma fonte única, como em produção.
+        let masses = crate::agents::mass_model::MassModelAgent::run(
+            &cfg, &engine, &req, &wing, &emp, state.mtow_kg, 3.8,
+        );
+        let mut wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp, &masses);
         // task trim-authority: finaliza o envelope (inside_envelope/
         // cg_limit_fwd_pct_mac) com o limite dianteiro físico — mesma
         // sequência de `orchestrator::size_aircraft`/`main.rs`, necessária
@@ -468,12 +478,9 @@ mod tests {
         // `main.rs`.
         let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
         let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-        let mass_main_total = cfg.masses.item_mass("trem_principal")
-            .expect("item de massa 'trem_principal' ausente na fixture");
-        let mass_nose = cfg.masses.item_mass("trem_nariz")
-            .expect("item de massa 'trem_nariz' ausente na fixture");
         let gear = crate::agents::landing_gear::LandingGearAgent::run(
-            state.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose,
+            state.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear,
+            masses.trem_principal_kg, masses.trem_nariz_kg,
         );
         let gear_cfg = cfg.gear.clone();
         (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg)

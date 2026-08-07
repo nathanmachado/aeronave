@@ -425,8 +425,10 @@ fn main() {
 
     // ── Agente 5: Estrutura ───────────────────────────────────────────────────
     println!("[ AGENTE 5 ] StructuralAgent — Longarina e Flutter");
-    let wing_mass_kg = cfg.masses.item_mass("asa")
-        .expect("item de massa 'asa' ausente na configuração da aeronave");
+    // Massa da asa COMPUTADA (ciclo 3, `agents::mass_model` via
+    // `SizedAircraft::structural_masses`) — a MESMA massa que entrou no OEW
+    // do `WeightBalanceAgent`, não mais um item fixo de `[[masses.items]]`.
+    let wing_mass_kg = sized.structural_masses.asa_kg;
     // Estrutura dimensiona para o pior caso de carga LEGAL (envelope), não
     // para o MTOW de missão — ver comentário do bloco [ SIZING ] acima.
     let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
@@ -457,10 +459,11 @@ fn main() {
     // [wing] le_root_x_m (única fonte da posição do bordo de ataque).
     let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
     let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-    let mass_main_total = cfg.masses.item_mass("trem_principal")
-        .expect("item de massa 'trem_principal' ausente na configuração da aeronave");
-    let mass_nose = cfg.masses.item_mass("trem_nariz")
-        .expect("item de massa 'trem_nariz' ausente na configuração da aeronave");
+    // Massas do trem COMPUTADAS (ciclo 3, `agents::mass_model`) — as MESMAS
+    // que entraram no OEW; `LandingGearAgent` deriva a massa de uma perna
+    // (atuador de retração) como metade da total.
+    let mass_main_total = sized.structural_masses.trem_principal_kg;
+    let mass_nose = sized.structural_masses.trem_nariz_kg;
     // Trem de pouso também dimensiona para o envelope estrutural (mesma
     // razão da StructuralAgent acima) — as cargas de pouso/solo devem
     // suportar o pior caso legal, não o MTOW de missão.

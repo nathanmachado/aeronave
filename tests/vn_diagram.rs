@@ -137,7 +137,10 @@ fn rajada_governando_aumenta_momento_fletor_na_proporcao_esperada() {
     let mass_light_kg = sized.wb.scenarios.iter()
         .map(|s| s.total_mass_kg)
         .fold(f64::INFINITY, f64::min);
-    let wing_mass_kg = cfg.masses.item_mass("asa").unwrap();
+    // Ciclo 3 (oew-parametrico): massa da asa COMPUTADA
+    // (`agents::mass_model` via `SizedAircraft::structural_masses`), não
+    // mais um item fixo de `[[masses.items]]`.
+    let wing_mass_kg = sized.structural_masses.asa_kg;
 
     let vn = VnDiagramAgent::run(
         &sized.wing, envelope_mtow_kg, mass_light_kg, &req, &cfg.structure.design_category,

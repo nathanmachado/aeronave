@@ -14,6 +14,7 @@
 ///   - Raymer, D. "Aircraft Design: A Conceptual Approach", Cap. 6 e 10
 ///   - Roskam, J. "Airplane Design Part II", estabilidade estática
 
+use crate::agents::mass_model::StructuralMasses;
 use crate::models::{
     aircraft_config::AircraftConfig,
     aircraft_state::AircraftState,
@@ -168,24 +169,35 @@ impl ArmConfig {
 /// convencional. Antes da task refino-ciclo2 este valor vinha do
 /// `arm_offset_m` do item fixo `emp_vertical` de `[[masses.items]]`
 /// (idêntico, −0,2 m, tanto no baseline real quanto na fixture sintética);
-/// agora que a massa é DERIVADA (`EmpennageSpec × mass_per_area`, não mais
-/// um item de config), o deslocamento vira uma constante de engenharia
-/// documentada aqui em vez de um campo de TOML.
+/// agora que a massa é COMPUTADA (`agents::mass_model`, não mais um item de
+/// config), o deslocamento vira uma constante de engenharia documentada
+/// aqui em vez de um campo de TOML.
 const EMP_VERTICAL_ARM_OFFSET_M: f64 = -0.2;
 
-/// Retorna os itens de peso do avião vazio operacional (OEW): o motor (de
-/// `EngineSpec`), todos os itens de `[[masses.items]]` da configuração
-/// (braço resolvido via `arm_ref` + `arm_offset_m` contra `ArmConfig`), MAIS
-/// os dois itens da empenagem — horizontal e vertical — DERIVADOS de
-/// `EmpennageSpec × [empennage].mass_per_area_{h,v}_kg_m2` (task
-/// refino-ciclo2, 1b: substitui os antigos itens fixos `emp_horizontal`/
-/// `emp_vertical` de `[[masses.items]]`, REMOVIDOS da config — erro de
-/// migração claro se ainda presentes, ver `models::config::
-/// check_emp_mass_items_migration`). Os braços dos dois itens derivados
-/// usam o MESMO `arm_ref` de antes (`empennage_cg`), com o MESMO offset
-/// para a vertical (`EMP_VERTICAL_ARM_OFFSET_M`) — só a MASSA passou a ser
-/// paramétrica, não o braço.
-pub fn oew_items(cfg: &AircraftConfig, engine: &EngineSpec, emp: &EmpennageSpec) -> Vec<MassItem> {
+/// Retorna os itens de peso do avião vazio operacional (OEW):
+///   - o motor (massa de `EngineSpec`);
+///   - os itens NÃO-estruturais de `[[masses.items]]` da configuração
+///     (equipamentos/instalação: PSRU+hélice+capô, resfriamento, aviônicos,
+///     bateria, painel, mobiliário, cabos, portas/vidros, antepara — braço
+///     resolvido via `arm_ref` + `arm_offset_m` contra `ArmConfig`);
+///   - as 7 massas ESTRUTURAIS COMPUTADAS (`masses`, ciclo 3 —
+///     `agents::mass_model`, equações de componente Raymer cap. 15.2 ×
+///     fatores de composto de `[mass_model]`), com mapeamento ESTÁTICO
+///     componente→braço.
+///
+/// Os braços dos 7 itens computados são EXATAMENTE os mesmos `arm_ref` que
+/// os antigos itens fixos de `[[masses.items]]` usavam (`wing_struct`,
+/// `fuselage_struct`, `empennage_cg` — com `EMP_VERTICAL_ARM_OFFSET_M`
+/// para a deriva —, `gear_main`, `gear_nose`, `fuel_cg`): só a MASSA passou
+/// a ser paramétrica, não o braço. Os 7 nomes correspondentes são
+/// PROIBIDOS em `[[masses.items]]` (erro de migração claro, ver
+/// `models::config::check_structural_mass_items_migration`) para que a
+/// mesma massa não possa ser contada duas vezes.
+pub fn oew_items(
+    cfg: &AircraftConfig,
+    engine: &EngineSpec,
+    masses: &StructuralMasses,
+) -> Vec<MassItem> {
     let arms = ArmConfig::from_config(cfg);
     let mut items = vec![MassItem {
         name: "Motor + acessórios".to_string(),
@@ -206,16 +218,16 @@ pub fn oew_items(cfg: &AircraftConfig, engine: &EngineSpec, emp: &EmpennageSpec)
             arm_m: base_arm + item.arm_offset_m,
         });
     }
-    items.push(MassItem {
-        name: "emp_horizontal".to_string(),
-        mass_kg: cfg.empennage.mass_per_area_h_kg_m2 * emp.s_horizontal_m2,
-        arm_m: arms.empenagem_cg_m,
-    });
-    items.push(MassItem {
-        name: "emp_vertical".to_string(),
-        mass_kg: cfg.empennage.mass_per_area_v_kg_m2 * emp.s_vertical_m2,
-        arm_m: arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M,
-    });
+    // Itens estruturais COMPUTADOS (ciclo 3, agents::mass_model) — mapeamento
+    // estático componente→braço, MESMOS arm_refs dos antigos itens de
+    // [[masses.items]] (removidos; erro de migração se presentes):
+    items.push(MassItem { name: "asa".into(), mass_kg: masses.asa_kg, arm_m: arms.wing_struct_m });
+    items.push(MassItem { name: "fuselagem".into(), mass_kg: masses.fuselagem_kg, arm_m: arms.fuselage_struct_m });
+    items.push(MassItem { name: "emp_horizontal".into(), mass_kg: masses.emp_h_kg, arm_m: arms.empenagem_cg_m });
+    items.push(MassItem { name: "emp_vertical".into(), mass_kg: masses.emp_v_kg, arm_m: arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M });
+    items.push(MassItem { name: "trem_principal".into(), mass_kg: masses.trem_principal_kg, arm_m: arms.gear_main_m });
+    items.push(MassItem { name: "trem_nariz".into(), mass_kg: masses.trem_nariz_kg, arm_m: arms.gear_nose_m });
+    items.push(MassItem { name: "tanques".into(), mass_kg: masses.tanques_kg, arm_m: arms.fuel_cg_m });
     items
 }
 
@@ -467,6 +479,7 @@ impl WeightBalanceAgent {
         cfg: &AircraftConfig,
         req: &Requirements,
         emp: &EmpennageSpec,
+        masses: &StructuralMasses,
     ) -> WeightBalanceOutput {
         let arms = ArmConfig::from_config(cfg);
 
@@ -487,7 +500,7 @@ impl WeightBalanceAgent {
         );
 
         // Peso vazio operacional
-        let oew_items = oew_items(cfg, engine, emp);
+        let oew_items = oew_items(cfg, engine, masses);
         // `x_cg_oew` (CG do OEW isolado) não é consumido por este agente —
         // só a lista de itens (`oew_items`) importa daqui pra frente, cada
         // cenário de carga recalcula seu próprio CG a partir dela.
@@ -673,9 +686,7 @@ mod tests {
     }
 
     /// Constrói a `EmpennageSpec` real da fixture sintética (mesma sequência
-    /// de agentes de `wing_teste`/pipeline completo) — usada por
-    /// `oew_items` (task refino-ciclo2, 1b: massa da empenagem derivada de
-    /// `EmpennageSpec × mass_per_area`).
+    /// de agentes de `wing_teste`/pipeline completo).
     fn emp_teste(cfg: &AircraftConfig) -> EmpennageSpec {
         let state = AircraftState::from_config(cfg);
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
@@ -683,72 +694,100 @@ mod tests {
         EmpennageAgent::run(&wing, cfg)
     }
 
+    /// Massas estruturais COMPUTADAS da fixture sintética (ciclo 3,
+    /// `agents::mass_model`) — mesma sequência de agentes do orchestrator,
+    /// com `mtow` = palpite inicial de `[sizing]` e `n_design` = seed 3,8 do
+    /// lag-1 (ver `orchestrator::size_aircraft_with_max_iters`). Estes
+    /// testes de unidade não iteram o MTOW: exercitam `oew_items`/
+    /// `WeightBalanceAgent::run` com um par (MTOW, n_design) fixo e
+    /// documentado, não o ponto fixo convergido.
+    fn masses_teste(cfg: &AircraftConfig, engine: &EngineSpec, emp: &EmpennageSpec)
+        -> crate::agents::mass_model::StructuralMasses
+    {
+        let state = AircraftState::from_config(cfg);
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing = AerodynamicsAgent::run(&state, &req);
+        crate::agents::mass_model::MassModelAgent::run(
+            cfg, engine, &req, &wing, emp, cfg.sizing.mtow_initial_guess_kg, 3.8,
+        )
+    }
+
     #[test]
     fn oew_dentro_do_orcamento() {
         let cfg    = config_teste();
         let engine = engine_teste();
         let emp    = emp_teste(&cfg);
-        let items  = oew_items(&cfg, &engine, &emp);
+        let masses = masses_teste(&cfg, &engine, &emp);
+        let items  = oew_items(&cfg, &engine, &masses);
         let (oew, _) = cg_from_items(&items);
         println!("OEW (fixture sintética) = {oew:.1} kg");
-        // Soma dos itens sintéticos de config_teste() (649 kg, já sem os
-        // antigos "emp_horizontal"/"emp_vertical" fixos) + massa DERIVADA
-        // da empenagem (EmpennageSpec × mass_per_area) + motor sintético
-        // (150 kg) — faixa com folga ao redor do valor observado,
-        // testando o pipeline de resolução de arm_ref, não um número mágico.
+        // Itens NÃO-estruturais sintéticos de config_teste() (261 kg, já sem
+        // as 5 massas estruturais fixas — ciclo 3) + as 7 massas
+        // COMPUTADAS (agents::mass_model) + motor sintético (150 kg) —
+        // faixa com folga ao redor do valor observado, testando o pipeline
+        // de resolução de arm_ref + o acoplamento com o modelo de massas,
+        // não um número mágico.
         assert!(oew > 700.0 && oew < 850.0,
             "OEW = {oew:.1} kg fora do intervalo esperado (700–850 kg)");
     }
 
-    // ─── oew_items: massa da empenagem derivada (task refino-ciclo2, 1b) ──
+    // ─── oew_items: as 7 massas ESTRUTURAIS computadas (ciclo 3) ──────────
 
-    /// `oew_items` deve conter itens "emp_horizontal"/"emp_vertical" com
-    /// massa EXATAMENTE `EmpennageSpec::s_{horizontal,vertical}_m2 ×
-    /// [empennage].mass_per_area_{h,v}_kg_m2` — não mais um valor fixo de
-    /// `[[masses.items]]`.
+    /// `oew_items` deve conter os 7 itens estruturais com massa EXATAMENTE
+    /// igual à computada por `agents::mass_model` (nenhuma reconta, nenhum
+    /// fator aplicado no caminho) e com os braços do mapeamento estático
+    /// componente→braço (MESMOS `arm_ref` dos antigos itens fixos).
     #[test]
-    fn oew_items_deriva_massa_da_empenagem_de_emp_spec_x_mass_per_area() {
+    fn oew_items_usa_as_massas_computadas_com_o_mapeamento_estatico_de_bracos() {
         let cfg    = config_teste();
         let engine = engine_teste();
         let emp    = emp_teste(&cfg);
-        let items  = oew_items(&cfg, &engine, &emp);
+        let masses = masses_teste(&cfg, &engine, &emp);
+        let items  = oew_items(&cfg, &engine, &masses);
+        let arms   = ArmConfig::from_config(&cfg);
 
-        let esperado_h = cfg.empennage.mass_per_area_h_kg_m2 * emp.s_horizontal_m2;
-        let esperado_v = cfg.empennage.mass_per_area_v_kg_m2 * emp.s_vertical_m2;
-
-        let item_h = items.iter().find(|i| i.name == "emp_horizontal")
-            .expect("oew_items deveria conter um item 'emp_horizontal' derivado");
-        let item_v = items.iter().find(|i| i.name == "emp_vertical")
-            .expect("oew_items deveria conter um item 'emp_vertical' derivado");
-
-        println!("emp_horizontal: mass_kg={:.6} (esperado {esperado_h:.6})", item_h.mass_kg);
-        println!("emp_vertical: mass_kg={:.6} (esperado {esperado_v:.6})", item_v.mass_kg);
-        assert!((item_h.mass_kg - esperado_h).abs() < 1e-9,
-            "massa de emp_horizontal ({:.9}) deveria bater exatamente com S_h×mass_per_area_h \
-             ({esperado_h:.9})", item_h.mass_kg);
-        assert!((item_v.mass_kg - esperado_v).abs() < 1e-9,
-            "massa de emp_vertical ({:.9}) deveria bater exatamente com S_v×mass_per_area_v \
-             ({esperado_v:.9})", item_v.mass_kg);
+        let esperado: [(&str, f64, f64); 7] = [
+            ("asa",            masses.asa_kg,             arms.wing_struct_m),
+            ("fuselagem",      masses.fuselagem_kg,       arms.fuselage_struct_m),
+            ("emp_horizontal", masses.emp_h_kg,           arms.empenagem_cg_m),
+            ("emp_vertical",   masses.emp_v_kg,           arms.empenagem_cg_m + EMP_VERTICAL_ARM_OFFSET_M),
+            ("trem_principal", masses.trem_principal_kg,  arms.gear_main_m),
+            ("trem_nariz",     masses.trem_nariz_kg,      arms.gear_nose_m),
+            ("tanques",        masses.tanques_kg,         arms.fuel_cg_m),
+        ];
+        for (nome, massa_esperada, braco_esperado) in esperado {
+            let item = items.iter().find(|i| i.name == nome)
+                .unwrap_or_else(|| panic!("oew_items deveria conter o item computado '{nome}'"));
+            println!("{nome}: mass_kg={:.6} (esperado {massa_esperada:.6})  \
+                      arm_m={:.6} (esperado {braco_esperado:.6})", item.mass_kg, item.arm_m);
+            assert!((item.mass_kg - massa_esperada).abs() < 1e-12,
+                "massa de '{nome}' ({:.9}) deveria bater EXATAMENTE com a computada por \
+                 agents::mass_model ({massa_esperada:.9})", item.mass_kg);
+            assert!((item.arm_m - braco_esperado).abs() < 1e-12,
+                "braço de '{nome}' ({:.9}) deveria bater com o mapeamento estático \
+                 ({braco_esperado:.9})", item.arm_m);
+        }
     }
 
-    /// Propriedade (brief: "mudar v_h em config mutada → massa E arrasto
-    /// acompanham, estrito nos dois sentidos"): aumentar `v_h` aumenta S_h
-    /// (`agents::empennage`), que por sua vez deve aumentar ESTRITAMENTE a
-    /// massa do item `emp_horizontal` derivado (o item `emp_vertical`, que
-    /// não depende de `v_h`, permanece INALTERADO).
+    /// Propriedade: aumentar `v_h` aumenta S_h (`agents::empennage`), que
+    /// por sua vez deve aumentar ESTRITAMENTE a massa COMPUTADA do item
+    /// `emp_horizontal` (Raymer 15.2, expoente 0.896 em S_ht) — o item
+    /// `emp_vertical`, que não depende de `v_h`, permanece INALTERADO.
     #[test]
     fn massa_emp_horizontal_aumenta_estritamente_quando_v_h_aumenta() {
         let cfg_base = config_teste();
         let engine = engine_teste();
         let emp_base = emp_teste(&cfg_base);
-        let items_base = oew_items(&cfg_base, &engine, &emp_base);
+        let masses_base = masses_teste(&cfg_base, &engine, &emp_base);
+        let items_base = oew_items(&cfg_base, &engine, &masses_base);
         let mass_h_base = items_base.iter().find(|i| i.name == "emp_horizontal").unwrap().mass_kg;
         let mass_v_base = items_base.iter().find(|i| i.name == "emp_vertical").unwrap().mass_kg;
 
         let mut cfg_maior = cfg_base.clone();
         cfg_maior.empennage.v_h *= 1.3;
         let emp_maior = emp_teste(&cfg_maior);
-        let items_maior = oew_items(&cfg_maior, &engine, &emp_maior);
+        let masses_maior = masses_teste(&cfg_maior, &engine, &emp_maior);
+        let items_maior = oew_items(&cfg_maior, &engine, &masses_maior);
         let mass_h_maior = items_maior.iter().find(|i| i.name == "emp_horizontal").unwrap().mass_kg;
         let mass_v_maior = items_maior.iter().find(|i| i.name == "emp_vertical").unwrap().mass_kg;
 
@@ -770,7 +809,8 @@ mod tests {
         let wing   = AerodynamicsAgent::run(&state, &req);
         let emp    = EmpennageAgent::run(&wing, &cfg);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
+        let masses = masses_teste(&cfg, &engine, &emp);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp, &masses);
 
         for sc in &wb.scenarios {
             assert!(sc.stable,
@@ -787,13 +827,14 @@ mod tests {
         let wing   = AerodynamicsAgent::run(&state, &req);
         let emp    = EmpennageAgent::run(&wing, &cfg);
         let engine = engine_teste();
-        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp);
+        let masses = masses_teste(&cfg, &engine, &emp);
+        let wb     = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp, &masses);
 
         println!("MTOW (fixture sintética) = {:.1} kg", wb.spec.mtow_kg);
-        // Faixa ampla ao redor do MTOW observado empiricamente (~1.415 kg)
-        // para a fixture sintética (célula + motor de teste) —
-        // suficientemente apertada para pegar regressões reais no somatório
-        // de peso, mas sem acoplar o teste a um valor exato.
+        // Faixa ampla ao redor do MTOW observado empiricamente para a
+        // fixture sintética (célula + motor de teste) — suficientemente
+        // apertada para pegar regressões reais no somatório de peso, mas sem
+        // acoplar o teste a um valor exato.
         let mtow = wb.spec.mtow_kg;
         assert!(mtow > 1_300.0 && mtow < 1_500.0,
             "MTOW = {mtow:.1} kg fora do intervalo (1.300–1.500 kg)");

@@ -54,9 +54,13 @@ fn gear_real() -> aeronave::models::specs::GearSpec {
     let wb = &sized.wb;
     let x_cg_fwd = wb.mac_le_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
     let x_cg_aft = wb.mac_le_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-    let mass_main_total = cfg.masses.item_mass("trem_principal").unwrap();
-    let mass_nose = cfg.masses.item_mass("trem_nariz").unwrap();
-    LandingGearAgent::run(wb.spec.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose)
+    // Ciclo 3 (oew-parametrico): as massas do trem vêm COMPUTADAS de
+    // `SizedAircraft::structural_masses` (`agents::mass_model`), não mais
+    // de itens fixos de `[[masses.items]]` — mesma fiação de `main.rs`.
+    LandingGearAgent::run(
+        wb.spec.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear,
+        sized.structural_masses.trem_principal_kg, sized.structural_masses.trem_nariz_kg,
+    )
 }
 
 /// Achado honesto HISTÓRICO (Task 2, refino-ciclo2): o trem principal foi
@@ -80,14 +84,18 @@ fn gear_real() -> aeronave::models::specs::GearSpec {
 fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     let gear = gear_real();
     println!("θ tipback (baseline real) = {:.4}°", gear.tipback_angle_deg);
-    // old (pré-E7, x_main=3.55m): ≈10.08° (abaixo do piso) — new (campanha
-    // E7, x_main=3.66m): ≈15.58° (acima do piso).
-    assert!((gear.tipback_angle_deg - 15.58).abs() < 0.05,
-        "θ tipback = {:.4}° — pin honesto esperado ≈15.58° (tolerância ±0.05°)",
+    // old (pré-E7, x_main=3.55m): ≈10.08° (abaixo do piso); E7
+    // (x_main=3.66m): ≈15.58°. Ciclo 3 (oew-parametrico, massas
+    // estruturais COMPUTADAS): o CG vazio AVANÇA e com ele o CG mais
+    // TRASEIRO real dos cenários (37,5%→31,7% MAC), o que AUMENTA a
+    // distância `(x_main − x_cg_aft)` e portanto FOLGA o tipback:
+    // 15.58°→**≈19.17°** (old→new, tolerância INALTERADA).
+    assert!((gear.tipback_angle_deg - 19.17).abs() < 0.05,
+        "θ tipback = {:.4}° — pin honesto esperado ≈19.17° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
     assert!(gear.tipback_angle_deg >= 15.0,
-        "achado honesto esperado (campanha E7): θ={:.2}° deveria ficar NO piso de 15° ou acima \
-         (tipback_min_deg) — resolvido por gear.x_main_m 3.55→3.66m", gear.tipback_angle_deg);
+        "achado honesto esperado: θ={:.2}° deveria ficar NO piso de 15° ou acima \
+         (tipback_min_deg) — folga ampliada pelo avanço do CG no ciclo 3", gear.tipback_angle_deg);
 }
 
 /// Tail-strike do baseline real: independe do CG (só geometria de
@@ -131,14 +139,24 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     let gear = gear_real();
     println!("nose_load_max_pct={:.4}%  nose_load_min_pct={:.4}%",
              gear.nose_load_max_pct, gear.nose_load_min_pct);
-    // old (pré-E7, x_main=3.55m): ≈21.17% — new (campanha E7, x_main=3.66m): ≈24.79%.
-    assert!((gear.nose_load_max_pct - 24.79).abs() < 0.1,
-        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈24.79% (tolerância ±0.1%)",
+    // old (pré-E7, x_main=3.55m): ≈21.17%; E7 (x_main=3.66m): ≈24.79%.
+    // Ciclo 3 (oew-parametrico): o CG mais DIANTEIRO avança de 16,0% para
+    // 8,3% MAC (estrutura redistribuída — ver o comentário do módulo), e
+    // quanto mais perto do trem de nariz fica o CG, MAIOR a fração de
+    // carga nele: 24.79%→**≈29.03%** (old→new, tolerância INALTERADA) —
+    // ACIMA do teto de 25%. FAIL honesto, asserido abaixo, não mascarado.
+    assert!((gear.nose_load_max_pct - 29.03).abs() < 0.1,
+        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈29.03% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
-    assert!(gear.nose_load_max_pct <= 25.0, "nose_load_max_pct deveria satisfazer o teto de 25%");
-    // old (pré-E7, x_main=3.55m): ≈8.68% — new (campanha E7, x_main=3.66m): ≈12.95%.
-    assert!((gear.nose_load_min_pct - 12.95).abs() < 0.05,
-        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈12.95% (tolerância ±0.05%)",
+    assert!(gear.nose_load_max_pct > 25.0,
+        "achado honesto do ciclo 3: nose_load_max_pct = {:.2}% deveria EXCEDER o teto de 25% \
+         (CG mais dianteiro avançou com a estrutura computada) — decisão de projeto para \
+         revisão humana, não mascarada aqui", gear.nose_load_max_pct);
+    // old (pré-E7, x_main=3.55m): ≈8.68%; E7: ≈12.95%. Ciclo 3: o CG mais
+    // TRASEIRO também avançou (37,5%→31,7% MAC), subindo a carga MÍNIMA de
+    // nariz: 12.95%→**≈16.15%** — continua bem acima do piso de 8%.
+    assert!((gear.nose_load_min_pct - 16.15).abs() < 0.05,
+        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈16.15% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
 }
@@ -149,15 +167,21 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 ///
 /// RESOLVIDO na campanha E7 (2026-08-06): `gear.x_main_m` 3.55→3.66m fecha
 /// também o tipback — as TRÊS checagens de trem de pouso (#15 tipback, #16
-/// tail-strike, #17 carga de nariz) PASSAM agora no baseline real. Renomeado
-/// (o nome antigo dizia "reporta_so_tipback"). Regressão de ponta a ponta
+/// tail-strike, #17 carga de nariz) PASSAVAM no baseline real.
+///
+/// ATUALIZAÇÃO (ciclo 3 — oew-parametrico, 2026-08-07): a carga de nariz
+/// (#17) volta a VIOLAR — ≈29,0% no CG mais dianteiro, acima do teto de
+/// 25%, porque a estrutura COMPUTADA (`agents::mass_model`) avança o CG
+/// vazio (ver o comentário do módulo). Tipback (#15, folgado a ≈19,17°) e
+/// tail-strike (#16) continuam passando. Renomeado de novo (o nome
+/// anterior dizia "nao_reporta_violacoes_de_trem"). Regressão de ponta a ponta
 /// (não só as funções puras acima) — confirma a fiação real em `main.rs`.
 /// O caminho de erro (violação de tipback) continua coberto por config
 /// sintética mutada em código — ver
 /// `validation::constraint_checker::tests::violacao_de_tipback_aparece_
 /// quando_abaixo_do_piso` (em `src/`).
 #[test]
-fn constraint_checker_nao_reporta_violacoes_de_trem_no_baseline_real() {
+fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
@@ -184,8 +208,15 @@ fn constraint_checker_nao_reporta_violacoes_de_trem_no_baseline_real() {
         "não deveria haver violação de tipback no baseline real pós-E7: {:?}", report.violations);
     assert!(!report.violations.iter().any(|v| v.starts_with("Tail-strike:")),
         "não deveria haver violação de tail-strike no baseline real: {:?}", report.violations);
-    assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:")),
-        "não deveria haver violação de carga de nariz no baseline real: {:?}", report.violations);
+    // Ciclo 3 (oew-parametrico): a carga de nariz PASSOU a violar — o CG
+    // mais dianteiro avançou com a estrutura computada e a fração de carga
+    // no nariz subiu para ≈29,0%, acima do teto de 25% (checagem #17).
+    // FAIL honesto asserido (não mascarado): tipback e tail-strike
+    // continuam PASSANDO, a carga de nariz não.
+    assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:")
+            && v.contains("excede o teto")),
+        "achado honesto do ciclo 3: deveria haver violação de carga de nariz (≈29,0% > 25,0%) \
+         no baseline real: {:?}", report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de
@@ -221,11 +252,15 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let fuel_margin_pct = (cfg.fuel_system.capacity_l - mission.fuel_total_l)
         / cfg.fuel_system.capacity_l * 100.0;
     println!("margem de combustível (baseline real) = {fuel_margin_pct:.4}% da capacidade");
-    // Pin honesto pós-Task-4 (pré-E7): ≈1.5767%. Pin novo (campanha E7,
-    // 2026-08-06, endurance_min_h 8h→7h): ≈13.9712% — mesmo número (novo)
-    // pinado em `tests/generic_engine.rs` (`sizing.fuel_margin_pct`).
-    assert!((fuel_margin_pct - 13.9712).abs() < 0.1,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-E7 ≈13.9712%");
+    // Pin honesto pós-Task-4 (pré-E7): ≈1.5767%; campanha E7
+    // (endurance_min_h 8h→7h): ≈13.9712%. Ciclo 3 (oew-parametrico):
+    // 13.9712→**≈14.5581%** (old→new, tolerância INALTERADA) — a estrutura
+    // computada deixa a aeronave ~11 kg mais leve no OEW, o que reduz o
+    // MTOW de missão convergido (1.517,9→1.505,6 kg) e o combustível
+    // exigido (223,7→222,1 L) com a capacidade do tanque inalterada.
+    assert!((fuel_margin_pct - 14.5581).abs() < 0.1,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-3 \
+         ≈14.5581%");
     assert!(fuel_margin_pct >= 5.0,
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");

@@ -240,16 +240,34 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// envelope de CG para ≈13,0% MAC nesta posição. `validation_status` vira
 /// `PASS` — primeiro PASS honesto com os 18 checks do ciclo 2 todos
 /// ativos, zero violações (só o aviso elétrico de pico permanece, não é
-/// violação). Renomeado (o nome antigo dizia "fail_honesto_de_tipback") —
-/// os DOIS caminhos de erro (#15 tipback, #18 margem de combustível)
-/// continuam cobertos por configs sintéticas mutadas em código: ver
-/// `tests/gear_tipback.rs::constraint_checker_nao_reporta_violacoes_de_
-/// trem_no_baseline_real` (regressão real) e
-/// `validation::constraint_checker::tests::violacao_de_tipback_aparece_
-/// quando_abaixo_do_piso`/`violacao_de_margem_de_combustivel_aparece_
-/// quando_abaixo_do_minimo` (violação sintética, em `src/`).
+/// violação).
+///
+/// ATUALIZAÇÃO (ciclo 3 — oew-parametrico, Task 4, 2026-08-07): TERCEIRO
+/// achado honesto, e o mais importante do ciclo. As 7 massas estruturais
+/// do OEW deixaram de ser itens FIXOS de `[[masses.items]]`/`mass_per_area`
+/// e passaram a ser COMPUTADAS pelas equações de componente de Raymer
+/// (cap. 15.2, `agents::mass_model`). O total estrutural mal se move
+/// (422,0 → 411,0 kg; OEW 890,0 → 879,0 kg), mas a DISTRIBUIÇÃO muda muito:
+/// fuselagem 160,0→110,6 kg e empenagens 43,0→19,6 kg (massas de braço
+/// TRASEIRO, encolhem) contra trem 77,0→110,5 kg, asa 130,0→148,0 kg e
+/// tanques 12,0→22,4 kg (braços à frente do CG, crescem). O CG vazio
+/// AVANÇA, e com ele o de todos os cenários: a faixa observada vai de
+/// 16,0–37,5% MAC para **8,3–31,7% MAC**. Consequência direta, NÃO
+/// mascarada:
+///   - 2 dos 6 cenários caem À FRENTE do limite dianteiro de rotação
+///     (13,0% MAC): "Solo (piloto)" (8,3%) e "2 pax dianteiros" (11,8%);
+///   - a carga no trem de NARIZ no CG mais dianteiro sobe de 24,8% para
+///     **29,0%**, acima do teto de 25% (checagem #16).
+/// `validation_status` volta a `FAIL`, com 3 violações nomeadas. Tipback
+/// (19,2° ≥ 15°), tail-strike, margem de combustível (14,56%) e hélice
+/// continuam PASSANDO — o CG mais traseiro também avançou, o que na
+/// verdade FOLGOU o tipback. A decisão de projeto (recuar de novo o
+/// bagageiro/bateria, mover a asa, ou aceitar) fica para revisão humana:
+/// este ciclo mede, não tuna. O caminho PASS continua coberto pelas
+/// configs sintéticas (`validation::constraint_checker::tests`).
+/// Renomeado de novo (o nome anterior dizia "pass_honesto").
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_pass_honesto() {
+fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_carga_de_nariz() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -276,25 +294,47 @@ fn engine_padrao_explicito_com_out_tempfile_converge_e_reporta_pass_honesto() {
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Achado honesto NOVO (campanha E7, ver nota acima): validation_status
-    // É PASS — tipback e margem de combustível fechados por decisão de
-    // projeto (endurance_min_h 8h→7h, x_main_m 3,55→3,66m).
-    assert!(json.contains("\"validation_status\": \"PASS\""),
-        "JSON de saída deveria reportar validation_status PASS (achado honesto da campanha E7, \
-         2026-08-06 — ver comentário acima):\n{json}");
-    assert!(json.contains("\"violations\": []"),
-        "JSON de saída deveria reportar ZERO violações no baseline real pós-E7:\n{json}");
-    // Nenhuma das checagens de trem/combustível deveria aparecer como
-    // violação — tipback, tail-strike e carga de nariz (dois extremos)
-    // PASSAM, assim como a margem de combustível.
-    assert!(!json.contains("Tipback:") && !json.contains("Tail-strike:")
-        && !json.contains("Carga de nariz:") && !json.contains("Margem de combustível:"),
-        "não deveria haver violação de trem de pouso/combustível no baseline real pós-E7:\n{json}");
-    // O envelope de CG (Task 4.4/E1–E6) continua FECHADO.
-    assert!(!json.contains("fora do envelope de CG admissível"),
-        "não deveria haver violações de cenário fora do envelope de CG admissível:\n{json}");
+    // Achado honesto do ciclo 3 (ver nota acima): validation_status É
+    // FAIL, com TRÊS violações NOMEADAS — dois cenários à frente do limite
+    // dianteiro de rotação e a carga de nariz acima do teto de 25%.
+    assert!(json.contains("\"validation_status\": \"FAIL\""),
+        "JSON de saída deveria reportar validation_status FAIL (achado honesto do ciclo 3, \
+         oew-parametrico — ver comentário acima):\n{json}");
+    let spec: serde_json::Value = serde_json::from_str(&json)
+        .expect("saída deveria ser JSON válido");
+    let violations: Vec<String> = spec["violations"].as_array()
+        .expect("violations deveria ser um array presente")
+        .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
+    assert_eq!(violations.len(), 3,
+        "esperava EXATAMENTE 3 violações honestas no baseline real pós-ciclo-3: {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("Solo (piloto)")
+            && v.contains("fora do envelope de CG admissível")),
+        "esperava violação de envelope para o cenário 'Solo (piloto)' (CG ≈8,3% MAC, à frente \
+         do limite de rotação de 13,0%): {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("2 pax dianteiros")
+            && v.contains("fora do envelope de CG admissível")),
+        "esperava violação de envelope para o cenário '2 pax dianteiros' (CG ≈11,8% MAC): \
+         {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("Carga de nariz:")
+            && v.contains("excede o teto")),
+        "esperava violação de carga de nariz (≈29,0% > teto de 25,0%): {violations:#?}");
+    // Os DEMAIS cenários continuam DENTRO do envelope — o achado é de dois
+    // cenários leves/dianteiros, não do envelope inteiro nem de um
+    // envelope vazio.
+    for cenario in ["4 pax sem bagagem", "4 pax + bagagem + cheio",
+                    "4 pax + bagagem + meia", "4 pax + bagagem vazio"] {
+        assert!(!violations.iter().any(|v| v.contains(cenario)),
+            "cenário '{cenario}' deveria continuar DENTRO do envelope: {violations:#?}");
+    }
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
+    // Tipback, tail-strike e margem de combustível continuam PASSANDO — o
+    // CG mais traseiro também avançou, o que FOLGOU o tipback (15,58° →
+    // 19,17°); a aeronave mais leve reduziu o combustível de missão
+    // (margem 13,97% → 14,56%).
+    assert!(!json.contains("Tipback:") && !json.contains("Tail-strike:")
+        && !json.contains("Margem de combustível:"),
+        "tipback/tail-strike/margem de combustível deveriam continuar sem violação:\n{json}");
     // O aviso elétrico de pico (não é violação) continua presente — só
     // confirma que o pipeline real ainda reporta avisos quando aplicável.
     assert!(json.contains("Orçamento elétrico:") && json.contains("banco de baterias"),

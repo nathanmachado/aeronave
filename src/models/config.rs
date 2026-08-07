@@ -207,7 +207,9 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_sm_max_migration(toml_str)?;
     check_cl_h_max_down_migration(toml_str)?;
     check_empennage_cd0_migration(toml_str)?;
-    check_emp_mass_items_migration(toml_str)?;
+    check_structural_mass_items_migration(toml_str)?;
+    check_mass_per_area_migration(toml_str)?;
+    check_mass_main_leg_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -289,14 +291,26 @@ fn check_empennage_cd0_migration(toml_str: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Guarda de migração (task refino-ciclo2, 1b): os itens `emp_horizontal`/
-/// `emp_vertical` de `[[masses.items]]` foram REMOVIDOS — a massa da
-/// empenagem agora é DERIVADA de `EmpennageSpec × [empennage].
-/// mass_per_area_{h,v}_kg_m2` (`weight_balance::oew_items`), não mais um
-/// valor fixo hardcoded na lista de massas. Ao contrário das outras
-/// migrações acima (uma chave escalar), aqui a checagem percorre o array
-/// `[[masses.items]]` procurando por `name` conhecido.
-fn check_emp_mass_items_migration(toml_str: &str) -> Result<(), ConfigError> {
+/// Nomes de item de `[[masses.items]]` PROIBIDOS desde o ciclo 3
+/// (oew-parametrico): as 7 massas ESTRUTURAIS do OEW agora são COMPUTADAS
+/// por `agents::mass_model` (equações de componente Raymer cap. 15.2 ×
+/// fatores de composto de `[mass_model]`) e injetadas em
+/// `weight_balance::oew_items` com mapeamento estático componente→braço.
+/// Mantê-las também em `[[masses.items]]` contaria a mesma massa duas
+/// vezes. `emp_horizontal`/`emp_vertical` já eram proibidos desde a task
+/// refino-ciclo2 (1b, quando eram derivados de `mass_per_area`); os outros
+/// 5 (asa, fuselagem, trem_principal, trem_nariz, tanques) entram na lista
+/// agora.
+const ITENS_DE_MASSA_ESTRUTURAIS_PROIBIDOS: [&str; 7] = [
+    "asa", "fuselagem", "emp_horizontal", "emp_vertical",
+    "trem_principal", "trem_nariz", "tanques",
+];
+
+/// Guarda de migração (ciclo 3, oew-parametrico): nenhuma das 7 massas
+/// estruturais pode mais vir de `[[masses.items]]`. Ao contrário das
+/// migrações de chave escalar acima, aqui a checagem percorre o array
+/// `[[masses.items]]` procurando por `name` proibido.
+fn check_structural_mass_items_migration(toml_str: &str) -> Result<(), ConfigError> {
     let raw: toml::Value = toml::from_str(toml_str)?;
     let Some(items) = raw.get("masses").and_then(|m| m.get("items")).and_then(|i| i.as_array())
     else {
@@ -304,17 +318,73 @@ fn check_emp_mass_items_migration(toml_str: &str) -> Result<(), ConfigError> {
     };
     for item in items {
         if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
-            if name == "emp_horizontal" || name == "emp_vertical" {
+            if ITENS_DE_MASSA_ESTRUTURAIS_PROIBIDOS.contains(&name) {
                 return Err(ConfigError::Validation(format!(
                     "configuração de aeronave inválida: [[masses.items]] '{name}' foi \
-                     substituído por uma massa derivada da área da empenagem REALMENTE \
-                     dimensionada — remova este item de [[masses.items]] e adicione \
-                     [empennage].mass_per_area_h_kg_m2/mass_per_area_v_kg_m2 (faixa \
-                     4–20 kg/m²; ver docs/aircraft_spec.schema.md e \
-                     config/aircraft/baseline_4seat.toml para valores de referência)"
+                     substituído por uma massa ESTRUTURAL COMPUTADA (equações de componente \
+                     Raymer cap. 15.2, agents::mass_model) — remova este item de \
+                     [[masses.items]] e configure os fatores de composto/geometria em \
+                     [mass_model] (composite_factor_wing/tail/fuselage/gear/fuel_system, \
+                     d_fus_equiv_m, fuselage_wetted_coeff, landing_load_factor_ult, \
+                     main_strut_length_m, nose_strut_length_m). Mantê-lo aqui contaria a \
+                     mesma massa duas vezes. Ver docs/aircraft_spec.schema.md e \
+                     config/aircraft/baseline_4seat.toml para valores de referência"
                 )));
             }
         }
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 3, oew-parametrico): `[empennage].
+/// mass_per_area_{h,v}_kg_m2` foram REMOVIDOS — a massa das empenagens
+/// agora vem das equações de componente de Raymer (cap. 15.2,
+/// `agents::mass_model::htail_mass_raymer_kg`/`vtail_mass_raymer_kg`),
+/// que respondem a S_h/S_v, N_z, q, alongamento e afilamento, escaladas
+/// por `[mass_model].composite_factor_tail` — não mais uma densidade de
+/// área calibrada à mão. Mesma justificativa de
+/// `check_sm_max_migration` (sem `deny_unknown_fields`, um TOML antigo
+/// com estas chaves seria simplesmente IGNORADO em silêncio).
+fn check_mass_per_area_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    for chave in ["mass_per_area_h_kg_m2", "mass_per_area_v_kg_m2"] {
+        if raw.get("empennage").and_then(|e| e.get(chave)).is_some() {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: [empennage].{chave} foi substituído pelas \
+                 equações de componente de Raymer (cap. 15.2, agents::mass_model) para a massa \
+                 da empenagem — remova esta chave e use [mass_model].composite_factor_tail \
+                 (fator de composto da cauda, Raymer Tab. 15.4) para calibrar a construção; a \
+                 área continua vindo do dimensionamento por coeficiente de volume \
+                 (agents::empennage). Ver docs/aircraft_spec.schema.md e \
+                 config/aircraft/baseline_4seat.toml para valores de referência"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 3, oew-parametrico): `[gear].mass_main_leg_kg`
+/// foi REMOVIDO — a massa TOTAL do trem principal agora é COMPUTADA
+/// (`agents::mass_model::main_gear_mass_raymer_kg` ×
+/// `[mass_model].composite_factor_gear`, função de N_l·W_l e do comprimento
+/// da perna `[mass_model].main_strut_length_m`), e a massa de UMA perna
+/// usada no dimensionamento do atuador de retração passa a ser essa massa
+/// computada ÷ 2 (`agents::landing_gear::LandingGearAgent::run`) — nunca
+/// mais um número de config que podia divergir silenciosamente da massa do
+/// trem no orçamento de peso.
+fn check_mass_main_leg_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("gear").and_then(|g| g.get("mass_main_leg_kg")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [gear].mass_main_leg_kg foi removido — a massa \
+             do trem de pouso agora é COMPUTADA (equações de componente Raymer cap. 15.2, \
+             agents::mass_model) a partir de [mass_model].landing_load_factor_ult/\
+             main_strut_length_m/composite_factor_gear, e o atuador de retração usa a massa \
+             computada de UMA perna (trem_principal_kg/2, agents::landing_gear) — remova esta \
+             chave. Ver docs/aircraft_spec.schema.md e config/aircraft/baseline_4seat.toml \
+             para valores de referência"
+                .to_string(),
+        ));
     }
     Ok(())
 }
@@ -465,27 +535,12 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.empennage.eta_h
         )));
     }
-    // Task refino-ciclo2 (1b): massa por área (kg/m²) e fator de área de
-    // CD0 da empenagem — substituem os antigos itens de massa fixos
-    // (`emp_horizontal`/`emp_vertical`) e o campo `[empennage].cd0`
-    // (removidos, ver `check_emp_mass_items_migration`/
-    // `check_empennage_cd0_migration`).
-    require_finite("empennage.mass_per_area_h_kg_m2", cfg.empennage.mass_per_area_h_kg_m2)?;
-    if cfg.empennage.mass_per_area_h_kg_m2 <= 4.0 || cfg.empennage.mass_per_area_h_kg_m2 >= 20.0 {
-        return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: empennage.mass_per_area_h_kg_m2 deve estar em \
-             (4.0, 20.0) (valor: {})",
-            cfg.empennage.mass_per_area_h_kg_m2
-        )));
-    }
-    require_finite("empennage.mass_per_area_v_kg_m2", cfg.empennage.mass_per_area_v_kg_m2)?;
-    if cfg.empennage.mass_per_area_v_kg_m2 <= 4.0 || cfg.empennage.mass_per_area_v_kg_m2 >= 20.0 {
-        return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: empennage.mass_per_area_v_kg_m2 deve estar em \
-             (4.0, 20.0) (valor: {})",
-            cfg.empennage.mass_per_area_v_kg_m2
-        )));
-    }
+    // Task refino-ciclo2 (1b): fator de área de CD0 da empenagem —
+    // substitui o antigo campo `[empennage].cd0` fixo (removido, ver
+    // `check_empennage_cd0_migration`). As faixas de
+    // `mass_per_area_{h,v}_kg_m2` morreram no ciclo 3 junto com os campos
+    // (massa da empenagem computada por `agents::mass_model`, ver
+    // `check_mass_per_area_migration`).
     require_finite("empennage.cd0_area_factor", cfg.empennage.cd0_area_factor)?;
     if cfg.empennage.cd0_area_factor <= 0.008 || cfg.empennage.cd0_area_factor >= 0.025 {
         return Err(ConfigError::Validation(format!(
@@ -596,7 +651,6 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.gear.x_main_m, cfg.gear.x_nose_m
         )));
     }
-    require_positive("gear.mass_main_leg_kg", cfg.gear.mass_main_leg_kg)?;
     require_positive("gear.mass_nose_kg", cfg.gear.mass_nose_kg)?;
     require_positive("gear.retraction_time_s", cfg.gear.retraction_time_s)?;
     require_non_negative("gear.actuators_doors_mass_kg", cfg.gear.actuators_doors_mass_kg)?;
@@ -770,20 +824,13 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         }
     }
 
-    // Itens de massa que o código de produção resolve por nome (main.rs,
-    // ao montar StructuralAgent::run/LandingGearAgent::run) — sem estes, o
-    // pipeline passa da validação e só quebra (panic) no meio da execução,
-    // depois de já ter impresso parte do relatório. Exigir aqui é mais
-    // barato que descobrir isso em produção.
-    for nome_obrigatorio in ["asa", "trem_principal", "trem_nariz"] {
-        if cfg.masses.item_mass(nome_obrigatorio).is_none() {
-            return Err(ConfigError::Validation(format!(
-                "configuração de aeronave inválida: masses.items não contém o item \
-                 obrigatório '{nome_obrigatorio}' (usado por nome no código de produção — \
-                 StructuralAgent para 'asa', LandingGearAgent para 'trem_principal'/'trem_nariz')"
-            )));
-        }
-    }
+    // NOTA (ciclo 3, oew-parametrico): a exigência dos itens obrigatórios
+    // `["asa", "trem_principal", "trem_nariz"]` em `[[masses.items]]`
+    // morreu — esses nomes agora são PROIBIDOS (ver
+    // `check_structural_mass_items_migration`), e o código de produção
+    // (`main.rs`, `StructuralAgent`/`LandingGearAgent`) lê as massas
+    // correspondentes de `SizedAircraft::structural_masses`, um campo
+    // tipado que não pode faltar.
 
     // [control_surfaces] (Task 4.2) — frações históricas (Raymer Tab. 6.5)
     // que dimensionam aileron, flap, profundor e leme.
@@ -877,23 +924,13 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         )));
     }
 
-    // Consistência trem principal: a massa TOTAL do item 'trem_principal'
-    // (ambas as pernas) deve ser exatamente 2× a massa de UMA perna
-    // (`[gear].mass_main_leg_kg`) — é essa relação que justifica usar
-    // `mass_main_leg_kg` (não um valor independente) no dimensionamento do
-    // atuador de retração em `landing_gear.rs`. Ver task-2.1-report.md
-    // ("bug fix: actuator_power_w agora usa a massa de perna real").
-    if let Some(trem_principal_kg) = cfg.masses.item_mass("trem_principal") {
-        let esperado = 2.0 * cfg.gear.mass_main_leg_kg;
-        if (trem_principal_kg - esperado).abs() > 1e-6 {
-            return Err(ConfigError::Validation(format!(
-                "configuração de aeronave inválida: masses.items 'trem_principal' \
-                 ({trem_principal_kg} kg) deveria ser exatamente 2× gear.mass_main_leg_kg \
-                 ({} kg × 2 = {esperado} kg) — as duas pernas do trem principal",
-                cfg.gear.mass_main_leg_kg
-            )));
-        }
-    }
+    // NOTA (ciclo 3, oew-parametrico): a guarda de consistência
+    // "'trem_principal' == 2× gear.mass_main_leg_kg" morreu junto com os
+    // dois lados que ela comparava — a massa total do trem principal é
+    // COMPUTADA (`agents::mass_model`) e a massa de uma perna usada no
+    // atuador de retração é essa total ÷ 2 (`agents::landing_gear`), uma
+    // identidade estrutural do código, não mais dois números de config
+    // que podiam divergir.
 
     // [electrical] (Task 5.2) — orçamento elétrico: barramento, alternador
     // e cargas individuais.
@@ -933,33 +970,18 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         }
     }
 
-    // Consistência trem retrátil × orçamento elétrico (Task 5.2): a carga
-    // elétrica 'trem_retratil' (pico na retração) não pode subestimar a
-    // potência MECÂNICA do atuador calculada por
-    // `agents::landing_gear::actuator_power_w` — mesma filosofia da guarda
-    // 'trem_principal' × `gear.mass_main_leg_kg` acima (dois lugares que
-    // descrevem o mesmo sistema físico não podem divergir silenciosamente).
-    // Nota: o valor mecânico aqui é só um PISO — o pico elétrico real de um
-    // atuador linear inclui perdas de eficiência do motor/mecanismo e
-    // corrente de partida, tipicamente bem acima do trabalho mecânico
-    // idealizado (ver comentário de `[[electrical.loads]]` 'trem_retratil'
-    // em `config/aircraft/baseline_4seat.toml`).
-    if let Some(carga_trem) = cfg.electrical.loads.iter().find(|l| l.name == "trem_retratil") {
-        let atuador_w = crate::agents::landing_gear::actuator_power_w(
-            cfg.gear.mass_main_leg_kg,
-            crate::agents::landing_gear::GEAR_RETRACTION_DELTA_H_M,
-            cfg.gear.retraction_time_s,
-        );
-        if carga_trem.peak_w < atuador_w {
-            return Err(ConfigError::Validation(format!(
-                "configuração de aeronave inválida: electrical.loads 'trem_retratil' peak_w \
-                 ({} W) deve ser >= à potência mecânica do atuador de retração calculada \
-                 ({atuador_w:.1} W, agents::landing_gear::actuator_power_w) — o orçamento \
-                 elétrico não pode subestimar o pico real de retração",
-                carga_trem.peak_w
-            )));
-        }
-    }
+    // NOTA (ciclo 3, oew-parametrico): a guarda "carga elétrica
+    // 'trem_retratil' peak_w >= potência mecânica do atuador de retração"
+    // (Task 5.2) foi REMOVIDA daqui — não porque a propriedade física
+    // deixou de valer, mas porque sua entrada deixou de existir NESTE
+    // ponto do pipeline: a massa da perna do trem agora é COMPUTADA
+    // (`agents::mass_model`, função do MTOW convergido pelo orchestrator),
+    // e `validate_aircraft` roda no parse do TOML, muito antes de qualquer
+    // MTOW existir. A potência mecânica real do atuador continua calculada
+    // e REPORTADA em runtime (`agents::landing_gear::LandingGearAgent::run`
+    // → `GearSpec::actuator_power_w`, impressa por `main.rs`), e o pico
+    // elétrico agregado continua checado por `ConstraintChecker::verify`
+    // (pico total × capacidade do alternador).
 
     // [mass_model] (ciclo 3, spec 2026-08-06-oew-parametrico-design.md) —
     // fatores de composto (Raymer Tab. 15.4) e geometria auxiliar
@@ -1312,8 +1334,6 @@ mod tests {
             taper_h = 0.5
             taper_v = 0.5
             eta_h = 0.90
-            mass_per_area_h_kg_m2 = 9.0
-            mass_per_area_v_kg_m2 = 11.0
             cd0_area_factor = 0.014
             e_h = 0.75
             [propeller]
@@ -1333,7 +1353,6 @@ mod tests {
             h_cg_ground_m = 1.0
             x_nose_m = 1.3
             x_main_m = 3.5
-            mass_main_leg_kg = 25.0
             mass_nose_kg = 20.0
             retraction_time_s = 7.0
             actuators_doors_mass_kg = 18.0
@@ -1385,17 +1404,13 @@ mod tests {
             rudder_span_frac = 0.90
             rudder_chord_frac = 0.35
             [[masses.items]]
-            name = "asa"
+            name = "mobiliario"
             mass_kg = 100.0
-            arm_ref = "wing_struct"
+            arm_ref = "pax_front"
             [[masses.items]]
-            name = "trem_principal"
-            mass_kg = 50.0
-            arm_ref = "gear_main"
-            [[masses.items]]
-            name = "trem_nariz"
-            mass_kg = 20.0
-            arm_ref = "gear_nose"
+            name = "painel_comandos"
+            mass_kg = 25.0
+            arm_ref = "avionics"
             [electrical]
             bus_voltage_v = 28.0
             alternator_w = 900.0
@@ -1551,7 +1566,7 @@ mod tests {
     #[test]
     fn rejeita_arm_ref_desconhecido() {
         let toml = aircraft_toml_valido().replace(
-            r#"arm_ref = "gear_main""#,
+            r#"arm_ref = "pax_front""#,
             r#"arm_ref = "lugar_nenhum""#,
         );
         let err = parse_aircraft(&toml).unwrap_err();
@@ -1666,39 +1681,15 @@ mod tests {
         assert!(err.to_string().contains("masses.items"), "{err}");
     }
 
-    #[test]
-    fn rejeita_item_de_massa_asa_ausente() {
-        let toml = aircraft_toml_valido().replace(r#"name = "asa""#, r#"name = "asa_renomeada""#);
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("'asa'"), "{err}");
-    }
-
-    #[test]
-    fn rejeita_item_de_massa_trem_principal_ausente() {
-        let toml = aircraft_toml_valido()
-            .replace(r#"name = "trem_principal""#, r#"name = "trem_principal_renomeado""#);
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("'trem_principal'"), "{err}");
-    }
-
-    #[test]
-    fn rejeita_item_de_massa_trem_nariz_ausente() {
-        let toml = aircraft_toml_valido()
-            .replace(r#"name = "trem_nariz""#, r#"name = "trem_nariz_renomeado""#);
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("'trem_nariz'"), "{err}");
-    }
-
-    #[test]
-    fn rejeita_massa_trem_principal_inconsistente_com_mass_main_leg_kg() {
-        // trem_principal = 50 kg no template, mas mass_main_leg_kg passa a
-        // valer 30 kg (2×30=60 ≠ 50) — deve ser rejeitado.
-        let toml = aircraft_toml_valido()
-            .replace("mass_main_leg_kg = 25.0", "mass_main_leg_kg = 30.0");
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("trem_principal"), "{err}");
-        assert!(err.to_string().contains("mass_main_leg_kg"), "{err}");
-    }
+    // NOTA (ciclo 3, oew-parametrico): os testes
+    // `rejeita_item_de_massa_{asa,trem_principal,trem_nariz}_ausente` e
+    // `rejeita_massa_trem_principal_inconsistente_com_mass_main_leg_kg`
+    // foram REMOVIDOS junto com as regras que verificavam — os 3 nomes
+    // deixaram de ser obrigatórios para virar PROIBIDOS (as massas são
+    // computadas por `agents::mass_model`; ver
+    // `rejeita_todos_os_sete_nomes_estruturais_em_masses_items`), e a
+    // relação "2× uma perna" virou uma identidade do código
+    // (`agents::landing_gear`), não mais dois campos de config.
 
     // ─── SUPERFÍCIES DE CONTROLE (Task 4.2) ─────────────────────────────────
 
@@ -1937,24 +1928,12 @@ mod tests {
             "{err}");
     }
 
-    // ─── [empennage] mass_per_area_{h,v}_kg_m2 / cd0_area_factor (task
-    //     refino-ciclo2, 1b) ────────────────────────────────────────────────
-
-    #[test]
-    fn rejeita_mass_per_area_h_fora_da_faixa() {
-        let toml = aircraft_toml_valido()
-            .replace("mass_per_area_h_kg_m2 = 9.0", "mass_per_area_h_kg_m2 = 25.0");
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("empennage.mass_per_area_h_kg_m2"), "{err}");
-    }
-
-    #[test]
-    fn rejeita_mass_per_area_v_muito_baixo() {
-        let toml = aircraft_toml_valido()
-            .replace("mass_per_area_v_kg_m2 = 11.0", "mass_per_area_v_kg_m2 = 2.0");
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("empennage.mass_per_area_v_kg_m2"), "{err}");
-    }
+    // ─── [empennage] cd0_area_factor (task refino-ciclo2, 1b) ─────────────
+    //
+    // As faixas de `mass_per_area_{h,v}_kg_m2` sumiram no ciclo 3 junto com
+    // os campos — hoje a rejeição é de MIGRAÇÃO, não de faixa (ver
+    // `rejeita_config_antiga_com_mass_per_area_{h,v}_com_erro_de_migracao_
+    // claro` mais abaixo).
 
     #[test]
     fn rejeita_cd0_area_factor_fora_da_faixa() {
@@ -2020,30 +1999,99 @@ mod tests {
         assert!(err.to_string().contains("substituído"), "{err}");
     }
 
-    /// Config antiga com um item `emp_horizontal`/`emp_vertical` em
-    /// `[[masses.items]]` deve ser rejeitada com um erro de migração claro.
-    #[test]
-    fn rejeita_config_antiga_com_item_de_massa_emp_horizontal_com_erro_de_migracao_claro() {
-        let toml = aircraft_toml_valido().replace(
-            "[[masses.items]]\n            name = \"asa\"",
-            "[[masses.items]]\n            name = \"emp_horizontal\"\n            mass_kg = 27.0\n            \
-             arm_ref = \"empennage_cg\"\n            [[masses.items]]\n            name = \"asa\"",
-        );
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("emp_horizontal"), "{err}");
-        assert!(err.to_string().contains("substituído"), "{err}");
+    // NOTA: os testes dedicados de `emp_horizontal`/`emp_vertical` em
+    // `[[masses.items]]` (task refino-ciclo2, 1b) foram absorvidos pelo
+    // ciclo 3: os dois nomes agora fazem parte da lista única de 7 nomes
+    // estruturais proibidos, coberta por
+    // `rejeita_todos_os_sete_nomes_estruturais_em_masses_items` abaixo
+    // (mesma guarda, `check_structural_mass_items_migration`).
+
+    // ─── Migrações do ciclo 3 (oew-parametrico): OEW estrutural computado ──
+    //
+    // As 7 massas estruturais (asa, fuselagem, empenagem h/v, trem
+    // principal/nariz, tanques) passaram a ser COMPUTADAS por
+    // `agents::mass_model` (equações de componente Raymer cap. 15.2 ×
+    // fatores de composto de `[mass_model]`). Os três lugares do schema
+    // antigo que as descreviam à mão morreram e viram erro de migração.
+
+    /// Injeta um item extra em `[[masses.items]]` (antes do primeiro item
+    /// existente) — helper das guardas de migração de nomes estruturais.
+    fn com_item_de_massa(nome: &str, arm_ref: &str) -> String {
+        aircraft_toml_valido().replacen(
+            "[[masses.items]]",
+            &format!(
+                "[[masses.items]]\n            name = \"{nome}\"\n            \
+                 mass_kg = 30.0\n            arm_ref = \"{arm_ref}\"\n            \
+                 [[masses.items]]"
+            ),
+            1,
+        )
     }
 
     #[test]
-    fn rejeita_config_antiga_com_item_de_massa_emp_vertical_com_erro_de_migracao_claro() {
+    fn rejeita_config_antiga_com_item_de_massa_asa_com_erro_de_migracao_claro() {
+        let err = parse_aircraft(&com_item_de_massa("asa", "wing_struct")).unwrap_err();
+        assert!(err.to_string().contains("asa"), "{err}");
+        assert!(err.to_string().contains("[mass_model]"), "{err}");
+        assert!(err.to_string().contains("agents::mass_model"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_item_de_massa_trem_principal_com_erro_de_migracao_claro() {
+        let err = parse_aircraft(&com_item_de_massa("trem_principal", "gear_main")).unwrap_err();
+        assert!(err.to_string().contains("trem_principal"), "{err}");
+        assert!(err.to_string().contains("[mass_model]"), "{err}");
+    }
+
+    /// Lista COMPLETA dos 7 nomes estruturais proibidos — nenhum deles pode
+    /// mais viver em `[[masses.items]]`.
+    #[test]
+    fn rejeita_todos_os_sete_nomes_estruturais_em_masses_items() {
+        for nome in ["asa", "fuselagem", "emp_horizontal", "emp_vertical",
+                     "trem_principal", "trem_nariz", "tanques"] {
+            let err = parse_aircraft(&com_item_de_massa(nome, "wing_struct"))
+                .err()
+                .unwrap_or_else(|| panic!("item de massa '{nome}' deveria ser rejeitado"))
+                .to_string();
+            assert!(err.contains(nome), "erro para '{nome}' deveria citar o nome: {err}");
+            assert!(err.contains("[mass_model]"),
+                "erro para '{nome}' deveria citar [mass_model]: {err}");
+        }
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_mass_per_area_h_com_erro_de_migracao_claro() {
         let toml = aircraft_toml_valido().replace(
-            "[[masses.items]]\n            name = \"asa\"",
-            "[[masses.items]]\n            name = \"emp_vertical\"\n            mass_kg = 16.0\n            \
-             arm_ref = \"empennage_cg\"\n            [[masses.items]]\n            name = \"asa\"",
+            "eta_h = 0.90\n",
+            "eta_h = 0.90\n            mass_per_area_h_kg_m2 = 9.0\n",
         );
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("emp_vertical"), "{err}");
-        assert!(err.to_string().contains("substituído"), "{err}");
+        assert!(err.to_string().contains("mass_per_area_h_kg_m2"), "{err}");
+        assert!(err.to_string().contains("composite_factor_tail"), "{err}");
+        assert!(err.to_string().contains("Raymer"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_mass_per_area_v_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "eta_h = 0.90\n",
+            "eta_h = 0.90\n            mass_per_area_v_kg_m2 = 11.0\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_per_area_v_kg_m2"), "{err}");
+        assert!(err.to_string().contains("composite_factor_tail"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_mass_main_leg_kg_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "mass_nose_kg = 20.0\n",
+            "mass_main_leg_kg = 25.0\n            mass_nose_kg = 20.0\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_main_leg_kg"), "{err}");
+        assert!(err.to_string().contains("agents::mass_model"), "{err}");
+        assert!(err.to_string().contains("atuador"), "{err}");
     }
 
     #[test]
@@ -2262,30 +2310,11 @@ mod tests {
         assert!(err.to_string().contains("avionicos"), "{err}");
     }
 
-    /// Guarda de consistência (Task 5.2): peak_w da carga 'trem_retratil'
-    /// deve ser >= à potência mecânica do atuador calculada por
-    /// `agents::landing_gear::actuator_power_w` a partir de
-    /// `gear.mass_main_leg_kg`/`gear.retraction_time_s` — mesmo padrão da
-    /// guarda 'trem_principal' × `mass_main_leg_kg` já existente.
-    #[test]
-    fn rejeita_peak_trem_retratil_abaixo_do_atuador_calculado() {
-        // Atuador calculado para esta fixture (mass_main_leg_kg=25.0,
-        // retraction_time_s=7.0) ≈ 16.8 W — 1.0 W fica abaixo disso.
-        let toml = aircraft_toml_valido().replace("peak_w = 520.0", "peak_w = 1.0");
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("trem_retratil"), "{err}");
-        assert!(err.to_string().contains("atuador"), "{err}");
-    }
-
-    #[test]
-    fn aceita_peak_trem_retratil_acima_do_atuador_calculado() {
-        // Atuador calculado para esta fixture ≈ 16.812 W — 17.0 W fica
-        // acima (não testamos o limite exato de igualdade em ponto
-        // flutuante, que seria frágil a arredondamento entre o literal TOML
-        // e o resultado da mesma conta em Rust).
-        let toml = aircraft_toml_valido().replace("peak_w = 520.0", "peak_w = 17.0");
-        parse_aircraft(&toml).expect("peak_w acima do atuador calculado deveria ser aceito");
-    }
+    // NOTA (ciclo 3, oew-parametrico): os dois testes da guarda
+    // "'trem_retratil' peak_w >= potência mecânica do atuador" (Task 5.2)
+    // saíram junto com a guarda — sua entrada (`gear.mass_main_leg_kg`)
+    // morreu e a massa da perna passou a ser computada a jusante, depois
+    // do MTOW convergir (ver o comentário em `validate_aircraft`).
 
     // ─── [mass_model] (ciclo 3, spec 2026-08-06-oew-parametrico-design.md) ──
 

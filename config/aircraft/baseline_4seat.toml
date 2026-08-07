@@ -56,27 +56,21 @@ ar_v = 1.5
 taper_h = 0.5
 taper_v = 0.5
 eta_h = 0.90
-# Task refino-ciclo2 (1b): massa por área e fator de área de CD0 da
-# empenagem — substituem os antigos itens fixos de [[masses.items]]
-# ("emp_horizontal"/"emp_vertical") e o campo [empennage].cd0 (fixo,
-# 0.0046). CALIBRADOS para reproduzir exatamente os valores da campanha E6
-# (27.0 kg / 16.0 kg / cd0=0.0046) na área REALMENTE dimensionada em
-# runtime desta config (S_h≈3.1340 m², S_v≈1.4129 m², via
-# agents::empennage::EmpennageAgent — ver task-1-report.md para o cálculo
-# completo com precisão total):
-#   mass_per_area_h_kg_m2 = 27.0/S_h ≈ 8.6153 kg/m² — faixa típica Raymer
-#     cap. 15/Niu "Airframe Structural Design" p/ caudas compostas leves
-#     (sanduíche + nervuras), 4–20 kg/m².
-#   mass_per_area_v_kg_m2 = 16.0/S_v ≈ 11.3242 kg/m² — mais reforçada por
-#     área que o estabilizador (suporta o leme + parte da carga torcional
-#     da fuselagem traseira).
+# Ciclo 3 (oew-parametrico): mass_per_area_h_kg_m2/mass_per_area_v_kg_m2
+# foram REMOVIDOS — a massa das empenagens agora é COMPUTADA pelas equações
+# de componente de Raymer (cap. 15.2, agents::mass_model) a partir da área
+# REALMENTE dimensionada (agents::empennage), de N_z, q, alongamento e
+# afilamento, escalada por [mass_model].composite_factor_tail. Erro de
+# migração claro se estas chaves ainda estiverem presentes aqui
+# (models::config::check_mass_per_area_migration).
+#
+# Task refino-ciclo2 (1b): fator de área de CD0 da empenagem — substitui o
+# antigo campo [empennage].cd0 (fixo, 0.0046).
 #   cd0_area_factor = 0.0046·S_w/(S_h+S_v) ≈ 0.014366 ≈ 2·Cf·FF
 #     (coeficiente de atrito de placa plana turbulenta × fator de forma,
 #     referenciado à área da ASA — não à área molhada da própria
 #     empenagem, daí o valor bem acima de um 2·Cf·FF típico de ~0.006–0.010
 #     referenciado à própria área). Faixa 0.008–0.025.
-mass_per_area_h_kg_m2 = 8.6153
-mass_per_area_v_kg_m2 = 11.3242
 cd0_area_factor = 0.014366
 # Task refino-ciclo2 (Task 4): eficiência de Oswald da empenagem horizontal —
 # usada no arrasto de trim de cruzeiro (agents::trim_authority::cd_trim_cruise).
@@ -164,7 +158,13 @@ x_nose_m = 1.40
 # os 6 cenários de carga. Validado experimentalmente (campanha E7, 48
 # execuções do pipeline real). x_main_m antigo (E1–E6): 3.55.
 x_main_m = 3.66
-mass_main_leg_kg = 27.5
+# Ciclo 3 (oew-parametrico): mass_main_leg_kg REMOVIDO — a massa do trem de
+# pouso agora é COMPUTADA (Raymer cap. 15.2, agents::mass_model) a partir de
+# [mass_model].landing_load_factor_ult/main_strut_length_m/nose_strut_length_m
+# × composite_factor_gear, e o atuador de retração usa a massa computada de
+# UMA perna (trem_principal_kg/2, agents::landing_gear). Erro de migração
+# claro se a chave ainda estiver presente aqui
+# (models::config::check_mass_main_leg_migration).
 mass_nose_kg = 22.0
 retraction_time_s = 7.0
 actuators_doors_mass_kg = 20.0
@@ -343,42 +343,24 @@ mass_kg = 25.0
 arm_ref = "pax_front"
 arm_offset_m = -0.3
 
-[[masses.items]]
-name = "fuselagem"
-mass_kg = 160.0
-arm_ref = "fuselage_struct"
-
-[[masses.items]]
-name = "asa"
-mass_kg = 130.0
-arm_ref = "wing_struct"
-
-# "emp_horizontal"/"emp_vertical" NÃO são mais itens de [[masses.items]]
-# (task refino-ciclo2, 1b) — a massa da empenagem agora é DERIVADA de
-# EmpennageSpec × [empennage].mass_per_area_{h,v}_kg_m2 (ver comentário em
-# [empennage] acima) — erro de migração claro se estes itens ainda
-# estiverem presentes aqui (models::config::check_emp_mass_items_migration).
-
-[[masses.items]]
-name = "trem_principal"
-mass_kg = 55.0
-arm_ref = "gear_main"
-
-[[masses.items]]
-name = "trem_nariz"
-mass_kg = 22.0
-arm_ref = "gear_nose"
+# As 7 massas ESTRUTURAIS do OEW — "asa" (130.0 kg no baseline E6),
+# "fuselagem" (160.0), "emp_horizontal" (27.0), "emp_vertical" (16.0),
+# "trem_principal" (55.0), "trem_nariz" (22.0) e "tanques" (12.0) — NÃO são
+# mais itens de [[masses.items]]: desde o ciclo 3 (oew-parametrico) são
+# COMPUTADAS pelas equações de componente de Raymer (cap. 15.2,
+# agents::mass_model) × os fatores de composto de [mass_model] (abaixo), e
+# injetadas no orçamento de peso por agents::weight_balance::oew_items com
+# os MESMOS braços (arm_ref) que os itens removidos usavam. Erro de
+# migração claro se qualquer um destes 7 nomes reaparecer aqui
+# (models::config::check_structural_mass_items_migration) — mantê-los
+# contaria a mesma massa duas vezes. Os itens que sobraram nesta seção são
+# só os NÃO-estruturais (equipamentos/instalação).
 
 [[masses.items]]
 name = "mobiliario"
 mass_kg = 45.0
 arm_ref = "pax_front"
 arm_offset_m = 0.5
-
-[[masses.items]]
-name = "tanques"
-mass_kg = 12.0
-arm_ref = "fuel_cg"
 
 [[masses.items]]
 # Campanha E1–E6 (2026-08-05), mudança 3: ganha arm_offset_m = 1.3 —

@@ -61,26 +61,26 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     // Campanha E1–E6: 15 → 16 itens — novo item "bateria_recolocada" (28kg,
     // bateria realocada do painel para o cone de cauda, mudança 2). Task
     // refino-ciclo2 (1b): 16 → 14 itens — "emp_horizontal"/"emp_vertical"
-    // REMOVIDOS de [[masses.items]] (agora derivados em
-    // `weight_balance::oew_items` a partir de `EmpennageSpec ×
-    // [empennage].mass_per_area_{h,v}_kg_m2` — ver
-    // `models::config::check_emp_mass_items_migration`).
-    assert_eq!(cfg.masses.items.len(), 14);
-    assert_eq!(cfg.masses.item_mass("asa"), Some(130.0));
-    assert_eq!(cfg.masses.item_mass("trem_principal"), Some(55.0));
+    // REMOVIDOS de [[masses.items]]. Ciclo 3 (oew-parametrico): 14 → 9
+    // itens — as 5 massas estruturais restantes ("asa", "fuselagem",
+    // "trem_principal", "trem_nariz", "tanques") também saíram, agora
+    // COMPUTADAS por `agents::mass_model` (Raymer cap. 15.2) e injetadas
+    // por `weight_balance::oew_items`. Sobraram só os NÃO-estruturais.
+    assert_eq!(cfg.masses.items.len(), 9);
     // Campanha E1–E6: novos/alterados itens de massa — cobertura direta
     // dos valores do brief (mudanças 2 e 8).
     assert_eq!(cfg.masses.item_mass("avionicos"), Some(32.0));
     assert_eq!(cfg.masses.item_mass("bateria_recolocada"), Some(28.0));
-    // "emp_horizontal"/"emp_vertical" não são mais itens de
-    // [[masses.items]] — ver `agents::weight_balance::oew_items` e
-    // `agents::weight_balance::tests::oew_items_deriva_massa_da_
-    // empenagem_de_emp_spec_x_mass_per_area` para a cobertura da massa
-    // DERIVADA (27,000055 kg / 15,999962 kg no runtime real, ≈27,0/16,0
-    // por construção — ver task-1-report.md).
-    assert_eq!(cfg.masses.item_mass("emp_horizontal"), None);
-    assert_eq!(cfg.empennage.mass_per_area_h_kg_m2, 8.6153);
-    assert_eq!(cfg.empennage.mass_per_area_v_kg_m2, 11.3242);
+    // Nenhum dos 7 nomes estruturais pode aparecer aqui (erro de migração
+    // no parse — ver `models::config::check_structural_mass_items_
+    // migration`; a cobertura da massa COMPUTADA está em
+    // `agents::weight_balance::tests::oew_items_usa_as_massas_computadas_
+    // com_o_mapeamento_estatico_de_bracos` e no baseline real).
+    for nome in ["asa", "fuselagem", "emp_horizontal", "emp_vertical",
+                 "trem_principal", "trem_nariz", "tanques"] {
+        assert_eq!(cfg.masses.item_mass(nome), None,
+            "item estrutural '{nome}' não deveria mais existir em [[masses.items]]");
+    }
     assert_eq!(cfg.empennage.cd0_area_factor, 0.014366);
     // Task 4 (refino-ciclo2): eficiência de Oswald da empenagem horizontal
     // — usada em `agents::trim_authority::cd_trim_cruise` (arrasto de trim

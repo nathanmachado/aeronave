@@ -185,10 +185,11 @@ impl LandingGearAgent {
     /// Executa o dimensionamento completo do trem de pouso.
     ///
     /// Parâmetros do layout longitudinal (do WeightBalanceAgent) e da
-    /// geometria/massas do trem (`[gear]` do TOML de aeronave, mais as
-    /// massas totais das pernas de `[[masses.items]]`, que são a fonte
-    /// única do peso total do sistema — `gear_cfg.mass_main_leg_kg` é só o
-    /// dado de "uma perna" usado no dimensionamento do atuador):
+    /// geometria do trem (`[gear]` do TOML de aeronave), mais as massas
+    /// COMPUTADAS do trem (`agents::mass_model`, via
+    /// `SizedAircraft::structural_masses`) — fonte única tanto do peso
+    /// total do sistema quanto da massa de UMA perna usada no
+    /// dimensionamento do atuador de retração (metade da total):
     ///   x_cg_fwd_m: CG mais DIANTEIRO real dos cenários de carga
     ///     (WeightBalanceAgent — `wb.spec.cg_mac_fwd_pct`, não o limite
     ///     admissível) — pior caso para o TETO de carga de nariz (25%) e
@@ -200,8 +201,9 @@ impl LandingGearAgent {
     ///     e para o ângulo de tipback.
     ///   gear_cfg:   geometria/parâmetros do trem
     ///   main_gear_total_mass_kg: massa TOTAL do trem principal (ambas as
-    ///     pernas) — item `trem_principal` de `[[masses.items]]`
-    ///   nose_gear_mass_kg: massa do trem de nariz — item `trem_nariz`
+    ///     pernas) — `StructuralMasses::trem_principal_kg`
+    ///   nose_gear_mass_kg: massa do trem de nariz —
+    ///     `StructuralMasses::trem_nariz_kg`
     pub fn run(
         mtow_kg: f64,
         x_cg_fwd_m: f64,
@@ -274,14 +276,24 @@ impl LandingGearAgent {
         let _tire_nose_ok = tire_load_ok(f_nose_impact, psi);
 
         // Atuador elétrico (retração leva o trem para a asa/fuselagem)
-        // Massa de uma perna principal: `[gear] mass_main_leg_kg`
+        // Massa de UMA perna principal: metade da massa TOTAL do trem
+        // principal recebida em `main_gear_total_mass_kg` (ciclo 3,
+        // oew-parametrico — massa COMPUTADA por `agents::mass_model`, ver
+        // `main_gear_mass_raymer_kg`). Antes vinha de `[gear]
+        // mass_main_leg_kg`, um campo de config independente que podia
+        // divergir silenciosamente da massa do trem no orçamento de peso
+        // (guarda de consistência removida junto com o campo — hoje a
+        // relação "duas pernas" é uma identidade do código).
         // Δh durante retração: `GEAR_RETRACTION_DELTA_H_M` (~0.40 m, levanta
         // perna para baixo da asa)
         let ret_time  = gear_cfg.retraction_time_s;
-        let p_actuator = actuator_power_w(gear_cfg.mass_main_leg_kg, GEAR_RETRACTION_DELTA_H_M, ret_time);
+        let p_actuator = actuator_power_w(
+            main_gear_total_mass_kg / 2.0, GEAR_RETRACTION_DELTA_H_M, ret_time,
+        );
 
-        // Peso total do sistema de trem: massas totais das pernas (de
-        // `[[masses.items]]`) + atuadores/portas (`[gear] actuators_doors_mass_kg`)
+        // Peso total do sistema de trem: massas totais das pernas
+        // (COMPUTADAS, `agents::mass_model`) + atuadores/portas
+        // (`[gear] actuators_doors_mass_kg`)
         let total_weight = main_gear_total_mass_kg + nose_gear_mass_kg
             + gear_cfg.actuators_doors_mass_kg;
 
@@ -374,7 +386,6 @@ mod tests {
             h_cg_ground_m: 1.05,
             x_nose_m: 1.40,
             x_main_m: 3.85,
-            mass_main_leg_kg: 27.5,
             mass_nose_kg: 22.0,
             retraction_time_s: 7.0,
             actuators_doors_mass_kg: 20.0,

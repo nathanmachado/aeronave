@@ -135,28 +135,14 @@ pub struct EmpennageCfg {
     /// Eficiência de pressão dinâmica na empenagem horizontal (q_t/q_∞) —
     /// usada em `weight_balance::neutral_point_m`.
     pub eta_h: f64,
-    /// Massa por área da empenagem HORIZONTAL (kg/m²) — task refino-ciclo2
-    /// (1b), substitui o antigo item hardcoded `emp_horizontal` de
-    /// `[[masses.items]]` (erro de migração se presente, ver
-    /// `models::config::parse_aircraft`). `weight_balance::oew_items`
-    /// multiplica por `EmpennageSpec::s_horizontal_m2` (área REALMENTE
-    /// dimensionada, Task 4.1) para obter a massa do item — troca o
-    /// parâmetro livre "massa fixa" por uma densidade de área, consistente
-    /// com o dimensionamento paramétrico da empenagem. Faixa 4–20 kg/m²
-    /// (caudas compostas leves, Raymer cap. 15/Niu "Airframe Structural
-    /// Design" — construção em compósito sanduíche, nervuras leves).
-    /// CALIBRADO para reproduzir o item `emp_horizontal` (27,0 kg) do
-    /// baseline E6 na área S_h runtime (≈3,1340 m²) — ver task-1-report.md
-    /// para o cálculo completo (27,0/S_h ≈ 8,6153 kg/m²).
-    pub mass_per_area_h_kg_m2: f64,
-    /// Massa por área da empenagem VERTICAL (kg/m²) — mesma justificativa
-    /// de `mass_per_area_h_kg_m2`. CALIBRADO para reproduzir o item
-    /// `emp_vertical` (16,0 kg) do baseline E6 na área S_v runtime
-    /// (≈1,4129 m²) — 16,0/S_v ≈ 11,3242 kg/m² (a deriva é estruturalmente
-    /// mais reforçada por área que o estabilizador, daí o valor por área
-    /// maior — suporta o leme e parte da carga torcional da fuselagem
-    /// traseira).
-    pub mass_per_area_v_kg_m2: f64,
+    // NOTA (ciclo 3, oew-parametrico): `mass_per_area_h_kg_m2`/
+    // `mass_per_area_v_kg_m2` foram REMOVIDOS — a massa das empenagens
+    // agora é COMPUTADA por `agents::mass_model` (Raymer cap. 15.2,
+    // `htail_mass_raymer_kg`/`vtail_mass_raymer_kg` × `[mass_model].
+    // composite_factor_tail`), que já responde a S_h/S_v, N_z, q e
+    // alongamento/afilamento em vez de uma densidade de área calibrada à
+    // mão. Erro de migração claro se ainda presentes no TOML — ver
+    // `models::config::check_mass_per_area_migration`.
     /// Fator de área para o CD0 da empenagem (adimensional) — task
     /// refino-ciclo2 (1b), substitui o antigo `[empennage].cd0` fixo (erro
     /// de migração se presente). `agents::aerodynamics::cd0_total` recebe
@@ -231,14 +217,18 @@ pub struct GearCfg {
     pub h_cg_ground_m: f64,
     pub x_nose_m: f64,
     pub x_main_m: f64,
-    /// Massa de UMA perna do trem principal (kg) — usada no dimensionamento
-    /// do atuador de retração. Note: a massa TOTAL do trem principal (ambas
-    /// as pernas) vive em `[[masses.items]]` (`trem_principal`).
-    pub mass_main_leg_kg: f64,
-    /// Massa do trem de nariz (kg) — perna única; mantido aqui como o dado
-    /// de engenharia "de perna", ainda que hoje coincida com o item de
-    /// `[[masses.items]]` (`trem_nariz`), que é a massa total já que o
-    /// nariz tem apenas uma perna.
+    // NOTA (ciclo 3, oew-parametrico): `mass_main_leg_kg` foi REMOVIDO — a
+    // massa TOTAL do trem principal agora é COMPUTADA por
+    // `agents::mass_model::main_gear_mass_raymer_kg` (× `[mass_model].
+    // composite_factor_gear`), e a massa de UMA perna usada no
+    // dimensionamento do atuador de retração é essa total ÷ 2 (ver
+    // `agents::landing_gear::LandingGearAgent::run`). Erro de migração
+    // claro se ainda presente no TOML — ver
+    // `models::config::check_mass_main_leg_migration`.
+    /// Massa do trem de nariz (kg) — perna única. Dado de engenharia "de
+    /// perna" mantido em `[gear]`; não alimenta o OEW (a massa do trem de
+    /// nariz que entra no peso vazio é COMPUTADA por
+    /// `agents::mass_model::nose_gear_mass_raymer_kg`).
     pub mass_nose_kg: f64,
     pub retraction_time_s: f64,
     /// Massa dos atuadores elétricos + portas do trem (kg) — soma ao peso
@@ -576,13 +566,12 @@ pub mod test_fixtures {
                 taper_h: 0.45,
                 taper_v: 0.45,
                 eta_h: 0.92,
-                // Levemente diferentes da calibração do baseline real
-                // (8.6153/11.3242/0.014366) — mesma justificativa de
-                // "nenhum destes números coincide com o baseline real"
-                // usada nas demais seções desta fixture (task
-                // refino-ciclo2, 1b).
-                mass_per_area_h_kg_m2: 9.2,
-                mass_per_area_v_kg_m2: 10.7,
+                // Levemente diferente da calibração do baseline real
+                // (0.014366) — mesma justificativa de "nenhum destes
+                // números coincide com o baseline real" usada nas demais
+                // seções desta fixture (task refino-ciclo2, 1b).
+                // `mass_per_area_{h,v}_kg_m2` morreram no ciclo 3 (massa da
+                // empenagem computada por `agents::mass_model`).
                 cd0_area_factor: 0.0135,
                 // Distinto do baseline real (0.70, task refino-ciclo2 Task 4)
                 // — mesma justificativa de "nenhum destes números coincide
@@ -606,7 +595,6 @@ pub mod test_fixtures {
                 h_cg_ground_m: 1.03,
                 x_nose_m: 1.35,
                 x_main_m: 3.75,
-                mass_main_leg_kg: 26.0,
                 mass_nose_kg: 21.0,
                 retraction_time_s: 7.5,
                 actuators_doors_mass_kg: 19.0,
@@ -656,24 +644,22 @@ pub mod test_fixtures {
                 to_flap_cm_fraction: 0.5,
                 fuselage_kf: 0.018,
             },
+            // Só itens NÃO-estruturais (equipamentos/instalação). As 7
+            // massas ESTRUTURAIS (asa, fuselagem, emp_horizontal,
+            // emp_vertical, trem_principal, trem_nariz, tanques) saíram
+            // daqui no ciclo 3 (oew-parametrico) — agora COMPUTADAS por
+            // `agents::mass_model` e injetadas em
+            // `weight_balance::oew_items` com mapeamento estático de
+            // braços; os 7 nomes são PROIBIDOS em `[[masses.items]]` (erro
+            // de migração, ver `models::config::
+            // check_structural_mass_items_migration`).
             masses: MassesCfg {
                 items: vec![
                     MassItemCfg { name: "psru_helice_capo".into(),   mass_kg: 62.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.3 },
                     MassItemCfg { name: "resfriamento".into(),       mass_kg: 17.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.5 },
                     MassItemCfg { name: "avionicos".into(),          mass_kg: 58.0,  arm_ref: "avionics".into(),        arm_offset_m: 0.0 },
                     MassItemCfg { name: "painel_comandos".into(),    mass_kg: 24.0,  arm_ref: "pax_front".into(),       arm_offset_m: -0.3 },
-                    MassItemCfg { name: "fuselagem".into(),          mass_kg: 150.0, arm_ref: "fuselage_struct".into(), arm_offset_m: 0.0 },
-                    MassItemCfg { name: "asa".into(),                mass_kg: 120.0, arm_ref: "wing_struct".into(),     arm_offset_m: 0.0 },
-                    // "emp_horizontal"/"emp_vertical" NÃO são mais itens de
-                    // `[[masses.items]]` (task refino-ciclo2, 1b) — agora
-                    // derivados em `weight_balance::oew_items` a partir de
-                    // `EmpennageSpec × [empennage].mass_per_area_{h,v}_kg_m2`
-                    // (erro de migração se presentes aqui, ver
-                    // `models::config::parse_aircraft`).
-                    MassItemCfg { name: "trem_principal".into(),     mass_kg: 52.0,  arm_ref: "gear_main".into(),       arm_offset_m: 0.0 },
-                    MassItemCfg { name: "trem_nariz".into(),         mass_kg: 21.0,  arm_ref: "gear_nose".into(),       arm_offset_m: 0.0 },
                     MassItemCfg { name: "mobiliario".into(),         mass_kg: 42.0,  arm_ref: "pax_front".into(),       arm_offset_m: 0.5 },
-                    MassItemCfg { name: "tanques".into(),            mass_kg: 11.0,  arm_ref: "fuel_cg".into(),         arm_offset_m: 0.0 },
                     MassItemCfg { name: "cabos_hidraulico".into(),   mass_kg: 19.0,  arm_ref: "fuselage_struct".into(), arm_offset_m: 0.0 },
                     MassItemCfg { name: "portas_vidros".into(),      mass_kg: 26.0,  arm_ref: "pax_front".into(),       arm_offset_m: 0.0 },
                     MassItemCfg { name: "antepara_firewall".into(),  mass_kg: 11.0,  arm_ref: "engine_cg".into(),       arm_offset_m: 0.9 },
@@ -713,9 +699,10 @@ pub mod test_fixtures {
             // Orçamento elétrico sintético (Task 5.2) — valores levemente
             // diferentes do baseline real (mesma justificativa de "nenhum
             // destes números coincide com o baseline real"). trem_retratil
-            // peak_w (480 W) respeita a guarda de consistência: atuador
-            // mecânico calculado para esta fixture (mass_main_leg_kg=26.0,
-            // retraction_time_s=7.5) ≈ 16.3 W, bem abaixo de 480 W.
+            // peak_w (480 W) fica com folga larga sobre a potência mecânica
+            // do atuador de retração (dezenas de W — ver
+            // `agents::landing_gear::actuator_power_w`, que desde o ciclo 3
+            // usa a massa COMPUTADA de uma perna, `trem_principal_kg/2`).
             electrical: ElectricalCfg {
                 bus_voltage_v: 28.0,
                 alternator_w: 850.0,

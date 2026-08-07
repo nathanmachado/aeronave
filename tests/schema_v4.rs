@@ -70,13 +70,17 @@ fn build_baseline_report() -> AircraftReport {
     let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
                                       &cfg.performance);
 
-    let wing_mass_kg = cfg.masses.item_mass("asa").unwrap();
+    // Ciclo 3 (oew-parametrico): massas estruturais COMPUTADAS
+    // (`agents::mass_model` via `SizedAircraft::structural_masses`) —
+    // mesma fiação de `main.rs`, não mais itens fixos de
+    // `[[masses.items]]`.
+    let wing_mass_kg = sized.structural_masses.asa_kg;
     let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
 
     let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
     let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-    let mass_main_total = cfg.masses.item_mass("trem_principal").unwrap();
-    let mass_nose = cfg.masses.item_mass("trem_nariz").unwrap();
+    let mass_main_total = sized.structural_masses.trem_principal_kg;
+    let mass_nose = sized.structural_masses.trem_nariz_kg;
     let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
 
     let electrical = ElectricalAgent::run(&cfg);

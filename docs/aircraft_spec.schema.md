@@ -189,6 +189,62 @@ documentação a ser corrigido, não um comportamento aceitável.
     (~0,1–0,7 pontos percentuais, dependendo da missão) — ver
     `tests/gear_tipback.rs`/`tests/generic_engine.rs`/`tests/acceptance.rs`
     para os pins atualizados.
+- **Ciclo 3 — oew-parametrico (ainda v4.4 — SEM mudança de forma do
+  JSON)**: as 7 massas ESTRUTURAIS do OEW (asa, fuselagem, empenagem
+  horizontal/vertical, trem principal/nariz, sistema de combustível)
+  deixaram de ser DADOS de configuração e passaram a ser COMPUTADAS pelas
+  equações de componente de Raymer ("Aircraft Design: A Conceptual
+  Approach", cap. 15.2, equações GA) × fatores de composto (Tab. 15.4) —
+  `agents::mass_model`. Nenhum campo/bloco deste schema JSON muda de
+  nome, tipo ou unidade; `weight.oew_kg`/`weight.mtow_kg`/`weight.cg_*`
+  e tudo que deriva deles mudam de VALOR.
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON),
+    TRÊS remoções, todas com erro de migração claro em
+    `models::config::parse_aircraft`:
+    1. Os SETE nomes `asa`, `fuselagem`, `emp_horizontal`, `emp_vertical`,
+       `trem_principal`, `trem_nariz` e `tanques` são agora **PROIBIDOS**
+       em `[[masses.items]]` (`check_structural_mass_items_migration`) —
+       mantê-los contaria a mesma massa duas vezes. Sobram na seção só os
+       itens NÃO-estruturais (equipamentos/instalação). Os braços
+       continuam vindo de `[arms]`/`[wing]`/`[gear]`: o mapeamento
+       componente→braço é ESTÁTICO em `weight_balance::oew_items` e usa
+       exatamente os mesmos `arm_ref` que os itens removidos usavam.
+    2. `[empennage].mass_per_area_h_kg_m2`/`mass_per_area_v_kg_m2` (que na
+       v4.2 tinham substituído os itens fixos `emp_horizontal`/
+       `emp_vertical`) foram **REMOVIDOS**
+       (`check_mass_per_area_migration`) — a massa das empenagens agora sai
+       de `htail_mass_raymer_kg`/`vtail_mass_raymer_kg` ×
+       `[mass_model].composite_factor_tail`, funções de S_h/S_v, N_z, q,
+       alongamento e afilamento.
+    3. `[gear].mass_main_leg_kg` foi **REMOVIDO**
+       (`check_mass_main_leg_migration`) — a massa total do trem principal
+       é computada e a massa de UMA perna usada no dimensionamento do
+       atuador de retração passou a ser essa total ÷ 2
+       (`agents::landing_gear`). Com isso morrem também duas guardas de
+       consistência que existiam só para amarrar campos de config
+       redundantes: `'trem_principal' == 2× mass_main_leg_kg` e
+       `'trem_retratil'.peak_w >= potência mecânica do atuador` (esta
+       última porque sua entrada só existe DEPOIS do MTOW convergir, muito
+       além do parse do TOML — a potência do atuador continua calculada e
+       reportada em `landing_gear.actuator_power_w`).
+    `[mass_model]` (10 campos obrigatórios: `composite_factor_wing/tail/
+    fuselage/gear/fuel_system`, `d_fus_equiv_m`, `fuselage_wetted_coeff`,
+    `landing_load_factor_ult`, `main_strut_length_m`,
+    `nose_strut_length_m`) é a nova fonte de calibração. Ver
+    `config/aircraft/baseline_4seat.toml` para valores de referência.
+  - **Achado honesto NOVO** (não uma mudança de contrato, mas relevante
+    para consumidores): o total estrutural mal se move (422,0 → 411,0 kg;
+    `weight.oew_kg` 890,0 → 879,0 kg), mas a DISTRIBUIÇÃO muda muito —
+    fuselagem 160,0→110,6 kg e empenagens 43,0→19,6 kg (braços traseiros)
+    contra trem 77,0→110,5 kg, asa 130,0→148,0 kg e tanques 12,0→22,4 kg
+    (braços dianteiros). O CG VAZIO AVANÇA e com ele o de todos os
+    cenários: `weight.cg_mac_fwd_pct`/`cg_mac_aft_pct` vão de 16,0/37,5%
+    para **8,3/31,7% MAC**. Consequência: `validation_status` do baseline
+    real volta a `"FAIL"` com TRÊS violações — dois cenários leves à frente
+    do limite dianteiro de rotação (13,0% MAC) e
+    `landing_gear.nose_load_max_pct` 24,8→**29,0%**, acima do teto de 25%.
+    Tipback FOLGA (15,6→19,2°) e a margem de combustível SOBE
+    (13,97→14,56%). Ver `tests/cli.rs`/`tests/gear_tipback.rs`.
 
 ## 2. Convenção de eixos e unidades
 

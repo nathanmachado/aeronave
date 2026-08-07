@@ -160,17 +160,28 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // fuel_required_l: 71,1 → 72,7 L (+2,2%, mais CD0 do empennage).
     //
     // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): achado honesto
-    // NOVO — o Rotax (84 kg) é muito mais leve que o Toyota (195 kg) para o
+    // — o Rotax (84 kg) é muito mais leve que o Toyota (195 kg) para o
     // qual esta célula foi dimensionada; sem o motor pesado no nariz, o CG
-    // de meia-missão fica bem mais ATRÁS (~54,2% MAC, vs ~35,4% MAC com o
-    // Toyota), exigindo um CL_h_trim de cruzeiro bem maior (~0,178, vs
-    // ~0,044) e portanto um ΔCD_trim bem maior (~7,96e-4, ~3,4% do CD0 —
-    // NÃO desprezível, ao contrário do caso Toyota). Isso eleva o
-    // combustível de missão desproporcionalmente mais que no caso Toyota:
-    // mtow_mission_kg 1.031,3 → **1.032,6 kg**; fuel_required_l 72,7 →
-    // **74,4 L** (old→new).
-    let mtow_expected = 1_032.6_f64;
-    let fuel_expected = 74.4_f64;
+    // de meia-missão fica bem mais ATRÁS, exigindo um CL_h_trim de cruzeiro
+    // maior e portanto um ΔCD_trim maior (NÃO desprezível, ao contrário do
+    // caso Toyota). Pins da época: mtow_mission_kg 1.031,3 → 1.032,6 kg;
+    // fuel_required_l 72,7 → 74,4 L.
+    //
+    // Ciclo 3 (oew-parametrico, Task 4): as 7 massas estruturais do OEW
+    // passaram a ser COMPUTADAS (`agents::mass_model`, Raymer cap. 15.2)
+    // em função do MTOW candidato, em vez de itens FIXOS de
+    // `[[masses.items]]`. Nesta missão o efeito é MUITO maior que no
+    // baseline Toyota, e por um motivo físico claro: com o Rotax e só 2
+    // pax, o MTOW de missão é bem menor (~915 kg vs ~1.033 kg), e as
+    // equações de Raymer escalam a estrutura COM o peso de projeto — o que
+    // antes era uma célula de massa estrutural congelada (422 kg,
+    // dimensionada para o Toyota) agora encolhe junto com a aeronave. O
+    // laço realimenta: estrutura mais leve → MTOW menor → estrutura ainda
+    // mais leve. OEW 779,0 → **665,5 kg**; mtow_mission_kg 1.032,6 →
+    // **914,9 kg**; fuel_required_l 74,4 → **68,5 L** (old→new,
+    // TOLERÂNCIAS INALTERADAS).
+    let mtow_expected = 914.9_f64;
+    let fuel_expected = 68.5_f64;
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \
@@ -201,11 +212,13 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // violação.
     let fuel_margin_pct = json["sizing"]["fuel_margin_pct"].as_f64()
         .expect("sizing.fuel_margin_pct deveria estar presente");
-    // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): 72,04% → **71,39%**
-    // (old→new) — ver comentário acima sobre o ΔCD_trim bem maior do Rotax
-    // nesta célula (CG de meia-missão bem mais atrás sem o motor pesado no
-    // nariz). Continua MUITO acima do piso de 5% — nenhuma violação nova.
-    let fuel_margin_pct_expected = 71.39_f64;
+    // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): 72,04% → 71,39%
+    // — ver comentário acima sobre o ΔCD_trim maior do Rotax nesta célula.
+    // Ciclo 3 (oew-parametrico, Task 4): 71,39% → **73,65%** (old→new) —
+    // aeronave mais leve exige menos combustível para a mesma missão, e a
+    // capacidade do tanque não mudou. Continua MUITO acima do piso de 5%
+    // — nenhuma violação nova.
+    let fuel_margin_pct_expected = 73.65_f64;
     assert!((fuel_margin_pct - fuel_margin_pct_expected).abs() < 1.0,
         "margem de combustível ({fuel_margin_pct:.2}%) deveria estar próxima do pin honesto \
          ~{fuel_margin_pct_expected}% (mudou o comportamento do sizing? atualize o pin)");

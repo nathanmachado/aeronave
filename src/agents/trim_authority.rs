@@ -593,6 +593,25 @@ mod tests {
     use super::*;
     use crate::models::atmosphere::RHO_SL;
 
+    /// Massas estruturais COMPUTADAS (ciclo 3, `agents::mass_model`) para os
+    /// testes que montam um `WeightBalanceOutput` a partir do baseline real
+    /// sem passar pelo orchestrator. Usa o MTOW do estado (palpite inicial
+    /// de `[sizing]`) e o seed 3,8 do lag-1 de `n_design` — mesmo par
+    /// documentado nas demais fixtures de teste deste crate (ver
+    /// `orchestrator::size_aircraft_with_max_iters`).
+    fn masses_do_baseline(
+        cfg: &crate::models::aircraft_config::AircraftConfig,
+        engine: &crate::models::engine::EngineSpec,
+        req: &crate::models::requirements::Requirements,
+        wing: &crate::models::specs::WingSpec,
+        emp: &crate::models::specs::EmpennageSpec,
+        state: &crate::models::aircraft_state::AircraftState,
+    ) -> crate::agents::mass_model::StructuralMasses {
+        crate::agents::mass_model::MassModelAgent::run(
+            cfg, engine, req, wing, emp, state.mtow_kg, 3.8,
+        )
+    }
+
     // ─── Hand-checks (valores do baseline real) ──────────────────────────
     //
     // MAC=1,2463161m, l_h=4,80m → l_h/MAC=3,85135; S_h/S=2,580913/14,2=
@@ -940,8 +959,9 @@ mod tests {
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);
         let emp = crate::agents::empennage::EmpennageAgent::run(&wing, &cfg);
         let engine = crate::models::engine::test_fixtures::motor_generico_teste();
+        let masses = masses_do_baseline(&cfg, &engine, &req, &wing, &emp, &state);
         let wb = crate::agents::weight_balance::WeightBalanceAgent::run(
-            &state, &wing, &engine, &cfg, &req, &emp,
+            &state, &wing, &engine, &cfg, &req, &emp, &masses,
         );
 
         let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
@@ -1012,20 +1032,30 @@ mod tests {
         // Campanha E7 (2026-08-06): `gear.x_main_m` 3.55→3.66m desloca o
         // braço do item de massa `trem_principal` (arm_ref="gear_main")
         // ~0,11m para trás, o que desloca x̄_cg (meia-missão) um pouco para
-        // trás também: 42,480201%→**42,834789%** MAC. CL_cruise não muda
-        // (independe do trem). Novo pin (recalculado pela mesma fórmula,
-        // ver código-fonte): CL_h_trim_cruise 0,084849→**0,086877**,
-        // ΔCD_trim 1,806e-4→**1,8937e-4**.
+        // trás também: 42,480201%→42,834789% MAC. CL_cruise não muda
+        // (independe do trem). Pin da E7: CL_h_trim_cruise 0,084849→
+        // 0,086877, ΔCD_trim 1,806e-4→1,8937e-4.
+        //
+        // Ciclo 3 (oew-parametrico, Task 4): as 7 massas estruturais do OEW
+        // passaram a ser COMPUTADAS (`agents::mass_model`) em vez de itens
+        // fixos de `[[masses.items]]`/`mass_per_area`. O redimensionamento
+        // é o achado do ciclo — em particular a fuselagem fica bem mais
+        // leve (160,0→~110,6 kg, braço traseiro) e o trem principal bem
+        // mais pesado (55,0→~90,7 kg, braço à frente do CG): o CG vazio
+        // AVANÇA, e com ele o CG de todos os cenários. x̄_cg (meia-missão)
+        // 42,834789%→**35,4739%** MAC. Novos pins (recalculados pela mesma
+        // fórmula, TOLERÂNCIAS INALTERADAS): CL_h_trim_cruise
+        // 0,086877→**0,045581**, ΔCD_trim 1,8937e-4→**5,213e-5**.
         println!("cl_h_trim_cruise = {:.6}  cd_trim = {:.8}  cg_reference = '{}' ({:.4}% MAC)",
             trim.cl_h_trim_cruise, trim.cd_trim, trim.cg_reference_scenario, trim.cg_reference_pct_mac);
         assert_eq!(trim.cg_reference_scenario,
             crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME);
-        assert!((trim.cl_h_trim_cruise - 0.086877).abs() < 1e-4,
-            "cl_h_trim_cruise = {:.6} (esperado ≈0.086877 ±1e-4, pin pós-campanha-E7)", trim.cl_h_trim_cruise);
-        assert!((trim.cd_trim - 1.8937e-4).abs() < 1e-6,
-            "cd_trim = {:.8} (esperado ≈1.8937e-4 ±1e-6, pin pós-campanha-E7)", trim.cd_trim);
+        assert!((trim.cl_h_trim_cruise - 0.045581).abs() < 1e-4,
+            "cl_h_trim_cruise = {:.6} (esperado ≈0.045581 ±1e-4, pin pós-ciclo-3)", trim.cl_h_trim_cruise);
+        assert!((trim.cd_trim - 5.213e-5).abs() < 1e-6,
+            "cd_trim = {:.8} (esperado ≈5.213e-5 ±1e-6, pin pós-ciclo-3)", trim.cd_trim);
         assert!(trim.cl_h_trim_cruise > 0.0,
-            "CG de referência atrás do CA (x̄≈42,5% > 25%) deveria produzir upload \
+            "CG de referência atrás do CA (x̄≈35,5% > 25%) deveria produzir upload \
              (CL_h_trim_cruise > 0) — obtido {:.6}", trim.cl_h_trim_cruise);
     }
 
@@ -1072,8 +1102,9 @@ mod tests {
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);
         let emp = crate::agents::empennage::EmpennageAgent::run(&wing, &cfg);
         let engine = crate::models::engine::test_fixtures::motor_generico_teste();
+        let masses = masses_do_baseline(&cfg, &engine, &req, &wing, &emp, &state);
         let wb = crate::agents::weight_balance::WeightBalanceAgent::run(
-            &state, &wing, &engine, &cfg, &req, &emp,
+            &state, &wing, &engine, &cfg, &req, &emp, &masses,
         );
 
         let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
@@ -1114,8 +1145,9 @@ mod tests {
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);
         let emp = crate::agents::empennage::EmpennageAgent::run(&wing, &cfg);
         let engine = crate::models::engine::test_fixtures::motor_generico_teste();
+        let masses = masses_do_baseline(&cfg, &engine, &req, &wing, &emp, &state);
         let wb = crate::agents::weight_balance::WeightBalanceAgent::run(
-            &state, &wing, &engine, &cfg, &req, &emp,
+            &state, &wing, &engine, &cfg, &req, &emp, &masses,
         );
 
         let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
