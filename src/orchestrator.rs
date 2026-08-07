@@ -723,8 +723,24 @@ mod tests {
 
     /// Ciclo 4: W_dg do modelo de massas é o MTOW de ENVELOPE com lag-1.
     /// Testa o campo REAL: as massas do SizedAircraft devem ser EXATAMENTE
-    /// as que MassModelAgent::run produz com o penúltimo envelope e o
-    /// penúltimo n_design do histórico (os valores lag-1 da iteração final).
+    /// as que MassModelAgent::run produz com a ÚLTIMA entrada do histórico
+    /// de envelope e a ÚLTIMA entrada do histórico de n_design (os valores
+    /// lag-1 efetivamente consumidos pela iteração final).
+    ///
+    /// Índice correto (achado de revisão): ao contrário de `iterations`
+    /// (que ganha um push EXTRA no ponto de retorno, `iterations.push(novo)`
+    /// logo antes do `return`), `mtow_envelope_iterations`/
+    /// `n_design_iterations` recebem exatamente UM push por iteração, sem
+    /// push extra no retorno — o push acontece logo após
+    /// `MassModelAgent::run` consumir o valor, ANTES de `mtow_envelope_prev`/
+    /// `n_design_prev` serem sobrescritos mais abaixo na MESMA iteração. Ou
+    /// seja, a última entrada de cada histórico já É o valor lag-1 que
+    /// alimentou as massas devolvidas em `SizedAircraft` — não a
+    /// penúltima. Verificado empiricamente: com `len-1` o diff bate
+    /// exatamente 0,0 (mesmíssimo cálculo); com `len-2` sobra um resíduo
+    /// de ~6,57e-11 (o delta de UMA iteração do lag) que só passava por
+    /// caber na tolerância `1e-9` do assert abaixo, sem ser a
+    /// reconstrução exata que o teste pretende provar.
     #[test]
     fn massas_do_sized_vem_do_envelope_lag_1() {
         let cfg = config_teste();
@@ -739,8 +755,8 @@ mod tests {
         assert!((env[0] - cfg.sizing.mtow_initial_guess_kg).abs() < 1e-12,
             "seed do lag deveria ser mtow_initial_guess_kg, obtido {}", env[0]);
 
-        let w_dg_lag = env[env.len() - 2];
-        let n_design_lag = nd[nd.len() - 2];
+        let w_dg_lag = env[env.len() - 1];
+        let n_design_lag = nd[nd.len() - 1];
         let esperado = MassModelAgent::run(&cfg, &engine, &req, &sized.wing,
                                            &sized.emp, w_dg_lag, n_design_lag);
         assert!((sized.structural_masses.asa_kg - esperado.asa_kg).abs() < 1e-9);
@@ -762,7 +778,6 @@ mod tests {
         assert!((d - d_pin).abs() < d_pin,
             "residual do lag de envelope = {d:e} divergiu do pin honesto ≈{d_pin:e} — \
              histórico completo: {env:?}");
-        assert!(d < 5.0, "residual do lag de envelope = {d:.4} kg — MEDIR E PINAR");
     }
 
     #[test]
