@@ -821,9 +821,12 @@ mod tests {
         //
         // ATUALIZAÇÃO (task refino-ciclo2, 1b): `cd0_empennage` da fixture
         // deixa de ser o `[empennage].cd0=0.0042` fixo e passa a ser
-        // DERIVADO de `cd0_area_factor·(S_h+S_v)/S_w` (novos campos da
-        // fixture, `mass_per_area_h/v_kg_m2`/`cd0_area_factor=0.0135` —
-        // ver `aircraft_config::test_fixtures::config_teste`): com
+        // DERIVADO de `cd0_area_factor·(S_h+S_v)/S_w` (`[empennage].
+        // cd0_area_factor=0.0135` — ver `aircraft_config::test_fixtures::
+        // config_teste`; a massa da empenagem em si, separada do arrasto,
+        // é alimentada desde o ciclo 3 (oew-parametrico) por `[mass_model]`
+        // via `agents::mass_model`, não mais por campos `mass_per_area_*`
+        // — ver docstring do módulo `agents::mass_model`): com
         // S_h≈2,3762/S_v≈1,4218/S_w=13,5, cd0_empennage cai para
         // ≈0,003798 (< 0,0042 antigo) — menos arrasto parasita, V_max sobe:
         // 302.9220524587 km/h → 304.6465774391 km/h (+1,725 km/h, +0,57%).

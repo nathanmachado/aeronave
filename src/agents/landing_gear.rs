@@ -386,7 +386,6 @@ mod tests {
             h_cg_ground_m: 1.05,
             x_nose_m: 1.40,
             x_main_m: 3.85,
-            mass_nose_kg: 22.0,
             retraction_time_s: 7.0,
             actuators_doors_mass_kg: 20.0,
             // Valores do hand-check do brief (task-2-brief.md) — Raymer

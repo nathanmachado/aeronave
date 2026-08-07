@@ -735,7 +735,7 @@ mod tests {
         let items  = oew_items(&cfg, &engine, &masses);
         let (oew, _) = cg_from_items(&items);
         println!("OEW (fixture sintética) = {oew:.1} kg");
-        // Itens NÃO-estruturais sintéticos de config_teste() (261 kg, já sem
+        // Itens NÃO-estruturais sintéticos de config_teste() (259 kg, já sem
         // as 5 massas estruturais fixas — ciclo 3) + as 7 massas
         // COMPUTADAS (agents::mass_model) + motor sintético (150 kg) —
         // faixa com folga ao redor do valor observado, testando o pipeline

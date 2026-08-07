@@ -504,8 +504,9 @@ mod tests {
     /// campo REAL: `size_aircraft` retorna assim que o MTOW estabiliza
     /// (`CONVERGENCE_TOL_KG=0,5kg`, um critério de aceite de PRODUÇÃO
     /// deliberadamente frouxo, sem relação com a precisão do lag de CG) —
-    /// nesse ponto o resíduo de `CL_h_trim` ainda está em ~1,5e-5 na
-    /// fixture sintética (e ~9,9e-6 no baseline real, ver
+    /// nesse ponto o resíduo de `CL_h_trim` ainda está em ~1,76e-5 na
+    /// fixture sintética (e estava em ~9,9e-6 no baseline real, na época —
+    /// medição do ciclo 2 anterior ao OEW estrutural computado, ver
     /// `task-4-report.md`), NÃO abaixo de 1e-6. Este teste pina o valor
     /// REAL medido (não o alvo original do brief, que a produção — com seu
     /// critério de parada atual — nunca alcança) e verifica GENUÍNA

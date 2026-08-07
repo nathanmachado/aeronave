@@ -165,7 +165,13 @@ x_main_m = 3.66
 # UMA perna (trem_principal_kg/2, agents::landing_gear). Erro de migração
 # claro se a chave ainda estiver presente aqui
 # (models::config::check_mass_main_leg_migration).
-mass_nose_kg = 22.0
+#
+# Revisão final (oew-parametrico): mass_nose_kg (22,0 kg) também REMOVIDO —
+# mesmo tratamento acima. O campo era config morta (nenhum código de
+# produção o lia) e já divergia da massa de nariz COMPUTADA
+# (agents::mass_model::nose_gear_mass_raymer_kg ≈ 19,81 kg neste baseline).
+# Erro de migração claro se a chave ainda estiver presente aqui
+# (models::config::check_mass_nose_migration).
 retraction_time_s = 7.0
 actuators_doors_mass_kg = 20.0
 # Tipback/tail-strike (Task 2, refino-ciclo2) — Raymer, "Aircraft Design",

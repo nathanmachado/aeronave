@@ -225,11 +225,14 @@ pub struct GearCfg {
     // `agents::landing_gear::LandingGearAgent::run`). Erro de migração
     // claro se ainda presente no TOML — ver
     // `models::config::check_mass_main_leg_migration`.
-    /// Massa do trem de nariz (kg) — perna única. Dado de engenharia "de
-    /// perna" mantido em `[gear]`; não alimenta o OEW (a massa do trem de
-    /// nariz que entra no peso vazio é COMPUTADA por
-    /// `agents::mass_model::nose_gear_mass_raymer_kg`).
-    pub mass_nose_kg: f64,
+    // NOTA (revisão final, oew-parametrico): `mass_nose_kg` também foi
+    // REMOVIDO, mesmo tratamento de `mass_main_leg_kg` acima — a massa do
+    // trem de nariz que entra no peso vazio é COMPUTADA por
+    // `agents::mass_model::nose_gear_mass_raymer_kg` (× `[mass_model].
+    // composite_factor_gear`); não havia código de produção lendo o campo,
+    // só a validação de `require_positive` e um TOML baseline que já
+    // divergia do valor computado. Erro de migração claro se ainda presente
+    // no TOML — ver `models::config::check_mass_nose_migration`.
     pub retraction_time_s: f64,
     /// Massa dos atuadores elétricos + portas do trem (kg) — soma ao peso
     /// total do sistema junto com as massas das pernas de `[masses]`.
@@ -595,7 +598,6 @@ pub mod test_fixtures {
                 h_cg_ground_m: 1.03,
                 x_nose_m: 1.35,
                 x_main_m: 3.75,
-                mass_nose_kg: 21.0,
                 retraction_time_s: 7.5,
                 actuators_doors_mass_kg: 19.0,
                 // Levemente diferente do baseline real (15.0/11.0/7.80/1.10,

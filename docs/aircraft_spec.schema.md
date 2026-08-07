@@ -81,7 +81,14 @@ documentação a ser corrigido, não um comportamento aceitável.
        `[empennage].mass_per_area_h_kg_m2`/`mass_per_area_v_kg_m2` (faixa
        4–20 kg/m²), multiplicados por `EmpennageSpec::s_horizontal_m2`/
        `s_vertical_m2` (`weight_balance::oew_items`) em vez de um valor
-       fixo na lista de massas.
+       fixo na lista de massas — isto valia NA ÉPOCA (v4.2). Desde a
+       **v4.5** (ciclo 3, oew-parametrico) os próprios
+       `mass_per_area_h_kg_m2`/`mass_per_area_v_kg_m2` foram removidos: a
+       substituição atual é `[mass_model]` (fatores de composto
+       `composite_factor_tail` etc., Raymer Tab. 15.4, aplicados às
+       equações de componente de `agents::mass_model`) — ver a entrada v4.5
+       abaixo e `models::specs::TrimSpec` (docstring) para o mesmo hedge do
+       lado Rust.
     Ver `config/aircraft/baseline_4seat.toml` para valores de referência
     calibrados (reproduzem os antigos valores fixos na área/autoridade
     runtime desta config, dentro de resíduo de arredondamento

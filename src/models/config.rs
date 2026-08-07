@@ -210,6 +210,7 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_structural_mass_items_migration(toml_str)?;
     check_mass_per_area_migration(toml_str)?;
     check_mass_main_leg_migration(toml_str)?;
+    check_mass_nose_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -383,6 +384,30 @@ fn check_mass_main_leg_migration(toml_str: &str) -> Result<(), ConfigError> {
              computada de UMA perna (trem_principal_kg/2, agents::landing_gear) — remova esta \
              chave. Ver docs/aircraft_spec.schema.md e config/aircraft/baseline_4seat.toml \
              para valores de referência"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (revisão final, oew-parametrico): `[gear].mass_nose_kg`
+/// foi REMOVIDO — mesmo tratamento de `[gear].mass_main_leg_kg` acima. A
+/// massa do trem de nariz que entra no peso vazio agora é COMPUTADA
+/// (`agents::mass_model::nose_gear_mass_raymer_kg` ×
+/// `[mass_model].composite_factor_gear`), e nenhum código de produção lia
+/// mais o campo de config — só sobrevivia como um número "de perna" isolado
+/// que podia (e, no TOML baseline, passou a) divergir silenciosamente do
+/// valor computado usado no orçamento de peso real.
+fn check_mass_nose_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("gear").and_then(|g| g.get("mass_nose_kg")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [gear].mass_nose_kg foi removido — a massa do \
+             trem de nariz agora é COMPUTADA (equações de componente Raymer cap. 15.2, \
+             agents::mass_model::nose_gear_mass_raymer_kg) a partir de \
+             [mass_model].landing_load_factor_ult/nose_strut_length_m/composite_factor_gear — \
+             remova esta chave. Ver docs/aircraft_spec.schema.md e \
+             config/aircraft/baseline_4seat.toml para valores de referência"
                 .to_string(),
         ));
     }
@@ -651,7 +676,6 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.gear.x_main_m, cfg.gear.x_nose_m
         )));
     }
-    require_positive("gear.mass_nose_kg", cfg.gear.mass_nose_kg)?;
     require_positive("gear.retraction_time_s", cfg.gear.retraction_time_s)?;
     require_non_negative("gear.actuators_doors_mass_kg", cfg.gear.actuators_doors_mass_kg)?;
     // Task 2 (refino-ciclo2): tipback/tail-strike — ver
@@ -1353,7 +1377,6 @@ mod tests {
             h_cg_ground_m = 1.0
             x_nose_m = 1.3
             x_main_m = 3.5
-            mass_nose_kg = 20.0
             retraction_time_s = 7.0
             actuators_doors_mass_kg = 18.0
             tipback_min_deg = 15.0
@@ -2085,13 +2108,25 @@ mod tests {
     #[test]
     fn rejeita_config_antiga_com_mass_main_leg_kg_com_erro_de_migracao_claro() {
         let toml = aircraft_toml_valido().replace(
-            "mass_nose_kg = 20.0\n",
-            "mass_main_leg_kg = 25.0\n            mass_nose_kg = 20.0\n",
+            "x_main_m = 3.5\n",
+            "x_main_m = 3.5\n            mass_main_leg_kg = 25.0\n",
         );
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("mass_main_leg_kg"), "{err}");
         assert!(err.to_string().contains("agents::mass_model"), "{err}");
         assert!(err.to_string().contains("atuador"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_mass_nose_kg_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "x_main_m = 3.5\n",
+            "x_main_m = 3.5\n            mass_nose_kg = 20.0\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_nose_kg"), "{err}");
+        assert!(err.to_string().contains("agents::mass_model"), "{err}");
+        assert!(err.to_string().contains("nose_gear_mass_raymer_kg"), "{err}");
     }
 
     #[test]

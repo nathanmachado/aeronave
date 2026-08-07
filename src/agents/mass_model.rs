@@ -3,6 +3,21 @@
 //! GA; fatores de composto da Tab. 15.4 vêm de [mass_model] no TOML).
 //! Interface em SI; internamente as equações usam unidades imperiais
 //! (fidelidade à fonte — expoentes empíricos não-dimensionalizáveis).
+//!
+//! **Aproximação conhecida — t/c das empenagens**: `htail_mass_raymer_kg`/
+//! `vtail_mass_raymer_kg` usam o MESMO espessura relativa da ASA
+//! (`[wing].thickness_ratio`, 0,15 no baseline) porque `EmpennageCfg` não
+//! tem um campo dedicado — empenagens GA tipicamente usam perfis mais finos
+//! (t/c ~0,10). O expoente de `(100·t/c)` é −0,49 na equação do EV e −0,12
+//! na do EH (Raymer Tab. 15.2), então usar 0,15 em vez de ~0,10 SUBESTIMA a
+//! massa do EV em ~21% e a do EH em ~5% — (1,5)^0,49 ≈ 1,22 e (1,5)^0,12 ≈
+//! 1,05, onde 1,5 = 0,15/0,10. Impacto medido no baseline: ~+2 kg de massa
+//! de empenagem, a um braço de ~7,3 m do CG, o que desloca o CG vazio em
+//! ~0,8 pp de MAC para a frente — dentro do gap de 4,7 pp identificado no
+//! achado do ciclo (ver task-4-report.md/task-1-report.md desta task de
+//! revisão). Refinamento futuro: um campo dedicado
+//! `[empennage].thickness_ratio` (com fallback para `[wing].
+//! thickness_ratio` se ausente, para não quebrar TOMLs existentes).
 
 use crate::models::aircraft_config::AircraftConfig;
 use crate::models::atmosphere::Isa;
