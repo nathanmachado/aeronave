@@ -127,6 +127,20 @@ pub struct SizedAircraft {
     /// recalculado com os dados JÁ CONVERGIDOS desta última iteração, não
     /// lido daqui).
     pub n_design_iterations: Vec<f64>,
+    /// Trajetória de W_dg de envelope (Ciclo 4, Task 2 — o peso máximo de
+    /// projeto de Raymer, `wb.spec.mtow_kg`) ao longo das iterações — o
+    /// valor USADO em CADA iteração é o da iteração ANTERIOR (lag-1,
+    /// mesmo padrão de `n_design_iterations`/`cl_h_trim_iterations`/
+    /// `x_cg_trim_ref_prev`): `MassModelAgent::run` precisa de W_dg/W_l
+    /// (o MTOW de envelope) para as equações de massa estrutural, mas o
+    /// `wb.spec.mtow_kg` desta MESMA iteração só fica disponível depois de
+    /// `WeightBalanceAgent` rodar (que por sua vez consome `masses`). O
+    /// seed da primeira entrada é `sizing.mtow_initial_guess_kg` (mesmo
+    /// palpite inicial do MTOW de missão — o envelope estabiliza em poucas
+    /// iterações). Diagnóstico/teste de estabilidade do lag — não usado
+    /// por nenhum agente a jusante (`wb.spec.mtow_kg`, no relatório final,
+    /// é o valor JÁ CONVERGIDO desta última iteração, não lido daqui).
+    pub mtow_envelope_iterations: Vec<f64>,
 }
 
 /// Erros do laço de convergência de MTOW.
@@ -277,6 +291,21 @@ pub(crate) fn size_aircraft_with_max_iters(
     let mut n_design_prev: f64 = 3.8;
     let mut n_design_iterations: Vec<f64> = Vec::new();
 
+    // W_dg de envelope (Ciclo 4, Task 2) — terceiro uso do mesmo padrão
+    // lag-1 dos dois acima: `MassModelAgent::run` precisa de W_dg/W_l de
+    // Raymer (o peso máximo de projeto), que é o MTOW de ENVELOPE
+    // (`wb.spec.mtow_kg`, cenário "4 pax + bagagem + tanque cheio"), não o
+    // MTOW de MISSÃO (`mtow`, candidato desta iteração) — até esta task o
+    // parâmetro recebia `mtow`, inconsistente com `StructuralAgent`/
+    // `LandingGearAgent` (que já usavam o MTOW de envelope). `wb` desta
+    // MESMA iteração só existe DEPOIS de `WeightBalanceAgent` rodar, que
+    // por sua vez consome `masses` — mesma dependência circular resolvida
+    // pelo lag-1 acima, agora com seed simples `sizing.
+    // mtow_initial_guess_kg` (o envelope estabiliza em poucas iterações,
+    // ver `mtow_envelope_iterations` no `SizedAircraft` devolvido).
+    let mut mtow_envelope_prev: f64 = cfg.sizing.mtow_initial_guess_kg;
+    let mut mtow_envelope_iterations: Vec<f64> = Vec::new();
+
     for _ in 0..max_iters {
         iterations.push(mtow);
 
@@ -298,8 +327,11 @@ pub(crate) fn size_aircraft_with_max_iters(
         // iteração ANTES de ser sobrescrito abaixo (mesmo padrão de
         // `iterations.push(mtow)` no topo do laço — o histórico mostra a
         // entrada, não a saída, de cada iteração).
-        let masses = MassModelAgent::run(cfg, engine, req, &wing, &emp, mtow, n_design_prev);
+        let masses = MassModelAgent::run(
+            cfg, engine, req, &wing, &emp, mtow_envelope_prev, n_design_prev,
+        );
         n_design_iterations.push(n_design_prev);
+        mtow_envelope_iterations.push(mtow_envelope_prev);
 
         // Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) — usa o CG
         // lag-1 (`x_cg_trim_ref_prev`, ver comentário acima) para fechar
@@ -340,6 +372,12 @@ pub(crate) fn size_aircraft_with_max_iters(
         let fuel_kg = mission.fuel_total_kg;
 
         let mut wb = WeightBalanceAgent::run(&state, &wing, engine, cfg, req, &emp, &masses);
+
+        // Atualiza o lag-1 do W_dg de envelope (Ciclo 4, Task 2) para a
+        // PRÓXIMA iteração — `wb` desta iteração já rodou, então já
+        // sabemos o MTOW de envelope real; a próxima iteração usará esse
+        // valor (em vez do usado nesta, que veio da iteração anterior).
+        mtow_envelope_prev = wb.spec.mtow_kg;
 
         // Atualiza o lag-1 do CG de referência para a PRÓXIMA iteração —
         // ver comentário no topo do laço. O `WeightBalanceAgent` desta
@@ -437,6 +475,7 @@ pub(crate) fn size_aircraft_with_max_iters(
                 structural_masses: masses,
                 vn,
                 n_design_iterations,
+                mtow_envelope_iterations,
             });
         }
 
@@ -526,8 +565,20 @@ mod tests {
     /// são COMPUTADAS (`agents::mass_model`) em função do MTOW candidato —
     /// o CG do cenário de referência TAMBÉM se move com o laço agora, e as
     /// duas fontes de resíduo somam. Efeito medido: delta final
-    /// 1,5041627731e-5 → **1,7579617312e-5** (old→new, mesma ordem de
-    /// grandeza e mesma taxa geométrica; tolerância INALTERADA).
+    /// 1,5041627731e-5 → 1,7579617312e-5 (Task 4 do plano oew-parametrico).
+    ///
+    /// **RE-MEDIDO (Ciclo 4, Task 2 — W_dg de envelope com lag-1)**: trocar
+    /// o `W_dg`/`W_l` de `MassModelAgent::run` do candidato de MISSÃO desta
+    /// iteração (`mtow`, sem lag) pelo envelope LAG-1
+    /// (`mtow_envelope_prev`) desacopla as massas estruturais do
+    /// transiente do candidato de MTOW cru — elas passam a reagir a uma
+    /// entrada mais estável (o envelope já quase convergido), o que
+    /// amortece a realimentação MTOW→massas→CG que alimentava este
+    /// resíduo. Efeito medido: delta final **1,7579617312e-5 →
+    /// 2,497194172366296e-6** (old→new, ~7× menor; convergência geométrica
+    /// e ordem de grandeza continuam válidas, só o valor do pin e sua
+    /// tolerância mudaram — a tolerância antiga, dimensionada para
+    /// ~1,76e-5, não cobre mais o novo pin com folga honesta).
     #[test]
     fn cl_h_trim_iterations_do_campo_real_converge_geometricamente() {
         let cfg = config_teste();
@@ -558,21 +609,22 @@ mod tests {
         }
 
         // Pin do resíduo REAL no ponto em que a produção retorna (critério
-        // de MTOW, não de CL_h_trim) — ver achado honesto na docstring
-        // acima. 1,7579617312e-5 medido (era 1,5041627731e-5 antes de o
-        // OEW estrutural virar computado); tolerância com folga (2x) para
-        // não ficar frágil a resíduo de ponto flutuante entre plataformas,
-        // mas apertada o bastante para pegar uma regressão real (ex.: lag
-        // desligado acidentalmente produziria delta ~O(0,16), o tamanho do
-        // transiente do seed, não ~1e-5).
+        // de MTOW, não de CL_h_trim) — ver achado honesto (RE-MEDIDO,
+        // Ciclo 4 Task 2) na docstring acima. 2,497194172366296e-6 medido
+        // (era 1,7579617312e-5 antes do W_dg de envelope com lag-1);
+        // tolerância com folga (2x) para não ficar frágil a resíduo de
+        // ponto flutuante entre plataformas, mas apertada o bastante para
+        // pegar uma regressão real (ex.: lag desligado acidentalmente
+        // produziria delta ~O(0,16), o tamanho do transiente do seed, não
+        // ~1e-6).
         let delta_final = deltas[deltas.len() - 1];
-        let delta_final_pin = 1.7579617312e-5;
-        assert!((delta_final - delta_final_pin).abs() < 1.5e-5,
+        let delta_final_pin = 2.497194172366296e-6;
+        assert!((delta_final - delta_final_pin).abs() < delta_final_pin,
             "delta final (campo real) = {delta_final:.10e} divergiu do pin honesto \
              ≈{delta_final_pin:.10e} — histórico completo: {history:?}");
         assert!(delta_final < 1e-4,
             "delta final (campo real) = {delta_final:.3e} deveria estar bem abaixo de 1e-4 \
-             (ordem de grandeza esperada ~1e-5) — histórico completo: {history:?}");
+             (ordem de grandeza esperada ~1e-6) — histórico completo: {history:?}");
     }
 
     // ─── n_design — estabilidade do lag-1 (Task 3, plano oew-parametrico) ──
@@ -595,10 +647,26 @@ mod tests {
     /// função do MTOW candidato, logo `wb.spec.mtow_kg` (cenário de
     /// envelope) e `mass_light_kg` MUDAM a cada iteração — o lag de
     /// `n_design` passou a ter um resíduo GENUÍNO a medir. Pin antigo:
-    /// ≈0.0 (`< 1e-9`). Pin novo (medido na fixture sintética):
-    /// **1,731522e-4** no ponto em que a produção retorna (critério de
-    /// MTOW, `CONVERGENCE_TOL_KG=0,5kg` — deliberadamente frouxo, sem
-    /// relação com a precisão do lag).
+    /// ≈0.0 (`< 1e-9`). Pin (Task 4, medido na fixture sintética):
+    /// 1,731522e-4 no ponto em que a produção retorna (critério de MTOW,
+    /// `CONVERGENCE_TOL_KG=0,5kg` — deliberadamente frouxo, sem relação com
+    /// a precisão do lag).
+    ///
+    /// **RE-MEDIDO (Ciclo 4, Task 2 — W_dg de envelope com lag-1)**: dois
+    /// lags agora interagem — `MassModelAgent::run` passou a usar o
+    /// envelope LAG-1 (`mtow_envelope_prev`) em vez do candidato de MISSÃO
+    /// cru (`mtow`) desta iteração. Investigado (achado de revisão): isso
+    /// NÃO piora o resíduo, MELHORA por ~7 ordens de grandeza — as massas
+    /// estruturais passam a reagir a uma entrada já quase-convergida (o
+    /// envelope, que estabiliza geometricamente rápido, ver
+    /// `mtow_envelope_iterations`) em vez do candidato de MTOW cru desta
+    /// iteração, o que amortece a realimentação MTOW→massas→`wb.spec.
+    /// mtow_kg`/`mass_light_kg`→`n_design` — a mesma cadeia que antes
+    /// carregava o transiente do candidato de missão a cada passo. Efeito
+    /// medido: delta final **1,731522e-4 → 1,5766055128096923e-11**
+    /// (old→new; ordem de grandeza cai de ruído físico genuíno para ruído
+    /// de ponto flutuante — a convergência geométrica em si continua
+    /// válida, só o valor do pin e sua tolerância mudaram).
     ///
     /// A convergência é geométrica a partir de h[3]: as duas primeiras
     /// entradas carregam o transiente do seed 3,8 (undershoot em h[2],
@@ -630,24 +698,71 @@ mod tests {
 
         let delta_final = deltas[deltas.len() - 1];
         println!("delta_final (n_design) = {delta_final:.6e}");
-        // Pin do resíduo REAL medido, com folga de 2× (mesma disciplina do
-        // pin de `cl_h_trim`): apertado o bastante para pegar uma regressão
-        // real (ex.: lag desligado produziria delta ~O(0,4), o tamanho do
-        // transiente do seed), frouxo o bastante para não quebrar com
-        // ruído de ponto flutuante entre plataformas.
-        let delta_final_pin = 1.731522e-4;
-        assert!((delta_final - delta_final_pin).abs() < 1.73e-4,
+        // Pin do resíduo REAL medido (RE-MEDIDO, Ciclo 4 Task 2 — ver
+        // achado honesto na docstring acima), com folga de 2× (mesma
+        // disciplina do pin de `cl_h_trim`): apertado o bastante para
+        // pegar uma regressão real (ex.: lag desligado produziria delta
+        // ~O(0,4), o tamanho do transiente do seed), frouxo o bastante
+        // para não quebrar com ruído de ponto flutuante entre plataformas.
+        let delta_final_pin = 1.5766055128096923e-11;
+        assert!((delta_final - delta_final_pin).abs() < 1.6e-11,
             "residual do lag de n_design = {delta_final:.6e} divergiu do pin honesto \
              ≈{delta_final_pin:.6e}; histórico completo: {h:?}");
         assert!(delta_final < 1e-3,
             "residual do lag de n_design = {delta_final:.3e} deveria estar bem abaixo de 1e-3 \
-             (ordem de grandeza esperada ~1e-4); histórico completo: {h:?}");
+             (ordem de grandeza esperada ~1e-11); histórico completo: {h:?}");
         // + structural_masses do SizedAircraft finitas e positivas:
         for (nome, v) in [("asa", sized.structural_masses.asa_kg),
                           ("fuselagem", sized.structural_masses.fuselagem_kg),
                           ("tanques", sized.structural_masses.tanques_kg)] {
             assert!(v.is_finite() && v > 0.0, "{nome} = {v}");
         }
+    }
+
+    // ─── W_dg de envelope — estabilidade do lag-1 (Ciclo 4, Task 2) ────────
+
+    /// Ciclo 4: W_dg do modelo de massas é o MTOW de ENVELOPE com lag-1.
+    /// Testa o campo REAL: as massas do SizedAircraft devem ser EXATAMENTE
+    /// as que MassModelAgent::run produz com o penúltimo envelope e o
+    /// penúltimo n_design do histórico (os valores lag-1 da iteração final).
+    #[test]
+    fn massas_do_sized_vem_do_envelope_lag_1() {
+        let cfg = config_teste();
+        let engine = engine_teste();
+        let req = requisitos_teste();
+        let sized = size_aircraft(&cfg, &engine, &req).expect("fixture converge");
+
+        let env = &sized.mtow_envelope_iterations;
+        let nd = &sized.n_design_iterations;
+        assert!(env.len() >= 2, "histórico do envelope: {env:?}");
+        // seed na primeira entrada (mesmo padrão de n_design_iterations):
+        assert!((env[0] - cfg.sizing.mtow_initial_guess_kg).abs() < 1e-12,
+            "seed do lag deveria ser mtow_initial_guess_kg, obtido {}", env[0]);
+
+        let w_dg_lag = env[env.len() - 2];
+        let n_design_lag = nd[nd.len() - 2];
+        let esperado = MassModelAgent::run(&cfg, &engine, &req, &sized.wing,
+                                           &sized.emp, w_dg_lag, n_design_lag);
+        assert!((sized.structural_masses.asa_kg - esperado.asa_kg).abs() < 1e-9);
+        assert!((sized.structural_masses.trem_principal_kg - esperado.trem_principal_kg).abs() < 1e-9);
+
+        // convergência: delta final do envelope pequeno e pinado honesto.
+        // O envelope (`wb.spec.mtow_kg`) é quase uma função direta do MTOW
+        // de missão convergido (mesma estrutura/masses/geometria) — o lag
+        // já está praticamente no ponto fixo quando o laço externo de MTOW
+        // para (`CONVERGENCE_TOL_KG=0,5kg`), então o resíduo medido é ruído
+        // de ponto flutuante (~1e-8 kg), não um transiente físico genuíno
+        // como os de `n_design`/`cl_h_trim`. Pin honesto medido na fixture
+        // sintética: 6,397840479621664e-9 kg; folga 2× (mesma disciplina
+        // dos outros pins de resíduo).
+        let d = (env[env.len() - 1] - env[env.len() - 2]).abs();
+        println!("mtow_envelope_iterations = {env:?}");
+        println!("d (residual medido) = {d:e}");
+        let d_pin = 6.397840479621664e-9;
+        assert!((d - d_pin).abs() < d_pin,
+            "residual do lag de envelope = {d:e} divergiu do pin honesto ≈{d_pin:e} — \
+             histórico completo: {env:?}");
+        assert!(d < 5.0, "residual do lag de envelope = {d:.4} kg — MEDIR E PINAR");
     }
 
     #[test]

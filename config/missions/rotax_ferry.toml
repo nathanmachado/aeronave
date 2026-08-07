@@ -14,7 +14,11 @@
 # em cruzeiro): era 72,7 L / ~72,0% (campanha E1-E6); o CG de meia-missão
 # desta célula com o Rotax fica bem mais atrás (motor mais leve no nariz),
 # exigindo mais CL_h_trim/ΔCD_trim que no caso Toyota — ver
-# tests/acceptance.rs).
+# tests/acceptance.rs). Ciclo 4 (Task 2, W_dg = MTOW de envelope): 74,4 L →
+# 68,5 L (ciclo 3) → **71,0 L** / ~72,7% de margem (old→new) — a estrutura
+# passou a ser dimensionada pelo MTOW de ENVELOPE (~1.351 kg, cenário fixo
+# "4 pax + bagagem + tanque cheio"), não pelo candidato de MISSÃO desta
+# missão leve (~915 kg antes) — ver tests/acceptance.rs.
 passengers = 2
 pax_mass_kg = 90.0
 baggage_kg = 20.0
@@ -28,9 +32,10 @@ isa_delta_c = 0.0
 # Margem mínima de combustível como requisito (Task 3, refino-ciclo2) —
 # mesmo piso de `config/missions/default.toml` (5%, fração da CAPACIDADE
 # do tanque). Verificado por execução real antes de fixar este arquivo:
-# Rotax 915 iS + esta missão exige ~74,4 L contra 260 L de capacidade —
-# margem ≈71,4% da capacidade, MUITO acima do piso (a missão ferry foi
-# escolhida deliberadamente com folga, não é um caso-limite) — ver
+# Rotax 915 iS + esta missão exige ~71,0 L contra 260 L de capacidade
+# (ciclo 4, task 2 — era ~68,5 L antes do W_dg de envelope) — margem
+# ≈72,7% da capacidade, MUITO acima do piso (a missão ferry foi escolhida
+# deliberadamente com folga, não é um caso-limite) — ver
 # `tests/acceptance.rs::rotax_missao_ferry_gera_spec_completo_data_driven`.
 min_fuel_margin_fraction = 0.05
 

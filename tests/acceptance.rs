@@ -180,8 +180,27 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // mais leve. OEW 779,0 → **665,5 kg**; mtow_mission_kg 1.032,6 →
     // **914,9 kg**; fuel_required_l 74,4 → **68,5 L** (old→new,
     // TOLERÂNCIAS INALTERADAS).
-    let mtow_expected = 914.9_f64;
-    let fuel_expected = 68.5_f64;
+    //
+    // Ciclo 4 (Task 2, W_dg = MTOW de envelope com lag-1): `MassModelAgent
+    // ::run` passou a receber o MTOW de ENVELOPE (`wb.spec.mtow_kg`,
+    // cenário fixo "4 pax + bagagem + tanque cheio", ~1.351 kg nesta
+    // missão) em vez do candidato de MISSÃO desta iteração (`mtow`, que
+    // para a missão ferry — só 2 pax, 3h — convergia bem mais leve,
+    // ~915 kg). INVESTIGADO (achado de revisão, salto >5%): esta missão é
+    // exatamente o caso em que a diferença entre os dois MTOWs é maior —
+    // a missão ferry usa metade dos passageiros e um terço da autonomia da
+    // missão de projeto, então seu candidato de MTOW ficava bem abaixo do
+    // envelope estrutural. Antes desta task a estrutura era dimensionada
+    // (incorretamente) para o peso LEVE da missão específica sendo voada;
+    // agora é dimensionada (corretamente, consistente com `StructuralAgent`
+    // /`LandingGearAgent`) para o peso do PIOR CASO estrutural (4 pax +
+    // bagagem + tanque cheio), que não muda com a missão. O salto grande
+    // (+6,6% no MTOW de missão) é justamente a estrutura deixando de ser
+    // subdimensionada para esta missão leve — não uma regressão. OEW não
+    // exposto no JSON desta missão; mtow_mission_kg 914,9 → **975,2 kg**;
+    // fuel_required_l 68,5 → **71,0 L** (old→new, TOLERÂNCIAS INALTERADAS).
+    let mtow_expected = 975.2_f64;
+    let fuel_expected = 71.0_f64;
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \
@@ -214,11 +233,15 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
         .expect("sizing.fuel_margin_pct deveria estar presente");
     // Task 4 (refino-ciclo2, arrasto de trim em cruzeiro): 72,04% → 71,39%
     // — ver comentário acima sobre o ΔCD_trim maior do Rotax nesta célula.
-    // Ciclo 3 (oew-parametrico, Task 4): 71,39% → **73,65%** (old→new) —
+    // Ciclo 3 (oew-parametrico, Task 4): 71,39% → 73,65% (old→new) —
     // aeronave mais leve exige menos combustível para a mesma missão, e a
     // capacidade do tanque não mudou. Continua MUITO acima do piso de 5%
     // — nenhuma violação nova.
-    let fuel_margin_pct_expected = 73.65_f64;
+    // Ciclo 4 (Task 2, W_dg de envelope): 73,65% → **72,71%** (old→new) —
+    // estrutura mais pesada (dimensionada para o envelope, ver comentário
+    // acima) consome um pouco mais de combustível para a mesma missão;
+    // ainda MUITO acima do piso de 5% — nenhuma violação nova.
+    let fuel_margin_pct_expected = 72.71_f64;
     assert!((fuel_margin_pct - fuel_margin_pct_expected).abs() < 1.0,
         "margem de combustível ({fuel_margin_pct:.2}%) deveria estar próxima do pin honesto \
          ~{fuel_margin_pct_expected}% (mudou o comportamento do sizing? atualize o pin)");

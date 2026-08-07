@@ -90,13 +90,21 @@ fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     // TRASEIRO real dos cenários (37,5%→31,7% MAC), o que AUMENTA a
     // distância `(x_main − x_cg_aft)` e portanto FOLGA o tipback:
     // 15.58°→**≈19.17°** (old→new, tolerância INALTERADA).
-    // Ciclo 4 (t/c dedicado da empenagem, `[empennage].thickness_ratio`,
-    // 2026-08-07): a cauda mais pesada (braço TRASEIRO) RECUA o CG vazio
-    // e o CG mais traseiro real, o que REDUZ a distância `(x_main −
-    // x_cg_aft)` e portanto aperta ligeiramente o tipback: 19.17°→
-    // **≈18.91°** (old→new). Continua bem acima do piso de 15°.
-    assert!((gear.tipback_angle_deg - 18.91).abs() < 0.05,
-        "θ tipback = {:.4}° — pin honesto esperado ≈18.91° (tolerância ±0.05°)",
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem, `[empennage].
+    // thickness_ratio`, 2026-08-07): a cauda mais pesada (braço TRASEIRO)
+    // RECUA o CG vazio e o CG mais traseiro real, o que REDUZ a distância
+    // `(x_main − x_cg_aft)` e portanto aperta ligeiramente o tipback:
+    // 19.17°→18.91° (old→new).
+    // Ciclo 4, Task 2 (W_dg = MTOW de envelope com lag-1): `MassModelAgent
+    // ::run` passa a usar o MTOW de ENVELOPE (~1.543,7kg) em vez do
+    // candidato de MISSÃO (~1.505,6kg antes) como W_dg — estrutura
+    // dimensionada para um peso maior fica um pouco mais pesada em TODOS
+    // os componentes (efeito uniforme, não recua nem avança o CG
+    // seletivamente), o que muda ligeiramente as massas/braços que
+    // definem o CG vazio e portanto o CG mais traseiro real: 18.91°→
+    // **≈18.85°** (old→new). Continua bem acima do piso de 15°.
+    assert!((gear.tipback_angle_deg - 18.8533).abs() < 0.05,
+        "θ tipback = {:.4}° — pin honesto esperado ≈18.8533° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
     assert!(gear.tipback_angle_deg >= 15.0,
         "achado honesto esperado: θ={:.2}° deveria ficar NO piso de 15° ou acima \
@@ -150,14 +158,18 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // quanto mais perto do trem de nariz fica o CG, MAIOR a fração de
     // carga nele: 24.79%→**≈29.03%** (old→new, tolerância INALTERADA) —
     // ACIMA do teto de 25%. FAIL honesto, asserido abaixo, não mascarado.
-    // Ciclo 4 (t/c dedicado da empenagem): a cauda mais pesada RECUA o CG
-    // mais dianteiro também (mesma causa física de todos os pins deste
-    // ciclo — massa em braço TRASEIRO recua o CG), afastando-o um pouco
-    // do trem de nariz: 29.03%→**≈28.71%** (old→new). Continua ACIMA do
-    // teto de 25% — achado honesto do ciclo 3 permanece, só com margem
-    // ligeiramente MENOR.
-    assert!((gear.nose_load_max_pct - 28.71).abs() < 0.1,
-        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈28.71% (tolerância ±0.1%)",
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): a cauda mais pesada
+    // RECUA o CG mais dianteiro também (mesma causa física de todos os
+    // pins deste ciclo — massa em braço TRASEIRO recua o CG), afastando-o
+    // um pouco do trem de nariz: 29.03%→28.71% (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): estrutura um pouco
+    // mais pesada em todos os componentes (W_dg sobe do candidato de
+    // missão ~1.505,6kg para o envelope ~1.543,7kg, ver docstring do
+    // teste de tipback acima) desloca o CG vazio ligeiramente — o CG mais
+    // DIANTEIRO real recua um pouco mais: 28.71%→**≈28.60%** (old→new).
+    // Continua ACIMA do teto de 25% — achado honesto do ciclo 3 permanece.
+    assert!((gear.nose_load_max_pct - 28.5966).abs() < 0.1,
+        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈28.5966% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
     assert!(gear.nose_load_max_pct > 25.0,
         "achado honesto do ciclo 3: nose_load_max_pct = {:.2}% deveria EXCEDER o teto de 25% \
@@ -166,11 +178,15 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // old (pré-E7, x_main=3.55m): ≈8.68%; E7: ≈12.95%. Ciclo 3: o CG mais
     // TRASEIRO também avançou (37,5%→31,7% MAC), subindo a carga MÍNIMA de
     // nariz: 12.95%→**≈16.15%** — continua bem acima do piso de 8%.
-    // Ciclo 4 (t/c dedicado da empenagem): CG mais traseiro RECUA (cauda
-    // mais pesada), reduzindo a carga MÍNIMA de nariz: 16.15%→**≈15.92%**
-    // (old→new). Continua bem acima do piso de 8%.
-    assert!((gear.nose_load_min_pct - 15.92).abs() < 0.05,
-        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈15.92% (tolerância ±0.05%)",
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): CG mais traseiro RECUA
+    // (cauda mais pesada), reduzindo a carga MÍNIMA de nariz: 16.15%→
+    // 15.92% (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): mesmo deslocamento
+    // uniforme do CG vazio da nota acima reduz também a carga MÍNIMA de
+    // nariz: 15.92%→**≈15.86%** (old→new). Continua bem acima do piso de
+    // 8%.
+    assert!((gear.nose_load_min_pct - 15.8646).abs() < 0.05,
+        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈15.8646% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
 }
@@ -227,9 +243,12 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
     // no nariz subiu para ≈29,0%, acima do teto de 25% (checagem #17).
     // FAIL honesto asserido (não mascarado): tipback e tail-strike
     // continuam PASSANDO, a carga de nariz não.
+    // Ciclo 4, Task 2 (W_dg de envelope): ≈29,0%→**≈28,6%** (old→new, ver
+    // `carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto` acima) —
+    // continua ACIMA do teto de 25%, mesmo achado honesto.
     assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:")
             && v.contains("excede o teto")),
-        "achado honesto do ciclo 3: deveria haver violação de carga de nariz (≈29,0% > 25,0%) \
+        "achado honesto do ciclo 3/4: deveria haver violação de carga de nariz (≈28,6% > 25,0%) \
          no baseline real: {:?}", report.violations);
 }
 
@@ -268,13 +287,18 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     println!("margem de combustível (baseline real) = {fuel_margin_pct:.4}% da capacidade");
     // Pin honesto pós-Task-4 (pré-E7): ≈1.5767%; campanha E7
     // (endurance_min_h 8h→7h): ≈13.9712%. Ciclo 3 (oew-parametrico):
-    // 13.9712→**≈14.5581%** (old→new, tolerância INALTERADA) — a estrutura
+    // 13.9712→14.5581% (old→new, tolerância INALTERADA) — a estrutura
     // computada deixa a aeronave ~11 kg mais leve no OEW, o que reduz o
     // MTOW de missão convergido (1.517,9→1.505,6 kg) e o combustível
     // exigido (223,7→222,1 L) com a capacidade do tanque inalterada.
-    assert!((fuel_margin_pct - 14.5581).abs() < 0.1,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-3 \
-         ≈14.5581%");
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): W_dg sobe do candidato
+    // de missão (~1.505,6kg) para o envelope (~1.543,7kg) — estrutura mais
+    // pesada em todos os componentes aumenta o OEW, o MTOW de missão
+    // convergido e o combustível exigido: 14.5581%→**≈14.3273%**
+    // (old→new). Continua bem acima do piso de 5%.
+    assert!((fuel_margin_pct - 14.3273).abs() < 0.1,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-4 \
+         ≈14.3273%");
     assert!(fuel_margin_pct >= 5.0,
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");

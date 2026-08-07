@@ -254,11 +254,16 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // MTOW de missão 1.517,9→1.505,6 kg (aeronave mais leve ⟹ menos
     // arrasto induzido ⟹ menos consumo/hora).
     // Autonomia informativa: 7.676424619 → **7.7292726508 h** (old→new).
-    // Ciclo 4 (t/c dedicado da empenagem): MTOW convergido sobe +2,37 kg
-    // (cauda mais pesada, ver `golden_toyota_baseline_regressao_task_2_1`)
-    // ⟹ mais arrasto induzido ⟹ menos horas com o mesmo tanque cheio:
-    // 7.7292726508 → **7.7219126689 h** (old→new).
-    let endurance_pin_h = 7.7219126689;
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): MTOW convergido sobe
+    // +2,37 kg (cauda mais pesada, ver
+    // `golden_toyota_baseline_regressao_task_2_1`) ⟹ mais arrasto
+    // induzido ⟹ menos horas com o mesmo tanque cheio: 7.7292726508 →
+    // 7.7219126689 h (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): MTOW convergido sobe
+    // mais (+4,43 kg, ver `golden_toyota_baseline_regressao_task_2_1`) ⟹
+    // mais arrasto induzido ⟹ menos horas com o mesmo tanque cheio:
+    // 7.7219126689 → **7.709253917 h** (old→new).
+    let endurance_pin_h = 7.709253917;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -267,10 +272,13 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // alcance com o mesmo tanque cheio: 2.127,792006 → 2.149,398893 km.
     // Ciclo 3 (oew-parametrico): 2.149,398893 → **2.164,196342 km**
     // (old→new, mesma causa — aeronave mais leve).
-    // Ciclo 4 (t/c dedicado da empenagem): MTOW convergido sobe (cauda mais
-    // pesada) ⟹ mais arrasto induzido ⟹ menos alcance com o mesmo tanque
-    // cheio: 2.164,196342 → **2.162,135547 km** (old→new).
-    let range_pin_km = 2_162.135547;
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): MTOW convergido sobe
+    // (cauda mais pesada) ⟹ mais arrasto induzido ⟹ menos alcance com o
+    // mesmo tanque cheio: 2.164,196342 → 2.162,135547 km (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): MTOW convergido sobe
+    // mais ⟹ mais arrasto induzido ⟹ menos alcance com o mesmo tanque
+    // cheio: 2.162,135547 → **2.158,591097 km** (old→new).
+    let range_pin_km = 2_158.591097;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -408,17 +416,23 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // arrasto induzido ⟹ menos consumo/hora).
     // Margem: 36,325136 L (~16,2402%) → **37,851123 L (~17,0386%)**
     // (old→new) — menos combustível exigido, mesma capacidade de tanque.
-    // Ciclo 4 (t/c dedicado da empenagem): cauda mais pesada → laço de MTOW
-    // realimenta → mais combustível de missão exigido (mais arrasto
-    // induzido) → margem CAI ligeiramente: 37,851123 L (~17,0386%) →
-    // **37,632378 L (~16,9235%)** (old→new). Continua CONFORTAVELMENTE
-    // POSITIVA — achado central pós-E7 permanece válido.
-    let margem_pin_l = 37.632378;
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): cauda mais pesada → laço
+    // de MTOW realimenta → mais combustível de missão exigido (mais
+    // arrasto induzido) → margem CAI ligeiramente: 37,851123 L (~17,0386%)
+    // → 37,632378 L (~16,9235%) (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): estrutura mais pesada
+    // (W_dg sobe do candidato de missão para o envelope, ver
+    // `golden_toyota_baseline_regressao_task_2_1`) → MTOW convergido sobe
+    // → mais combustível de missão exigido → margem CAI de novo:
+    // 37,632378 L (~16,9235%) → **37,250858 L (~16,7232%)** (old→new).
+    // Continua CONFORTAVELMENTE POSITIVA — achado central pós-E7
+    // permanece válido.
+    let margem_pin_l = 37.250858;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
         "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E7 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 16.9235).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-3 ~16,9235%");
+    assert!((margem_pct - 16.7232).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-4 ~16,7232%");
     assert!(margem_l > 0.0,
         "achado central pós-E7: com endurance_min_h reduzido, a missão cabe no tanque de 260 L \
          com folga confortável (margem {margem_l:.2} L)");
@@ -719,23 +733,45 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // laço de MTOW realimenta (mais OEW ⟹ mais combustível de missão ⟹
     // mais MTOW): 1.505,634264 → **1.508,008307 kg** (old→new, +2,37 kg,
     // +0,16%).
-    let mtow_convergido_kg = 1_508.008306643;
+    //
+    // Ciclo 4, Task 2 (W_dg = MTOW de envelope com lag-1, 2026-08-07):
+    // `MassModelAgent::run` recebia até aqui o candidato de MTOW de
+    // MISSÃO desta iteração (`mtow`) como W_dg/W_l de Raymer — inconsistente
+    // com `StructuralAgent`/`LandingGearAgent`, que já usavam o MTOW de
+    // ENVELOPE (`wb.spec.mtow_kg`, cenário fixo "4 pax + bagagem + tanque
+    // cheio"). Corrigido para usar o mesmo envelope, com LAG-1 (mesmo
+    // padrão de `n_design_prev`, seed `sizing.mtow_initial_guess_kg`). O
+    // envelope (~1.543,7 kg) é mais pesado que o candidato de missão
+    // (~1.505,6 kg) neste baseline (4 pax reais ≈ o cenário de envelope,
+    // mas o TANQUE CHEIO do envelope excede o combustível de missão) —
+    // estrutura dimensionada para o peso maior fica um pouco mais pesada
+    // em TODOS os componentes, e o laço realimenta (mais OEW ⟹ mais
+    // combustível de missão ⟹ mais MTOW): 1.508,008307 →
+    // **1.512,442570 kg** (old→new, +4,43 kg, +0,29% — dentro da faixa
+    // "~1-2%" prevista, sem surpresa).
+    let mtow_convergido_kg = 1_512.442570484;
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
     // Ciclo 3 (oew-parametrico): 7.676424619 → **7.7292726508 h**.
-    // Ciclo 4 (t/c dedicado): MTOW convergido sobe (cauda mais pesada) ⟹
-    // mais arrasto induzido ⟹ menos horas com o mesmo tanque (informativo):
-    // 7.7292726508 → **7.7219126689 h** (old→new).
-    let endurance_h = 7.7219126689;
+    // Ciclo 4, Task 1 (t/c dedicado): MTOW convergido sobe (cauda mais
+    // pesada) ⟹ mais arrasto induzido ⟹ menos horas com o mesmo tanque
+    // (informativo): 7.7292726508 → 7.7219126689 h (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope): MTOW convergido sobe mais (ver
+    // `mtow_convergido_kg` acima) ⟹ mais arrasto induzido ⟹ menos horas
+    // com o mesmo tanque: 7.7219126689 → **7.709253917 h** (old→new).
+    let endurance_h = 7.709253917;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
     // Ciclo 3 (oew-parametrico): 30.482941164 → **30.274517483 L/h**
     // (old→new) — aeronave mais leve, menos potência de cruzeiro.
-    // Ciclo 4 (t/c dedicado): MTOW convergido sobe ⟹ mais potência
-    // requerida em cruzeiro: 30.274517483 → **30.3033730156 L/h** (old→new).
-    let fc_lph = 30.3033730156;
+    // Ciclo 4, Task 1 (t/c dedicado): MTOW convergido sobe ⟹ mais potência
+    // requerida em cruzeiro: 30.274517483 → 30.3033730156 L/h (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope): MTOW convergido sobe mais ⟹ mais
+    // potência requerida em cruzeiro: 30.3033730156 → **30.353131770 L/h**
+    // (old→new).
+    let fc_lph = 30.353131770;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -772,7 +808,19 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // **881,219504 kg** (old→new, +2,190 kg, +0,25% — dentro da faixa
     // "~+2,3 kg" prevista pelo brief, sem surpresa >5%). Tolerância do
     // assert INALTERADA (5e-5).
-    let oew_kg = 881.219504199;
+    //
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1, 2026-08-07): W_dg sobe
+    // do candidato de missão (~1.505,6 kg) para o envelope de projeto
+    // (~1.543,7 kg de `wb.spec.mtow_kg`, ver `mtow_convergido_kg` acima)
+    // — TODOS os itens estruturais com expoente positivo em W_dg/W_l
+    // ficam um pouco mais pesados (kg, old→new): asa 147,99→149,56;
+    // fuselagem 110,57→110,99; emp_h 14,11→14,23; emp_v 7,49→7,55;
+    // trem_principal 90,84→92,51; trem_nariz 19,83→20,10; tanques
+    // 22,39→22,39 (independe de W_dg, inalterado). Total estrutural
+    // 413,22→417,33 kg (+4,11 kg). OEW 881,219504 → **885,333291 kg**
+    // (old→new, +4,114 kg, +0,47% — dentro da faixa "~1-2%" prevista,
+    // sem surpresa). Tolerância do assert INALTERADA (5e-5).
+    let oew_kg = 885.333291285;
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
         "MTOW convergido {:.6} kg divergiu do valor medido na Task 5.2 (cooling_drag_fraction) \
@@ -813,10 +861,15 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Ciclo 3 (oew-parametrico): MTOW convergido cai mais 12,25 kg
     // (massas estruturais computadas) — 301.944536 → **302.234169 km/h**
     // (old→new).
-    // Ciclo 4 (t/c dedicado da empenagem): MTOW convergido sobe +2,37 kg
-    // (cauda mais pesada, ver acima) — mais peso ⟹ mais arrasto induzido ⟹
-    // V_max cai: 302.234169 → **302.178330 km/h** (old→new, -0,056 km/h).
-    let v_max_pos_task_5_2_kmh = 302.178330243;
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): MTOW convergido sobe
+    // +2,37 kg (cauda mais pesada, ver acima) — mais peso ⟹ mais arrasto
+    // induzido ⟹ V_max cai: 302.234169 → 302.178330 km/h (old→new,
+    // -0,056 km/h).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): MTOW convergido sobe
+    // mais +4,43 kg (ver `mtow_convergido_kg` acima) — mais peso ⟹ mais
+    // arrasto induzido ⟹ V_max cai de novo: 302.178330 →
+    // **302.073675 km/h** (old→new, -0,105 km/h).
+    let v_max_pos_task_5_2_kmh = 302.073675;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-4 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
@@ -1201,10 +1254,15 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // de forma um pouco diferente com capacidade de tanque menor.
     // Ciclo 3 (oew-parametrico): aeronave mais leve exige menos
     // combustível — 223,663329 → **222,101240 L** (old→new).
-    // Ciclo 4 (t/c dedicado da empenagem): cauda mais pesada eleva
-    // ligeiramente o combustível exigido — 222,101240 → **222,319874 L**
-    // (old→new). Continua com folga confortável sobre os 240 L.
-    let necessario_pin_l = 222.319874;
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): cauda mais pesada eleva
+    // ligeiramente o combustível exigido — 222,101240 → 222,319874 L
+    // (old→new).
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): estrutura dimensionada
+    // pelo envelope (mais pesada, ver `golden_toyota_baseline_regressao_
+    // task_2_1`) eleva o combustível exigido de novo: 222,319874 →
+    // **222,502043 L** (old→new). Continua com folga confortável sobre
+    // os 240 L.
+    let necessario_pin_l = 222.502043;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
         "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E7 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
@@ -1278,11 +1336,21 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // deixam a célula mais leve também neste caso — 357,080029 →
             // **353,967160 L** (old→new). Continua MUITO acima dos 260 L
             // (~36,1%): o achado qualitativo não muda.
-            // Ciclo 4 (t/c dedicado da empenagem): cauda mais pesada eleva
-            // ligeiramente o combustível exigido também neste caso —
-            // 353,967160 → **354,344831 L** (old→new). Continua MUITO
-            // acima dos 260 L (~36,3%): achado qualitativo inalterado.
-            let necessario_pin_l = 354.344831;
+            // Ciclo 4, Task 1 (t/c dedicado da empenagem): cauda mais pesada
+            // eleva ligeiramente o combustível exigido também neste caso —
+            // 353,967160 → 354,344831 L (old→new).
+            // Ciclo 4, Task 2 (W_dg de envelope com lag-1): a estrutura
+            // passa a ser dimensionada pelo MTOW de ENVELOPE em vez do
+            // candidato de missão desta iteração — o motor Rotax nunca
+            // converge (é o caminho de ERRO deste teste), então o laço
+            // não estabiliza num único ponto fixo como nos casos Toyota
+            // acima; a mudança de W_dg desloca ligeiramente os
+            // intermediários que alimentam o `CombustivelInsuficiente`
+            // final: 354,344831 → **353,309519 L** (old→new, -0,29% —
+            // pequeno e na direção OPOSTA à do caso Toyota, consistente
+            // com não ser o mesmo tipo de ponto fixo). Continua MUITO
+            // acima dos 260 L (~35,9%): achado qualitativo inalterado.
+            let necessario_pin_l = 353.309519;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E7 \
                  {necessario_pin_l:.6} L");
@@ -1341,10 +1409,13 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
     // Ciclo 3 (oew-parametrico): MTOW convergido cai de novo (massas
     // estruturais computadas) 1.517,89 → 1.505,63 kg → ws_actual ≈
     // 1.048,30 → **1.039,84 N/m²** (old→new).
-    // Ciclo 4 (t/c dedicado da empenagem): MTOW convergido sobe +2,37 kg
-    // (cauda mais pesada) → ws_actual ≈ 1.039,84 → **1.041,48 N/m²**
+    // Ciclo 4, Task 1 (t/c dedicado da empenagem): MTOW convergido sobe
+    // +2,37 kg (cauda mais pesada) → ws_actual ≈ 1.039,84 → 1.041,48 N/m²
     // (old→new).
-    let ws_actual_esperado = 1_041.48;
+    // Ciclo 4, Task 2 (W_dg de envelope com lag-1): MTOW convergido sobe
+    // mais +4,43 kg (ver `golden_toyota_baseline_regressao_task_2_1`) →
+    // ws_actual ≈ 1.041,48 → **1.044,54 N/m²** (old→new).
+    let ws_actual_esperado = 1_044.54;
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);

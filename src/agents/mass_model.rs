@@ -150,6 +150,16 @@ pub fn fuel_system_mass_raymer_kg(capacity_l: f64) -> f64 {
 pub struct MassModelAgent;
 
 impl MassModelAgent {
+    /// `w_dg_envelope_kg`: W_dg/W_l de Raymer — o peso máximo de projeto,
+    /// que é o MTOW de ENVELOPE (`wb.spec.mtow_kg`, cenário "4 pax +
+    /// bagagem + tanque cheio"), não o MTOW de missão (`state.mtow_kg`).
+    /// No laço do orchestrator vem com LAG-1 (seed `sizing.
+    /// mtow_initial_guess_kg`, ver `orchestrator::size_aircraft_with_
+    /// max_iters`) — até o ciclo 3 este parâmetro recebia o candidato de
+    /// MISSÃO da iteração, inconsistente com `StructuralAgent`/
+    /// `LandingGearAgent` (que já usavam o MTOW de envelope), efeito medido
+    /// ~−3,5 kg dianteiros nas massas estruturais.
+    ///
     /// `n_design`: fator de carga LIMITE (o agente aplica ×1.5 para o
     /// ultimate N_z). No laço do orchestrator vem com LAG-1 (iteração
     /// anterior; seed 3.8 → N_z 5.70) — ver `orchestrator::size_aircraft`.
@@ -158,9 +168,9 @@ impl MassModelAgent {
     /// de q são fracos (0.006–0.241), erro ≤3% (spec).
     pub fn run(
         cfg: &AircraftConfig, engine: &EngineSpec, req: &Requirements,
-        wing: &WingSpec, emp: &EmpennageSpec, mtow_kg: f64, n_design: f64,
+        wing: &WingSpec, emp: &EmpennageSpec, w_dg_envelope_kg: f64, n_design: f64,
     ) -> StructuralMasses {
-        assert!(mtow_kg > 0.0, "MTOW deve ser positivo, obtido {mtow_kg}");
+        assert!(w_dg_envelope_kg > 0.0, "MTOW deve ser positivo, obtido {w_dg_envelope_kg}");
         assert!(n_design > 0.0, "n_design deve ser positivo, obtido {n_design}");
         let mm = &cfg.mass_model;
         let rho = Isa::density_kgm3(req.cruise_altitude_m, req.isa_delta_c);
@@ -175,22 +185,22 @@ impl MassModelAgent {
         let l_over_d = cfg.fuselage.length_m / mm.d_fus_equiv_m;
         StructuralMasses {
             asa_kg: wing_mass_raymer_kg(wing.area_m2, w_fw_kg, wing.aspect_ratio,
-                q_pa, wing.taper_ratio, t_c_asa, n_z_ult, mtow_kg)
+                q_pa, wing.taper_ratio, t_c_asa, n_z_ult, w_dg_envelope_kg)
                 * mm.composite_factor_wing,
-            emp_h_kg: htail_mass_raymer_kg(n_z_ult, mtow_kg, q_pa,
+            emp_h_kg: htail_mass_raymer_kg(n_z_ult, w_dg_envelope_kg, q_pa,
                 emp.s_horizontal_m2, t_c_emp, emp.ar_h, emp.taper_h)
                 * mm.composite_factor_tail,
-            emp_v_kg: vtail_mass_raymer_kg(n_z_ult, mtow_kg, q_pa,
+            emp_v_kg: vtail_mass_raymer_kg(n_z_ult, w_dg_envelope_kg, q_pa,
                 emp.s_vertical_m2, t_c_emp, emp.ar_v, emp.taper_v)
                 * mm.composite_factor_tail,
-            fuselagem_kg: fuselage_mass_raymer_kg(s_f_m2, n_z_ult, mtow_kg,
+            fuselagem_kg: fuselage_mass_raymer_kg(s_f_m2, n_z_ult, w_dg_envelope_kg,
                 emp.arm_h_m, l_over_d, q_pa)
                 * mm.composite_factor_fuselage,
             trem_principal_kg: main_gear_mass_raymer_kg(
-                mm.landing_load_factor_ult, mtow_kg, mm.main_strut_length_m)
+                mm.landing_load_factor_ult, w_dg_envelope_kg, mm.main_strut_length_m)
                 * mm.composite_factor_gear,
             trem_nariz_kg: nose_gear_mass_raymer_kg(
-                mm.landing_load_factor_ult, mtow_kg, mm.nose_strut_length_m)
+                mm.landing_load_factor_ult, w_dg_envelope_kg, mm.nose_strut_length_m)
                 * mm.composite_factor_gear,
             tanques_kg: fuel_system_mass_raymer_kg(cfg.fuel_system.capacity_l)
                 * mm.composite_factor_fuel_system,
