@@ -514,16 +514,19 @@ mod tests {
     /// importa: a recursão é uma contração, não uma oscilação/divergência
     /// mascarada por um número de iterações pequeno.
     ///
-    /// A causa do resíduo NÃO é que o lag do CG em si convirja devagar:
-    /// `WeightBalanceAgent` calcula o CG do cenário de referência a partir
-    /// só de massas/braços fixos (motor, itens de `[[masses.items]]`,
-    /// empenagem, pax, bagagem, MEIO tanque a CAPACIDADE fixa) — nenhum
-    /// desses depende de `state.mtow_kg` nem de `wing.cd_cruise`, então o
-    /// CG do cenário de referência já é PRATICAMENTE CONSTANTE a partir da
-    /// 2ª iteração. O resíduo observado vem de `wing.cl_cruise`
-    /// (proporcional a `state.mtow_kg`, recalculado do zero a cada
-    /// iteração, SEM lag) continuar mudando enquanto o MTOW ainda não
-    /// convergiu — a MESMA taxa de convergência do laço de MTOW.
+    /// Até a Task 3 do plano oew-parametrico, a causa do resíduo NÃO era o
+    /// lag do CG em si: `WeightBalanceAgent` calculava o CG do cenário de
+    /// referência a partir só de massas/braços FIXOS (motor, itens de
+    /// `[[masses.items]]`, empenagem, pax, bagagem, MEIO tanque a
+    /// CAPACIDADE fixa), nenhum dependente de `state.mtow_kg`, então o CG
+    /// já era praticamente constante a partir da 2ª iteração e o resíduo
+    /// vinha só de `wing.cl_cruise` (proporcional a `state.mtow_kg`, sem
+    /// lag). Desde a Task 4 do mesmo plano as 7 massas ESTRUTURAIS do OEW
+    /// são COMPUTADAS (`agents::mass_model`) em função do MTOW candidato —
+    /// o CG do cenário de referência TAMBÉM se move com o laço agora, e as
+    /// duas fontes de resíduo somam. Efeito medido: delta final
+    /// 1,5041627731e-5 → **1,7579617312e-5** (old→new, mesma ordem de
+    /// grandeza e mesma taxa geométrica; tolerância INALTERADA).
     #[test]
     fn cl_h_trim_iterations_do_campo_real_converge_geometricamente() {
         let cfg = config_teste();
@@ -555,12 +558,14 @@ mod tests {
 
         // Pin do resíduo REAL no ponto em que a produção retorna (critério
         // de MTOW, não de CL_h_trim) — ver achado honesto na docstring
-        // acima. 1,5041627731e-5 medido; tolerância com folga (2x) para
+        // acima. 1,7579617312e-5 medido (era 1,5041627731e-5 antes de o
+        // OEW estrutural virar computado); tolerância com folga (2x) para
         // não ficar frágil a resíduo de ponto flutuante entre plataformas,
         // mas apertada o bastante para pegar uma regressão real (ex.: lag
-        // desligado acidentalmente produziria delta ~O(1), não ~1e-5).
+        // desligado acidentalmente produziria delta ~O(0,16), o tamanho do
+        // transiente do seed, não ~1e-5).
         let delta_final = deltas[deltas.len() - 1];
-        let delta_final_pin = 1.5041627731e-5;
+        let delta_final_pin = 1.7579617312e-5;
         assert!((delta_final - delta_final_pin).abs() < 1.5e-5,
             "delta final (campo real) = {delta_final:.10e} divergiu do pin honesto \
              ≈{delta_final_pin:.10e} — histórico completo: {history:?}");

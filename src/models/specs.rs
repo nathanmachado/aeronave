@@ -756,10 +756,15 @@ pub struct ElectricalSpec {
 /// por `[control_surfaces].elevator_deflection_max_deg` +
 /// `[stability].cl_h_stall_limit`); `[empennage].cd0` e os itens
 /// `emp_horizontal`/`emp_vertical` de `[[masses.items]]` também foram
-/// REMOVIDOS (substituídos por `[empennage].mass_per_area_{h,v}_kg_m2` +
-/// `cd0_area_factor`, aplicados sobre a área da empenagem REALMENTE
-/// dimensionada) — todos com erro de migração claro em
-/// `models::config::parse_aircraft` se ainda presentes no TOML. Ver
+/// REMOVIDOS (substituídos, na época, por
+/// `[empennage].mass_per_area_{h,v}_kg_m2` + `cd0_area_factor`, aplicados
+/// sobre a área da empenagem REALMENTE dimensionada) — todos com erro de
+/// migração claro em `models::config::parse_aircraft` se ainda presentes
+/// no TOML. No ciclo 3 (oew-parametrico) os próprios
+/// `mass_per_area_{h,v}_kg_m2` foram removidos, junto com mais 5 nomes de
+/// `[[masses.items]]` e `[gear].mass_main_leg_kg`: as 7 massas
+/// estruturais do OEW passaram a ser COMPUTADAS por `agents::mass_model`
+/// (Raymer cap. 15.2 × `[mass_model]`). Ver
 /// `docs/aircraft_spec.schema.md` §1 e §4.
 ///
 /// v4.3 (Task 2, refino-ciclo2): `GearSpec::nose_load_fraction_pct`
