@@ -12,3 +12,4 @@ pub mod constraint_diagram;
 pub mod vn_diagram;
 pub mod propeller;
 pub mod trim_authority;
+pub mod mass_model;
