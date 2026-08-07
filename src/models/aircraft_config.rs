@@ -43,6 +43,10 @@ pub struct AircraftConfig {
     /// Orçamento elétrico (Task 5.2) — barramento, alternador e cargas
     /// individuais, consumidos por `agents::electrical::ElectricalAgent`.
     pub electrical: ElectricalCfg,
+    /// Parâmetros do modelo de massas estruturais (ciclo 3, spec
+    /// 2026-08-06-oew-parametrico-design.md) — fatores de composto e
+    /// geometria auxiliar consumidos por `agents::mass_model`.
+    pub mass_model: MassModelCfg,
 }
 
 /// Parâmetros do laço de convergência de MTOW (`orchestrator::size_aircraft`,
@@ -476,6 +480,26 @@ pub struct ElectricalCfg {
     pub loads: Vec<ElectricalLoadCfg>,
 }
 
+/// Parâmetros do modelo de massas estruturais (ciclo 3, spec
+/// 2026-08-06-oew-parametrico-design.md) — fatores de composto (Raymer
+/// Tab. 15.4) e geometria auxiliar consumidos por `agents::mass_model`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MassModelCfg {
+    pub composite_factor_wing: f64,
+    pub composite_factor_tail: f64,
+    pub composite_factor_fuselage: f64,
+    pub composite_factor_gear: f64,
+    pub composite_factor_fuel_system: f64,
+    /// Diâmetro equivalente da fuselagem (m) — cabine + estrutura.
+    pub d_fus_equiv_m: f64,
+    /// S_molhada = coeff × π × d_equiv × comprimento (corpo afilado < cilindro).
+    pub fuselage_wetted_coeff: f64,
+    /// Fator de carga de POUSO ultimate N_l (= N_pouso × 1.5, Raymer 15.2).
+    pub landing_load_factor_ult: f64,
+    pub main_strut_length_m: f64,
+    pub nose_strut_length_m: f64,
+}
+
 /// Um item de massa do orçamento de peso vazio (OEW), com o braço de
 /// momento expresso por REFERÊNCIA a uma entrada de `[arms]` (ou de
 /// `[wing]`/`[gear]`, ver `weight_balance::ArmConfig::by_name`) mais um
@@ -704,6 +728,18 @@ pub mod test_fixtures {
                     ElectricalLoadCfg { name: "pitot_aquecido".into(),     continuous_w: 85.0,  peak_w: 85.0 },
                     ElectricalLoadCfg { name: "radio_transponder".into(),  continuous_w: 50.0,  peak_w: 65.0 },
                 ],
+            },
+            mass_model: MassModelCfg {
+                composite_factor_wing: 0.90,
+                composite_factor_tail: 0.80,
+                composite_factor_fuselage: 0.95,
+                composite_factor_gear: 1.00,
+                composite_factor_fuel_system: 1.05,
+                d_fus_equiv_m: 1.10,
+                fuselage_wetted_coeff: 0.70,
+                landing_load_factor_ult: 4.0,
+                main_strut_length_m: 0.50,
+                nose_strut_length_m: 0.40,
             },
         }
     }

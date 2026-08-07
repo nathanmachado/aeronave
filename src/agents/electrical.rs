@@ -146,7 +146,18 @@ mod tests {
         // Substitui a seção [electrical] inteira por uma com loads vazio.
         let head = toml_base.split("[electrical]").next().unwrap();
         let toml_mutado = format!(
-            "{head}\n[electrical]\nbus_voltage_v = 28.0\nalternator_w = 900.0\nloads = []\n"
+            "{head}\n[electrical]\nbus_voltage_v = 28.0\nalternator_w = 900.0\nloads = []\n\
+             [mass_model]\n\
+             composite_factor_wing = 0.85\n\
+             composite_factor_tail = 0.83\n\
+             composite_factor_fuselage = 0.90\n\
+             composite_factor_gear = 0.95\n\
+             composite_factor_fuel_system = 1.00\n\
+             d_fus_equiv_m = 1.30\n\
+             fuselage_wetted_coeff = 0.75\n\
+             landing_load_factor_ult = 4.5\n\
+             main_strut_length_m = 0.67\n\
+             nose_strut_length_m = 0.53\n"
         );
 
         let err = crate::models::config::parse_aircraft(&toml_mutado)

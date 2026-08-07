@@ -961,6 +961,91 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         }
     }
 
+    // [mass_model] (ciclo 3, spec 2026-08-06-oew-parametrico-design.md) —
+    // fatores de composto (Raymer Tab. 15.4) e geometria auxiliar
+    // consumidos por `agents::mass_model`.
+    let mm = &cfg.mass_model;
+    require_finite("mass_model.composite_factor_wing", mm.composite_factor_wing)?;
+    if mm.composite_factor_wing <= 0.6 || mm.composite_factor_wing >= 1.1 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.composite_factor_wing deve estar em \
+             (0.6, 1.1) — valor: {}",
+            mm.composite_factor_wing
+        )));
+    }
+    require_finite("mass_model.composite_factor_tail", mm.composite_factor_tail)?;
+    if mm.composite_factor_tail <= 0.6 || mm.composite_factor_tail >= 1.1 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.composite_factor_tail deve estar em \
+             (0.6, 1.1) — valor: {}",
+            mm.composite_factor_tail
+        )));
+    }
+    require_finite("mass_model.composite_factor_fuselage", mm.composite_factor_fuselage)?;
+    if mm.composite_factor_fuselage <= 0.6 || mm.composite_factor_fuselage >= 1.1 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.composite_factor_fuselage deve estar \
+             em (0.6, 1.1) — valor: {}",
+            mm.composite_factor_fuselage
+        )));
+    }
+    require_finite("mass_model.composite_factor_gear", mm.composite_factor_gear)?;
+    if mm.composite_factor_gear <= 0.6 || mm.composite_factor_gear >= 1.1 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.composite_factor_gear deve estar em \
+             (0.6, 1.1) — valor: {}",
+            mm.composite_factor_gear
+        )));
+    }
+    require_finite("mass_model.composite_factor_fuel_system", mm.composite_factor_fuel_system)?;
+    if mm.composite_factor_fuel_system <= 0.6 || mm.composite_factor_fuel_system >= 1.2 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.composite_factor_fuel_system deve \
+             estar em (0.6, 1.2) — valor: {}",
+            mm.composite_factor_fuel_system
+        )));
+    }
+    require_finite("mass_model.d_fus_equiv_m", mm.d_fus_equiv_m)?;
+    if mm.d_fus_equiv_m <= 0.9 || mm.d_fus_equiv_m >= 2.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.d_fus_equiv_m deve estar em \
+             (0.9, 2.0) — valor: {}",
+            mm.d_fus_equiv_m
+        )));
+    }
+    require_finite("mass_model.fuselage_wetted_coeff", mm.fuselage_wetted_coeff)?;
+    if mm.fuselage_wetted_coeff <= 0.5 || mm.fuselage_wetted_coeff >= 0.95 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.fuselage_wetted_coeff deve estar em \
+             (0.5, 0.95) — valor: {}",
+            mm.fuselage_wetted_coeff
+        )));
+    }
+    require_finite("mass_model.landing_load_factor_ult", mm.landing_load_factor_ult)?;
+    if mm.landing_load_factor_ult <= 3.0 || mm.landing_load_factor_ult >= 7.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.landing_load_factor_ult deve estar \
+             em (3.0, 7.0) — valor: {}",
+            mm.landing_load_factor_ult
+        )));
+    }
+    require_finite("mass_model.main_strut_length_m", mm.main_strut_length_m)?;
+    if mm.main_strut_length_m <= 0.3 || mm.main_strut_length_m >= 1.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.main_strut_length_m deve estar em \
+             (0.3, 1.5) — valor: {}",
+            mm.main_strut_length_m
+        )));
+    }
+    require_finite("mass_model.nose_strut_length_m", mm.nose_strut_length_m)?;
+    if mm.nose_strut_length_m <= 0.3 || mm.nose_strut_length_m >= 1.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.nose_strut_length_m deve estar em \
+             (0.3, 1.5) — valor: {}",
+            mm.nose_strut_length_m
+        )));
+    }
+
     Ok(())
 }
 
@@ -1342,6 +1427,17 @@ mod tests {
             name = "radio_transponder"
             continuous_w = 55.0
             peak_w = 70.0
+            [mass_model]
+            composite_factor_wing = 0.90
+            composite_factor_tail = 0.80
+            composite_factor_fuselage = 0.95
+            composite_factor_gear = 1.00
+            composite_factor_fuel_system = 1.05
+            d_fus_equiv_m = 1.10
+            fuselage_wetted_coeff = 0.70
+            landing_load_factor_ult = 4.0
+            main_strut_length_m = 0.50
+            nose_strut_length_m = 0.40
         "#
         .to_string()
     }
@@ -2124,7 +2220,18 @@ mod tests {
         let base = aircraft_toml_valido();
         let head = base.split("[electrical]").next().unwrap();
         let toml = format!(
-            "{head}\n[electrical]\nbus_voltage_v = 28.0\nalternator_w = 900.0\nloads = []\n"
+            "{head}\n[electrical]\nbus_voltage_v = 28.0\nalternator_w = 900.0\nloads = []\n\
+             [mass_model]\n\
+             composite_factor_wing = 0.90\n\
+             composite_factor_tail = 0.80\n\
+             composite_factor_fuselage = 0.95\n\
+             composite_factor_gear = 1.00\n\
+             composite_factor_fuel_system = 1.05\n\
+             d_fus_equiv_m = 1.10\n\
+             fuselage_wetted_coeff = 0.70\n\
+             landing_load_factor_ult = 4.0\n\
+             main_strut_length_m = 0.50\n\
+             nose_strut_length_m = 0.40\n"
         );
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("electrical.loads"), "{err}");
@@ -2178,6 +2285,88 @@ mod tests {
         // e o resultado da mesma conta em Rust).
         let toml = aircraft_toml_valido().replace("peak_w = 520.0", "peak_w = 17.0");
         parse_aircraft(&toml).expect("peak_w acima do atuador calculado deveria ser aceito");
+    }
+
+    // ─── [mass_model] (ciclo 3, spec 2026-08-06-oew-parametrico-design.md) ──
+
+    #[test]
+    fn rejeita_composite_factor_wing_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("composite_factor_wing = 0.90", "composite_factor_wing = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.composite_factor_wing"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_composite_factor_tail_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("composite_factor_tail = 0.80", "composite_factor_tail = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.composite_factor_tail"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_composite_factor_fuselage_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("composite_factor_fuselage = 0.95", "composite_factor_fuselage = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.composite_factor_fuselage"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_composite_factor_gear_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("composite_factor_gear = 1.00", "composite_factor_gear = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.composite_factor_gear"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_composite_factor_fuel_system_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("composite_factor_fuel_system = 1.05", "composite_factor_fuel_system = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.composite_factor_fuel_system"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_d_fus_equiv_m_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("d_fus_equiv_m = 1.10", "d_fus_equiv_m = 0.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.d_fus_equiv_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_fuselage_wetted_coeff_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("fuselage_wetted_coeff = 0.70", "fuselage_wetted_coeff = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.fuselage_wetted_coeff"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_landing_load_factor_ult_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("landing_load_factor_ult = 4.0", "landing_load_factor_ult = 9.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.landing_load_factor_ult"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_main_strut_length_m_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("main_strut_length_m = 0.50", "main_strut_length_m = 2.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.main_strut_length_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_nose_strut_length_m_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("nose_strut_length_m = 0.40", "nose_strut_length_m = 2.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.nose_strut_length_m"), "{err}");
     }
 
     // ─── MISSÃO (REQUISITOS) ────────────────────────────────────────────────

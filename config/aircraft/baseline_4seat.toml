@@ -457,3 +457,20 @@ peak_w = 90.0
 name = "radio_transponder"
 continuous_w = 55.0
 peak_w = 70.0
+
+# Modelo de massas estruturais (ciclo 3) — equações de componente Raymer
+# cap. 15.2 (GA) × fatores de composto (Tab. 15.4). As 7 massas estruturais
+# do OEW são COMPUTADAS por agents::mass_model — os antigos itens fixos de
+# [[masses.items]] (asa, fuselagem, trem_principal, trem_nariz, tanques) e
+# [empennage].mass_per_area_* foram removidos (erro de migração se presentes).
+[mass_model]
+composite_factor_wing        = 0.85  # Raymer Tab. 15.4 (asa composta)
+composite_factor_tail        = 0.83  # idem (empenagens)
+composite_factor_fuselage    = 0.90  # idem (fuselagem)
+composite_factor_gear        = 0.95  # idem (trem)
+composite_factor_fuel_system = 1.00  # tanques integrais compostos ≈ metálicos
+d_fus_equiv_m                = 1.30  # cabine 1.22 m + estrutura
+fuselage_wetted_coeff        = 0.75  # corpo afilado vs cilindro pleno
+landing_load_factor_ult      = 4.5   # N_l = N_pouso×1.5 (Raymer 15.2)
+main_strut_length_m          = 0.67  # curso oleo E7 (212 mm) + roda ≈ 26.3 in
+nose_strut_length_m          = 0.53  # idem
