@@ -588,12 +588,14 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // Ciclo 4: t/c dedicado da empenagem (antes usava-se o t/c da asa como
     // aproximação, ver histórico em `agents::mass_model`). Faixa (0.06,
     // 0.18) — perfis simétricos finos típicos de empenagem GA (NACA
-    // 0006–0018), mesma ordem de grandeza da faixa de `wing.thickness_ratio`.
+    // 0006–0018); `wing.thickness_ratio` não tem faixa validada (só
+    // `require_positive`), então esta é a primeira faixa explícita de t/c
+    // do schema.
     require_finite("empennage.thickness_ratio", cfg.empennage.thickness_ratio)?;
     if cfg.empennage.thickness_ratio <= 0.06 || cfg.empennage.thickness_ratio >= 0.18 {
         return Err(ConfigError::Validation(format!(
             "configuração de aeronave inválida: empennage.thickness_ratio deve estar em \
-             (0.06, 0.18) — valor: {}",
+             (0.06, 0.18) (valor: {})",
             cfg.empennage.thickness_ratio
         )));
     }
