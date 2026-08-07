@@ -4,7 +4,7 @@
 use crate::agents::weight_balance::WeightBalanceOutput;
 use crate::models::{
     aircraft_config::GearCfg, engine::EngineSpec, requirements::Requirements,
-    specs::{WingSpec, PropulsionSpec, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec},
+    specs::{WingSpec, PropulsionSpec, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, RobustnessSpec},
 };
 
 /// Gradiente de subida mínimo exigido pela CS 23.65 para esta categoria (%).
@@ -54,6 +54,7 @@ impl ConstraintChecker {
         gear: &GearSpec,
         gear_cfg: &GearCfg,
         fuel_capacity_l: f64,
+        robustness: &RobustnessSpec,
     ) -> ConstraintReport {
         let mut violations = Vec::new();
         let mut warnings   = Vec::new();
@@ -397,6 +398,25 @@ impl ConstraintChecker {
             ));
         }
 
+        // 19. Robustez à incerteza do modelo de massas (ciclo 4, task
+        // robustez — `validation::robustness::RobustnessAgent`): as 7
+        // massas estruturais são equações empíricas de componente (Raymer
+        // cap. 15.2) ajustadas a uma FROTA histórica, com incerteza típica
+        // de projeto conceitual de ±10-20% (Raymer/Roskam Classe II) — um
+        // check que passa no NOMINAL mas reprova sob um dos dois conjuntos
+        // adversariais determinísticos (±σ, `RobustnessSpec::flips`) é uma
+        // violação nomeada, não um aviso: o veredito nominal sozinho não é
+        // confiável o bastante para essas 7 massas. Um `violations.push`
+        // por flip (zero flips ⇒ zero violações desta checagem).
+        for flip in &robustness.flips {
+            violations.push(format!(
+                "Robustez: {} passa no nominal mas reprova com massas estruturais ±{:.0}% \
+                 (pior caso {}): {:.2} vs {:.2}",
+                flip.check, robustness.sigma_mass_fraction * 100.0, flip.caso,
+                flip.valor, flip.limite
+            ));
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -417,6 +437,7 @@ mod tests {
     use crate::agents::weight_balance::WeightBalanceAgent;
     use crate::models::aircraft_state::AircraftState;
     use crate::models::engine::test_fixtures::motor_generico_teste;
+    use crate::models::specs::RobustnessFlip;
 
     /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec,
     /// WeightBalanceOutput, PropellerSpec, PerformanceSpec)` coerente via os
@@ -427,7 +448,7 @@ mod tests {
     /// depende do diâmetro PROVISÓRIO real calculado por
     /// `AircraftState::from_config`, não de um valor sobrescrito depois).
     fn setup_with_cfg(cfg: crate::models::aircraft_config::AircraftConfig)
-        -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg)
+        -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec)
     {
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
         setup_with_cfg_and_req(cfg, req)
@@ -451,7 +472,7 @@ mod tests {
     /// envelope sem violação" é preciso usar a MISSÃO real, não uma fixture
     /// mais leve que por acaso ficava perto do limite.
     fn setup_with_cfg_and_req(cfg: crate::models::aircraft_config::AircraftConfig, req: Requirements)
-        -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg)
+        -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec)
     {
         let state  = AircraftState::from_config(&cfg);
         let wing   = AerodynamicsAgent::run(&state, &req);
@@ -492,7 +513,14 @@ mod tests {
             masses.trem_principal_kg, masses.trem_nariz_kg,
         );
         let gear_cfg = cfg.gear.clone();
-        (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg)
+        // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA
+        // sequência de `main.rs` — os dois conjuntos adversariais avaliados
+        // contra os limites NOMINAIS já calculados acima (`wb`/`gear`, já
+        // com o trim aplicado).
+        let robustness = crate::validation::robustness::RobustnessAgent::run(
+            &cfg, &engine, &req, &state, &wing, &emp, &masses, &wb, &gear,
+        );
+        (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness)
     }
 
     /// Base de todas as asserções de violação isolada abaixo — usa a
@@ -500,20 +528,20 @@ mod tests {
     /// apenas os campos relevantes à violação isolada em questão, para não
     /// depender do resultado real dos demais agentes (já testados em seus
     /// próprios módulos).
-    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg) {
+    fn setup() -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec) {
         setup_with_cfg(crate::models::aircraft_config::test_fixtures::config_teste())
     }
 
     #[test]
     fn violacao_cruzeiro_inviavel_aparece_quando_infeasible() {
-        let (req, wing, mut prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, mut prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         // Força a inviabilidade independentemente do resultado real da busca
         // de rpm, para testar isoladamente a violação #9.
         prop.cruise_feasible = false;
         prop.p_req_cruise_kw = 150.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "esperava violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -524,12 +552,12 @@ mod tests {
 
     #[test]
     fn sem_violacao_cruzeiro_quando_feasible() {
-        let (req, wing, mut prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, mut prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         prop.cruise_feasible = true;
         prop.p_req_cruise_kw = 90.0;
         prop.p_shaft_cruise_kw = 100.0;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
             "não deveria haver violação de cruzeiro inviável, obteve: {:?}", report.violations);
@@ -546,12 +574,12 @@ mod tests {
     /// fora do envelope, citando o nome do cenário e os limites em %MAC.
     #[test]
     fn violacao_de_envelope_aparece_quando_cenario_esta_fora() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         assert!(wb.scenarios.iter().any(|s| !s.inside_envelope),
             "pré-condição do teste: fixture sintética deveria ter ao menos um \
              cenário fora do envelope (achado honesto, replicado do baseline real)");
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
             "esperava violação de envelope de CG, obteve: {:?}", report.violations);
@@ -610,13 +638,13 @@ mod tests {
         let cfg = crate::models::config::parse_aircraft(&toml)
             .expect("baseline real deveria ser uma configuração válida");
         let fuel_capacity_l = cfg.fuel_system.capacity_l;
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup_with_cfg(cfg);
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: baseline real (pós E1–E6) deveria ter envelope de CG \
              FECHADO (fwd={:.2}% <= aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac,
             wb.spec.cg_limit_aft_pct_mac);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
             "não deveria haver violação dedicada de envelope vazio no baseline pós-E6: {:?}",
@@ -692,14 +720,14 @@ mod tests {
         // check_baseline_mutado_parametros_pre_e6`.
         cfg.control_surfaces.elevator_chord_frac = 0.30;
         let fuel_capacity_l = cfg.fuel_system.capacity_l;
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup_with_cfg(cfg);
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: parâmetros pré-E6 (x_main_m=3.85, v_h=0.70, \
              elevator_chord_frac=0.30, config real mutada) deveriam reproduzir o envelope de \
              CG vazio original (fwd={:.2}% > aft={:.2}%)",
             wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
             "esperava violação dedicada de envelope vazio, obteve: {:?}", report.violations);
@@ -721,12 +749,12 @@ mod tests {
     /// (ver `violacao_de_envelope_vazio_aparece_no_baseline_real` acima).
     #[test]
     fn sem_violacao_de_envelope_quando_todos_os_cenarios_estao_dentro() {
-        let (req, wing, prop, engine, mut wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, mut wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         for sc in &mut wb.scenarios {
             sc.inside_envelope = true;
         }
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
             "não deveria haver violação de envelope de CG, obteve: {:?}", report.violations);
@@ -736,11 +764,11 @@ mod tests {
 
     #[test]
     fn violacao_de_helice_aparece_quando_algum_ok_e_falso() {
-        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         propeller.ok_mach_static = false;
         propeller.tip_mach_static = 0.99;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("Mach de ponta ESTÁTICO")),
             "esperava violação de Mach de ponta estático, obteve: {:?}", report.violations);
@@ -755,13 +783,13 @@ mod tests {
     /// naturalmente (não precisa de override) para esta fixture.
     #[test]
     fn violacao_de_folga_de_solo_aparece_naturalmente_na_fixture_sintetica() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         assert!(!propeller.ok_clearance,
             "pré-condição do teste: fixture sintética (shaft_height_m=1.15, diameter=1.90, \
              ground_clearance_min_m=0.25) deveria falhar na folga de solo — obtido \
              ground_clearance_m={:.3}", propeller.ground_clearance_m);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("folga de solo")),
             "esperava violação de folga de solo, obteve: {:?}", report.violations);
@@ -772,12 +800,12 @@ mod tests {
     /// nenhuma violação de hélice deve aparecer.
     #[test]
     fn sem_violacao_de_helice_quando_todos_ok_forcado() {
-        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         propeller.ok_mach_static = true;
         propeller.ok_mach_cruise = true;
         propeller.ok_clearance = true;
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("Hélice:")),
             "não deveria haver violação de hélice, obteve: {:?}", report.violations);
@@ -801,7 +829,7 @@ mod tests {
         cfg.propeller.diameter_m = None;
         cfg.propeller.psru_ratio = 1.0;
 
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup_with_cfg(cfg);
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
         assert_eq!(propeller.source, "derivado");
         println!(
             "pipeline real (Mach governa): D_autoritativo={:.4} D_provisorio(prop.prop_diameter_m)={:.4}",
@@ -812,7 +840,7 @@ mod tests {
              divergir do provisório ({:.4}) usado pela busca de cruzeiro",
             propeller.diameter_m, prop.prop_diameter_m);
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
             "esperava aviso de divergência de diâmetro, obteve: {:?}", report.warnings);
@@ -831,14 +859,14 @@ mod tests {
         let mut cfg = crate::models::aircraft_config::test_fixtures::config_teste();
         cfg.propeller.diameter_m = None;
 
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg) = setup_with_cfg(cfg);
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
         assert_eq!(propeller.source, "derivado");
         println!(
             "pipeline real (folga governa): D_autoritativo={:.4} D_provisorio(prop.prop_diameter_m)={:.4}",
             propeller.diameter_m, prop.prop_diameter_m
         );
 
-        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
             "não deveria haver aviso de divergência de diâmetro quando a folga governa, \
@@ -878,11 +906,11 @@ mod tests {
 
     #[test]
     fn violacao_de_gradiente_aparece_quando_abaixo_de_8_3_por_cento() {
-        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         let perf = performance_spec_com_gradiente(6.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("Gradiente de subida")),
             "esperava violação de gradiente de subida, obteve: {:?}", report.violations);
@@ -894,11 +922,11 @@ mod tests {
 
     #[test]
     fn sem_violacao_de_gradiente_quando_maior_ou_igual_a_8_3_por_cento() {
-        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         let perf = performance_spec_com_gradiente(9.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("Gradiente de subida")),
             "não deveria haver violação de gradiente quando climb_gradient_pct (9.0%) >= \
@@ -922,12 +950,12 @@ mod tests {
 
     #[test]
     fn violacao_eletrica_aparece_quando_carga_continua_excede_80pct_do_alternador() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg, robustness) = setup();
         // 900 W de alternador, 80% = 720 W — 750 W de carga contínua excede.
         let electrical = electrical_spec(900.0, 750.0, 750.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("carga contínua")),
             "esperava violação de carga elétrica contínua, obteve: {:?}", report.violations);
@@ -938,12 +966,12 @@ mod tests {
 
     #[test]
     fn sem_violacao_eletrica_quando_carga_continua_dentro_de_80pct() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg, robustness) = setup();
         // 900 W de alternador, 80% = 720 W — 430 W (baseline real) fica bem dentro.
         let electrical = electrical_spec(900.0, 430.0, 1_260.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("carga contínua")),
             "não deveria haver violação de carga contínua, obteve: {:?}", report.violations);
@@ -951,12 +979,12 @@ mod tests {
 
     #[test]
     fn aviso_eletrico_aparece_quando_pico_excede_o_alternador() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg, robustness) = setup();
         // Pico pior-caso do baseline real (1.260 W) > alternador (900 W).
         let electrical = electrical_spec(900.0, 430.0, 1_260.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(report.warnings.iter().any(|w| w.contains("carga de pico")),
             "esperava aviso de pico elétrico, obteve: {:?}", report.warnings);
@@ -967,11 +995,11 @@ mod tests {
 
     #[test]
     fn sem_aviso_eletrico_quando_pico_dentro_da_capacidade_do_alternador() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg, robustness) = setup();
         let electrical = electrical_spec(900.0, 430.0, 800.0);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.warnings.iter().any(|w| w.contains("carga de pico")),
             "não deveria haver aviso de pico elétrico quando peak_load_w (800 W) <= \
@@ -992,9 +1020,9 @@ mod tests {
             .expect("baseline real deveria ser uma configuração válida");
         let electrical_real = crate::agents::electrical::ElectricalAgent::run(&cfg);
 
-        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, _electrical, gear, gear_cfg, robustness) = setup();
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
-                                                 &propeller, &perf, &mission, &electrical_real, &gear, &gear_cfg, 220.0);
+                                                 &propeller, &perf, &mission, &electrical_real, &gear, &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("carga contínua")),
             "baseline real (430 W contínuo / 900 W alternador, ~52,2% de margem) não deveria \
@@ -1025,13 +1053,13 @@ mod tests {
     /// sem depender de nenhum `x_main_m` real.
     #[test]
     fn violacao_de_tipback_aparece_quando_abaixo_do_piso() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg, robustness) = setup();
         assert!(gear_cfg.tipback_min_deg > 0.0, "fixture deveria ter um piso de tipback positivo");
         gear.tipback_angle_deg = gear_cfg.tipback_min_deg - 2.0; // sintético, abaixo do piso
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,
-                                                 &gear_cfg, 220.0);
+                                                 &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v| v.starts_with("Tipback:")),
             "esperava violação de tipback com gear.tipback_angle_deg sintético abaixo do piso, \
@@ -1042,12 +1070,12 @@ mod tests {
     /// violar — confirma que a checagem #15 não dispara em falso.
     #[test]
     fn sem_violacao_de_tipback_quando_acima_do_piso() {
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg, robustness) = setup();
         gear.tipback_angle_deg = gear_cfg.tipback_min_deg + 2.0; // sintético, acima do piso
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,
-                                                 &gear_cfg, 220.0);
+                                                 &gear_cfg, 220.0, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
             "não deveria haver violação de tipback com gear.tipback_angle_deg sintético acima \
@@ -1065,13 +1093,13 @@ mod tests {
     /// exigidos = 5 L de margem = 5% da capacidade, abaixo do piso de 8%.
     #[test]
     fn violacao_de_margem_de_combustivel_aparece_quando_abaixo_do_minimo() {
-        let (req, wing, prop, engine, wb, propeller, perf, mut mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mut mission, electrical, gear, gear_cfg, robustness) = setup();
         mission.fuel_total_l = 95.0;
         let fuel_capacity_l = 100.0;
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,
-                                                 &gear_cfg, fuel_capacity_l);
+                                                 &gear_cfg, fuel_capacity_l, &robustness);
 
         assert!(report.violations.iter().any(|v| v.contains("Margem de combustível")),
             "esperava violação de margem de combustível, obteve: {:?}", report.violations);
@@ -1085,13 +1113,13 @@ mod tests {
     /// margem = 30% da capacidade, acima do piso de 8% — nenhuma violação.
     #[test]
     fn sem_violacao_de_margem_de_combustivel_quando_acima_do_minimo() {
-        let (req, wing, prop, engine, wb, propeller, perf, mut mission, electrical, gear, gear_cfg) = setup();
+        let (req, wing, prop, engine, wb, propeller, perf, mut mission, electrical, gear, gear_cfg, robustness) = setup();
         mission.fuel_total_l = 70.0;
         let fuel_capacity_l = 100.0;
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,
-                                                 &gear_cfg, fuel_capacity_l);
+                                                 &gear_cfg, fuel_capacity_l, &robustness);
 
         assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),
             "não deveria haver violação de margem de combustível, obteve: {:?}", report.violations);
@@ -1108,4 +1136,63 @@ mod tests {
     // a margem real ficava ABAIXO do piso, achado honesto FAIL do baseline
     // E6, ver histórico no bloco `min_fuel_margin_fraction` de
     // `config/missions/default.toml`).
+
+    // ─── Ciclo 4 (task robustez): checagem #19 — robustez à incerteza ──────
+
+    /// #19: `RobustnessSpec` SINTÉTICO com um único flip injetado gera
+    /// EXATAMENTE uma violação começando com "Robustez:" e citando o check,
+    /// o caso (dianteiro/traseiro) e os números (valor/limite) do flip;
+    /// `RobustnessSpec` com `flips` vazio não gera nenhuma violação desta
+    /// checagem — isola a lógica de `verify` da lógica de
+    /// `RobustnessAgent::run` (já coberta por `validation::robustness::
+    /// tests`), sem depender do pipeline real convergir de um jeito
+    /// específico.
+    #[test]
+    fn check_19_transforma_flips_em_violacoes_nomeadas() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness_nominal) = setup();
+
+        // Caso 1: flips vazio (RobustnessSpec nominal já vem assim para a
+        // fixture sintética íntegra, mas explicitamos por clareza/robustez
+        // do teste a mudanças futuras na fixture) — zero violações #19.
+        let robustness_sem_flips = RobustnessSpec {
+            flips: Vec::new(),
+            ..robustness_nominal.clone()
+        };
+        let report_sem_flips = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                           &propeller, &perf, &mission, &electrical, &gear,
+                                                           &gear_cfg, 220.0, &robustness_sem_flips);
+        assert!(!report_sem_flips.violations.iter().any(|v| v.starts_with("Robustez:")),
+            "RobustnessSpec com flips vazio não deveria gerar nenhuma violação #19, obteve: {:?}",
+            report_sem_flips.violations);
+
+        // Caso 2: um único flip sintético injetado — exatamente uma
+        // violação "Robustez:", citando check/caso/valor/limite.
+        let robustness_com_flip = RobustnessSpec {
+            sigma_mass_fraction: 0.15,
+            flips: vec![RobustnessFlip {
+                check: "Tipback".to_string(),
+                caso: "traseiro".to_string(),
+                valor: 12.34,
+                limite: 15.0,
+            }],
+            ..robustness_nominal
+        };
+        let report_com_flip = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                          &propeller, &perf, &mission, &electrical, &gear,
+                                                          &gear_cfg, 220.0, &robustness_com_flip);
+
+        let violacoes_robustez: Vec<&String> = report_com_flip.violations.iter()
+            .filter(|v| v.starts_with("Robustez:"))
+            .collect();
+        assert_eq!(violacoes_robustez.len(), 1,
+            "esperava EXATAMENTE uma violação #19 para um único flip injetado: {:?}",
+            report_com_flip.violations);
+        let v = violacoes_robustez[0];
+        assert!(v.contains("Tipback"), "violação deveria citar o check do flip ('Tipback'): {v}");
+        assert!(v.contains("traseiro"), "violação deveria citar o caso do flip ('traseiro'): {v}");
+        assert!(v.contains("12.34"), "violação deveria citar o valor do flip (12.34): {v}");
+        assert!(v.contains("15.00") || v.contains("15.0"),
+            "violação deveria citar o limite do flip (15.0): {v}");
+        assert!(v.contains("15%"), "violação deveria citar σ formatado como percentual (±15%): {v}");
+    }
 }

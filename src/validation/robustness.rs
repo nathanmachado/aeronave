@@ -15,10 +15,10 @@
 //! ×(1−σ)) e outro que o empurra o mais para TRÁS possível (o oposto) —
 //! ver `adversarial_masses`.
 //!
-//! **Módulo ISOLADO** (task robustez, ciclo 4): `RobustnessAgent::run` NÃO
-//! é chamado por `main`/`orchestrator`/`ConstraintChecker` nesta task —
-//! zero mudança de comportamento no pipeline. O wiring (adicionar o check
-//! #19 e a saída em `AircraftReport`) é a próxima task do ciclo.
+//! Consumido por `main.rs` (chamado logo após o `LandingGearAgent`) e por
+//! `validation::constraint_checker::ConstraintChecker::verify` (checagem
+//! #19 — um `flip` gera uma violação nomeada) desde a Task 4 do ciclo
+//! (wiring, schema v4.6) — antes disso o módulo era isolado do pipeline.
 //!
 //! Os limites contra os quais os conjuntos perturbados são avaliados são
 //! os NOMINAIS (`wb_nominal.spec.cg_limit_{fwd,aft}_pct_mac`,

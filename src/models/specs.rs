@@ -632,8 +632,8 @@ pub struct RobustnessFlip {
 
 /// Análise de robustez à incerteza do modelo de massas (ciclo 4) —
 /// pior-caso determinístico direcional, ver `validation::robustness`.
-/// **Módulo ISOLADO** (task robustez, ciclo 4): ainda não é consumido por
-/// `main`/`AircraftReport`/`ConstraintChecker` — ver task de wiring (task-4).
+/// Consumida por `main`/`AircraftReport::robustness`/`ConstraintChecker::
+/// verify` (checagem #19, schema v4.6 — task de wiring, ciclo 4).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RobustnessSpec {
     pub sigma_mass_fraction: f64,
@@ -859,7 +859,18 @@ pub struct ElectricalSpec {
 /// mudança ADITIVA (campo novo num bloco já existente; nenhum campo
 /// removido nem mudou de tipo/unidade), consumidores v4.4 continuam
 /// funcionando sem alteração. Ver `docs/aircraft_spec.schema.md` §1 e §4.
-pub const SCHEMA_VERSION: &str = "4.5";
+///
+/// v4.6 (Task 4, ciclo4-fidelidade-massas): `AircraftReport` ganha UM
+/// bloco NOVO, `robustness` (`RobustnessSpec` — `validation::robustness::
+/// RobustnessAgent`, já existente internamente desde a Task 3 do ciclo mas
+/// isolado do pipeline até aqui) — checagem #19 NOVA em `ConstraintChecker
+/// ::verify`: um check que PASSA no nominal mas REPROVA sob um dos dois
+/// conjuntos adversariais de massas estruturais (±σ, `RobustnessSpec::
+/// flips`) gera uma violação nomeada. Mudança ADITIVA (bloco novo opcional
+/// + checagem nova que só pode ADICIONAR violações, nunca remover as
+/// existentes), consumidores v4.5 continuam funcionando sem alteração. Ver
+/// `docs/aircraft_spec.schema.md` §1 e §4.
+pub const SCHEMA_VERSION: &str = "4.6";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -969,6 +980,12 @@ pub struct AircraftReport {
     pub electrical: Option<ElectricalSpec>,
     /// Dimensionamento/convergência de MTOW (Task 6.1) — ver `SizingReport`.
     pub sizing: Option<SizingReport>,
+    /// Análise de robustez à incerteza do modelo de massas (Task 4, ciclo4
+    /// -fidelidade-massas, schema v4.6) — pior-caso determinístico ±σ sobre
+    /// as 7 massas estruturais, ver `RobustnessSpec`/`validation::
+    /// robustness`. `Option` só por simetria com os demais campos do
+    /// relatório; `main.rs` sempre o preenche.
+    pub robustness: Option<RobustnessSpec>,
     /// Nível de confiança por bloco do relatório — chave = nome do bloco
     /// (ex.: "wing", "structure"), valor = uma de "preliminary" (estimativa
     /// simplificada, exige análise posterior — FEM, GVT, VLM/CFD conforme o

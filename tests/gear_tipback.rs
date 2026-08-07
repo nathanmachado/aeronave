@@ -218,6 +218,7 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
     let sized = size_aircraft(&cfg, &engine, &req).unwrap();
 
     let wing = &sized.wing;
+    let emp = &sized.emp;
     let prop = &sized.prop;
     let wb = &sized.wb;
     let mission = &sized.mission;
@@ -228,10 +229,15 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();
+    // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
+    // de `main.rs`, contra os limites NOMINAIS já calculados (`wb`/`gear`).
+    let robustness = aeronave::validation::robustness::RobustnessAgent::run(
+        &cfg, &engine, &req, &sized.state, wing, emp, &sized.structural_masses, wb, &gear,
+    );
 
     let report = ConstraintChecker::verify(
         &req, wing, prop, sized.state.mtow_kg, &engine, wb, &propeller, &perf, mission,
-        &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l,
+        &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l, &robustness,
     );
 
     assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
@@ -250,6 +256,19 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
             && v.contains("excede o teto")),
         "achado honesto do ciclo 3/4: deveria haver violação de carga de nariz (≈28,6% > 25,0%) \
          no baseline real: {:?}", report.violations);
+    // Ciclo 4, Task 4 (checagem #19, robustez à incerteza de massa
+    // estrutural): investigado — com σ=15% (`[mass_model].
+    // sigma_mass_fraction`), NENHUM dos checks que passam no nominal
+    // (tipback ≈18,85° vs. piso 15°; carga de nariz mínima ≈15,86% vs.
+    // piso 8%; os 4 cenários de CG dentro do envelope) flipa sob os dois
+    // conjuntos adversariais — as margens nominais folgadas absorvem a
+    // perturbação de ±15% nas 7 massas estruturais. Achado honesto: zero
+    // violações NOVAS desta checagem no baseline real; as 3 violações
+    // nominais (2 cenários de envelope + carga de nariz máxima) continuam
+    // as ÚNICAS.
+    assert!(!report.violations.iter().any(|v| v.starts_with("Robustez:")),
+        "achado honesto do ciclo 4 (σ=15%): nenhum check que passa no nominal deveria flipar \
+         sob os conjuntos adversariais no baseline real: {:?}", report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de
@@ -310,10 +329,14 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();
+    let robustness = aeronave::validation::robustness::RobustnessAgent::run(
+        &cfg, &engine, &req, &sized.state, &sized.wing, &sized.emp, &sized.structural_masses,
+        &sized.wb, &gear,
+    );
 
     let report = ConstraintChecker::verify(
         &req, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &sized.wb, &propeller,
-        &perf, mission, &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l,
+        &perf, mission, &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l, &robustness,
     );
 
     assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),

@@ -266,6 +266,21 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// este ciclo mede, não tuna. O caminho PASS continua coberto pelas
 /// configs sintéticas (`validation::constraint_checker::tests`).
 /// Renomeado de novo (o nome anterior dizia "pass_honesto").
+///
+/// ATUALIZAÇÃO (ciclo 4, Task 4 — checagem #19, robustez à incerteza do
+/// modelo de massas): INVESTIGADO, não forçado. Com σ=15%
+/// (`[mass_model].sigma_mass_fraction`), os dois conjuntos adversariais
+/// (±σ direcional sobre as 7 massas estruturais) NÃO derrubam nenhum check
+/// que passa no nominal — tipback (≈18,85° nominal vs. piso 15°: cai para
+/// ≈17,36° no pior caso, ainda acima), carga de nariz MÍNIMA (≈15,86%
+/// nominal vs. piso 8%: pior caso ≈14,52%, ainda acima) e os 4 cenários de
+/// CG dentro do envelope (o mais próximo do limite, "4 pax sem bagagem" a
+/// 25,2%, cai para ≈22,15% no pior caso — ainda bem acima do piso de
+/// 13,0%) têm folga nominal grande o bastante para absorver a perturbação.
+/// `validation_status` continua `FAIL`, com as MESMAS 3 violações — zero
+/// violações NOVAS de robustez. Ver `tests/gear_tipback.rs::
+/// constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_
+/// baseline_real` para o mesmo achado com os números completos.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_carga_de_nariz() {
     let out_path = std::env::temp_dir().join(format!(
@@ -335,6 +350,15 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     assert!(!json.contains("Tipback:") && !json.contains("Tail-strike:")
         && !json.contains("Margem de combustível:"),
         "tipback/tail-strike/margem de combustível deveriam continuar sem violação:\n{json}");
+    // Ciclo 4, Task 4 (checagem #19, robustez à incerteza de massa
+    // estrutural): achado honesto INVESTIGADO (ver comentário da função,
+    // acima) — com σ=15% nenhum check que passa no nominal flipa sob os
+    // conjuntos adversariais. Zero violações NOVAS ("Robustez:") — já
+    // implícito no `assert_eq!(violations.len(), 3, ...)` acima, explicito
+    // aqui para documentar a checagem #19 especificamente.
+    assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
+        "achado honesto do ciclo 4 (σ=15%): nenhuma violação de robustez nova esperada no \
+         baseline real: {violations:#?}");
     // O aviso elétrico de pico (não é violação) continua presente — só
     // confirma que o pipeline real ainda reporta avisos quando aplicável.
     assert!(json.contains("Orçamento elétrico:") && json.contains("banco de baterias"),

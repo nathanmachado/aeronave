@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.5
+# `aircraft_spec.json` — contrato do schema v4.6
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -271,6 +271,34 @@ documentação a ser corrigido, não um comportamento aceitável.
   cabos etc.) continua `preliminary` internamente, mas o rótulo agregado do
   bloco passa a refletir o método DOMINANTE. Ver §3 e §4 abaixo.
 
+- **v4.6** (Task 4, ciclo4-fidelidade-massas): `AircraftReport` ganha UM
+  bloco NOVO, `robustness` (`RobustnessSpec`) — checagem #19 NOVA em
+  `ConstraintChecker::verify`. As 7 massas estruturais (`weight.
+  structural_masses`, desde a v4.5) vêm de equações empíricas de
+  componente (Raymer cap. 15.2) ajustadas a uma FROTA histórica, não a
+  ESTA aeronave — incerteza típica de projeto conceitual de ±10-20%
+  (Raymer/Roskam Classe II). `validation::robustness::RobustnessAgent`
+  (módulo já existente desde a Task 3 do ciclo, isolado do pipeline até
+  aqui) constrói dois conjuntos adversariais DETERMINÍSTICOS (±σ
+  direcional: um empurra o CG vazio o mais para a FRENTE possível, o outro
+  o mais para TRÁS) e reavalia os cenários de CG e o trem de pouso contra
+  os MESMOS limites NOMINAIS já calculados (esses limites — autoridade de
+  profundor, tetos/pisos de carga de nariz — são invariantes à massa
+  estrutural). Um check que PASSA no nominal mas REPROVA sob um dos dois
+  conjuntos é um `flip` (`RobustnessSpec::flips`) — a checagem #19 gera uma
+  violação nomeada por flip: `"Robustez: {check} passa no nominal mas
+  reprova com massas estruturais ±{σ}% (pior caso {caso}): {valor} vs
+  {limite}"`. Mudança ADITIVA (bloco novo opcional + checagem nova que só
+  pode ADICIONAR violações, nunca remover as existentes), consumidores
+  v4.5 continuam funcionando sem alteração. Achado honesto do baseline
+  real (`config/aircraft/baseline_4seat.toml`, σ=15%): ZERO flips — as
+  margens nominais dos checks que passam (tipback, carga de nariz mínima,
+  os 4 cenários de CG dentro do envelope) são folgadas o bastante para
+  absorver a perturbação; as 3 violações nominais já existentes (2
+  cenários de envelope + carga de nariz máxima, ver entrada "Ciclo 3"
+  acima) continuam as ÚNICAS. Ver §3 e §4 abaixo, e `validation::
+  robustness` para a dedução completa.
+
 ## 2. Convenção de eixos e unidades
 
 - **Sistema de unidades**: SI em todo o documento, com DUAS exceções
@@ -326,6 +354,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `mission` | computed (segmentos + equação de Breguet, L/D constante em cruzeiro) | — |
 | `electrical` | preliminary (soma de cargas nominais configuradas) | Análise transiente/térmica real |
 | `sizing` | computed (laço de convergência de ponto fixo) | — |
+| `robustness` | **v4.6**: computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
 
 O texto exato de cada entrada (em português, como gerado pelo pipeline)
 pode variar ligeiramente entre execuções — a tabela acima é a referência
@@ -353,6 +382,7 @@ canônica de INTERPRETAÇÃO, o JSON em si é a fonte do texto exibido.
 | `mission` | objeto (`MissionSpec`) ou `null` | sempre preenchido |
 | `electrical` | objeto (`ElectricalSpec`) ou `null` | sempre preenchido |
 | `sizing` | objeto (`SizingReport`) ou `null` | sempre preenchido |
+| `robustness` | objeto (`RobustnessSpec`) ou `null` | sempre preenchido (novo na v4.6) |
 | `fidelity` | objeto `{string: string}` | sempre, não-vazio |
 | `violations` | array de string | sempre (vazio se `validation_status == "PASS"`) |
 | `warnings` | array de string | sempre (pode ser vazio) |
@@ -744,6 +774,47 @@ Gudmundsson cap. 3):
 | `pw_actual_w_n` | f64 | W/N | P/W atual (potência máxima contínua, nível do mar) |
 | `recommended_wing_area_m2` | f64 | m² | Área de asa recomendada no W/S escolhido — **puramente informativo, não redimensiona a asa automaticamente** |
 | `ws_chosen_n_m2` | f64 | N/m² | W/S escolhido para a recomendação = `min(ws_max_stall, ws_optimal_cruise)` |
+
+### `robustness` — `RobustnessSpec` (RobustnessAgent — novo na v4.6)
+
+Análise de robustez à incerteza do modelo de massas: as 7 massas
+estruturais (`weight.structural_masses`, desde a v4.5) vêm de equações
+empíricas de componente (Raymer cap. 15.2) ajustadas a uma FROTA
+histórica, não a esta aeronave — incerteza típica de projeto conceitual de
+±10-20% (Raymer/Roskam Classe II). Este bloco quantifica se checks que
+PASSAM com as massas NOMINAIS continuariam passando sob essa incerteza —
+não uma análise probabilística (sem RNG, sem distribuição): um **pior-caso
+determinístico direcional**. Dois conjuntos adversariais de massa são
+construídos (`sigma_mass_fraction` = σ): um empurra o CG vazio o mais para
+a FRENTE possível (todo componente estrutural cujo braço fica à frente do
+CG vazio nominal fica ×(1+σ), os demais ×(1−σ)), o outro o mais para TRÁS
+(o espelho exato). Os dois conjuntos são reavaliados contra os MESMOS
+limites NOMINAIS já calculados nos blocos `weight`/`landing_gear` — esses
+limites (autoridade de profundor do bloco `trim`, tetos/pisos de carga de
+nariz) são derivados de geometria/estabilidade, não da massa estrutural em
+si, logo são invariantes à perturbação.
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `sigma_mass_fraction` | f64 | fração (0–1) | σ usado — eco de `[mass_model].sigma_mass_fraction` da configuração |
+| `cg_fwd_case_pct_mac` | array [f64; 2] | %MAC | Faixa de CG observada nos 6 cenários de carga sob o conjunto CG-mais-DIANTEIRO (`[mínimo, máximo]`) |
+| `cg_aft_case_pct_mac` | array [f64; 2] | %MAC | Idem sob o conjunto CG-mais-TRASEIRO |
+| `flips` | array de objetos (`RobustnessFlip`) | — | Checks que PASSAM no nominal mas REPROVAM sob um dos dois conjuntos adversariais. **Array vazio = robusto** (nenhum check descoberto flipa sob ±σ) — não é ausência de dado, é o resultado positivo |
+
+Sub-bloco `robustness.flips[]` (`RobustnessFlip`):
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `check` | string | — | Nome do check que flipou — `"Cenário '<nome>'"` (envelope de CG), `"Tipback"`, `"Carga de nariz máx"` ou `"Carga de nariz mín"` |
+| `caso` | string | — | Qual conjunto adversarial derrubou o check: `"dianteiro"` \| `"traseiro"` |
+| `valor` | f64 | %MAC ou ° (conforme `check`) | Valor observado SOB perturbação |
+| `limite` | f64 | mesma unidade de `valor` | Limite NOMINAL violado |
+
+Cada flip em `robustness.flips` gera exatamente uma entrada em
+`violations` (checagem #19 de `ConstraintChecker::verify`, ver §4
+"`fidelity`, `violations`, `warnings`" abaixo): `"Robustez: {check} passa
+no nominal mas reprova com massas estruturais ±{σ}% (pior caso {caso}):
+{valor} vs {limite}"`.
 
 ### `fidelity`, `violations`, `warnings`
 

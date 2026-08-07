@@ -27,6 +27,7 @@ use aeronave::models::specs::{
 };
 use aeronave::orchestrator::size_aircraft;
 use aeronave::validation::constraint_checker::ConstraintChecker;
+use aeronave::validation::robustness::RobustnessAgent;
 use std::collections::BTreeMap;
 
 fn config_path(rel: &str) -> PathBuf {
@@ -85,9 +86,16 @@ fn build_baseline_report() -> AircraftReport {
 
     let electrical = ElectricalAgent::run(&cfg);
 
+    // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
+    // de `main.rs` — logo após o `LandingGearAgent`, contra os limites
+    // NOMINAIS já calculados (`wb`/`gear`).
+    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp,
+                                           &sized.structural_masses, wb, &gear);
+
     let report = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
                                             &propeller, &perf, mission, &electrical,
-                                            &gear, &cfg.gear, cfg.fuel_system.capacity_l);
+                                            &gear, &cfg.gear, cfg.fuel_system.capacity_l,
+                                            &robustness);
     let all_ok = report.all_satisfied();
 
     let geometry = GeometrySpec {
@@ -122,6 +130,9 @@ fn build_baseline_report() -> AircraftReport {
     fidelity.insert("mission".into(), "computed (segmentos + Breguet L/D constante)".into());
     fidelity.insert("empennage".into(), "preliminary (coeficiente de volume; requer VLM/CFD)".into());
     fidelity.insert("trim".into(), "preliminary (semi-empírico; sensível a cl_h_max_down)".into());
+    fidelity.insert("robustness".into(),
+        "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; \
+         limites de envelope nominais — invariantes a massa)".into());
 
     AircraftReport {
         schema_version: SCHEMA_VERSION.to_string(),
@@ -142,6 +153,7 @@ fn build_baseline_report() -> AircraftReport {
         mission: Some(mission.clone()),
         electrical: Some(electrical.clone()),
         sizing: Some(sizing),
+        robustness: Some(robustness),
         fidelity,
         violations: report.violations,
         warnings: report.warnings,
@@ -151,7 +163,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.5");
+    assert_eq!(report.schema_version, "4.6");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -162,13 +174,36 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
         "schema_version", "revision", "validation_status", "wing", "propulsion",
         "geometry", "empennage", "control_surfaces", "weight", "trim", "performance",
         "vn_diagram", "structure", "landing_gear", "propeller", "mission",
-        "electrical", "sizing", "fidelity", "violations", "warnings",
+        "electrical", "sizing", "robustness", "fidelity", "violations", "warnings",
     ];
     assert!(expected_keys.len() >= 16, "lista de chaves esperadas deveria ter pelo menos 16 entradas");
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.5");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.6");
+}
+
+/// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco
+/// `robustness` (`RobustnessSpec`) está presente no JSON e traz
+/// `sigma_mass_fraction` (eco de `[mass_model].sigma_mass_fraction`) e
+/// `flips` como array (vazio ou não — o baseline real, σ=15%, não produz
+/// nenhum flip, ver `tests/gear_tipback.rs`/`tests/cli.rs` para o achado
+/// honesto completo).
+#[test]
+fn robustness_presente_com_sigma_e_flips_array() {
+    let report = build_baseline_report();
+    let robustness = report.robustness.as_ref().expect("robustness deveria estar presente");
+    assert!(robustness.sigma_mass_fraction > 0.0,
+        "sigma_mass_fraction deveria ser positivo, obteve {}", robustness.sigma_mass_fraction);
+
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let rob = &value["robustness"];
+    assert!(rob["sigma_mass_fraction"].is_number(),
+        "robustness.sigma_mass_fraction deveria estar presente e ser numérico no JSON");
+    assert!(rob["flips"].is_array(), "robustness.flips deveria ser um array no JSON");
+    assert!(rob["cg_fwd_case_pct_mac"].is_array(), "robustness.cg_fwd_case_pct_mac deveria ser um array no JSON");
+    assert!(rob["cg_aft_case_pct_mac"].is_array(), "robustness.cg_aft_case_pct_mac deveria ser um array no JSON");
 }
 
 /// Schema 4.5 (Task 5, oew-parametrico): `weight.structural_masses` —

@@ -15,6 +15,7 @@ use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION};
 use aeronave::orchestrator::size_aircraft;
 use aeronave::validation::constraint_checker::ConstraintChecker;
+use aeronave::validation::robustness::RobustnessAgent;
 
 fn sep() { println!("{}", "─".repeat(64)); }
 
@@ -509,6 +510,22 @@ fn main() {
              gear.retraction_time_s, gear.actuator_power_w,
              gear.actuator_power_w / 28.0, gear.total_weight_kg);
 
+    // ── Robustez à incerteza do modelo de massas (ciclo 4, task robustez) ──────
+    // Pior-caso determinístico ±σ sobre as 7 massas estruturais (equações
+    // Raymer cap. 15.2, incerteza típica de projeto conceitual ±10-20%,
+    // Raymer/Roskam Classe II) contra os limites NOMINAIS já calculados
+    // acima (`wb`/`gear`) — ver `validation::robustness` para a dedução
+    // completa. Checagem #19 de `ConstraintChecker::verify` transforma cada
+    // flip numa violação nomeada.
+    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp, sm, wb, &gear);
+    println!("[ ROBUSTEZ ] RobustnessAgent — Incerteza de Massa Estrutural (±σ)");
+    println!("  σ={:.0}%: {} flip(s)", robustness.sigma_mass_fraction * 100.0, robustness.flips.len());
+    for flip in &robustness.flips {
+        println!("    {} (caso {}): {:.2} vs limite {:.2}",
+                 flip.check, flip.caso, flip.valor, flip.limite);
+    }
+    println!();
+
     // Varredura INFORMATIVA de posição do trem principal (Task 2,
     // refino-ciclo2) — o achado acima (tipback abaixo do piso de 15°) é a
     // tensão fundamental do triciclo: recuar o trem (x_main maior) melhora
@@ -560,7 +577,8 @@ fn main() {
     sep();
     let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
                                              &propeller, &perf, mission, &electrical,
-                                             &gear, &cfg.gear, cfg.fuel_system.capacity_l);
+                                             &gear, &cfg.gear, cfg.fuel_system.capacity_l,
+                                             &robustness);
     let rc_ok   = perf.rc_sl_ms   >= 1.5;
     let ceil_ok = perf.service_ceiling_m >= 3_000.0;
     let fl_ok   = struc.flutter_ok;
@@ -719,6 +737,9 @@ fn main() {
          transiente/térmica real)".into());
     fidelity.insert("sizing".into(),
         "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)".into());
+    fidelity.insert("robustness".into(),
+        "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; \
+         limites de envelope nominais — invariantes a massa)".into());
     // task refino-ciclo2: limite dianteiro físico do envelope de CG, agora
     // com a autoridade de profundor CALCULADA por geometria DATCOM/Nelson
     // (não mais um `cl_h_max_down` de config direto — ver
@@ -756,6 +777,7 @@ fn main() {
         mission:          Some(mission.clone()),
         electrical:       Some(electrical.clone()),
         sizing:           Some(sizing),
+        robustness:       Some(robustness.clone()),
         fidelity,
         violations:       report.violations,
         warnings:         report.warnings,
