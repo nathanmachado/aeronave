@@ -88,6 +88,13 @@ Equações Raymer cap. 15.2 (GA): asa, EH, EV, fuselagem (sem termo de pressuriz
 5. **Pins honestos** (old→new, tolerâncias iguais) em toda a suite afetada; se o baseline reprovar o envelope, os testes asseram o **FAIL honesto** com as violações nomeadas (padrão do ciclo 2 pré-E7), e a cobertura do caminho PASS fica em config sintética.
 6. **Genericidade:** fatores/dados só em config; equações (física estatística publicada) em código — aceitação `src` sem nomes de motor continua verde.
 
+## Sequência do ciclo e critério de conclusão
+
+1. **Implementação** (plano SDD em worktree): equações + config + remoções + testes.
+2. **Rodada do baseline E7 com o modelo novo** — última task do plano: `cargo run`, `aircraft_spec.json` regenerado e commitado. É esta rodada que revela o resultado real e quais dos 18 checks apertam (candidatos: envelope de CG 6 cenários, carga de nariz, margem estática).
+3. **Relatório do achado**: números honestos, violação por violação, comparando old→new (OEW, CG por cenário, checks). O ciclo termina aqui — **com FAIL ou PASS, o que o modelo disser**.
+4. **Decisão humana posterior**: se houver violações, campanha E8 de refechamento só com dados (bateria no cone de cauda, bagageiro, `x_main`, tanque…), mesmo método das campanhas E6/E7 — escopo de um próximo trabalho, com as alavancas escolhidas à luz dos números do passo 3.
+
 ## Fora de escopo
 
 - Campanha E8 de refechamento do envelope (decisão humana posterior).
