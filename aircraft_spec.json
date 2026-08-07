@@ -1,6 +1,6 @@
 {
-  "schema_version": "4.4",
-  "revision": "4.4",
+  "schema_version": "4.5",
+  "revision": "4.5",
   "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
@@ -111,7 +111,21 @@
     "cg_mac_aft_pct": 31.69511941062508,
     "static_margin_pct": 16.764916756121067,
     "cg_limit_fwd_pct_mac": 12.995017153816146,
-    "cg_limit_aft_pct_mac": 43.460036166746164
+    "cg_limit_aft_pct_mac": 43.460036166746164,
+    "structural_masses": {
+      "asa_kg": 147.9576439060138,
+      "fuselagem_kg": 110.56322439764872,
+      "emp_h_kg": 13.436096120398474,
+      "emp_v_kg": 6.140146189314445,
+      "trem_principal_kg": 90.73430596941581,
+      "trem_nariz_kg": 19.810504915404525,
+      "tanques_kg": 22.387285131171133,
+      "composite_factor_wing": 0.85,
+      "composite_factor_tail": 0.83,
+      "composite_factor_fuselage": 0.9,
+      "composite_factor_gear": 0.95,
+      "composite_factor_fuel_system": 1.0
+    }
   },
   "trim": {
     "flare_limit_pct_mac": -16.290033742549543,
@@ -362,7 +376,7 @@
     "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
     "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)",
     "vn_diagram": "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)",
-    "weight": "preliminary (soma de itens de massa configurados não pesados — validar na balança antes da fabricação)",
+    "weight": "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados não pesados — validar na balança)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [

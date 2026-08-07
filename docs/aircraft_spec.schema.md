@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.4
+# `aircraft_spec.json` — contrato do schema v4.5
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -245,6 +245,24 @@ documentação a ser corrigido, não um comportamento aceitável.
     `landing_gear.nose_load_max_pct` 24,8→**29,0%**, acima do teto de 25%.
     Tipback FOLGA (15,6→19,2°) e a margem de combustível SOBE
     (13,97→14,56%). Ver `tests/cli.rs`/`tests/gear_tipback.rs`.
+- **v4.5** (Task 5, oew-parametrico): `weight` (`WeightSpec`) ganha UM
+  campo NOVO, `structural_masses` (`StructuralMassesSpec`) — as 7 massas
+  ESTRUTURAIS computadas descritas na entrada "Ciclo 3" acima (asa,
+  fuselagem, empenagem horizontal/vertical, trem principal/nariz, sistema
+  de combustível), já usadas internamente desde aquele ciclo mas nunca
+  ecoadas no JSON, agora rastreáveis pelo consumidor de CAD — mais os 5
+  fatores de composto de `[mass_model]` usados para calculá-las
+  (`composite_factor_wing/tail/fuselage/gear/fuel_system`). Mudança
+  ADITIVA (campo novo num bloco já existente; nenhum campo removido nem
+  mudou de tipo/unidade), consumidores v4.4 continuam funcionando sem
+  alteração. `fidelity.weight` muda de texto — de `"preliminary"` (soma de
+  itens de massa configurados não pesados) para `"semi-empirical"`
+  (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware:
+  itens configurados ainda não pesados) — reflete que a MAIOR parte do OEW
+  (as 7 massas estruturais) agora vem de equações semi-empíricas, não mais
+  de valores de catálogo/projeto direto; o hardware (aviônicos, bateria,
+  cabos etc.) continua `preliminary` internamente, mas o rótulo agregado do
+  bloco passa a refletir o método DOMINANTE. Ver §3 e §4 abaixo.
 
 ## 2. Convenção de eixos e unidades
 
@@ -291,7 +309,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `geometry` | computed (derivado da configuração + `WeightBalanceAgent`) | — |
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
-| `weight` | preliminary (soma de itens de massa configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — a aritmética é exata, mas os valores de entrada são estimativas de catálogo/projeto, não massas medidas; erros aqui se propagam para MTOW/estrutura/trem de pouso |
+| `weight` | **v4.5**: semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — as 7 massas estruturais (`weight.structural_masses`) vêm de equações semi-empíricas de componente, mas o hardware/instalação (aviônicos, bateria, cabos etc.) ainda é estimativa de catálogo/projeto, não massa medida; erros aqui se propagam para MTOW/estrutura/trem de pouso |
 | `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação DESCONSIDERA o binário tração/arrasto/inércia, resíduo estimado ≈ μ_roll·(W−L_g)·h_cg) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
 | `performance` | computed (equações fechadas, atmosfera ISA padrão) | — |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
@@ -452,6 +470,29 @@ da superfície espelhada.
 | `static_margin_pct` | f64 | % | Margem estática |
 | `cg_limit_fwd_pct_mac` | f64 | %MAC | Limite DIANTEIRO admissível — `max(trim.flare_limit_pct_mac, trim.rotation_limit_pct_mac)` (bloco `trim` abaixo), não mais o proxy `[stability].sm_max`. Ambos os termos do `max` são NÚMEROS ÚNICOS (não variam por cenário de carga — ver bloco `trim`), então este limite se aplica IGUALMENTE a todos os cenários. Não confundir com `cg_mac_fwd_pct` acima (valor OBSERVADO). **PODE ficar À FRENTE de `cg_limit_aft_pct_mac`** — ver "Envelope vazio" abaixo. |
 | `cg_limit_aft_pct_mac` | f64 | %MAC | Limite TRASEIRO admissível — de `[stability].sm_min` |
+| `structural_masses` | objeto (`StructuralMassesSpec`, **novo v4.5**) | — | As 7 massas estruturais COMPUTADAS + os 5 fatores de composto usados — ver tabela abaixo |
+
+Sub-bloco `StructuralMassesSpec` (**novo v4.5**) — massas estruturais
+computadas por `agents::mass_model` (Raymer, "Aircraft Design: A
+Conceptual Approach", cap. 15.2, equações GA) × fatores de composto
+(Tab. 15.4, `[mass_model]` da configuração). São EXATAMENTE as mesmas
+massas que entraram no OEW (`weight.oew_kg`) e nos blocos `structure`/
+`landing_gear` — não uma cópia recomputada independentemente:
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `asa_kg` | f64 | kg | Massa da asa (Raymer eq. 15.2, GA) |
+| `fuselagem_kg` | f64 | kg | Massa da fuselagem |
+| `emp_h_kg` | f64 | kg | Massa da empenagem horizontal |
+| `emp_v_kg` | f64 | kg | Massa da empenagem vertical |
+| `trem_principal_kg` | f64 | kg | Massa TOTAL do trem principal (as duas pernas) |
+| `trem_nariz_kg` | f64 | kg | Massa do trem de nariz |
+| `tanques_kg` | f64 | kg | Massa do sistema de combustível (tanques integrais) |
+| `composite_factor_wing` | f64 | — | Fator de composto aplicado à asa (`[mass_model].composite_factor_wing`, Tab. 15.4) |
+| `composite_factor_tail` | f64 | — | Fator de composto aplicado às empenagens (`composite_factor_tail`) |
+| `composite_factor_fuselage` | f64 | — | Fator de composto aplicado à fuselagem (`composite_factor_fuselage`) |
+| `composite_factor_gear` | f64 | — | Fator de composto aplicado ao trem de pouso (`composite_factor_gear`) |
+| `composite_factor_fuel_system` | f64 | — | Fator de composto aplicado ao sistema de combustível (`composite_factor_fuel_system`) |
 
 **Envelope vazio**: quando `cg_limit_fwd_pct_mac > cg_limit_aft_pct_mac`
 (achado histórico pré-E6 do baseline real: ≈39,9% > ≈36,6% — o baseline

@@ -172,7 +172,7 @@ impl ArmConfig {
 /// agora que a massa é COMPUTADA (`agents::mass_model`, não mais um item de
 /// config), o deslocamento vira uma constante de engenharia documentada
 /// aqui em vez de um campo de TOML.
-const EMP_VERTICAL_ARM_OFFSET_M: f64 = -0.2;
+pub const EMP_VERTICAL_ARM_OFFSET_M: f64 = -0.2;
 
 /// Retorna os itens de peso do avião vazio operacional (OEW):
 ///   - o motor (massa de `EngineSpec`);
@@ -622,6 +622,20 @@ impl WeightBalanceAgent {
                 static_margin_pct: sm_min_observado * 100.0,
                 cg_limit_fwd_pct_mac: f64::NAN,
                 cg_limit_aft_pct_mac: cg_limit_aft_pct,
+                structural_masses: crate::models::specs::StructuralMassesSpec {
+                    asa_kg:            masses.asa_kg,
+                    fuselagem_kg:      masses.fuselagem_kg,
+                    emp_h_kg:          masses.emp_h_kg,
+                    emp_v_kg:          masses.emp_v_kg,
+                    trem_principal_kg: masses.trem_principal_kg,
+                    trem_nariz_kg:     masses.trem_nariz_kg,
+                    tanques_kg:        masses.tanques_kg,
+                    composite_factor_wing:        cfg.mass_model.composite_factor_wing,
+                    composite_factor_tail:        cfg.mass_model.composite_factor_tail,
+                    composite_factor_fuselage:    cfg.mass_model.composite_factor_fuselage,
+                    composite_factor_gear:        cfg.mass_model.composite_factor_gear,
+                    composite_factor_fuel_system: cfg.mass_model.composite_factor_fuel_system,
+                },
             },
             oew_kg,
             chord_root_m:  c_r,
@@ -1067,6 +1081,20 @@ mod tests {
                 static_margin_pct: 12.0,
                 cg_limit_fwd_pct_mac: f64::NAN,
                 cg_limit_aft_pct_mac: cg_pct_mac(x_cg_limit_aft, mac_le, mac),
+                structural_masses: crate::models::specs::StructuralMassesSpec {
+                    asa_kg: 148.0,
+                    fuselagem_kg: 110.6,
+                    emp_h_kg: 14.0,
+                    emp_v_kg: 5.6,
+                    trem_principal_kg: 110.5,
+                    trem_nariz_kg: 22.0,
+                    tanques_kg: 22.4,
+                    composite_factor_wing: 0.90,
+                    composite_factor_tail: 0.80,
+                    composite_factor_fuselage: 0.95,
+                    composite_factor_gear: 1.00,
+                    composite_factor_fuel_system: 1.05,
+                },
             },
             oew_kg: 900.0,
             chord_root_m: 1.6,

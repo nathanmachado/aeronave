@@ -297,6 +297,29 @@ fn main() {
     println!("  Todos os cenários dentro do envelope admissível: {}\n",
              if all_inside_envelope { "✓ SIM" } else { "✗ NÃO" });
 
+    // ── Massas Estruturais Computadas (Task 5, oew-parametrico) ────────────────
+    // As 7 massas ESTRUTURAIS que entraram no OEW acima (`agents::
+    // mass_model`, Raymer 15.2 GA × fatores de composto Tab. 15.4) — mesmos
+    // valores de `sized.structural_masses`, com o braço de momento de cada
+    // uma (mesma `ArmConfig` usada por `weight_balance::oew_items`).
+    println!("[ MASSAS ESTRUTURAIS ]  (Raymer 15.2 GA × composto)");
+    let sm_arms = aeronave::agents::weight_balance::ArmConfig::from_config(&cfg);
+    let sm = &sized.structural_masses;
+    let sm_items: [(&str, f64, f64); 7] = [
+        ("asa",             sm.asa_kg,             sm_arms.wing_struct_m),
+        ("fuselagem",       sm.fuselagem_kg,       sm_arms.fuselage_struct_m),
+        ("emp_horizontal",  sm.emp_h_kg,           sm_arms.empenagem_cg_m),
+        ("emp_vertical",    sm.emp_v_kg,
+            sm_arms.empenagem_cg_m + aeronave::agents::weight_balance::EMP_VERTICAL_ARM_OFFSET_M),
+        ("trem_principal",  sm.trem_principal_kg,  sm_arms.gear_main_m),
+        ("trem_nariz",      sm.trem_nariz_kg,      sm_arms.gear_nose_m),
+        ("tanques",         sm.tanques_kg,         sm_arms.fuel_cg_m),
+    ];
+    for (name, mass_kg, arm_m) in sm_items {
+        println!("  {:<15} {:6.1} kg  @ {:.2} m", name, mass_kg, arm_m);
+    }
+    println!();
+
     // ── TrimAuthorityAgent — Autoridade de Profundor (flare + rotação) ─────────
     // Limite dianteiro FÍSICO do envelope de CG acima — substitui o antigo
     // proxy `stability.sm_max`. Roda depois de WB+Empenagem (consome
@@ -672,8 +695,8 @@ fn main() {
         "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de \
          autoridade/eficiência de controle)".into());
     fidelity.insert("weight".into(),
-        "preliminary (soma de itens de massa configurados não pesados — validar \
-         na balança antes da fabricação)".into());
+        "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; \
+         hardware: itens configurados não pesados — validar na balança)".into());
     fidelity.insert("performance".into(),
         "computed (equações de desempenho em forma fechada, atmosfera ISA padrão)".into());
     fidelity.insert("vn_diagram".into(),

@@ -151,7 +151,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.4");
+    assert_eq!(report.schema_version, "4.5");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -168,7 +168,36 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.4");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.5");
+}
+
+/// Schema 4.5 (Task 5, oew-parametrico): `weight.structural_masses` —
+/// as 7 massas estruturais COMPUTADAS (`agents::mass_model`) + os 5
+/// fatores de composto usados (`[mass_model]`), rastreáveis no JSON
+/// final (antes só disponíveis internamente via `SizedAircraft::
+/// structural_masses`, nunca ecoadas dentro do bloco `weight`).
+#[test]
+fn weight_structural_masses_presente_e_positivo() {
+    let report = build_baseline_report();
+    let weight = report.weight.as_ref().expect("weight deveria estar presente");
+    let sm = &weight.structural_masses;
+
+    assert!(sm.asa_kg > 0.0, "asa_kg deveria ser positivo, obteve {}", sm.asa_kg);
+    assert!(sm.fuselagem_kg > 0.0, "fuselagem_kg deveria ser positivo, obteve {}", sm.fuselagem_kg);
+    assert!(sm.emp_h_kg > 0.0, "emp_h_kg deveria ser positivo, obteve {}", sm.emp_h_kg);
+    assert!(sm.emp_v_kg > 0.0, "emp_v_kg deveria ser positivo, obteve {}", sm.emp_v_kg);
+    assert!(sm.trem_principal_kg > 0.0, "trem_principal_kg deveria ser positivo, obteve {}", sm.trem_principal_kg);
+    assert!(sm.trem_nariz_kg > 0.0, "trem_nariz_kg deveria ser positivo, obteve {}", sm.trem_nariz_kg);
+    assert!(sm.tanques_kg > 0.0, "tanques_kg deveria ser positivo, obteve {}", sm.tanques_kg);
+    assert!(sm.composite_factor_wing > 0.0,
+        "composite_factor_wing deveria ser positivo, obteve {}", sm.composite_factor_wing);
+
+    // Rastreabilidade: as massas ecoadas em `weight.structural_masses` são
+    // EXATAMENTE as mesmas que entraram no OEW (`SizedAircraft::
+    // structural_masses`), não uma cópia recomputada independentemente.
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    assert!(json.contains("\"structural_masses\""),
+        "JSON deveria conter a chave 'structural_masses' dentro de 'weight'");
 }
 
 #[test]

@@ -246,6 +246,28 @@ pub struct WeightSpec {
     /// principal (`[gear].x_main_m`) fica longe demais do CG — decisão de
     /// layout do trem, não corrigida automaticamente por este pipeline.
     pub cg_limit_aft_pct_mac: f64,
+    /// Massas estruturais computadas + fatores de composto usados (Schema
+    /// 4.5, Task 5, oew-parametrico) — ver `StructuralMassesSpec`.
+    pub structural_masses: StructuralMassesSpec,
+}
+
+/// Massas estruturais computadas (ciclo 3, `agents::mass_model` — Raymer
+/// 15.2 GA × fatores de composto Tab. 15.4) + os fatores usados
+/// (rastreabilidade). Schema 4.5.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuralMassesSpec {
+    pub asa_kg: f64,
+    pub fuselagem_kg: f64,
+    pub emp_h_kg: f64,
+    pub emp_v_kg: f64,
+    pub trem_principal_kg: f64,
+    pub trem_nariz_kg: f64,
+    pub tanques_kg: f64,
+    pub composite_factor_wing: f64,
+    pub composite_factor_tail: f64,
+    pub composite_factor_fuselage: f64,
+    pub composite_factor_gear: f64,
+    pub composite_factor_fuel_system: f64,
 }
 
 /// Margem de autoridade de ROTAÇÃO na CG e no peso REAIS de UM cenário do
@@ -799,7 +821,15 @@ pub struct ElectricalSpec {
 /// horizontal, faixa 0,5–0,95) — sem valor padrão implícito; TOMLs antigos
 /// sem esse campo falham o parse do `toml` crate por campo ausente, não um
 /// erro de migração dedicado. Ver `docs/aircraft_spec.schema.md` §1 e §4.
-pub const SCHEMA_VERSION: &str = "4.4";
+/// v4.5 (Task 5, oew-parametrico): `WeightSpec` ganha UM campo NOVO,
+/// `structural_masses` (`StructuralMassesSpec`) — as 7 massas estruturais
+/// COMPUTADAS (`agents::mass_model`, já usadas internamente desde o Ciclo 3
+/// mas nunca ecoadas no JSON) + os 5 fatores de composto de `[mass_model]`
+/// usados para calculá-las, para rastreabilidade no consumidor de CAD —
+/// mudança ADITIVA (campo novo num bloco já existente; nenhum campo
+/// removido nem mudou de tipo/unidade), consumidores v4.4 continuam
+/// funcionando sem alteração. Ver `docs/aircraft_spec.schema.md` §1 e §4.
+pub const SCHEMA_VERSION: &str = "4.5";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
