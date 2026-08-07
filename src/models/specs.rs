@@ -615,6 +615,36 @@ pub struct GearSpec {
     pub total_weight_kg: f64,
 }
 
+/// Um check que PASSA no nominal mas REPROVA sob um conjunto adversarial
+/// de massas estruturais (±σ) — ciclo 4, check #19 (ver
+/// `validation::robustness`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RobustnessFlip {
+    /// Nome do check que flipou (ex.: "Cenário 'Solo (piloto)'", "Tipback",
+    /// "Carga de nariz máx").
+    pub check: String,
+    /// Conjunto adversarial que o derrubou: "dianteiro" | "traseiro".
+    pub caso: String,
+    /// Valor sob perturbação e limite violado.
+    pub valor: f64,
+    pub limite: f64,
+}
+
+/// Análise de robustez à incerteza do modelo de massas (ciclo 4) —
+/// pior-caso determinístico direcional, ver `validation::robustness`.
+/// **Módulo ISOLADO** (task robustez, ciclo 4): ainda não é consumido por
+/// `main`/`AircraftReport`/`ConstraintChecker` — ver task de wiring (task-4).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RobustnessSpec {
+    pub sigma_mass_fraction: f64,
+    /// Faixa de CG dos cenários sob o conjunto CG-mais-DIANTEIRO (%MAC).
+    pub cg_fwd_case_pct_mac: [f64; 2],
+    /// Idem sob o conjunto CG-mais-TRASEIRO.
+    pub cg_aft_case_pct_mac: [f64; 2],
+    /// Checks que passam no nominal mas reprovam perturbados (vazio = robusto).
+    pub flips: Vec<RobustnessFlip>,
+}
+
 /// Saída do PropellerAgent (Task 4.5) — dimensionamento/validação da hélice
 /// por Mach de ponta de pá (estático e cruzeiro) e folga de solo (CS
 /// 23.925). Quando `[propeller].diameter_m` está presente na configuração,

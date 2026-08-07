@@ -465,3 +465,11 @@ fuselage_wetted_coeff        = 0.75  # corpo afilado vs cilindro pleno
 landing_load_factor_ult      = 4.5   # N_l = N_pouso×1.5 (Raymer 15.2)
 main_strut_length_m          = 0.67  # curso oleo E7 (212 mm) + roda ≈ 26.3 in
 nose_strut_length_m          = 0.53  # idem
+# Ciclo 4 (task robustez): ±σ da estatística de frota das equações de peso
+# acima — Raymer cap. 15/Roskam Classe II citam ±10–20% em projeto
+# conceitual (equações empíricas ajustadas a uma frota histórica, não a
+# ESTA aeronave). Consumida por validation::robustness::adversarial_masses
+# para construir os dois conjuntos adversariais de massas estruturais e
+# quantificar se checks que PASSAM no nominal sobrevivem à incerteza do
+# modelo — módulo ainda ISOLADO (sem check no pipeline, ver task-4).
+sigma_mass_fraction           = 0.15

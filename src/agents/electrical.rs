@@ -157,7 +157,8 @@ mod tests {
              fuselage_wetted_coeff = 0.75\n\
              landing_load_factor_ult = 4.5\n\
              main_strut_length_m = 0.67\n\
-             nose_strut_length_m = 0.53\n"
+             nose_strut_length_m = 0.53\n\
+             sigma_mass_fraction = 0.15\n"
         );
 
         let err = crate::models::config::parse_aircraft(&toml_mutado)

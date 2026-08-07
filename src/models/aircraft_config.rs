@@ -497,6 +497,14 @@ pub struct MassModelCfg {
     pub landing_load_factor_ult: f64,
     pub main_strut_length_m: f64,
     pub nose_strut_length_m: f64,
+    /// Fração ±σ da estatística de frota das equações de peso — Raymer
+    /// cap. 15/Roskam Classe II citam ±10–20% em projeto conceitual
+    /// (equações empíricas ajustadas a uma frota histórica, não a ESTA
+    /// aeronave). Consumida por `validation::robustness::adversarial_masses`
+    /// (ciclo 4) para construir os dois conjuntos de massas estruturais
+    /// ±σ e quantificar se checks que PASSAM no nominal sobrevivem à
+    /// incerteza do modelo de massas. Faixa validada (0.05, 0.30).
+    pub sigma_mass_fraction: f64,
 }
 
 /// Um item de massa do orçamento de peso vazio (OEW), com o braço de
@@ -739,6 +747,11 @@ pub mod test_fixtures {
                 landing_load_factor_ult: 4.0,
                 main_strut_length_m: 0.50,
                 nose_strut_length_m: 0.40,
+                // Fixture do ciclo 4 (task robustez) — dentro da faixa
+                // validada (0.05, 0.30), distinto do baseline real (0.15)
+                // por conveniência de teste (perturbação visível nos hand-
+                // checks sem coincidir com o valor de projeto).
+                sigma_mass_fraction: 0.20,
             },
         }
     }

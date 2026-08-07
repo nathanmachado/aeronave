@@ -17,6 +17,14 @@ const CLIMB_GRADIENT_MIN_PCT: f64 = 8.3;
 /// transientes não capturadas no orçamento contínuo). Task 5.2.
 const ELECTRICAL_CONTINUOUS_MARGIN_FRAC: f64 = 0.80;
 
+/// Teto de carga de nariz no CG mais DIANTEIRO real (%) — checagem #17.
+/// `pub` (ciclo 4, task robustez) para fonte única: `validation::robustness`
+/// avalia os conjuntos adversariais contra o MESMO teto usado aqui.
+pub const NOSE_LOAD_MAX_CEILING_PCT: f64 = 25.0;
+/// Piso de carga de nariz no CG mais TRASEIRO real (%) — checagem #17.
+/// `pub` pelo mesmo motivo de `NOSE_LOAD_MAX_CEILING_PCT`.
+pub const NOSE_LOAD_MIN_FLOOR_PCT: f64 = 8.0;
+
 #[derive(Debug)]
 pub struct ConstraintReport {
     pub violations: Vec<String>,
@@ -344,9 +352,10 @@ impl ConstraintChecker {
         // (Task 2, refino-ciclo2) — substitui a antiga checagem única (só
         // no CG traseiro). Teto de 25% no CG mais DIANTEIRO; piso de 8% no
         // CG mais TRASEIRO (tração/direção em solo insuficiente abaixo
-        // disso).
-        const NOSE_LOAD_MAX_CEILING_PCT: f64 = 25.0;
-        const NOSE_LOAD_MIN_FLOOR_PCT: f64 = 8.0;
+        // disso). Constantes promovidas a `pub const` de módulo (ciclo 4,
+        // task robustez) — `validation::robustness` reexporta as MESMAS
+        // constantes para avaliar os conjuntos adversariais contra os
+        // mesmos tetos/pisos, fonte única.
         if gear.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT {
             violations.push(format!(
                 "Carga de nariz: {:.1}% no CG mais DIANTEIRO real excede o teto de {:.1}% \

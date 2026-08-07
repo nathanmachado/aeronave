@@ -1105,6 +1105,18 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             mm.nose_strut_length_m
         )));
     }
+    // sigma_mass_fraction (ciclo 4, task robustez): ±σ da estatística de
+    // frota das equações de peso — Raymer cap. 15/Roskam Classe II citam
+    // ±10–20% em projeto conceitual; faixa validada com folga acima e
+    // abaixo desse intervalo típico.
+    require_finite("mass_model.sigma_mass_fraction", mm.sigma_mass_fraction)?;
+    if mm.sigma_mass_fraction <= 0.05 || mm.sigma_mass_fraction >= 0.30 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: mass_model.sigma_mass_fraction deve estar em \
+             (0.05, 0.30) — valor: {}",
+            mm.sigma_mass_fraction
+        )));
+    }
 
     Ok(())
 }
@@ -1491,6 +1503,7 @@ mod tests {
             landing_load_factor_ult = 4.0
             main_strut_length_m = 0.50
             nose_strut_length_m = 0.40
+            sigma_mass_fraction = 0.20
         "#
         .to_string()
     }
@@ -2340,7 +2353,8 @@ mod tests {
              fuselage_wetted_coeff = 0.70\n\
              landing_load_factor_ult = 4.0\n\
              main_strut_length_m = 0.50\n\
-             nose_strut_length_m = 0.40\n"
+             nose_strut_length_m = 0.40\n\
+             sigma_mass_fraction = 0.20\n"
         );
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("electrical.loads"), "{err}");
@@ -2457,6 +2471,18 @@ mod tests {
             .replace("nose_strut_length_m = 0.40", "nose_strut_length_m = 2.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("mass_model.nose_strut_length_m"), "{err}");
+    }
+
+    /// Ciclo 4 (task robustez): `sigma_mass_fraction` fora da faixa (0.05,
+    /// 0.30) — Raymer cap. 15/Roskam Classe II citam ±10–20% em projeto
+    /// conceitual; a faixa validada tem folga acima e abaixo desse
+    /// intervalo típico.
+    #[test]
+    fn rejeita_sigma_mass_fraction_fora_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("sigma_mass_fraction = 0.20", "sigma_mass_fraction = 0.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("mass_model.sigma_mass_fraction"), "{err}");
     }
 
     // ─── MISSÃO (REQUISITOS) ────────────────────────────────────────────────
