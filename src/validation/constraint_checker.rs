@@ -511,6 +511,25 @@ impl ConstraintChecker {
             ));
         }
 
+        // 23. Decolagem na GRAMA sobre obstáculo de 15 m dentro da pista
+        // disponível (Ciclo 6, task 2) — premissa fundadora do projeto:
+        // operação em pista de terra/grama (`req.runway_available_m`,
+        // `config/missions/default.toml`), não pavimentada.
+        if perf.to_50ft_grass_m > req.runway_available_m {
+            violations.push(format!(
+                "Decolagem (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
+                perf.to_50ft_grass_m, req.runway_available_m
+            ));
+        }
+        // 24. Pouso sobre obstáculo de 15 m dentro da pista disponível
+        // (Ciclo 6, task 2) — mesmo raciocínio da checagem #23 acima.
+        if perf.ldg_50ft_m > req.runway_available_m {
+            violations.push(format!(
+                "Pouso (15 m): {:.0} m excede a pista disponível de {:.0} m",
+                perf.ldg_50ft_m, req.runway_available_m
+            ));
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -1133,6 +1152,57 @@ mod tests {
         assert!(!report.violations.iter().any(|v| v.contains("Teto de serviço")),
             "não deveria haver violação de teto de serviço quando service_ceiling_m (5000) >= \
              SERVICE_CEILING_MIN_M (3000), obteve: {:?}", report.violations);
+    }
+
+    // ─── Ciclo 6 (task 2): checagens #23/#24 — pista disponível ────────────
+    //
+    // #23: decolagem na grama sobre 15 m não pode exceder a pista disponível
+    // (`req.runway_available_m`). #24: idem para o pouso. Ao contrário das
+    // checagens de gradiente/RC/teto acima, aqui usamos o `perf` REAL
+    // calculado pelo pipeline de `setup()` (não uma `PerformanceSpec`
+    // sintética à mão) — basta sobrescrever `req.runway_available_m` para
+    // ficar 1 m abaixo do valor JÁ calculado, isolando exatamente a
+    // checagem sob teste sem depender de nenhum número mágico externo.
+
+    #[test]
+    fn check_23_reprova_decolagem_grama_maior_que_pista() {
+        let (mut req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        req.runway_available_m = perf.to_50ft_grass_m - 1.0;
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness));
+
+        assert!(report.violations.iter().any(|v| v.contains("grama") && v.contains("pista disponível")),
+            "esperava violação de decolagem na grama excedendo a pista disponível \
+             ({:.1} m > {:.1} m), obteve: {:?}", perf.to_50ft_grass_m, req.runway_available_m,
+             report.violations);
+    }
+
+    #[test]
+    fn check_24_reprova_pouso_maior_que_pista() {
+        let (mut req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        req.runway_available_m = perf.ldg_50ft_m - 1.0;
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness));
+
+        assert!(report.violations.iter().any(|v| v.contains("Pouso") && v.contains("pista disponível")),
+            "esperava violação de pouso excedendo a pista disponível \
+             ({:.1} m > {:.1} m), obteve: {:?}", perf.ldg_50ft_m, req.runway_available_m,
+             report.violations);
+    }
+
+    #[test]
+    fn checks_de_pista_passam_na_fixture_intacta() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness));
+
+        assert!(!report.violations.iter().any(|v| v.contains("pista disponível")),
+            "fixture intacta (pista de {:.0} m sintéticos) não deveria violar #23/#24 — \
+             decolagem grama {:.1} m, pouso {:.1} m: {:?}",
+             req.runway_available_m, perf.to_50ft_grass_m, perf.ldg_50ft_m, report.violations);
     }
 
     // ─── Task 5.2: orçamento elétrico ────────────────────────────────────

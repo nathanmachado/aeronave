@@ -39,6 +39,13 @@ isa_delta_c = 0.0
 # tests/generic_engine.rs — cobertura da checagem #18 preservada).
 min_fuel_margin_fraction = 0.05
 
+# Pista disponível (m) — grama/terra (Ciclo 6, task 2). Premissa de operação
+# do projeto: decisão do cliente (2026-08-08), 600 m, deliberadamente
+# apertada — pista de fazenda típica, não um aeródromo pavimentado. Gates:
+# check #23 (decolagem na grama sobre 15 m) e #24 (pouso sobre 15 m) de
+# `validation::constraint_checker::ConstraintChecker::verify`.
+runway_available_m = 600.0
+
 # Análise de missão por segmentos (Task 5.1) — táxi, subida integrada,
 # cruzeiro Breguet e descida substituem o antigo modelo de consumo
 # constante. Ver `agents::mission::MissionAgent` e

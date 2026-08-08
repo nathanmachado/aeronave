@@ -39,6 +39,11 @@ isa_delta_c = 0.0
 # `tests/acceptance.rs::rotax_missao_ferry_gera_spec_completo_data_driven`.
 min_fuel_margin_fraction = 0.05
 
+# Pista disponível (m) — grama/terra (Ciclo 6, task 2). Missão de traslado
+# ("ferry") entre aeródromos — folga maior que o baseline (600 m) porque
+# esta missão não assume a pista de fazenda apertada do projeto principal.
+runway_available_m = 800.0
+
 [analysis]
 taxi_fuel_l = 3.0
 descent_rate_ms = 4.0

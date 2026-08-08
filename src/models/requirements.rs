@@ -51,6 +51,11 @@ pub struct Requirements {
     /// Parâmetros da análise de missão por segmentos (Task 5.1) — táxi,
     /// subida integrada e descida. Ver `AnalysisCfg`.
     pub analysis: AnalysisCfg,
+    /// Pista disponível (m) — grama/terra, premissa de operação do projeto
+    /// (decisão do cliente, 2026-08-08: 600 m, deliberadamente apertada).
+    /// Gates: check #23 (decolagem na GRAMA sobre 15 m) e #24 (pouso sobre
+    /// 15 m). Faixa válida: (300, 2000).
+    pub runway_available_m: f64,
 }
 
 impl Requirements {
@@ -122,6 +127,10 @@ pub mod test_fixtures {
                 descent_power_fraction: 0.25,
                 climb_speed_policy: "vy".to_string(),
             },
+            // Distinto do valor real de `config/missions/default.toml`
+            // (600.0) — mesma filosofia de fixture sintética das demais
+            // (ver docstring do módulo).
+            runway_available_m: 700.0,
         }
     }
 }

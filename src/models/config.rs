@@ -1320,6 +1320,21 @@ fn validate_mission(req: &Requirements) -> Result<(), ConfigError> {
         )));
     }
 
+    // Ciclo 6 (task 2): pista disponível — gate dos checks #23 (decolagem
+    // na grama sobre 15 m) e #24 (pouso sobre 15 m) de
+    // `validation::constraint_checker::ConstraintChecker::verify`. Faixa
+    // (300, 2000): abaixo de 300 m não seria uma pista plausível para esta
+    // classe de aeronave; acima de 2000 m deixaria de ser uma restrição
+    // (provavelmente erro de digitação).
+    require_finite_missao("runway_available_m", req.runway_available_m)?;
+    if req.runway_available_m <= 300.0 || req.runway_available_m >= 2_000.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de missão inválida: runway_available_m deve estar em \
+             (300, 2000) (valor: {})",
+            req.runway_available_m
+        )));
+    }
+
     Ok(())
 }
 
@@ -2603,6 +2618,7 @@ mod tests {
             airfield_altitude_m = 0.0
             isa_delta_c = 0.0
             min_fuel_margin_fraction = 0.05
+            runway_available_m = 700.0
 
             [analysis]
             taxi_fuel_l = 3.0
@@ -2731,6 +2747,18 @@ mod tests {
         let toml_max = mission_toml_valido()
             .replace("min_fuel_margin_fraction = 0.05", "min_fuel_margin_fraction = 0.3");
         parse_mission(&toml_max).expect("0.3 (extremo superior) deveria ser aceito");
+    }
+
+    // ─── runway_available_m (Ciclo 6, task 2) ───────────────────────────────
+
+    #[test]
+    fn rejeita_runway_available_m_fora_da_faixa() {
+        let toml = mission_toml_valido()
+            .replace("runway_available_m = 700.0", "runway_available_m = 250.0");
+        let err = parse_mission(&toml).unwrap_err();
+        assert!(err.to_string().contains("runway_available_m"), "{err}");
+        assert!(err.to_string().contains("(300, 2000)"), "{err}");
+        assert!(err.to_string().contains("valor: 250"), "{err}");
     }
 
     // ─── [analysis] (Task 5.1) ──────────────────────────────────────────────

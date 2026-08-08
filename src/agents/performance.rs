@@ -737,6 +737,42 @@ mod tests {
              ({s_ground:.0}m) — inclui rotação + subida");
     }
 
+    // ─── Ciclo 6 (task 2): sensibilidade ao diâmetro de hélice ─────────────
+    //
+    // A cadeia D → tração estática (disco atuador, T ∝ D^(2/3) — ver
+    // `static_thrust_ideal_n`) → distância de decolagem sobre obstáculo
+    // existe desde a Task 4.7, mas nenhum teste protegia o VEREDITO físico
+    // esperado (hélice menor ⟹ pior desempenho). Direção ESTRITA (>), resto
+    // fixo.
+
+    #[test]
+    fn helice_menor_tem_menos_tracao_estatica() {
+        let (state, _wing, _prop, engine, _req, _perf_cfg) = setup();
+        let t_1_9 = static_thrust_ideal_n(&engine, engine.rpm_max_continuous, 1.9, 0.0, 0.0,
+                                           state.psru_efficiency);
+        let t_1_6 = static_thrust_ideal_n(&engine, engine.rpm_max_continuous, 1.6, 0.0, 0.0,
+                                           state.psru_efficiency);
+        println!("T(D=1.9m)={t_1_9:.1}N  T(D=1.6m)={t_1_6:.1}N");
+        assert!(t_1_9 > t_1_6,
+            "hélice MAIOR (D=1.9m) deveria produzir tração estática ESTRITAMENTE maior que a \
+             menor (D=1.6m): T(1.9)={t_1_9:.1}N, T(1.6)={t_1_6:.1}N");
+    }
+
+    #[test]
+    fn helice_menor_alonga_decolagem_sobre_obstaculo() {
+        let (mut state, wing, _prop, engine, _req, perf_cfg) = setup();
+        state.prop_diameter_m = 1.9;
+        let s_1_9 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+                                             0.0, &perf_cfg);
+        state.prop_diameter_m = 1.6;
+        let s_1_6 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+                                             0.0, &perf_cfg);
+        println!("S_50ft(D=1.9m)={s_1_9:.1}m  S_50ft(D=1.6m)={s_1_6:.1}m");
+        assert!(s_1_6 > s_1_9,
+            "hélice MENOR (D=1.6m) deveria alongar ESTRITAMENTE a decolagem sobre obstáculo \
+             de 15m em relação à maior (D=1.9m): S(1.6)={s_1_6:.1}m, S(1.9)={s_1_9:.1}m");
+    }
+
     #[test]
     fn pouso_50ft_maior_que_pouso_ground_roll_mais_ar_fixo() {
         let (state, wing, prop, engine, _req, perf_cfg) = setup();
