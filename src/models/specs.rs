@@ -748,6 +748,17 @@ pub struct MissionSpec {
     pub breguet_range_full_tank_km: f64,
 }
 
+/// Eco de uma carga elétrica configurada (ciclo 5, check #20) — espelho de
+/// `ElectricalLoadCfg` no relatório, para rastreabilidade e para o checker
+/// comparar o pico DECLARADO do atuador de retração com a potência
+/// COMPUTADA (`GearSpec::actuator_power_w`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElectricalLoadSpec {
+    pub name: String,
+    pub continuous_w: f64,
+    pub peak_w: f64,
+}
+
 /// Saída do ElectricalAgent (Task 5.2) — orçamento elétrico: soma das
 /// cargas configuradas (`[electrical].loads`) contra a capacidade do
 /// alternador (`[electrical].alternator_w`). Pura soma/derivação — não
@@ -769,6 +780,16 @@ pub struct ElectricalSpec {
     /// Margem sobre a capacidade CONTÍNUA do alternador (%):
     /// `(alternator_w − continuous_load_w) / alternator_w × 100`.
     pub margin_continuous_pct: f64,
+    /// Eco das cargas individuais configuradas (ciclo 5, check #20) — cada
+    /// item espelha um `ElectricalLoadCfg` de `[electrical].loads`. Existe
+    /// para que `ConstraintChecker::verify` possa comparar o pico
+    /// DECLARADO da carga 'trem_retratil' contra a potência do atuador de
+    /// retração COMPUTADA por `LandingGearAgent` — checagem que só é
+    /// possível PÓS-convergência (ver nota histórica do ciclo 3 em
+    /// `models::config::validate_aircraft`: a guarda equivalente de
+    /// parse-time foi removida porque a massa da perna do trem virou
+    /// computada).
+    pub loads: Vec<ElectricalLoadSpec>,
 }
 
 /// Versão do schema JSON (`AircraftReport`) — contrato com o time de CAD

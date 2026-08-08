@@ -417,6 +417,27 @@ impl ConstraintChecker {
             ));
         }
 
+        // 20 — atuador de retração vs orçamento elétrico (ciclo 5): o pico
+        // DECLARADO da carga 'trem_retratil' deve cobrir a potência
+        // COMPUTADA do atuador (LandingGearAgent). Substitui a guarda de
+        // parse removida no ciclo 3 (`models::config::validate_aircraft` —
+        // a massa da perna virou computada) — a checagem só é possível
+        // PÓS-convergência, aqui.
+        match electrical.loads.iter().find(|l| l.name == "trem_retratil") {
+            None => violations.push(
+                "Carga 'trem_retratil' ausente do orçamento elétrico — aeronave de \
+                 trem retrátil precisa declarar o pico do atuador em [[electrical.loads]]"
+                    .to_string(),
+            ),
+            Some(l) if l.peak_w < gear.actuator_power_w => violations.push(format!(
+                "Atuador de retração: pico declarado em [[electrical.loads]] \
+                 'trem_retratil' ({:.1} W) menor que a potência computada do atuador \
+                 ({:.1} W) — orçamento elétrico subdimensionado",
+                l.peak_w, gear.actuator_power_w
+            )),
+            Some(_) => {}
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -437,7 +458,7 @@ mod tests {
     use crate::agents::weight_balance::WeightBalanceAgent;
     use crate::models::aircraft_state::AircraftState;
     use crate::models::engine::test_fixtures::motor_generico_teste;
-    use crate::models::specs::RobustnessFlip;
+    use crate::models::specs::{ElectricalLoadSpec, RobustnessFlip};
 
     /// Monta um `(Requirements, WingSpec, PropulsionSpec, EngineSpec,
     /// WeightBalanceOutput, PropellerSpec, PerformanceSpec)` coerente via os
@@ -940,6 +961,12 @@ mod tests {
     /// `ElectricalSpec` sintética mínima para os testes de violação/aviso
     /// elétrico abaixo — construída à mão (não via `ElectricalAgent`) para
     /// isolar exatamente as checagens #14/#15 de `ConstraintChecker::verify`.
+    ///
+    /// Inclui uma carga 'trem_retratil' sintética com `peak_w` MUITO acima
+    /// de qualquer `gear.actuator_power_w` plausível (fixture ou baseline
+    /// real) — deliberado, para que estes testes de #14/#15 não disparem
+    /// acidentalmente a checagem #20 (ciclo 5), que tem seus próprios
+    /// testes dedicados (`check_20_*`, abaixo).
     fn electrical_spec(alternator_w: f64, continuous_load_w: f64, peak_load_w: f64) -> ElectricalSpec {
         ElectricalSpec {
             bus_voltage_v: 28.0,
@@ -947,6 +974,11 @@ mod tests {
             continuous_load_w,
             peak_load_w,
             margin_continuous_pct: (alternator_w - continuous_load_w) / alternator_w * 100.0,
+            loads: vec![ElectricalLoadSpec {
+                name: "trem_retratil".to_string(),
+                continuous_w: 0.0,
+                peak_w: 1.0e6,
+            }],
         }
     }
 
@@ -1198,5 +1230,78 @@ mod tests {
         assert!(v.contains("15.0%"), "violação deveria citar σ formatado sem arredondamento \
             enganoso (±15.0%, {{:.1}} em vez de {{:.0}} — 0.125 arredondaria para \"13%\" com \
             {{:.0}}): {v}");
+    }
+
+    // ─── Ciclo 5 (task robustez-total-e-solo): checagem #20 — atuador de
+    // retração vs orçamento elétrico ──────────────────────────────────────
+    //
+    // Substitui a guarda de parse-time removida no ciclo 3
+    // (`models::config::validate_aircraft` — "carga elétrica 'trem_retratil'
+    // peak_w >= potência mecânica do atuador de retração"): a massa da
+    // perna do trem virou COMPUTADA (`agents::mass_model`), então a
+    // comparação só é possível PÓS-convergência — aqui, comparando o pico
+    // DECLARADO em `[[electrical.loads]]` (`ElectricalSpec::loads`, novo
+    // nesta task) contra a potência COMPUTADA (`GearSpec::actuator_power_w`).
+
+    /// #20: peak_w declarado da carga 'trem_retratil' menor que a potência
+    /// COMPUTADA do atuador → violação nomeando os dois valores.
+    #[test]
+    fn check_20_reprova_peak_w_declarado_menor_que_atuador_computado() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, mut electrical, gear, gear_cfg, robustness) = setup();
+        let carga = electrical.loads.iter_mut().find(|l| l.name == "trem_retratil")
+            .expect("pré-condição do teste: fixture sintética deveria ter a carga 'trem_retratil'");
+        carga.peak_w = 1.0;
+        assert!(gear.actuator_power_w > 1.0,
+            "pré-condição do teste: potência computada do atuador ({:.4} W) deveria ser \
+             maior que o peak_w declarado sintético (1.0 W) para exercitar a violação",
+            gear.actuator_power_w);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness);
+
+        assert!(report.violations.iter().any(|v|
+                v.contains("trem_retratil") && v.contains("1.0")
+                && v.contains(&format!("{:.1}", gear.actuator_power_w))),
+            "esperava violação citando 'trem_retratil', o peak_w declarado (1.0) e a potência \
+             computada do atuador ({:.1}): {:?}", gear.actuator_power_w, report.violations);
+    }
+
+    /// #20: aeronave de trem retrátil SEM carga 'trem_retratil' declarada →
+    /// violação (cobertura que morreu no ciclo 3 volta, agora
+    /// pós-convergência).
+    #[test]
+    fn check_20_reprova_carga_trem_retratil_ausente() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, mut electrical, gear, gear_cfg, robustness) = setup();
+        let tinha_a_carga = electrical.loads.iter().any(|l| l.name == "trem_retratil");
+        assert!(tinha_a_carga,
+            "pré-condição do teste: fixture sintética deveria ter a carga 'trem_retratil' antes \
+             da remoção");
+        electrical.loads.retain(|l| l.name != "trem_retratil");
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness);
+
+        assert!(report.violations.iter().any(|v|
+                v.contains("trem_retratil") && v.contains("ausente")),
+            "esperava violação citando a ausência da carga 'trem_retratil', obteve: {:?}",
+            report.violations);
+    }
+
+    /// Caminho PASS: fixture intacta (peak_w sintético 480 W do
+    /// `config_teste()` fica bem acima da potência mecânica computada do
+    /// atuador, dezenas de W) — nenhuma violação da checagem #20.
+    #[test]
+    fn check_20_passa_na_fixture_intacta() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness);
+
+        assert!(!report.violations.iter().any(|v| v.contains("atuador")),
+            "fixture intacta (peak_w declarado bem acima do computado) não deveria gerar \
+             nenhuma violação da checagem #20, obteve: {:?}", report.violations);
     }
 }

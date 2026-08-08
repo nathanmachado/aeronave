@@ -17,7 +17,7 @@
 /// de `peak_load_w` sobre `alternator_w` como AVISO, não violação — o banco
 /// de baterias existe exatamente para isto).
 use crate::models::aircraft_config::AircraftConfig;
-use crate::models::specs::ElectricalSpec;
+use crate::models::specs::{ElectricalLoadSpec, ElectricalSpec};
 
 pub struct ElectricalAgent;
 
@@ -38,12 +38,25 @@ impl ElectricalAgent {
         let margin_continuous_pct =
             (elec.alternator_w - continuous_load_w) / elec.alternator_w * 100.0;
 
+        // Ciclo 5, check #20: eco das cargas individuais (map direto de
+        // `cfg.electrical.loads`) — permite a `ConstraintChecker::verify`
+        // comparar o pico DECLARADO de 'trem_retratil' contra a potência
+        // do atuador COMPUTADA por `LandingGearAgent`, pós-convergência.
+        let loads: Vec<ElectricalLoadSpec> = elec.loads.iter()
+            .map(|l| ElectricalLoadSpec {
+                name: l.name.clone(),
+                continuous_w: l.continuous_w,
+                peak_w: l.peak_w,
+            })
+            .collect();
+
         ElectricalSpec {
             bus_voltage_v: elec.bus_voltage_v,
             alternator_w: elec.alternator_w,
             continuous_load_w,
             peak_load_w,
             margin_continuous_pct,
+            loads,
         }
     }
 }
