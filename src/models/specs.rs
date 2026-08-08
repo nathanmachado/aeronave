@@ -1007,7 +1007,43 @@ pub struct ElectricalSpec {
 /// decolagem na grama (#23, 428,2 m) passa limpa, e o caso massa-total
 /// ampliado não produz nenhum flip novo. Ver `docs/aircraft_spec.schema.md`
 /// §1 e `tests/cli.rs`.
-pub const SCHEMA_VERSION: &str = "4.8";
+///
+/// v5.0 (Task 2, ciclo7-clmax-decolagem; bump **MAJOR**, não MINOR — a
+/// própria política acima é explícita: "renomeia/remove campo... muda o
+/// TIPO ou a UNIDADE de um campo existente" é MAJOR): a Task 1 do mesmo
+/// ciclo RENOMEOU um campo JÁ SERIALIZADO, `[stability].to_flap_cm_fraction`
+/// → `to_flap_fraction`, ecoado em `TrimSpec::to_flap_fraction` — pela
+/// própria régua deste crate isso não é uma mudança aditiva, é quebra de
+/// contrato (um consumidor lendo `trim.to_flap_cm_fraction` do JSON v4.8
+/// simplesmente não encontra mais a chave no v5.0). Duas mudanças de
+/// conteúdo:
+///   1. `WingSpec` ganha UM campo NOVO, `cl_max_to` — CL_max em
+///      configuração de DECOLAGEM (flap PARCIAL), derivado por
+///      interpolação linear entre `cl_max_clean` e `cl_max_flaps` pela
+///      MESMA `to_flap_fraction` que já sinalizava o ΔCm da rotação (ver
+///      docstring de `WingSpec::cl_max_to` acima). Isoladamente seria
+///      ADITIVA (campo novo); é o renome acima que força o MAJOR.
+///   2. `TrimSpec::to_flap_fraction` (RENOMEADO, ver acima) — mesmo
+///      significado físico e VALOR do antigo `to_flap_cm_fraction`, agora
+///      com papel DUPLO: além do ΔCm de rotação, governa também
+///      `wing.cl_max_to`.
+/// ACHADO HONESTO do baseline real (consequência da Task 1, física
+/// corrigida — rotação e distâncias de decolagem passam a usar o CL_max de
+/// DECOLAGEM em vez do CL_max de POUSO, que ninguém usa para decolar):
+/// `rotation_limit_pct_mac` (limite dianteiro de rotação) recua de 12,995%
+/// para **8,908% MAC** (mais autoridade, era pessimista com o CLmax
+/// errado). `validation_status` PERMANECE `"FAIL"` com as MESMAS **4**
+/// violações em CONTAGEM, mas DUAS trocam de natureza: os cenários nominais
+/// 'Solo (piloto)' e '2 pax dianteiros', que antes violavam o limite
+/// dianteiro de rotação DIRETAMENTE (envelope de CG nominal), agora ficam
+/// DENTRO do envelope nominal (o limite recuou o bastante) e passam a
+/// disparar a checagem #19 de ROBUSTEZ (`robustness.flips`) — reprovam sob
+/// o caso adversarial dianteiro (±15% de massa estrutural) contra o mesmo
+/// limite de 8,908% MAC. O achado físico não some, muda de categoria
+/// (nominal → robustez). As outras duas violações (carga de nariz máxima e
+/// pouso na grama, v4.8) ficam bit a bit INALTERADAS. Ver
+/// `docs/aircraft_spec.schema.md` §1 e `tests/schema_v4.rs`.
+pub const SCHEMA_VERSION: &str = "5.0";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver

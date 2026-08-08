@@ -165,7 +165,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.8");
+    assert_eq!(report.schema_version, "5.0");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -182,7 +182,52 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.8");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.0");
+}
+
+/// Schema 5.0 (Task 2, ciclo7-clmax-decolagem — bump MAJOR): `wing.cl_max_to`
+/// (NOVO, derivado na Task 1 do mesmo ciclo) é numericamente ENTRE
+/// `cl_max_clean` e `cl_max_flaps` — consistente com sua definição de
+/// interpolação linear pela fração de deployment do flap de decolagem,
+/// `cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps −
+/// cl_max_clean)` com `0 < to_flap_fraction < 1`. `cl_max_flaps` não é
+/// ecoado no JSON (só o `cl_max` de pouso, que é o mesmo valor internamente
+/// — ver `WingSpec::cl_max`), então o teste usa `cl_max` como o teto de
+/// pouso equivalente. O campo `trim.to_flap_fraction` (RENOMEADO de
+/// `to_flap_cm_fraction` na Task 1 — motivo do bump MAJOR, não MINOR: a
+/// política de versionamento do schema, `SCHEMA_VERSION`/§1 deste
+/// documento, classifica renome de campo serializado como mudança que
+/// QUEBRA compatibilidade) está presente, e o nome ANTIGO
+/// `to_flap_cm_fraction` NÃO aparece mais em lugar nenhum do JSON.
+#[test]
+fn wing_cl_max_to_entre_clean_e_flaps_trim_to_flap_fraction_renomeado() {
+    let report = build_baseline_report();
+
+    assert!(
+        report.wing.cl_max_to > report.wing.cl_max_clean
+            && report.wing.cl_max_to < report.wing.cl_max,
+        "wing.cl_max_to ({}) deveria ficar estritamente entre cl_max_clean ({}) e \
+         cl_max/cl_max_flaps de pouso ({})",
+        report.wing.cl_max_to, report.wing.cl_max_clean, report.wing.cl_max,
+    );
+
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let trim = &value["trim"];
+    assert!(
+        trim.get("to_flap_fraction").and_then(|v| v.as_f64()).is_some(),
+        "trim.to_flap_fraction deveria estar presente e ser numérico no JSON"
+    );
+    assert!(
+        trim.get("to_flap_cm_fraction").is_none(),
+        "trim.to_flap_cm_fraction (nome ANTIGO, renomeado na Task 1) não deveria mais \
+         aparecer no JSON — o campo é to_flap_fraction"
+    );
+    assert!(
+        !json.contains("to_flap_cm_fraction"),
+        "o JSON completo não deveria conter nenhuma ocorrência do nome antigo \
+         'to_flap_cm_fraction'"
+    );
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco
