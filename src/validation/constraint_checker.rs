@@ -447,16 +447,9 @@ impl ConstraintChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::aerodynamics::AerodynamicsAgent;
     use crate::agents::electrical::ElectricalAgent;
-    use crate::agents::empennage::EmpennageAgent;
-    use crate::agents::mission::MissionAgent;
     use crate::agents::performance::PerformanceAgent;
     use crate::agents::propeller::PropellerAgent;
-    use crate::agents::propulsion::PropulsionAgent;
-    use crate::agents::trim_authority::TrimAuthorityAgent;
-    use crate::agents::weight_balance::WeightBalanceAgent;
-    use crate::models::aircraft_state::AircraftState;
     use crate::models::engine::test_fixtures::motor_generico_teste;
     use crate::models::specs::{ElectricalLoadSpec, RobustnessFlip};
 
@@ -467,7 +460,8 @@ mod tests {
     /// padrão) e pelos testes de aviso de divergência de diâmetro abaixo, que
     /// precisam mutar `cfg.propeller` ANTES do pipeline rodar (o aviso
     /// depende do diâmetro PROVISÓRIO real calculado por
-    /// `AircraftState::from_config`, não de um valor sobrescrito depois).
+    /// `AircraftState::from_config`, dentro do laço de
+    /// `orchestrator::size_aircraft`, não de um valor sobrescrito depois).
     fn setup_with_cfg(cfg: crate::models::aircraft_config::AircraftConfig)
         -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec)
     {
@@ -479,65 +473,65 @@ mod tests {
     /// por `envelope_de_cg_fechado_sem_violacao_no_baseline_real` (campanha
     /// E7, 2026-08-06) para exercitar o baseline real (config E TAMBÉM
     /// missão de `config/missions/default.toml`, não a fixture sintética
-    /// mais leve `requisitos_teste()`, 85kg/60kg pax/bagagem). Motivo: o
-    /// deslocamento de `gear.x_main_m` (3,55→3,66m) move o braço de
-    /// `trem_principal` (arm_ref="gear_main") um pouco para trás, o que por
-    /// sua vez desloca o CG de TODOS os cenários levemente para trás — no
-    /// baseline real (pax 90kg/bagagem 80kg) a margem estática mínima segue
-    /// folgada (~11,0%, ver `cargo run`/`aircraft_spec.json`), mas na
-    /// fixture `requisitos_teste()` mais leve o cenário "4 pax + bagagem +
-    /// cheio" já vivia bem perto do piso de 5% (SM≈5,30% com x_main=3,55m) e
-    /// o deslocamento o empurra ligeiramente abaixo (SM≈4,97%) — achado de
-    /// COINCIDÊNCIA DE FIXTURE, não do projeto real (que passa 6/6 com
-    /// margem folgada). Para testar honestamente "o baseline real fecha o
-    /// envelope sem violação" é preciso usar a MISSÃO real, não uma fixture
-    /// mais leve que por acaso ficava perto do limite.
+    /// mais leve `requisitos_teste()`, 85kg/60kg pax/bagagem).
+    ///
+    /// Ciclo 5 (task massa-total, fix de review): trocado de um pipeline
+    /// MANUAL com MTOW FIXO (`state.mtow_kg` = palpite inicial de
+    /// `[sizing]`, sem iterar o laço) para `orchestrator::size_aircraft`
+    /// de verdade — mesma correção aplicada à fixture interna de
+    /// `validation::robustness::tests::nominal_pipeline`. Motivo: o 3º
+    /// caso adversarial de `RobustnessAgent::run` ("massa-total") sempre
+    /// re-converge o laço COMPLETO para o mundo perturbado (+σ); se o
+    /// nominal passado aqui (`mission`/`perf`, entre outros) viesse de um
+    /// MTOW não convergido, a comparação do caso massa-total ficaria
+    /// enviesada por bases diferentes (nominal não convergido vs.
+    /// perturbado sempre convergido) — não pelo efeito físico de σ.
+    /// `wb`/`gear`/`mission`/`perf` saem TODOS do MESMO `SizedAircraft`
+    /// convergido, como em produção. Consequência aceita: os números
+    /// pinados de vários testes abaixo mudam de "MTOW inicial de
+    /// [sizing]" para "MTOW de missão convergido" — ver comentários
+    /// `old→new` nos testes afetados.
     fn setup_with_cfg_and_req(cfg: crate::models::aircraft_config::AircraftConfig, req: Requirements)
         -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec)
     {
-        let state  = AircraftState::from_config(&cfg);
-        let wing   = AerodynamicsAgent::run(&state, &req);
         let engine = motor_generico_teste();
-        let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
-        let emp    = EmpennageAgent::run(&wing, &cfg);
-        // Massas estruturais COMPUTADAS (ciclo 3, `agents::mass_model`) —
-        // mesma sequência do orchestrator, com o MTOW do estado (palpite
-        // inicial de `[sizing]`, esta fixture não itera o ponto fixo) e o
-        // seed 3,8 do lag-1 de `n_design` (ver
-        // `orchestrator::size_aircraft_with_max_iters`). Alimentam tanto o
-        // OEW (`WeightBalanceAgent`) quanto o `LandingGearAgent` abaixo —
-        // uma fonte única, como em produção.
-        let masses = crate::agents::mass_model::MassModelAgent::run(
-            &cfg, &engine, &req, &wing, &emp, state.mtow_kg, 3.8,
-        );
-        let mut wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp, &masses);
-        // task trim-authority: finaliza o envelope (inside_envelope/
-        // cg_limit_fwd_pct_mac) com o limite dianteiro físico — mesma
-        // sequência de `orchestrator::size_aircraft`/`main.rs`, necessária
-        // para os testes de envelope de CG abaixo exercitarem o pipeline
-        // real (não o placeholder NaN de `WeightBalanceAgent::run` sozinho).
-        let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
-        wb.apply_trim(&trim);
+        let sized = crate::orchestrator::size_aircraft(&cfg, &engine, &req)
+            .expect("fixture sintética deveria convergir (ver orchestrator::size_aircraft)");
+        let state = sized.state;
+        let wing = sized.wing;
+        let prop = sized.prop;
+        let emp = sized.emp;
+        // Massas estruturais COMPUTADAS na iteração CONVERGIDA (ciclo 3,
+        // `agents::mass_model`, via `SizedAircraft::structural_masses`) —
+        // as MESMAS que alimentaram o OEW (`wb`) dentro do laço. Fonte
+        // única, como em produção.
+        let masses = sized.structural_masses;
+        // `wb` já sai do laço com `apply_trim` aplicado (ver docstring de
+        // `orchestrator::SizedAircraft::wb`) — não precisa reaplicar aqui.
+        let wb = sized.wb;
         let propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
-        let perf   = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
-                                            &cfg.performance);
-        let mission = MissionAgent::run(&state, &wing, &prop, &engine, &req, state.mtow_kg)
-            .expect("fixture sintética deveria produzir uma missão viável (ver agents::mission)");
+        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
+                                          &cfg.performance);
+        let mission = sized.mission;
         let electrical = ElectricalAgent::run(&cfg);
         // Task 2 (refino-ciclo2): CG mais dianteiro/traseiro REAIS dos
         // cenários de carga (não o limite admissível) — mesma fórmula de
-        // `main.rs`.
+        // `main.rs`. Trem de pouso dimensiona pelo MTOW de ENVELOPE
+        // (`wb.spec.mtow_kg`, pior caso legal "4 pax + bagagem + cheio"),
+        // não pelo MTOW de missão (`state.mtow_kg`) — mesma convenção de
+        // `main.rs`/`orchestrator` para `LandingGearAgent`.
         let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
         let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
         let gear = crate::agents::landing_gear::LandingGearAgent::run(
-            state.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear,
+            wb.spec.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear,
             masses.trem_principal_kg, masses.trem_nariz_kg,
         );
         let gear_cfg = cfg.gear.clone();
         // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA
         // sequência de `main.rs` — os dois conjuntos adversariais avaliados
         // contra os limites NOMINAIS já calculados acima (`wb`/`gear`, já
-        // com o trim aplicado).
+        // com o trim aplicado); ciclo 5, `mission`/`perf` NOMINAIS (do MESMO
+        // `SizedAircraft` convergido) para o 3º caso (massa-total).
         let robustness = crate::validation::robustness::RobustnessAgent::run(
             &cfg, &engine, &req, &state, &wing, &emp, &masses, &wb, &gear, &mission, &perf,
         );
@@ -636,21 +630,23 @@ mod tests {
     /// real de `config/missions/default.toml`, pax 90kg/bagagem 80kg, MTOW
     /// reconvergido) a margem estática mínima segue folgada (~11,0%, ver
     /// `cargo run`/`aircraft_spec.json`, `tests/gear_tipback.rs`) — ZERO
-    /// violações, confirmado pelo pipeline real. MAS este teste em
-    /// particular usa `setup_with_cfg`/`requisitos_teste()`: uma fixture
-    /// sintética MAIS LEVE (85kg pax/60kg bagagem) com MTOW FIXO (não
-    /// reconvergido pela missão — este módulo evita deliberadamente
-    /// `orchestrator::size_aircraft` para isolar `ConstraintChecker` dos
-    /// demais agentes), historicamente perto do piso de 5% de margem
-    /// estática por coincidência de fixture (SM≈5,30% com x_main=3,55m, não
-    /// um limite de projeto). O deslocamento de 0,11m a empurra ligeiramente
-    /// abaixo (SM≈4,97%) — achado honesto NOVO, isolado a esta fixture
-    /// sintética (não ao projeto real, que passa 6/6 com margem folgada, ver
-    /// acima). Não mascarado (não se toca `requisitos_teste()`, usada por
-    /// dezenas de outros testes deste arquivo, nem `[gear]`/`[stability]`
-    /// reais): a asserção abaixo passa a tolerar EXATAMENTE esta violação
-    /// marginal esperada, citando o número, e continua falhando para
-    /// qualquer OUTRA violação de envelope (regressão real).
+    /// violações, confirmado pelo pipeline real. Na época (E7), este teste
+    /// em particular usava `setup_with_cfg`/`requisitos_teste()` com MTOW
+    /// FIXO (fixture não iterava o laço de convergência — ver histórico
+    /// abaixo) e cruzava o piso de 5% por coincidência de fixture
+    /// (SM≈4,97% no cenário "4 pax + bagagem + cheio").
+    ///
+    /// RE-PIN (ciclo 5, task massa-total, fix de review): `setup_with_cfg`/
+    /// `setup_with_cfg_and_req` passaram a rodar `orchestrator::
+    /// size_aircraft` de verdade (ver docstring de `setup_with_cfg_and_req`
+    /// — necessário para o 3º caso do `RobustnessAgent` comparar contra um
+    /// nominal genuinamente convergido). Com o MTOW agora reconvergido
+    /// (mesmo com a missão sintética mais leve, `requisitos_teste()`), o
+    /// cenário "4 pax + bagagem + cheio" sobe de SM≈4,97% para **SM≈11,07%**
+    /// (old→new) — a coincidência de fixture desaparece; ZERO violações de
+    /// envelope, coerente com o pipeline real. Não mascarado: a asserção
+    /// abaixo agora exige zero violações de envelope (qualquer violação,
+    /// marginal ou não, reprova o teste).
     #[test]
     fn envelope_de_cg_fechado_sem_violacao_no_baseline_real() {
         let toml = std::fs::read_to_string(
@@ -670,38 +666,24 @@ mod tests {
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
             "não deveria haver violação dedicada de envelope vazio no baseline pós-E6: {:?}",
             report.violations);
-        // Achado honesto NOVO (campanha E7, ver docstring acima): a fixture
-        // sintética MAIS LEVE deste teste (requisitos_teste(), 85kg/60kg)
-        // cruza o piso de 5% de margem estática por uma margem minúscula
-        // (SM≈4,97%, ~0,03pp abaixo) SÓ no cenário "4 pax + bagagem + cheio"
-        // — coincidência de fixture, não achado do projeto real (que passa
-        // 6/6, ver `tests/gear_tipback.rs`/`aircraft_spec.json`). Tolerado
-        // EXPLICITAMENTE aqui (não mascarado): qualquer OUTRA violação de
-        // envelope (outro cenário, ou esta mesma citando um SM diferente)
-        // continua reprovando o teste.
+        // RE-PIN (ciclo 5, ver docstring acima): com a fixture agora
+        // convergida de verdade, a violação marginal de fixture (SM≈4,97%,
+        // achado da campanha E7) não ocorre mais — o cenário "4 pax +
+        // bagagem + cheio" sobe para SM≈11,07%. Zero violações de envelope
+        // esperadas, sem exceção.
         let violacoes_de_envelope: Vec<&String> = report.violations.iter()
             .filter(|v| v.contains("fora do envelope de CG admissível"))
             .collect();
-        assert!(violacoes_de_envelope.len() <= 1,
-            "esperava NO MÁXIMO a violação marginal conhecida (fixture leve, achado da campanha \
-             E7) — mais de uma violação de envelope indica uma regressão real: {:?}",
-            report.violations);
-        if let Some(v) = violacoes_de_envelope.first() {
-            assert!(v.contains("4 pax + bagagem + cheio"),
-                "a única violação de envelope tolerada é a marginal conhecida da fixture leve \
-                 (cenário '4 pax + bagagem + cheio') — obteve uma violação em outro cenário, \
-                 possível regressão real: {v:?}");
-            // Confirma numericamente (não só pela string) que é a violação
-            // MARGINAL esperada — SM logo abaixo de 0.05 (piso), não uma
-            // violação grande (que indicaria regressão real de projeto).
-            let cheio = wb.scenarios.iter().find(|s| s.name == "4 pax + bagagem + cheio")
-                .expect("cenário '4 pax + bagagem + cheio' deveria existir nos scenarios");
-            assert!((0.045..0.050).contains(&cheio.static_margin),
-                "SM do cenário '4 pax + bagagem + cheio' ({:.4}) fora da faixa esperada para o \
-                 achado marginal da campanha E7 [0.045, 0.050) — investigar antes de tolerar \
-                 (pode ser uma regressão maior, não a coincidência de fixture documentada acima)",
-                cheio.static_margin);
-        }
+        assert!(violacoes_de_envelope.is_empty(),
+            "achado honesto (ciclo 5): com a fixture reconvergida, NÃO deveria haver nenhuma \
+             violação de envelope (a coincidência de fixture da campanha E7, SM≈4,97%, some com \
+             o MTOW real reconvergido — ver docstring): {:?}", report.violations);
+        let cheio = wb.scenarios.iter().find(|s| s.name == "4 pax + bagagem + cheio")
+            .expect("cenário '4 pax + bagagem + cheio' deveria existir nos scenarios");
+        assert!(cheio.static_margin > 0.05,
+            "SM do cenário '4 pax + bagagem + cheio' ({:.4}) deveria ficar acima do piso de 5% \
+             agora que a fixture reconverge — achado honesto do ciclo 5 (old≈0.0497→new)",
+            cheio.static_margin);
     }
 
     /// Caminho de erro preservado (achado histórico pré-E6, Task 4.4/

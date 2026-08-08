@@ -137,6 +137,25 @@ impl RobustnessAgent {
     /// para o porquê de não reavaliar `TrimAuthorityAgent`). Um `flip` é
     /// registrado por (check, caso) sempre que o conjunto perturbado
     /// REPROVA um check que o NOMINAL passava.
+    ///
+    /// PRECONDIÇÃO (ciclo 5, caso massa-total): `state`/`wb_nominal`/
+    /// `gear_nominal`/`mission_nominal`/`perf_nominal` devem vir TODOS do
+    /// MESMO `orchestrator::size_aircraft` que CONVERGIU (`Ok(sized)`) —
+    /// nunca de um MTOW candidato/palpite inicial não iterado, nem de
+    /// agentes rodados isoladamente com um MTOW arbitrário. O 3º caso
+    /// (massa-total) SEMPRE re-converge o laço completo para o mundo +σ; se
+    /// o nominal recebido aqui não tivesse convergido de verdade, o flip
+    /// "Dimensionamento" reportaria "passa no nominal mas reprova
+    /// perturbado" para uma falha que já existia no nominal — ou, mais
+    /// sutil, compararia margem/VS0/desempenho contra bases fisicamente
+    /// inconsistentes (nominal não convergido vs. perturbado sempre
+    /// convergido), enviesando os gates independente do efeito real de σ
+    /// (achado de review, ciclo 5 — ver fixture corrigida em
+    /// `validation::constraint_checker::tests::setup_with_cfg_and_req`).
+    /// Os dois `debug_assert!`s abaixo checam a guarda mais direta e barata
+    /// que um sizing convergido garante e um não-convergido tipicamente não
+    /// (não é uma prova formal de convergência, mesmo espírito dos dois
+    /// `debug_assert!`s pré-existentes sobre `wb_nominal`).
     pub fn run(
         cfg: &AircraftConfig,
         engine: &EngineSpec,
@@ -154,6 +173,22 @@ impl RobustnessAgent {
             "RobustnessAgent exige um wb NOMINAL já com apply_trim (cg_limit_fwd_pct_mac = NaN)");
         debug_assert!(wb_nominal.spec.cg_limit_aft_pct_mac.is_finite(),
             "RobustnessAgent exige um wb NOMINAL já com apply_trim (cg_limit_aft_pct_mac = NaN)");
+        // Ciclo 5 (review): guarda mínima de sanidade de que o nominal veio
+        // de um sizing CONVERGIDO — `mission_nominal.fuel_total_l` só é
+        // finito e positivo quando o `MissionAgent` (chamado dentro do laço
+        // de `orchestrator::size_aircraft`) teve sucesso, e `state.mtow_kg`
+        // só é o MTOW de missão real (não um palpite/candidato NaN/0) num
+        // `SizedAircraft` convergido.
+        debug_assert!(
+            mission_nominal.fuel_total_l.is_finite() && mission_nominal.fuel_total_l > 0.0,
+            "RobustnessAgent exige mission_nominal de um sizing NOMINAL CONVERGIDO \
+             (fuel_total_l inválido: {})", mission_nominal.fuel_total_l
+        );
+        debug_assert!(
+            state.mtow_kg.is_finite() && state.mtow_kg > 0.0,
+            "RobustnessAgent exige state de um sizing NOMINAL CONVERGIDO (mtow_kg inválido: {})",
+            state.mtow_kg
+        );
         let sigma = cfg.mass_model.sigma_mass_fraction;
         let (m_fwd, m_aft) = adversarial_masses(cfg, engine, masses, sigma);
 
