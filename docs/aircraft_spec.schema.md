@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.7
+# `aircraft_spec.json` — contrato do schema v4.8
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -338,6 +338,61 @@ documentação a ser corrigido, não um comportamento aceitável.
     prop_axis_above_cg_m` em vez do datum absoluto antigo — acopla a
     folga de hélice ao comprimento do trem, para que encurtar o trem
     consuma folga de hélice automaticamente. Ver §3 e §4 abaixo.
+- **v4.8** (Task 4, ciclo6-pista-e-robustez-final): NENHUM campo NOVO
+  neste schema JSON — bump puramente de CONTRATO DE COMPORTAMENTO
+  (`violations`/`flips` podem conter textos NOVOS; nenhum bloco/campo
+  existente muda de nome, tipo ou unidade). Três mudanças:
+  1. **Requisito de pista** — `ConstraintChecker::verify` ganha as
+     checagens #23 (decolagem na GRAMA sobre obstáculo de 15 m,
+     `performance.to_50ft_grass_m`, excede a pista disponível) e #24
+     (pouso sobre 15 m, `performance.ldg_50ft_m`, idem) — comparadas
+     contra `runway_available_m`, um requisito NOVO **obrigatório** de
+     missão (não deste schema JSON — ver migração de CONFIGURAÇÃO
+     abaixo). Textos de violação NOVOS possíveis: `"Decolagem (grama,
+     15 m): {d} m excede a pista disponível de {p} m"` e `"Pouso (15 m):
+     {d} m excede a pista disponível de {p} m"`.
+  2. **Gates do caso "massa-total" ampliados** (checagem #19,
+     `robustness.flips`) — até a v4.7, o mundo "massa-total"
+     (`RobustnessAgent`, MTOW re-convergido com as 5 massas estruturais
+     compostas ×(1+σ)) só avaliava os gates de DESEMPENHO (margem de
+     combustível, VS0, razão de subida, v_cruise, teto de serviço);
+     `sized_p.wb` (o CG re-convergido desse mundo) era descartado. Desde
+     esta task, o mundo massa-total avalia TAMBÉM pista (#23/#24 acima) e
+     envelope de CG/carga de nariz/tipback — a MESMA avaliação já aplicada
+     aos dois casos direcionais (±σ) desde a v4.6, agora reutilizada
+     (função helper compartilhada) sobre `sized_p.wb`/`LandingGearAgent`
+     re-computado desse mundo. Mais nomes de check POSSÍVEIS em
+     `robustness.flips` com `caso == "massa-total"` (os mesmos nomes já
+     usados pelos casos direcionais: cenários de CG, carga de nariz
+     máx/mín, tipback) — nenhum flip existente muda de forma.
+  3. **Refactor mecânico** (`ConstraintChecker::verify` → recebe
+     `VerifyInputs<'a>`, uma struct, no lugar de 15 parâmetros
+     posicionais) — mudança de assinatura Rust interna, ZERO efeito no
+     JSON gerado (mesmos valores, mesma ordem de checagem, mesmas
+     mensagens para os checks #1-22 já existentes).
+  - Mudança ADITIVA em comportamento (mais violações/flips POSSÍVEIS,
+    nunca menos; nenhum texto/campo existente removido ou alterado),
+    consumidores v4.7 continuam funcionando sem alteração.
+  - **Migração de CONFIGURAÇÃO** (`mission.toml`, não deste schema
+    JSON): ganha um campo NOVO **obrigatório** — `runway_available_m`
+    (faixa válida (300, 2000) m). TOMLs de missão antigos sem esse campo
+    falham o parse (`missing field`) — mesmo padrão sem erro de migração
+    dedicado das v4.3/v4.4 (não há campo antigo equivalente para
+    redirecionar). Ver `config/missions/default.toml` (600 m — premissa
+    de pista de fazenda, deliberadamente apertada) e `rotax_ferry.toml`
+    (800 m — ferry entre aeródromos) para valores de referência.
+  - **Achado honesto do baseline real** (`config/aircraft/
+    baseline_4seat.toml`, missão `default.toml`, pista 600 m): os checks
+    #23/#24 passam LIMPOS (`to_50ft_grass_m` ≈ 428,2 m e `ldg_50ft_m` ≈
+    540,0 m, ambos ≤ 600 m) — nenhuma violação nova de pista. O caso
+    massa-total ampliado não produz nenhum flip novo (as margens
+    nominais que já absorviam a perturbação ±σ direcional desde a v4.6
+    também absorvem a perturbação ×(1+σ) do massa-total, no mundo de
+    desempenho JÁ verificado desde a v4.7). `validation_status` continua
+    `"FAIL"` com as MESMAS 3 violações nominais (dois cenários de
+    envelope + carga de nariz máxima, ver entrada "Ciclo 3" acima). Ver
+    `tests/cli.rs`, `src/validation/constraint_checker.rs` (mod tests) e
+    `src/validation/robustness.rs` (mod tests).
 
 ## 2. Convenção de eixos e unidades
 

@@ -165,7 +165,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.7");
+    assert_eq!(report.schema_version, "4.8");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -182,7 +182,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.7");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.8");
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco
@@ -196,7 +196,14 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
 /// (`sizing.mtow_mission_kg`) — os 5 fatores de composto só multiplicam
 /// por (1+σ) > 1. Schema 4.7 (Task 4, ciclo5-robustez-total-e-solo): o
 /// bump de versão que formaliza `mtow_masstotal_kg` (e `electrical.loads`,
-/// ver teste dedicado abaixo) como parte do contrato.
+/// ver teste dedicado abaixo) como parte do contrato. Schema 4.8 (Task 4,
+/// ciclo6-pista-e-robustez-final): NENHUM campo novo neste bloco — o mundo
+/// "massa-total" passa a avaliar TAMBÉM pista (#23/#24) e envelope/nariz/
+/// tipback (não só os gates de desempenho que já existiam), mas isso é
+/// comportamento do `RobustnessAgent`/`ConstraintChecker`, não uma mudança
+/// de forma do JSON; o bump formaliza o requisito `runway_available_m` e as
+/// checagens #23/#24 (`ConstraintChecker::verify`) como parte do contrato
+/// v4 — ver `docs/aircraft_spec.schema.md` §1.
 #[test]
 fn robustness_presente_com_sigma_e_flips_array() {
     let report = build_baseline_report();
