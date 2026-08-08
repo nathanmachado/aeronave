@@ -233,6 +233,7 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
     // de `main.rs`, contra os limites NOMINAIS já calculados (`wb`/`gear`).
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
         &cfg, &engine, &req, &sized.state, wing, emp, &sized.structural_masses, wb, &gear,
+        mission, &perf,
     );
 
     let report = ConstraintChecker::verify(
@@ -331,7 +332,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let gear = gear_real();
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
         &cfg, &engine, &req, &sized.state, &sized.wing, &sized.emp, &sized.structural_masses,
-        &sized.wb, &gear,
+        &sized.wb, &gear, mission, &perf,
     );
 
     let report = ConstraintChecker::verify(

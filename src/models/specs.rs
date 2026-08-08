@@ -643,6 +643,13 @@ pub struct RobustnessSpec {
     pub cg_aft_case_pct_mac: [f64; 2],
     /// Checks que passam no nominal mas reprovam perturbados (vazio = robusto).
     pub flips: Vec<RobustnessFlip>,
+    /// MTOW (kg) re-convergido pelo laço COMPLETO de `orchestrator::
+    /// size_aircraft` no 3º caso adversarial (ciclo 5, check #19) — todas as
+    /// 5 massas estruturais compostas ×(1+σ), não só ±σ direcional como os
+    /// dois casos de CG acima. `0.0` quando o sizing perturbado FALHOU
+    /// (`SizingError`) — nesse caso o flip de "Dimensionamento" acompanha e
+    /// documenta a causa, este campo não carrega significado físico.
+    pub mtow_masstotal_kg: f64,
 }
 
 /// Saída do PropellerAgent (Task 4.5) — dimensionamento/validação da hélice

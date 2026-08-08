@@ -539,7 +539,7 @@ mod tests {
         // contra os limites NOMINAIS já calculados acima (`wb`/`gear`, já
         // com o trim aplicado).
         let robustness = crate::validation::robustness::RobustnessAgent::run(
-            &cfg, &engine, &req, &state, &wing, &emp, &masses, &wb, &gear,
+            &cfg, &engine, &req, &state, &wing, &emp, &masses, &wb, &gear, &mission, &perf,
         );
         (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness)
     }

@@ -90,7 +90,7 @@ fn build_baseline_report() -> AircraftReport {
     // de `main.rs` — logo após o `LandingGearAgent`, contra os limites
     // NOMINAIS já calculados (`wb`/`gear`).
     let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp,
-                                           &sized.structural_masses, wb, &gear);
+                                           &sized.structural_masses, wb, &gear, mission, &perf);
 
     let report = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
                                             &propeller, &perf, mission, &electrical,
@@ -188,13 +188,22 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
 /// `sigma_mass_fraction` (eco de `[mass_model].sigma_mass_fraction`) e
 /// `flips` como array (vazio ou não — o baseline real, σ=15%, não produz
 /// nenhum flip, ver `tests/gear_tipback.rs`/`tests/cli.rs` para o achado
-/// honesto completo).
+/// honesto completo). Ciclo 5 (task massa-total, mesma versão de schema
+/// 4.6 — o bump é da Task 4 seguinte): `mtow_masstotal_kg` também presente
+/// e, no baseline real (sem flip de Dimensionamento), estritamente MAIOR
+/// que o MTOW de missão nominal (`sizing.mtow_mission_kg`) — os 5 fatores
+/// de composto só multiplicam por (1+σ) > 1.
 #[test]
 fn robustness_presente_com_sigma_e_flips_array() {
     let report = build_baseline_report();
     let robustness = report.robustness.as_ref().expect("robustness deveria estar presente");
     assert!(robustness.sigma_mass_fraction > 0.0,
         "sigma_mass_fraction deveria ser positivo, obteve {}", robustness.sigma_mass_fraction);
+    let sizing = report.sizing.as_ref().expect("sizing deveria estar presente");
+    assert!(robustness.mtow_masstotal_kg > sizing.mtow_mission_kg,
+        "achado honesto (baseline real, sem flip de Dimensionamento): mtow_masstotal_kg ({:.2}) \
+         deveria ficar ACIMA do MTOW de missão nominal ({:.2})",
+        robustness.mtow_masstotal_kg, sizing.mtow_mission_kg);
 
     let json = serde_json::to_string(&report).expect("deveria serializar");
     let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
@@ -204,6 +213,8 @@ fn robustness_presente_com_sigma_e_flips_array() {
     assert!(rob["flips"].is_array(), "robustness.flips deveria ser um array no JSON");
     assert!(rob["cg_fwd_case_pct_mac"].is_array(), "robustness.cg_fwd_case_pct_mac deveria ser um array no JSON");
     assert!(rob["cg_aft_case_pct_mac"].is_array(), "robustness.cg_aft_case_pct_mac deveria ser um array no JSON");
+    assert!(rob["mtow_masstotal_kg"].is_number(),
+        "robustness.mtow_masstotal_kg deveria estar presente e ser numérico no JSON");
 }
 
 /// Schema 4.5 (Task 5, oew-parametrico): `weight.structural_masses` —

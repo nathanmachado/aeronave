@@ -517,7 +517,8 @@ fn main() {
     // acima (`wb`/`gear`) — ver `validation::robustness` para a dedução
     // completa. Checagem #19 de `ConstraintChecker::verify` transforma cada
     // flip numa violação nomeada.
-    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp, sm, wb, &gear);
+    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp, sm, wb, &gear,
+                                           mission, &perf);
     println!("[ ROBUSTEZ ] RobustnessAgent — Incerteza de Massa Estrutural (±σ)");
     println!("  σ={:.0}%: {} flip(s)", robustness.sigma_mass_fraction * 100.0, robustness.flips.len());
     for flip in &robustness.flips {

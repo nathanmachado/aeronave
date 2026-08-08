@@ -41,6 +41,18 @@
 //! custo de mais uma chamada de agente — por isso as massas perturbadas
 //! são comparadas numericamente contra os limites NOMINAIS já calculados,
 //! sem re-rodar `TrimAuthorityAgent`.
+//!
+//! Ciclo 5 (spec robustez-total-e-solo) acrescenta um 3º caso, "massa-
+//! total": em vez de perturbar as 7 massas direcionalmente (±σ conforme o
+//! braço, mantendo o resto do pipeline NOMINAL fixo), multiplica os 5
+//! fatores de composto (`[mass_model].composite_factor_*`) por (1+σ) — TODA
+//! massa estrutural mais pesada — e RE-CONVERGE o laço completo
+//! (`orchestrator::size_aircraft`), avaliando MTOW/combustível/VS0/
+//! desempenho nesse mundo +σ contra os mesmos limites do pipeline nominal
+//! (não contra os limites nominais numéricos já calculados, como os dois
+//! casos de CG acima — este caso precisa do estado FÍSICO recalculado,
+//! porque a asa/hélice/missão também respondem ao MTOW maior). Ver o corpo
+//! de `RobustnessAgent::run` para o caso 3.
 
 use crate::agents::landing_gear::LandingGearAgent;
 use crate::agents::mass_model::StructuralMasses;
@@ -51,7 +63,11 @@ use crate::models::aircraft_config::AircraftConfig;
 use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
-use crate::models::specs::{EmpennageSpec, GearSpec, RobustnessFlip, RobustnessSpec, WingSpec};
+use crate::models::specs::{
+    EmpennageSpec, GearSpec, MissionSpec, PerformanceSpec, RobustnessFlip, RobustnessSpec,
+    WingSpec,
+};
+use crate::orchestrator::SizingError;
 use crate::validation::constraint_checker::{NOSE_LOAD_MAX_CEILING_PCT, NOSE_LOAD_MIN_FLOOR_PCT};
 
 /// Constrói os 2 conjuntos adversariais de massas estruturais (±σ).
@@ -131,6 +147,8 @@ impl RobustnessAgent {
         masses: &StructuralMasses,
         wb_nominal: &WeightBalanceOutput,
         gear_nominal: &GearSpec,
+        mission_nominal: &MissionSpec,
+        perf_nominal: &PerformanceSpec,
     ) -> RobustnessSpec {
         debug_assert!(wb_nominal.spec.cg_limit_fwd_pct_mac.is_finite(),
             "RobustnessAgent exige um wb NOMINAL já com apply_trim (cg_limit_fwd_pct_mac = NaN)");
@@ -215,7 +233,89 @@ impl RobustnessAgent {
         let (cg_aft_case_pct_mac, flips_traseiro) = evaluate_case("traseiro", &m_aft);
         flips.extend(flips_traseiro);
 
-        RobustnessSpec { sigma_mass_fraction: sigma, cg_fwd_case_pct_mac, cg_aft_case_pct_mac, flips }
+        // ── Caso 3: MASSA-TOTAL (ciclo 5) — todas as massas estruturais +σ via
+        // re-sizing COMPLETO: clona o config multiplicando os 5 fatores de
+        // composto por (1+σ) e re-converge o laço inteiro. What-if físico em
+        // memória — deliberadamente NÃO re-passa pelas faixas de parse (o
+        // produto pode exceder a faixa de config; a faixa protege dados de
+        // entrada, não experimentos adversariais). Autonomia não é
+        // reavaliada aqui: o MissionAgent a garante por construção ou o
+        // sizing falha (CombustivelInsuficiente) — coberto pelo flip de
+        // Dimensionamento.
+        let mut cfg_p = cfg.clone();
+        cfg_p.mass_model.composite_factor_wing *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_tail *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_fuselage *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_gear *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_fuel_system *= 1.0 + sigma;
+
+        let mtow_masstotal_kg;
+        match crate::orchestrator::size_aircraft(&cfg_p, engine, req) {
+            Err(e) => {
+                mtow_masstotal_kg = 0.0; // sem ponto convergido; flip documenta
+                flips.push(RobustnessFlip {
+                    check: "Dimensionamento".to_string(),
+                    caso: "massa-total".to_string(),
+                    valor: match &e {
+                        SizingError::CombustivelInsuficiente { necessario_l, .. } => *necessario_l,
+                        SizingError::MtowExcedido { mtow, .. } => *mtow,
+                        _ => f64::NAN,
+                    },
+                    limite: match &e {
+                        SizingError::CombustivelInsuficiente { capacidade_l, .. } => *capacidade_l,
+                        SizingError::MtowExcedido { limite, .. } => *limite,
+                        _ => f64::NAN,
+                    },
+                });
+            }
+            Ok(sized_p) => {
+                mtow_masstotal_kg = sized_p.state.mtow_kg;
+                let cap = cfg.fuel_system.capacity_l;
+                // margem de combustível (fórmula do check #18):
+                let margem_p = (cap - sized_p.mission.fuel_total_l) / cap;
+                let margem_nom = (cap - mission_nominal.fuel_total_l) / cap;
+                if margem_nom >= req.min_fuel_margin_fraction
+                    && margem_p < req.min_fuel_margin_fraction {
+                    flips.push(RobustnessFlip { check: "Margem de combustível".into(),
+                        caso: "massa-total".into(), valor: margem_p * 100.0,
+                        limite: req.min_fuel_margin_fraction * 100.0 });
+                }
+                // VS0 (fórmula do check #2):
+                let vs0_lim = req.cruise_speed_min_kmh / 1.8;
+                if wing.stall_speed_flaps_kmh <= vs0_lim
+                    && sized_p.wing.stall_speed_flaps_kmh > vs0_lim {
+                    flips.push(RobustnessFlip { check: "VS0".into(),
+                        caso: "massa-total".into(),
+                        valor: sized_p.wing.stall_speed_flaps_kmh, limite: vs0_lim });
+                }
+                // desempenho no mundo +σ (mesmos gates do pipeline nominal):
+                let perf_p = crate::agents::performance::PerformanceAgent::run(
+                    &sized_p.state, &sized_p.wing, &sized_p.prop,
+                    sized_p.state.mtow_kg, engine, req, &cfg.performance);
+                for (nome, nom, p, lim, maior_melhor) in [
+                    ("Razão de subida", perf_nominal.rc_sl_ms, perf_p.rc_sl_ms, 1.5, true),
+                    ("Velocidade de cruzeiro", perf_nominal.v_cruise_kmh, perf_p.v_cruise_kmh,
+                     req.cruise_speed_min_kmh, true),
+                    ("Teto de serviço", perf_nominal.service_ceiling_m,
+                     perf_p.service_ceiling_m, 3_000.0, true),
+                ] {
+                    let nom_ok = if maior_melhor { nom >= lim } else { nom <= lim };
+                    let p_ok = if maior_melhor { p >= lim } else { p <= lim };
+                    if nom_ok && !p_ok {
+                        flips.push(RobustnessFlip { check: nome.into(),
+                            caso: "massa-total".into(), valor: p, limite: lim });
+                    }
+                }
+            }
+        }
+
+        RobustnessSpec {
+            sigma_mass_fraction: sigma,
+            cg_fwd_case_pct_mac,
+            cg_aft_case_pct_mac,
+            mtow_masstotal_kg,
+            flips,
+        }
     }
 }
 
@@ -224,20 +324,23 @@ impl RobustnessAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::aerodynamics::AerodynamicsAgent;
-    use crate::agents::empennage::EmpennageAgent;
-    use crate::agents::mass_model::MassModelAgent;
-    use crate::agents::trim_authority::TrimAuthorityAgent;
+    use crate::agents::performance::PerformanceAgent;
     use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::models::engine::test_fixtures::motor_generico_teste;
     use crate::models::requirements::test_fixtures::requisitos_teste;
+    use crate::models::specs::PerformanceSpec;
 
-    /// Pipeline nominal COMPLETO, mesma sequência de agentes de
-    /// `validation::constraint_checker` (fixture `setup_with_cfg_and_req`):
-    /// Aerodynamics → Empennage → MassModel → WeightBalance →
-    /// TrimAuthority/`apply_trim` → LandingGear. MTOW/n_design FIXOS
-    /// (1450.0/4.0 — não itera o ponto fixo do orchestrator, este teste
-    /// exercita `RobustnessAgent` isoladamente, não a convergência).
+    /// Pipeline nominal COMPLETO via `orchestrator::size_aircraft` — mesma
+    /// sequência de `main.rs`/`validation::constraint_checker` (fixture
+    /// `setup_with_cfg_and_req`), incluindo o laço de convergência de MTOW
+    /// (`wb` já sai com `apply_trim` — ver docstring de
+    /// `orchestrator::SizedAircraft`). Ciclo 5 (task massa-total): trocado
+    /// do MTOW/n_design FIXOS (1450.0/4.0, sem convergência) para o laço
+    /// REAL porque o 3º caso adversarial de `RobustnessAgent::run`
+    /// (massa-total) precisa de um `MissionSpec`/`PerformanceSpec`
+    /// nominais fisicamente consistentes com `cfg` para comparar contra o
+    /// mundo +σ re-convergido — um nominal sintético/desacoplado da
+    /// convergência não teria essa garantia.
     struct Nominal {
         cfg: AircraftConfig,
         engine: EngineSpec,
@@ -248,25 +351,38 @@ mod tests {
         masses: StructuralMasses,
         wb: WeightBalanceOutput,
         gear: GearSpec,
+        mission: MissionSpec,
+        perf: PerformanceSpec,
     }
 
     fn nominal_pipeline(cfg: AircraftConfig) -> Nominal {
-        let req = requisitos_teste();
-        let state = AircraftState::from_config(&cfg);
-        let wing = AerodynamicsAgent::run(&state, &req);
+        nominal_pipeline_with_req(cfg, requisitos_teste())
+    }
+
+    /// Mesmo pipeline de `nominal_pipeline`, mas recebe `req` explícito —
+    /// usado pelos testes do 3º caso (massa-total) que precisam apertar
+    /// `min_fuel_margin_fraction` logo abaixo da margem nominal.
+    fn nominal_pipeline_with_req(cfg: AircraftConfig, req: Requirements) -> Nominal {
         let engine = motor_generico_teste();
-        let emp = EmpennageAgent::run(&wing, &cfg);
-        let masses = MassModelAgent::run(&cfg, &engine, &req, &wing, &emp, 1450.0, 4.0);
-        let mut wb = WeightBalanceAgent::run(&state, &wing, &engine, &cfg, &req, &emp, &masses);
-        let trim = TrimAuthorityAgent::run(&cfg, &wing, &emp, &wb);
-        wb.apply_trim(&trim);
+        let sized = crate::orchestrator::size_aircraft(&cfg, &engine, &req)
+            .expect("fixture de teste (config_teste + requisitos_teste + motor_generico_teste) \
+                     deveria convergir");
+        let state = sized.state;
+        let wing = sized.wing;
+        let emp = sized.emp;
+        let masses = sized.structural_masses;
+        let wb = sized.wb;
+        let prop = sized.prop;
+        let mission = sized.mission;
+        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
+                                          &cfg.performance);
         let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
         let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
         let gear = LandingGearAgent::run(
             wb.spec.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear,
             masses.trem_principal_kg, masses.trem_nariz_kg,
         );
-        Nominal { cfg, engine, req, state, wing, emp, masses, wb, gear }
+        Nominal { cfg, engine, req, state, wing, emp, masses, wb, gear, mission, perf }
     }
 
     /// Classificação direcional: cada um dos 7 componentes entra no lado
@@ -340,6 +456,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
         );
 
         println!("flips={:?}", out.flips);
@@ -378,6 +495,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
 
@@ -390,6 +508,108 @@ mod tests {
             "valor ({}) deveria estar abaixo do limite ({}) — é isso que caracteriza o flip",
             flip.valor, flip.limite);
         assert!((flip.limite - n.cfg.gear.tipback_min_deg).abs() < 1e-9);
+    }
+
+    /// Tanque apertado (`fuel_system.capacity_l = 172.0`, achado por sonda
+    /// numérica: nominal converge com margem pequena — 168,55 L exigidos
+    /// para 172 L de capacidade — e o mundo +σ, que exige mais combustível
+    /// de missão porque o MTOW re-convergido sobe, estoura essa
+    /// capacidade): `RobustnessAgent::run` produz um ÚNICO flip
+    /// "Dimensionamento" (caso "massa-total") citando
+    /// `SizingError::CombustivelInsuficiente` (necessário > capacidade) e
+    /// `mtow_masstotal_kg = 0.0` (sem ponto convergido).
+    #[test]
+    fn sizing_inviavel_no_mundo_mais_sigma_gera_flip_de_dimensionamento() {
+        let mut cfg = config_teste();
+        cfg.fuel_system.capacity_l = 172.0;
+        let n = nominal_pipeline(cfg);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+        println!("mtow_masstotal_kg={}", out.mtow_masstotal_kg);
+
+        assert_eq!(out.mtow_masstotal_kg, 0.0,
+            "sizing +σ deveria falhar — sem ponto convergido, mtow_masstotal_kg deveria ser 0.0");
+        assert_eq!(out.flips.len(), 1,
+            "esperava exatamente 1 flip (Dimensionamento/massa-total): {:?}", out.flips);
+        let flip = &out.flips[0];
+        assert_eq!(flip.check, "Dimensionamento");
+        assert_eq!(flip.caso, "massa-total");
+        assert!(flip.valor > flip.limite,
+            "CombustivelInsuficiente: necessario_l ({}) deveria exceder capacidade_l ({})",
+            flip.valor, flip.limite);
+        assert!((flip.limite - n.cfg.fuel_system.capacity_l).abs() < 1e-9,
+            "limite do flip deveria ser a capacidade do tanque configurada ({})",
+            n.cfg.fuel_system.capacity_l);
+    }
+
+    /// Margem de combustível NOMINAL folgada (`config_teste()`, ≈23,2% da
+    /// capacidade) mas `min_fuel_margin_fraction` apertado logo ABAIXO
+    /// dela (via `nominal_pipeline_with_req`): o nominal passa por pouco, e
+    /// o mundo +σ — que exige mais combustível de missão (MTOW re-
+    /// convergido maior) — derruba a margem bem abaixo do piso apertado,
+    /// gerando o flip "Margem de combustível" (caso "massa-total"). Mesma
+    /// fórmula do check #18 (`ConstraintChecker::verify`).
+    #[test]
+    fn margem_de_combustivel_marginal_flipa_no_caso_massa_total() {
+        let n0 = nominal_pipeline(config_teste());
+        let cap = n0.cfg.fuel_system.capacity_l;
+        let margem_nom = (cap - n0.mission.fuel_total_l) / cap;
+        println!("margem_nom = {margem_nom:.5}");
+
+        let mut req = requisitos_teste();
+        req.min_fuel_margin_fraction = margem_nom - 0.001; // logo abaixo da margem nominal
+        let n = nominal_pipeline_with_req(config_teste(), req);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+
+        let flips_margem: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Margem de combustível" && f.caso == "massa-total")
+            .collect();
+        assert_eq!(flips_margem.len(), 1,
+            "esperava exatamente 1 flip Margem de combustível(massa-total): {:?}", out.flips);
+        let flip = flips_margem[0];
+        assert!(flip.valor < flip.limite,
+            "margem sob +σ ({:.3}%) deveria ficar ABAIXO do piso apertado ({:.3}%) — é isso que \
+             caracteriza o flip", flip.valor, flip.limite);
+        assert!((flip.limite - n.req.min_fuel_margin_fraction * 100.0).abs() < 1e-9);
+    }
+
+    /// σ mínimo da faixa válida de `parse_aircraft` (0.05 — ver comentário
+    /// de `sigma_zero_nao_produz_flips`) com as margens folgadas da
+    /// fixture intacta (`config_teste()`): nenhum flip no caso
+    /// "massa-total" (nem Dimensionamento, nem margem/VS0/desempenho) —
+    /// perturbação pequena demais para derrubar qualquer check. O MTOW
+    /// re-convergido (`mtow_masstotal_kg`) fica ACIMA do nominal — os 5
+    /// fatores de composto só multiplicam por (1+σ) > 1, nunca reduzem
+    /// massa.
+    #[test]
+    fn caso_massa_total_bem_formado_sem_flips_na_fixture_folgada() {
+        let mut cfg = config_teste();
+        cfg.mass_model.sigma_mass_fraction = 0.05;
+        let n = nominal_pipeline(cfg);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
+        );
+        println!("mtow nominal = {:.3}  mtow_masstotal_kg = {:.3}",
+            n.state.mtow_kg, out.mtow_masstotal_kg);
+        println!("flips={:?}", out.flips);
+
+        assert!(!out.flips.iter().any(|f| f.caso == "massa-total"),
+            "fixture folgada (σ=0.05) não deveria produzir flip no caso massa-total: {:?}",
+            out.flips);
+        assert!(out.mtow_masstotal_kg > n.state.mtow_kg,
+            "mtow_masstotal_kg ({:.3}) deveria ficar ACIMA do MTOW nominal ({:.3}) — \
+             perturbação para CIMA", out.mtow_masstotal_kg, n.state.mtow_kg);
     }
 
     /// Fixture intacta (`config_teste()`, σ=0.20 da fixture): saída
@@ -405,6 +625,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
         );
         println!("nominal fwd/aft = {:.3}/{:.3}  caso dianteiro = {:?}  caso traseiro = {:?}",
             n.wb.spec.cg_mac_fwd_pct, n.wb.spec.cg_mac_aft_pct,
