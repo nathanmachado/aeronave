@@ -1128,7 +1128,31 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //   (ii) a polar de subida agora cobra `cd0_flap_to_extra` (arrasto de
     //        flap parcial) ⟹ menos excesso de potência relativo ⟹
     //        gradiente CAI, mesmo com Vx maior.
-    // O piso de 8,3% da CS 23.65 continua com folga confortável (~5,6 p.p.).
+    // A queda TOTAL do gradiente (15,129850%→13,896713%, −1,233137 p.p.) tem
+    // DOIS contribuintes, decompostos isolando cada efeito (achado da
+    // revisão — a atribuição original creditava 100% ao arrasto, incorreto):
+    //   - `best_climb_angle_ms` devolve o LIMITE INFERIOR da varredura
+    //     (1,05·V_s — RC/V é monotonicamente decrescente nesta faixa para
+    //     esta célula, ver Finding Important #2 da revisão e a nota na
+    //     docstring da função), então o DESLOCAMENTO da própria referência
+    //     de estol (V_s_to > V_s0) move o ponto de avaliação, mesmo com
+    //     `cd0_extra=0` isolado: 15,129850% → **14,241757%** (−0,888093 p.p.,
+    //     ~72% da queda total) — efeito (i), deslocamento do ponto.
+    //   - SÓ ENTÃO o arrasto de flap parcial (`cd0_flap_to_extra=0,00525`)
+    //     entra, no MESMO ponto de avaliação (V_s_to já deslocado):
+    //     14,241757% → 13,896713% (−0,345045 p.p., ~28% da queda total) —
+    //     efeito (ii), arrasto.
+    //   Os dois somam exatamente a queda total (0,888093+0,345045=1,233138
+    //   p.p. ≈ 1,233137 p.p., resíduo de arredondamento).
+    // O piso de 8,3% da CS 23.65 continua com folga confortável (~5,6 p.p.),
+    // mas essa folga em si é otimista por um viés PRÉ-EXISTENTE (não
+    // introduzido por esta task, ver Finding Important #2): o piso de
+    // varredura 1,05·V_s fica abaixo da velocidade de avaliação típica da
+    // CS 23.65 (≥1,2·V_s) — a este mesmo V_s_to·1,2 o gradiente seria
+    // ≈12,45% (não 13,90%), ~1,45 p.p. de viés otimista REMANESCENTE, fora
+    // de escopo desta task (ver docstring de `best_climb_angle_ms` e
+    // `fidelity.performance`, e o report desta task para o item de ciclo
+    // futuro).
     // to_50ft_paved_m/to_50ft_grass_m sobem por poucos % (o segmento de
     // SUBIDA fica mais longo com o gradiente menor — rolagem/rotação
     // INTOCADAS, ver auditoria em `agents::performance::
@@ -1142,9 +1166,12 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //   vy_kmh:             147.915721 → 147.915721  (inalterado)
     //   best_glide_kmh:     173.266373 → 173.266373  (inalterado)
     //   glide_ratio:         15.921177 →  15.921177  (inalterado)
-    //   climb_gradient_pct:  15.129850 →  13.896713  (-8,15%, efeito (ii) —
-    //                                       piso CS 23.65 8,3% ainda
-    //                                       folgado, margem ~5,6 p.p.)
+    //   climb_gradient_pct:  15.129850 →  13.896713  (-8,15%; decomposto
+    //                                       acima em ~0,888 p.p. de
+    //                                       deslocamento do ponto de
+    //                                       avaliação + ~0,345 p.p. de
+    //                                       arrasto — piso CS 23.65 8,3%
+    //                                       ainda folgado, margem ~5,6 p.p.)
     //   to_50ft_paved_m:    416.222778 → 420.466819  (+1,02%)
     //   to_50ft_grass_m:    469.331958 → 473.575998  (+0,90%)
     //   ldg_50ft_m:         502.482013 → 502.482013  (inalterado — auditoria
@@ -1170,8 +1197,15 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
 
     // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
     // real passa com folga confortável (~13.9% pós-ciclo-8/task-1, gradiente
-    // honesto — ver tabela old→new acima; era ~15.1% no híbrido pré-task,
-    // mais de 5 p.p. acima do piso mesmo depois da correção).
+    // honesto — ver tabela old→new e decomposição acima; era ~15.1% no
+    // híbrido pré-task, mais de 5 p.p. acima do piso mesmo depois da
+    // correção). Essa folga em si segue OTIMISTA por um viés pré-existente,
+    // não introduzido por esta task: `best_climb_angle_ms` avalia no piso da
+    // varredura (1,05·V_s), abaixo da velocidade de avaliação típica da CS
+    // 23.65 (≥1,2·V_s); a 1,2·V_s_to o gradiente seria ≈12,45% — ainda acima
+    // do piso 8,3%, mas com margem menor (~4,15 p.p., não ~5,6 p.p.). Ver
+    // docstring de `best_climb_angle_ms` (nota de viés remanescente) e o
+    // report da task 1 do ciclo 8 (item nomeado para ciclo futuro).
     assert!(perf.climb_gradient_pct >= 8.3,
         "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
 

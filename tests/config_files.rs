@@ -112,6 +112,11 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.mass_model.main_strut_length_m, 0.54);
     assert_eq!(cfg.mass_model.nose_strut_length_m, 0.40);
     assert_eq!(cfg.wing.cm_flap_delta, -0.30);
+    // Ciclo 8 (task 1): ΔCD0 do flap cheio (pouso) — Raymer cap. 12/Hoerner,
+    // flap SLOTTED moderado. Achado da revisão: sem este pin, um drift
+    // silencioso (ex. 0.015→0.014) passaria por todas as outras redes de
+    // proteção (validação só checa a faixa (0.005, 0.05), não o valor).
+    assert_eq!(cfg.wing.cd0_flap_delta, 0.015);
 }
 
 #[test]

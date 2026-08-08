@@ -397,7 +397,10 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 ///     de CG que fechou o lado DIANTEIRO consome o lado TRASEIRO. Ver
 ///     `tests/empennage.rs`.
 ///   - Decolagem 2,3–2,6% mais longa (grama 457,7→469,3 m sobre 15 m,
-///     pista de 600 m).
+///     pista de 600 m). ATUALIZAÇÃO (ciclo 8, task 1 — arrasto de flap na
+///     polar): 469,3→473,6 m (o segmento de SUBIDA cobra o arrasto de flap
+///     parcial agora, `cd0_flap_to_extra`), folga sobre a pista cai de
+///     ≈131 m para ≈126 m, ainda folgada — ver `tests/generic_engine.rs`.
 /// O aviso elétrico de pico (1.260 W > alternador 900 W) PERMANECE — é
 /// aviso, não violação, e agora é coberto pelo banco de baterias de 53 kg
 /// que a própria E10 instalou (ver comentário do item de massa no TOML).
@@ -468,10 +471,12 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_pass_sem_violacoes() {
          {violations:#?}");
     // A decolagem na grama continua PASSANDO — E10 a alonga um pouco
     // (457,7 → 469,3 m sobre 15 m: hélice menor + MTOW maior superam o
-    // `cl_max_to` maior), folga remanescente ≈131 m nos 600 m.
+    // `cl_max_to` maior). Ciclo 8 (task 1, arrasto de flap na polar):
+    // 469,3 → 473,6 m (segmento de subida cobra `cd0_flap_to_extra`), folga
+    // remanescente ≈126 m nos 600 m (era ≈131 m).
     assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
-        "decolagem na grama (≈469,3 m pós-E10, era ≈457,7 m) deveria continuar dentro dos \
-         600 m: {violations:#?}");
+        "decolagem na grama (≈473,6 m pós-ciclo-8, era ≈469,3 m pós-E10, ≈457,7 m antes) \
+         deveria continuar dentro dos 600 m: {violations:#?}");
     // Nenhum dos 6 cenários de carga fora do envelope admissível — nem os
     // dianteiros (que E10 recuou) nem os traseiros (que E10 aproximou do
     // limite: o pior, '4 pax + bagagem + cheio', vai a 38,8% MAC contra um

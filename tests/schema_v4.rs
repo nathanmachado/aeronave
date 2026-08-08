@@ -230,6 +230,43 @@ fn wing_cl_max_to_entre_clean_e_flaps_trim_to_flap_fraction_renomeado() {
     );
 }
 
+/// Ciclo 8 (task 1, arrasto de flap na polar — ainda dentro de v5.0, bump
+/// formal para v5.1 pendente de §3/§4 do mesmo ciclo, ver
+/// `docs/aircraft_spec.schema.md`): `wing.cd0_flap_to_extra` (NOVO) está
+/// presente e numérico no JSON, e bate com a fórmula fechada
+/// `to_flap_fraction · cd0_flap_delta` — mesmo precedente de
+/// `wing_cl_max_to_entre_clean_e_flaps_trim_to_flap_fraction_renomeado`
+/// acima para `cl_max_to`. `cd0_flap_delta` em si não é ecoado no JSON (só
+/// o produto derivado), então o teste recomputa a partir da config do
+/// baseline real.
+#[test]
+fn wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada() {
+    let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
+    let report = build_baseline_report();
+
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let cd0_flap_to_extra_json = value["wing"].get("cd0_flap_to_extra")
+        .and_then(|v| v.as_f64());
+    assert!(
+        cd0_flap_to_extra_json.is_some(),
+        "wing.cd0_flap_to_extra deveria estar presente e ser numérico no JSON"
+    );
+
+    let esperado = cfg.stability.to_flap_fraction * cfg.wing.cd0_flap_delta;
+    let obtido = cd0_flap_to_extra_json.unwrap();
+    assert!(
+        (obtido - esperado).abs() < 1e-9,
+        "wing.cd0_flap_to_extra no JSON ({obtido:.9}) deveria bater com a fórmula fechada \
+         to_flap_fraction·cd0_flap_delta ({esperado:.9})"
+    );
+    assert!(
+        obtido > 0.0 && obtido < cfg.wing.cd0_flap_delta,
+        "wing.cd0_flap_to_extra ({obtido:.6}) deveria ficar ESTRITAMENTE entre 0 e o delta \
+         cheio de pouso ({:.6})", cfg.wing.cd0_flap_delta
+    );
+}
+
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco
 /// `robustness` (`RobustnessSpec`) está presente no JSON e traz
 /// `sigma_mass_fraction` (eco de `[mass_model].sigma_mass_fraction`) e

@@ -224,11 +224,32 @@ pub fn climb_rate_ms(
 /// já usada pelas distâncias de decolagem) e `excess_power_kw` recebe
 /// `wing.cd0_flap_to_extra` (`to_flap_fraction · cd0_flap_delta`) em vez de
 /// 0.0 — CL_max de referência e CD0 agora refletem a MESMA configuração de
-/// decolagem parcial, de ponta a ponta. Consequência esperada: o gradiente
-/// CAI (mais arrasto, V_ref muda) em relação ao valor híbrido antigo — ver
-/// pin `climb_gradient_pct` em `tests/generic_engine.rs` para o valor
-/// old→new medido, e o piso de 8,3% da CS 23.65 continua sendo checado
-/// sobre este valor corrigido (`ConstraintChecker`).
+/// decolagem parcial. A queda do gradiente resultante tem DOIS
+/// contribuintes, não só o arrasto: no baseline real (motor/célula de
+/// referência), da tabela
+/// old→new (15,129850%→13,896713%, −1,233137 p.p.) em
+/// `tests/generic_engine.rs`, ~0,888 p.p. (≈72%) vêm do DESLOCAMENTO da
+/// referência de estol (V_s_to > V_s0, muda o ponto de avaliação — ver nota
+/// de viés remanescente abaixo) e só ~0,345 p.p. (≈28%) do arrasto de flap
+/// em si — ver pin `climb_gradient_pct` para a decomposição completa.
+///
+/// AINDA NÃO CORRIGIDO (achado da revisão desta task — pré-existente, não
+/// introduzido aqui): CL_max de referência e CD0 agora são consistentes
+/// entre si (ambos refletem o flap PARCIAL de decolagem), mas a VELOCIDADE
+/// de avaliação continua sendo um viés otimista separado. A varredura cobre
+/// `[1,05·V_s, 1,80·V_s]`; para a célula/motor real, RC/V é monotonicamente
+/// DECRESCENTE em toda essa faixa (verificado — ver task-1-report.md), então
+/// esta função devolve, na prática, o LIMITE INFERIOR da varredura
+/// (`1,05·V_s`), não um máximo interior genuíno — "melhor ângulo de subida"
+/// é o nome da busca, não uma garantia de que o pico esteja dentro do
+/// intervalo modelado. A CS 23.65 avalia o gradiente a uma velocidade de
+/// referência tipicamente ≥1,2·V_s, mais alta que o piso de 1,05·V_s usado
+/// aqui: como RC/V CAI com V nesta faixa, avaliar mais cedo (1,05·V_s) é
+/// OTIMISTA. No baseline real, a 1,2·V_s_to o gradiente seria ≈12,45%, não
+/// os ≈13,90% retornados por esta função — ~1,45 p.p. de viés otimista
+/// REMANESCENTE, irmão do gap conhecido de `climb_rate_ms`/Vy (mesma família
+/// de limitação, função vizinha). Corrigir a velocidade de avaliação em si
+/// está FORA DE ESCOPO desta task — nomeado como item de ciclo futuro.
 pub fn best_climb_angle_ms(
     mass_kg: f64,
     altitude_m: f64,
