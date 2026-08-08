@@ -141,13 +141,26 @@ fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
 /// tipback) reduz a distância entre o trem principal e o cone de cauda
 /// (`tail_cone_x_m` fixo), o que aumenta ligeiramente o ângulo de folga —
 /// continua bem acima do piso de 11°.
+///
+/// CORREÇÃO (revisão final, campanha E10, 2026-08-08): a rodada original de
+/// E10 baixou a célula inteira 13 cm (`[gear].h_cg_ground_m` 1,05→0,92) sem
+/// baixar `[gear].tail_cone_height_m` junto — o campo é a altura do FUNDO
+/// do cone acima do SOLO em atitude ESTÁTICA (ver
+/// `agents::landing_gear::tail_strike_margin_deg`), não uma dimensão
+/// independente do trem, então ficou 13 cm ALTO DEMAIS por engano (pin
+/// antigo, nunca correto: 14,88°, herdado sem mudança da campanha E7).
+/// Corrigido para 0,97 m (era 1,10 m,
+/// ver `config/aircraft/baseline_4seat.toml`): tail-strike recalculado
+/// 14,88°→**≈13,1865°** (old→new) — folga MENOR (o cone de cauda está mais
+/// perto do solo de verdade), mas ainda bem acima do piso de 11°.
 #[test]
 fn tail_strike_do_baseline_real_satisfaz_o_piso_pin_honesto() {
     let gear = gear_real();
     println!("Folga tail-strike (baseline real) = {:.4}°", gear.tail_strike_margin_deg);
-    // old (pré-E7, x_main=3.55m): 14.51° — new (campanha E7, x_main=3.66m): ≈14.88°.
-    assert!((gear.tail_strike_margin_deg - 14.88).abs() < 0.05,
-        "folga tail-strike = {:.4}° — pin honesto esperado ≈14.88° (tolerância ±0.05°)",
+    // old (pré-E7, x_main=3.55m): 14.51° — E7 (x_main=3.66m): ≈14.88° — E10,
+    // corrigido na revisão final (tail_cone_height_m 1.10→0.97): ≈13.1865°.
+    assert!((gear.tail_strike_margin_deg - 13.1865).abs() < 0.05,
+        "folga tail-strike = {:.4}° — pin honesto esperado ≈13.1865° (tolerância ±0.05°)",
         gear.tail_strike_margin_deg);
     assert!(gear.tail_strike_margin_deg >= 11.0,
         "folga tail-strike deveria satisfazer o piso de 11° (rotation_attitude_deg)");
@@ -268,6 +281,15 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 /// que não há NENHUMA violação"; a cobertura dos caminhos de erro continua
 /// nas configs sintéticas mutadas de `src/validation/constraint_checker.rs`
 /// (checks #15/#17/#19) e de `src/validation/robustness.rs`.
+///
+/// CORREÇÃO (revisão final): até esta rodada a afirmação acima era FALSA
+/// para o check #17 (carga de nariz) — nenhum teste sintético cobria os
+/// dois ramos (teto de 25% / piso de 8%) desde que o baseline real
+/// inverteu para PASS, buraco confirmado por mutação manual (`if false &&`
+/// em cada ramo não quebrava nenhum teste). Agora coberto por
+/// `constraint_checker::tests::violacao_de_carga_de_nariz_aparece_quando_
+/// max_acima_do_teto`/`..._quando_min_abaixo_do_piso` (mais os dois
+/// negativos gêmeos) — a afirmação passa a ser verdadeira.
 #[test]
 fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();

@@ -140,6 +140,26 @@ impl EngineSpec {
 pub(crate) mod test_fixtures {
     use super::*;
 
+    /// Massa de motor representativa da CLASSE que esta célula assume
+    /// (~195 kg, ver `config/engines/*.toml` para o valor concreto — `src/`
+    /// não conhece motores reais). Constante compartilhada (revisão final,
+    /// campanha E10) entre os DOIS hand-checks do baseline real que
+    /// precisam de uma massa de motor realista em vez dos 150 kg de
+    /// `motor_generico_teste()` (o motor fica no braço MAIS DIANTEIRO da
+    /// aeronave — `[arms].engine_cg_m` = 0,65 m — então a diferença desloca
+    /// o CG de todos os cenários em vários pontos percentuais de MAC; ver a
+    /// docstring de `constraint_checker::tests::setup_with_cfg_req_engine`
+    /// para a sensibilidade medida):
+    ///   - `validation::constraint_checker::tests::
+    ///     envelope_de_cg_fechado_sem_violacao_no_baseline_real`
+    ///   - `agents::trim_authority::tests::
+    ///     trim_authority_agent_run_hand_check_baseline_real`
+    /// Antes desta constante, `195.0` estava hardcoded independentemente
+    /// nos dois lugares — fonte única agora, mesmo padrão de
+    /// `NOSE_LOAD_MAX_CEILING_PCT`/`NOSE_LOAD_MIN_FLOOR_PCT` em
+    /// `constraint_checker.rs`.
+    pub(crate) const MASSA_MOTOR_CLASSE_KG: f64 = 195.0;
+
     /// Motor sintético "forte" — usado como motor genérico padrão nos testes
     /// de `propulsion.rs`/`performance.rs`/`constraint_checker.rs` e nos
     /// testes deste próprio módulo.

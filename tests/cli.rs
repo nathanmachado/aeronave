@@ -513,3 +513,108 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_pass_sem_violacoes() {
 
     let _ = std::fs::remove_file(&out_path);
 }
+
+/// Golden-file (recomendação adotada da revisão final, campanha E10): o
+/// binário rodado com os TOMLs REAIS do repositório (mesma invocação do
+/// teste PASS acima) deve produzir um JSON estruturalmente IDÊNTICO ao
+/// `aircraft_spec.json` COMMITADO. Pega ARTEFATO STALE — o `aircraft_spec.
+/// json` desatualizado em relação a `config/`/`src/` (aconteceu de verdade
+/// entre os ciclos 7 e E10: o JSON commitado ficou uma rodada inteira sem
+/// refletir os valores do baseline real, achado só na revisão).
+///
+/// ESCOLHA DE COMPARAÇÃO (documentada, achado do brief — "estruturalmente
+/// ou bytes, escolha a mais robusta a float"): estrutural via
+/// `serde_json::Value` (`PartialEq`), não byte-a-byte. Dois motivos:
+///   1. `Value::Object`/`serde_json::Map` compara por conteúdo, não por
+///      ORDEM de chave — não falsifica em uma mudança de formatação/ordem
+///      inofensiva (o que uma comparação de bytes faria).
+///   2. Ainda assim é EXATA para números: o crate depende de `serde_json`
+///      com a feature `float_roundtrip` (ver `Cargo.toml`, comentário de
+///      Task 6.1) especificamente para ida-e-volta f64 byte-exata através
+///      do parser JSON. Como `size_aircraft`/os agentes são determinísticos
+///      (mesma config, mesmo resultado), dois runs da MESMA config real
+///      devem produzir f64s idênticos bit a bit — não há folga de
+///      tolerância a definir aqui, ao contrário dos pins de
+///      `tests/generic_engine.rs`/`tests/gear_tipback.rs` (que comparam o
+///      pipeline real contra um valor ESPERADO escrito à mão).
+#[test]
+fn aircraft_spec_json_commitado_bate_com_o_pipeline_real() {
+    let out_path = std::env::temp_dir().join(format!(
+        "aeronave_cli_test_golden_file_{}.json",
+        std::process::id()
+    ));
+
+    let output = bin()
+        .current_dir(manifest_dir())
+        .arg("--engine")
+        .arg("config/engines/toyota_1gd_ftv.toml")
+        .arg("--aircraft")
+        .arg("config/aircraft/baseline_4seat.toml")
+        .arg("--mission")
+        .arg("config/missions/default.toml")
+        .arg("--out")
+        .arg(&out_path)
+        .output()
+        .expect("falha ao executar o binário aeronave");
+
+    assert!(output.status.success(),
+        "binário deveria convergir com sucesso (mesma config real do teste PASS acima): \
+         stderr={}", String::from_utf8_lossy(&output.stderr));
+
+    let fresh_json = std::fs::read_to_string(&out_path)
+        .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
+    let fresh: serde_json::Value = serde_json::from_str(&fresh_json)
+        .expect("JSON recém-gerado pelo binário deveria ser válido");
+    let _ = std::fs::remove_file(&out_path);
+
+    let committed_path = manifest_dir().join("aircraft_spec.json");
+    let committed_json = std::fs::read_to_string(&committed_path)
+        .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", committed_path.display()));
+    let committed: serde_json::Value = serde_json::from_str(&committed_json)
+        .expect("aircraft_spec.json commitado deveria ser JSON válido");
+
+    if fresh != committed {
+        let mut mismatches = Vec::new();
+        diff_json(&fresh, &committed, "$", &mut mismatches);
+        panic!(
+            "aircraft_spec.json COMMITADO diverge do JSON que o pipeline real produz agora com \
+             config/aircraft/baseline_4seat.toml + config/engines/toyota_1gd_ftv.toml + \
+             config/missions/default.toml — artefato STALE (não regenerado após uma mudança de \
+             config/src).\nRegenere com:\n  cargo run --release -- --engine \
+             config/engines/toyota_1gd_ftv.toml --aircraft config/aircraft/baseline_4seat.toml \
+             --mission config/missions/default.toml --out aircraft_spec.json\n\
+             Divergências ({} no total, até 10 mostradas):\n{}",
+            mismatches.len(),
+            mismatches.iter().take(10).cloned().collect::<Vec<_>>().join("\n"),
+        );
+    }
+}
+
+/// Diff estrutural recursivo de dois `serde_json::Value` — só para produzir
+/// a mensagem de erro legível do teste golden-file acima; a comparação que
+/// decide PASS/FAIL é `fresh != committed` (structural `PartialEq`
+/// completo, não este helper).
+fn diff_json(fresh: &serde_json::Value, committed: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+    use serde_json::Value;
+    match (fresh, committed) {
+        (Value::Object(mf), Value::Object(mc)) => {
+            let keys: std::collections::BTreeSet<&String> = mf.keys().chain(mc.keys()).collect();
+            for key in keys {
+                let child_path = format!("{path}.{key}");
+                match (mf.get(key), mc.get(key)) {
+                    (Some(vf), Some(vc)) => diff_json(vf, vc, &child_path, out),
+                    (Some(_), None) => out.push(format!("{child_path}: presente só no JSON gerado agora")),
+                    (None, Some(_)) => out.push(format!("{child_path}: presente só no JSON commitado")),
+                    (None, None) => unreachable!(),
+                }
+            }
+        }
+        (Value::Array(af), Value::Array(ac)) if af.len() == ac.len() => {
+            for (i, (vf, vc)) in af.iter().zip(ac.iter()).enumerate() {
+                diff_json(vf, vc, &format!("{path}[{i}]"), out);
+            }
+        }
+        _ if fresh != committed => out.push(format!("{path}: gerado agora={fresh} | commitado={committed}")),
+        _ => {}
+    }
+}

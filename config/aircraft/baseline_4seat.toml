@@ -126,6 +126,17 @@ tip_mach_max_static = 0.85
 tip_mach_max_cruise = 0.80
 # Folga mínima ponta de pá → solo (m). CS 23.925 exige >= 0.18 m (7 pol);
 # usamos 0.23 m (9 pol) de margem de projeto.
+#
+# CAVEAT (revisão final, campanha E10): o modelo computa folga ESTÁTICA,
+# trem TOTALMENTE ESTENDIDO, aeronave nivelada (ver
+# `agents::landing_gear`/`shaft_height` em `main.rs`) — NÃO desconta a
+# compressão do amortecedor oleo-pneumático nem o pneu murcho/parcialmente
+# descarregado, que é a condição efetivamente crítica do CS 23.925 (folga
+# mínima sob compressão de projeto, não em repouso). O piso de 0.23 m aqui é
+# um PROXY de projeto conservador na fase conceitual, não uma verificação
+# direta do requisito regulatório — validar com o curso real do amortecedor
+# (`[mass_model].main_strut_length_m`) e a compressão de projeto antes de
+# certificação.
 ground_clearance_min_m = 0.23
 
 [fuel_system]
@@ -270,11 +281,29 @@ actuators_doors_mass_kg = 20.0
 # recupera parte disso (CG mais baixo ⟹ mais tipback). Saldo: 18,85°→
 # **16,74°**, ainda acima do piso de 15° — e agora robusto: com massas
 # estruturais a ±15% (RobustnessAgent, check #19) o tipback continua
-# passando nos três mundos. Tail-strike 14,88° (inalterado, só geometria).
+# passando nos três mundos.
+#
+# CORREÇÃO (revisão final, campanha E10): tail-strike NÃO ficou
+# "inalterado, só geometria" como o comentário anterior afirmava —
+# `tail_cone_height_m` (abaixo) tinha ficado esquecido em 1.10 m enquanto
+# `h_cg_ground_m` 1,05→0,92 baixava a célula inteira 13 cm. Corrigido para
+# 0.97 (ver comentário do campo); tail-strike recalculado de 14,88° para
+# ≈13,19° — ainda bem acima do piso de 11° (rotation_attitude_deg).
 tipback_min_deg = 15.0
 rotation_attitude_deg = 11.0
 tail_cone_x_m = 7.80
-tail_cone_height_m = 1.10
+# Campanha E10 (2026-08-08, corrigido na revisão final): 1.10 → 0.97 —
+# `tail_cone_height_m` é a altura do FUNDO do cone de cauda acima do SOLO
+# em atitude ESTÁTICA (trem estendido, ver
+# `agents::landing_gear::tail_strike_margin_deg`), não uma dimensão da
+# célula independente do trem. A campanha E10 baixou toda a célula 13 cm
+# (`h_cg_ground_m` 1,05→0,92) para ganhar tipback — o cone de cauda desce
+# junto, rigidamente, com o resto da aeronave. O valor ficou parado em
+# 1.10 na primeira rodada de E10 (erro corrigido nesta revisão, não uma
+# mudança de projeto nova): 1.10 − 0.13 = 0.97. Consequência: tail-strike
+# 14,88° → ≈13,19° (folga MENOR, ainda acima do piso de 11°,
+# `rotation_attitude_deg`). Antigo (pré-E10): 1.10.
+tail_cone_height_m = 0.97
 
 [arms]      # braços de momento (m do datum no nariz)
 engine_cg_m = 0.65

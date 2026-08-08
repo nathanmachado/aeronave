@@ -1058,8 +1058,11 @@ mod tests {
         // `tests/acceptance.rs::src_nao_contem_nomes_de_motor_especificos`).
         // Os limites de FLARE e ROTAÇÃO pinados acima NÃO dependem do peso
         // nem do CG (ver derivação no código), então não se movem com isto.
+        // Revisão final: constante compartilhada com o hand-check gêmeo de
+        // `validation::constraint_checker` (mesma massa de motor, mesmo
+        // motivo) — ver `models::engine::test_fixtures::MASSA_MOTOR_CLASSE_KG`.
         let mut engine = crate::models::engine::test_fixtures::motor_generico_teste();
-        engine.mass_kg = 195.0;
+        engine.mass_kg = crate::models::engine::test_fixtures::MASSA_MOTOR_CLASSE_KG;
         let masses = masses_do_baseline(&cfg, &engine, &req, &wing, &emp, &state);
         let wb = crate::agents::weight_balance::WeightBalanceAgent::run(
             &state, &wing, &engine, &cfg, &req, &emp, &masses,

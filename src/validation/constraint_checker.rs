@@ -604,11 +604,23 @@ mod tests {
         setup_with_cfg_and_req(cfg, req)
     }
 
-    /// Mesmo pipeline de `setup_with_cfg`, mas recebe `req` explícito — usada
-    /// por `envelope_de_cg_fechado_sem_violacao_no_baseline_real` (campanha
-    /// E7, 2026-08-06) para exercitar o baseline real (config E TAMBÉM
-    /// missão de `config/missions/default.toml`, não a fixture sintética
-    /// mais leve `requisitos_teste()`, 85kg/60kg pax/bagagem).
+    /// Mesmo pipeline de `setup_with_cfg`, mas recebe `req` explícito.
+    ///
+    /// DOCSTRING CORRIGIDA (revisão final, campanha E10): a versão anterior
+    /// desta nota dizia que esta função era "usada por
+    /// `envelope_de_cg_fechado_sem_violacao_no_baseline_real` ... para
+    /// exercitar o baseline real (config E TAMBÉM missão de
+    /// `config/missions/default.toml`, não a fixture sintética mais leve
+    /// `requisitos_teste()`)" — FALSO desde que esse teste passou a chamar
+    /// `setup_with_cfg_req_engine` DIRETAMENTE (campanha E10, para também
+    /// controlar a massa do motor — ver docstring dessa função), sem passar
+    /// por aqui. Hoje esta função é, na prática, um PASS-THROUGH interno: o
+    /// único chamador é `setup_with_cfg` (logo abaixo), que sempre passa a
+    /// MESMA fixture sintética (`requisitos_teste()`) — nenhum chamador
+    /// atual usa o parâmetro `req` para passar algo diferente do fixture
+    /// padrão. Mantida como função separada pela simetria com
+    /// `setup_with_cfg_req_engine` (mesmo padrão de "MESMO pipeline, um
+    /// parâmetro a mais explícito"), não por necessidade funcional atual.
     ///
     /// Ciclo 5 (task massa-total, fix de review): trocado de um pipeline
     /// MANUAL com MTOW FIXO (`state.mtow_kg` = palpite inicial de
@@ -850,10 +862,18 @@ mod tests {
         // O resto do motor segue sintético/genérico (curva de torque, BSFC,
         // combustível) — `src/` não conhece motores concretos.
         let mut engine_classe_real = motor_generico_teste();
-        engine_classe_real.mass_kg = 195.0;
-        let req_real = crate::models::requirements::test_fixtures::requisitos_teste();
+        // Revisão final: constante compartilhada com o hand-check gêmeo de
+        // `agents::trim_authority` (mesma massa de motor, mesmo motivo) —
+        // ver `models::engine::test_fixtures::MASSA_MOTOR_CLASSE_KG`.
+        engine_classe_real.mass_kg = crate::models::engine::test_fixtures::MASSA_MOTOR_CLASSE_KG;
+        // Nome honesto (revisão final — era `req_real`, o que sugeria "a
+        // missão real do projeto"; é o MESMO fixture sintético leve
+        // (`requisitos_teste()`, 85kg/60kg pax/bagagem) que `setup_with_cfg`
+        // usa em todo o resto do módulo — só o MOTOR e a CONFIG (`cfg`,
+        // lida do TOML real acima) são "reais" aqui, não os requisitos).
+        let req_sintetico = crate::models::requirements::test_fixtures::requisitos_teste();
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) =
-            setup_with_cfg_req_engine(cfg, req_real, engine_classe_real);
+            setup_with_cfg_req_engine(cfg, req_sintetico, engine_classe_real);
         assert!(wb.spec.cg_limit_fwd_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: baseline real (pós E1–E6) deveria ter envelope de CG \
              FECHADO (fwd={:.2}% <= aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac,
@@ -1493,6 +1513,90 @@ mod tests {
         assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
             "não deveria haver violação de tipback com gear.tipback_angle_deg sintético acima \
              do piso, obteve: {:?}", report.violations);
+    }
+
+    // ─── Revisão final (baseline E10, 2026-08-08): checagem #17 (carga de
+    // nariz nos dois extremos) — cobertura sintética dedicada ───────────────
+    //
+    // ACHADO DE REVISÃO: até esta rodada, nenhum teste deste módulo cobria
+    // os dois ramos de #17 (:398 teto de 25%, :405 piso de 8%) diretamente —
+    // a única cobertura viva era o pin honesto do baseline REAL em
+    // `tests/gear_tipback.rs`, que passou a ficar do lado PASS (dentro dos
+    // dois limites) desde que a campanha E10 fechou a violação de carga de
+    // nariz. Um mutante `if false &&` em qualquer um dos dois ramos de #17
+    // não quebrava NENHUM teste — buraco confirmado por mutação manual (ver
+    // processo abaixo). Mesmo padrão de
+    // `violacao_de_tipback_aparece_quando_abaixo_do_piso` (checagem #15,
+    // acima): sobrescreve só o campo relevante da fixture sintética
+    // (`gear.nose_load_max_pct`/`gear.nose_load_min_pct`), sem depender de
+    // nenhum `x_nose_m`/`x_main_m` real.
+
+    /// Ramo do TETO (:398): `gear.nose_load_max_pct` acima de
+    /// `NOSE_LOAD_MAX_CEILING_PCT` (25%) deve violar — isola exatamente o
+    /// ramo do teto, sem tocar no ramo do piso (`nose_load_min_pct` segue
+    /// dentro da faixa da fixture padrão).
+    #[test]
+    fn violacao_de_carga_de_nariz_aparece_quando_max_acima_do_teto() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg, robustness) = setup();
+        gear.nose_load_max_pct = NOSE_LOAD_MAX_CEILING_PCT + 2.0; // sintético, acima do teto
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("DIANTEIRO")),
+            "esperava violação de carga de nariz (ramo do TETO) com gear.nose_load_max_pct \
+             sintético acima de {:.1}%, obteve: {:?}", NOSE_LOAD_MAX_CEILING_PCT, report.violations);
+    }
+
+    /// Sanidade inversa do ramo do TETO: `gear.nose_load_max_pct` no teto ou
+    /// abaixo não deveria violar — confirma que o ramo não dispara em falso.
+    #[test]
+    fn sem_violacao_de_carga_de_nariz_quando_max_no_teto_ou_abaixo() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg, robustness) = setup();
+        gear.nose_load_max_pct = NOSE_LOAD_MAX_CEILING_PCT - 2.0; // sintético, abaixo do teto
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("DIANTEIRO")),
+            "não deveria haver violação de carga de nariz (ramo do TETO) com gear.nose_load_max_pct \
+             sintético abaixo de {:.1}%, obteve: {:?}", NOSE_LOAD_MAX_CEILING_PCT, report.violations);
+    }
+
+    /// Ramo do PISO (:405): `gear.nose_load_min_pct` abaixo de
+    /// `NOSE_LOAD_MIN_FLOOR_PCT` (8%) deve violar — isola exatamente o ramo
+    /// do piso, sem tocar no ramo do teto (`nose_load_max_pct` segue dentro
+    /// da faixa da fixture padrão).
+    #[test]
+    fn violacao_de_carga_de_nariz_aparece_quando_min_abaixo_do_piso() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg, robustness) = setup();
+        gear.nose_load_min_pct = NOSE_LOAD_MIN_FLOOR_PCT - 2.0; // sintético, abaixo do piso
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("TRASEIRO")),
+            "esperava violação de carga de nariz (ramo do PISO) com gear.nose_load_min_pct \
+             sintético abaixo de {:.1}%, obteve: {:?}", NOSE_LOAD_MIN_FLOOR_PCT, report.violations);
+    }
+
+    /// Sanidade inversa do ramo do PISO: `gear.nose_load_min_pct` no piso ou
+    /// acima não deveria violar — confirma que o ramo não dispara em falso.
+    #[test]
+    fn sem_violacao_de_carga_de_nariz_quando_min_no_piso_ou_acima() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, mut gear, gear_cfg, robustness) = setup();
+        gear.nose_load_min_pct = NOSE_LOAD_MIN_FLOOR_PCT + 2.0; // sintético, acima do piso
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("TRASEIRO")),
+            "não deveria haver violação de carga de nariz (ramo do PISO) com gear.nose_load_min_pct \
+             sintético acima de {:.1}%, obteve: {:?}", NOSE_LOAD_MIN_FLOOR_PCT, report.violations);
     }
 
     // ─── Task 3 (refino-ciclo2): margem mínima de combustível ──────────────

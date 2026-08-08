@@ -754,8 +754,11 @@ fn main() {
         "preliminary (dimensionamento estático de cargas; requer análise \
          dinâmica de pouso/afundamento)".into());
     fidelity.insert("propeller".into(),
-        "semi-empirical (Mach de ponta + folga de solo; requer mapa de \
-         desempenho de hélice real do fabricante)".into());
+        "semi-empirical (Mach de ponta + folga de solo ESTÁTICA, trem \
+         totalmente estendido, aeronave nivelada — não desconta compressão \
+         de amortecedor/pneu murcho, a condição efetivamente crítica do \
+         CS 23.925; piso de projeto, não verificação regulatória direta; \
+         requer mapa de desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \
          L/D constante em cruzeiro)".into());

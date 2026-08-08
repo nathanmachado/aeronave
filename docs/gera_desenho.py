@@ -156,7 +156,7 @@ dados = [f"MTOW {w['mtow_kg']:.0f} kg · OEW {w['oew_kg']:.0f} kg",
          f"S {wi['area_m2']:.1f} m² · AR {wi['aspect_ratio']:.1f}",
          f"cruzeiro {s['performance']['v_cruise_kmh']:.0f} km/h",
          f"autonomia {s['performance']['endurance_h']:.1f} h + reserva",
-         f"tanque 260 L · margem {s['sizing']['fuel_margin_pct']:.0f}%"]
+         f"tanque {s['sizing']['fuel_capacity_l']:.0f} L · margem {s['sizing']['fuel_margin_pct']:.0f}%"]
 svg.append(f'<rect x="{bx-12}" y="{by-16}" width="252" height="{len(dados)*17+20}" rx="8" fill="#fffdf8" stroke="{DIM}" stroke-width="1"/>')
 for i, t in enumerate(dados):
     label(bx, by + i * 17, t, 11.5, INK)
