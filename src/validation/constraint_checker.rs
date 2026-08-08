@@ -629,7 +629,40 @@ mod tests {
     fn setup_with_cfg_and_req(cfg: crate::models::aircraft_config::AircraftConfig, req: Requirements)
         -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec)
     {
-        let engine = motor_generico_teste();
+        setup_with_cfg_req_engine(cfg, req, motor_generico_teste())
+    }
+
+    /// Mesmo pipeline de `setup_with_cfg_and_req`, mas com o MOTOR também
+    /// explícito (campanha E10, 2026-08-08).
+    ///
+    /// Motivo: `motor_generico_teste()` pesa 150 kg — bem abaixo da classe de
+    /// motor que ESTA célula assume no seu layout de braços (~195 kg, o valor
+    /// concreto vive em `config/engines/*.toml`, fora de `src/`). Como o
+    /// motor está no braço MAIS DIANTEIRO de toda a aeronave
+    /// (`[arms].engine_cg_m` = 0,65 m, ≈2,8 m à frente do CG), 45 kg a menos
+    /// ali valem ≈+6,7 pp de MAC no CG de TODOS os cenários — um viés de
+    /// fixture grande o bastante para dominar qualquer conclusão sobre
+    /// ENVELOPE de CG. Medido, com a config real de E10 e o resto da fixture
+    /// sintética idêntico:
+    ///   motor 150 kg → CG dos cenários [24,39%, 44,32%] MAC, SM mín 4,14%
+    ///   motor 170 kg → CG dos cenários [20,86%, 41,30%] MAC, SM mín 7,16%
+    ///   motor 195 kg → CG dos cenários [16,63%, 37,65%] MAC, SM mín 10,81%
+    /// (limite traseiro do envelope: 43,46% nos três — não depende do motor).
+    /// Ou seja: com o motor sintético leve o baseline "violaria" o envelope
+    /// traseiro; com um motor da classe real, não — e é o pipeline real
+    /// (`cargo run`, `tests/gear_tipback.rs`, `aircraft_spec.json`) que dá a
+    /// resposta certa: CG [17,9%, 38,8%], zero violações.
+    ///
+    /// Este helper existe para que `envelope_de_cg_fechado_sem_violacao_no_
+    /// baseline_real` — o único teste deste módulo cuja PERGUNTA é sobre o
+    /// baseline real e não sobre uma violação isolada — possa fazer essa
+    /// pergunta com uma massa de motor representativa, sem tocar em
+    /// `motor_generico_teste()` (usada por dezenas de outros testes, todos
+    /// sobre violações ISOLADAS, onde o viés de CG é irrelevante).
+    fn setup_with_cfg_req_engine(cfg: crate::models::aircraft_config::AircraftConfig,
+                                 req: Requirements, engine: EngineSpec)
+        -> (Requirements, WingSpec, PropulsionSpec, EngineSpec, WeightBalanceOutput, PropellerSpec, PerformanceSpec, MissionSpec, ElectricalSpec, GearSpec, GearCfg, RobustnessSpec)
+    {
         let sized = crate::orchestrator::size_aircraft(&cfg, &engine, &req)
             .expect("fixture sintética deveria convergir (ver orchestrator::size_aircraft)");
         let state = sized.state;
@@ -782,6 +815,27 @@ mod tests {
     /// envelope, coerente com o pipeline real. Não mascarado: a asserção
     /// abaixo agora exige zero violações de envelope (qualquer violação,
     /// marginal ou não, reprova o teste).
+    ///
+    /// ATUALIZAÇÃO (campanha E10, 2026-08-08): a bateria híbrida de 53 kg a
+    /// 7,80 m recua o CG de todos os cenários ≈+6,5 pp MAC. No pipeline REAL
+    /// isso é folgado (CG [17,9%, 38,8%] contra um limite traseiro de 43,5%,
+    /// SM mín 9,68%, ZERO violações — ver `cargo run`/`aircraft_spec.json`/
+    /// `tests/gear_tipback.rs`), mas somado ao VIÉS DE FIXTURE do motor
+    /// sintético leve (150 kg no braço mais dianteiro, ≈+6,7 pp de CG — ver
+    /// a tabela medida na docstring de `setup_with_cfg_req_engine`) o CG
+    /// desta fixture ia a 44,3% e produzia 6 violações inexistentes no
+    /// projeto real (2 de envelope, 1 de tipback, 3 de robustez).
+    ///
+    /// Correção: este teste passa a usar `setup_with_cfg_req_engine` com uma
+    /// massa de motor da CLASSE que esta célula assume (~195 kg), em vez de
+    /// `motor_generico_teste()` (150 kg). Não é afrouxamento — é o oposto:
+    /// antes de E10 o viés de 6,7 pp existia igual, só não era grande o
+    /// bastante para cruzar o limite, e o teste vinha "passando por sorte"
+    /// com uma geometria de massas que não era a do baseline real. As
+    /// asserções seguem exigindo ZERO violações de envelope, agora sobre uma
+    /// fixture que de fato representa a pergunta do nome do teste. Os
+    /// DEMAIS testes deste módulo (violações ISOLADAS, com campos
+    /// sobrescritos à mão) continuam com `motor_generico_teste()` intocado.
     #[test]
     fn envelope_de_cg_fechado_sem_violacao_no_baseline_real() {
         let toml = std::fs::read_to_string(
@@ -790,7 +844,16 @@ mod tests {
         let cfg = crate::models::config::parse_aircraft(&toml)
             .expect("baseline real deveria ser uma configuração válida");
         let fuel_capacity_l = cfg.fuel_system.capacity_l;
-        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
+        // Campanha E10: massa de motor representativa da classe desta célula
+        // (~195 kg) — ver docstring de `setup_with_cfg_req_engine` para a
+        // sensibilidade medida (±45 kg no braço de 0,65 m ⟹ ∓6,7 pp de MAC).
+        // O resto do motor segue sintético/genérico (curva de torque, BSFC,
+        // combustível) — `src/` não conhece motores concretos.
+        let mut engine_classe_real = motor_generico_teste();
+        engine_classe_real.mass_kg = 195.0;
+        let req_real = crate::models::requirements::test_fixtures::requisitos_teste();
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) =
+            setup_with_cfg_req_engine(cfg, req_real, engine_classe_real);
         assert!(wb.spec.cg_limit_fwd_pct_mac <= wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: baseline real (pós E1–E6) deveria ter envelope de CG \
              FECHADO (fwd={:.2}% <= aft={:.2}%)", wb.spec.cg_limit_fwd_pct_mac,
@@ -822,6 +885,15 @@ mod tests {
         // (10,5%–11,5%) é centrada no valor medido e detecta esse tipo de
         // deriva silenciosa, mantendo a folga de arredondamento de ponto
         // flutuante entre runs.
+        //
+        // Campanha E10 (2026-08-08): a BANDA fica INALTERADA — o valor
+        // medido se move dentro dela, de ≈11,07% para **≈10,81%**, por dois
+        // efeitos que quase se cancelam: a bateria de 53 kg a 7,80 m recua o
+        // CG (−SM) e a massa de motor da fixture sobe de 150 para 195 kg
+        // (+SM, ver `setup_with_cfg_req_engine`). Não é coincidência de
+        // fixture: no pipeline REAL a SM mínima é 9,68% (ver
+        // `tests/empennage.rs`), o resíduo vem da missão sintética mais
+        // leve (`requisitos_teste()`, 85 kg/60 kg pax/bagagem vs 90/80).
         assert!((0.105..0.115).contains(&cheio.static_margin),
             "SM do cenário '4 pax + bagagem + cheio' ({:.4}) deveria ficar na banda [10.5%, \
              11.5%) em torno do valor medido (~11,07%) agora que a fixture reconverge — pin \
@@ -866,8 +938,13 @@ mod tests {
         // avança TODO limite de rotação ~4 pp e fazia esta mutação deixar
         // de reproduzir o envelope vazio (35,7% < 36,6%) — ver comentário
         // completo em `agents::trim_authority::tests::trim_authority_agent_
-        // run_hand_check_baseline_mutado_parametros_pre_e6`.
-        cfg.control_surfaces.elevator_chord_frac = 0.28;
+        // run_hand_check_baseline_mutado_parametros_pre_e6`. Campanha E10
+        // (2026-08-08): 0.28→0.26 pelo mesmo mecanismo com sinal invertido
+        // — o recuo de CG da bateria de 53 kg fazia a mutação voltar a
+        // FECHAR o envelope (rot 36,09% < aft 36,61%); 0.26 dá rot 37,53%,
+        // restaurando o achado com 0,91 pp de folga. Varredura completa no
+        // comentário do teste gêmeo citado acima.
+        cfg.control_surfaces.elevator_chord_frac = 0.26;
         let fuel_capacity_l = cfg.fuel_system.capacity_l;
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,

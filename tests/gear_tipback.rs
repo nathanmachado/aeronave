@@ -29,6 +29,15 @@
 //! trem mais atrás e o MTOW de missão mais leve deslocam ligeiramente o
 //! CG e a massa de todos os cenários — ver comentários em cada teste
 //! abaixo). `validation_status` do baseline real vira `PASS`.
+//!
+//! ATUALIZAÇÃO (campanha E10, 2026-08-08): a bateria híbrida de 53 kg a
+//! 7,80 m, `[gear].x_nose_m` 1,40→1,30 e `[gear].h_cg_ground_m` 1,05→0,92
+//! (ver `config/aircraft/baseline_4seat.toml`) recuam o CG de todos os
+//! cenários ≈+6,5 pp MAC e diluem a carga de nariz. Consequências nos pins
+//! deste arquivo: tipback 18,85°→16,74°, carga de nariz máx 28,60%→22,77%
+//! (deixa de violar o teto de 25%), mín 15,86%→11,72%, margem de
+//! combustível 14,33%→9,14%. `validation_status` volta a `PASS` — agora com
+//! ZERO violações E zero flips de robustez (primeiro PASS completo).
 
 use std::path::PathBuf;
 
@@ -106,8 +115,18 @@ fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     // seletivamente), o que muda ligeiramente as massas/braços que
     // definem o CG vazio e portanto o CG mais traseiro real: 18.91°→
     // **≈18.85°** (old→new). Continua bem acima do piso de 15°.
-    assert!((gear.tipback_angle_deg - 18.8533).abs() < 0.05,
-        "θ tipback = {:.4}° — pin honesto esperado ≈18.8533° (tolerância ±0.05°)",
+    // Campanha E10 (2026-08-08): DOIS efeitos opostos, saldo negativo mas
+    // ainda acima do piso. (a) `[gear].h_cg_ground_m` 1,05→0,92 baixa o CG
+    // 13 cm, o que AUMENTA o tipback (arctan do braço sobre a altura);
+    // (b) a bateria de 53 kg a 7,80 m RECUA o CG mais traseiro real
+    // (32,2%→38,8% MAC), o que ENCURTA `(x_main − x_cg_aft)` e derruba o
+    // tipback bem mais do que (a) recupera: 18.85°→**≈16.74°** (old→new,
+    // tolerância INALTERADA). Segue acima do piso de 15° — e agora também
+    // nos DOIS mundos adversariais de ±15% de massa (0 flips, era o objetivo
+    // de (a)); antes de E10 o tipback nominal era mais folgado mas os
+    // cenários dianteiros flipavam sob σ.
+    assert!((gear.tipback_angle_deg - 16.7356).abs() < 0.05,
+        "θ tipback = {:.4}° — pin honesto esperado ≈16.7356° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
     assert!(gear.tipback_angle_deg >= 15.0,
         "achado honesto esperado: θ={:.2}° deveria ficar NO piso de 15° ou acima \
@@ -171,13 +190,25 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // teste de tipback acima) desloca o CG vazio ligeiramente — o CG mais
     // DIANTEIRO real recua um pouco mais: 28.71%→**≈28.60%** (old→new).
     // Continua ACIMA do teto de 25% — achado honesto do ciclo 3 permanece.
-    assert!((gear.nose_load_max_pct - 28.5966).abs() < 0.1,
-        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈28.5966% (tolerância ±0.1%)",
+    //
+    // RESOLVIDO na campanha E10 (2026-08-08) — o achado honesto do ciclo 3
+    // deixa de ocorrer, por DUAS mudanças de projeto somadas (não por
+    // afrouxamento: o teto de 25% e a tolerância ±0.1 seguem os mesmos):
+    //   (a) `[gear].x_nose_m` 1,40→1,30 alonga o braço `(x_main − x_nose)`
+    //       que aparece no denominador da fração de carga de nariz;
+    //   (b) a bateria híbrida de 53 kg a 7,80 m RECUA o CG mais dianteiro
+    //       real de 9,1% para 17,9% MAC, afastando-o do trem de nariz.
+    // 28.60%→**≈22.77%** (old→new). A ASSERÇÃO INVERTE: o teste passa a
+    // exigir que a carga fique ABAIXO do teto. O caminho de erro (carga de
+    // nariz acima do teto) segue coberto por config sintética mutada — ver
+    // `validation::constraint_checker::tests` (checagem #17) em `src/`.
+    assert!((gear.nose_load_max_pct - 22.7693).abs() < 0.1,
+        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈22.7693% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
-    assert!(gear.nose_load_max_pct > 25.0,
-        "achado honesto do ciclo 3: nose_load_max_pct = {:.2}% deveria EXCEDER o teto de 25% \
-         (CG mais dianteiro avançou com a estrutura computada) — decisão de projeto para \
-         revisão humana, não mascarada aqui", gear.nose_load_max_pct);
+    assert!(gear.nose_load_max_pct <= 25.0,
+        "campanha E10: nose_load_max_pct = {:.2}% deveria ficar NO teto de 25% ou abaixo \
+         (x_nose_m 1,40→1,30 + bateria de 53 kg no cone de cauda) — o FAIL honesto do ciclo 3 \
+         foi resolvido por projeto, não mascarado", gear.nose_load_max_pct);
     // old (pré-E7, x_main=3.55m): ≈8.68%; E7: ≈12.95%. Ciclo 3: o CG mais
     // TRASEIRO também avançou (37,5%→31,7% MAC), subindo a carga MÍNIMA de
     // nariz: 12.95%→**≈16.15%** — continua bem acima do piso de 8%.
@@ -188,8 +219,15 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // uniforme do CG vazio da nota acima reduz também a carga MÍNIMA de
     // nariz: 15.92%→**≈15.86%** (old→new). Continua bem acima do piso de
     // 8%.
-    assert!((gear.nose_load_min_pct - 15.8646).abs() < 0.05,
-        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈15.8646% (tolerância ±0.05%)",
+    // Campanha E10 (2026-08-08): o CG mais TRASEIRO recua (32,2%→38,8% MAC,
+    // bateria de 53 kg no cone de cauda) e o braço `(x_main − x_nose)` cresce
+    // (x_nose 1,40→1,30) — ambos reduzem a carga MÍNIMA de nariz:
+    // 15.86%→**≈11.72%** (old→new, tolerância INALTERADA). Continua acima do
+    // piso de 8%, mas com bem menos folga: é o extremo do envelope que E10
+    // aperta (o outro extremo, o teto de 25%, é o que ela abre). O check #19
+    // (robustez ±15% de massa) confirma 0 flips também neste extremo.
+    assert!((gear.nose_load_min_pct - 11.7219).abs() < 0.05,
+        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈11.7219% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
 }
@@ -213,8 +251,25 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 /// sintética mutada em código — ver
 /// `validation::constraint_checker::tests::violacao_de_tipback_aparece_
 /// quando_abaixo_do_piso` (em `src/`).
+///
+/// ATUALIZAÇÃO (campanha E10, 2026-08-08): as TRÊS checagens de trem voltam
+/// a passar E as duas violações de ROBUSTEZ (#19) desaparecem — o baseline
+/// real passa a reportar ZERO violações de qualquer tipo (primeiro PASS
+/// completo do projeto). Renomeado de novo (o nome anterior dizia
+/// "reporta_so_carga_de_nariz"). O que mudou, por violação:
+///   - Carga de nariz (#17): 28,60%→22,77%, abaixo do teto de 25%
+///     (`x_nose_m` 1,40→1,30 + bateria de 53 kg a 7,80 m).
+///   - Robustez (#19), 'Solo (piloto)' e '2 pax dianteiros': o CG desses
+///     cenários recua de 9,1%/12,5% para 17,9%/20,5% MAC, enquanto o limite
+///     de rotação praticamente não se move (8,91%→8,53%) — a margem sai de
+///     0,4%/7,4% para 21,6%/29,4% e sobrevive aos dois mundos de ±15% de
+///     massa estrutural. `RobustnessAgent` reporta 0 flips.
+/// Este teste inverte de "asserir os FAILs honestos por nome" para "asserir
+/// que não há NENHUMA violação"; a cobertura dos caminhos de erro continua
+/// nas configs sintéticas mutadas de `src/validation/constraint_checker.rs`
+/// (checks #15/#17/#19) e de `src/validation/robustness.rs`.
 #[test]
-fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baseline_real() {
+fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
@@ -250,52 +305,39 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
         "não deveria haver violação de tipback no baseline real pós-E7: {:?}", report.violations);
     assert!(!report.violations.iter().any(|v| v.starts_with("Tail-strike:")),
         "não deveria haver violação de tail-strike no baseline real: {:?}", report.violations);
-    // Ciclo 3 (oew-parametrico): a carga de nariz PASSOU a violar — o CG
-    // mais dianteiro avançou com a estrutura computada e a fração de carga
-    // no nariz subiu para ≈29,0%, acima do teto de 25% (checagem #17).
-    // FAIL honesto asserido (não mascarado): tipback e tail-strike
-    // continuam PASSANDO, a carga de nariz não.
-    // Ciclo 4, Task 2 (W_dg de envelope): ≈29,0%→**≈28,6%** (old→new, ver
-    // `carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto` acima) —
-    // continua ACIMA do teto de 25%, mesmo achado honesto.
-    assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:")
-            && v.contains("excede o teto")),
-        "achado honesto do ciclo 3/4: deveria haver violação de carga de nariz (≈28,6% > 25,0%) \
-         no baseline real: {:?}", report.violations);
-    // Ciclo 4, Task 4 (checagem #19, robustez à incerteza de massa
-    // estrutural): investigado — com σ=15% (`[mass_model].
-    // sigma_mass_fraction`), NENHUM dos checks que passavam no nominal
-    // (tipback ≈18,85° vs. piso 15°; carga de nariz mínima ≈15,86% vs.
-    // piso 8%; os 4 cenários de CG dentro do envelope) flipava sob os dois
-    // conjuntos adversariais.
-    //
-    // ATUALIZADO no ciclo 7 (task 1, `cl_max_to`): agora existem
-    // EXATAMENTE DUAS violações de robustez, e só duas. Com a rotação
-    // usando o CLmax de DECOLAGEM (1,585) em vez do de POUSO (1,72), o
-    // limite dianteiro de rotação caiu de 12,995% para 8,908% MAC
-    // (−4,087 pp, `q_r ∝ 1/CL_max_TO`) e os cenários 'Solo (piloto)'
-    // (9,1% MAC) e '2 pax dianteiros' (12,5%) ENTRARAM no envelope no
-    // nominal — deixando de ser violações nominais e passando a ser
-    // exatamente o caso que a checagem #19 existe para pegar: passam no
-    // nominal, reprovam sob ±15% de massa estrutural (Solo 4,55 vs 8,91;
-    // 2 pax 8,46 vs 8,91 %MAC no pior caso dianteiro). O achado não é
-    // novo nem pior — é o MESMO achado, reclassificado. Tipback,
-    // tail-strike e carga de nariz mínima continuam sem flipar. Ver
-    // `tests/cli.rs::engine_padrao_explicito_...` para o old→new completo.
+    // Ciclo 3 (oew-parametrico): a carga de nariz PASSOU a violar (≈29,0%,
+    // depois ≈28,6% no ciclo 4) — FAIL honesto asserido por nome aqui até a
+    // campanha E9. E10 (2026-08-08) resolve por PROJETO (`x_nose_m`
+    // 1,40→1,30 + bateria de 53 kg a 7,80 m): 28,6%→22,77%, abaixo do teto.
+    // A asserção INVERTE — ver docstring.
+    assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:")),
+        "campanha E10: não deveria haver violação de carga de nariz (≈22,77% ≤ 25,0%) no \
+         baseline real: {:?}", report.violations);
+    // Checagem #19 (robustez à incerteza de massa estrutural, σ=15% =
+    // `[mass_model].sigma_mass_fraction`): no ciclo 7 havia EXATAMENTE duas
+    // violações — 'Solo (piloto)' (4,55 vs limite 8,91 %MAC) e '2 pax
+    // dianteiros' (8,46 vs 8,91), cenários que passavam no nominal com
+    // margem de rotação apertadíssima (0,4% e 7,4%) e reprovavam sob ±15%
+    // de massa. A campanha E10 recua o CG desses cenários para 17,9%/20,5%
+    // MAC (bateria de 53 kg no cone de cauda) enquanto o limite de rotação
+    // fica praticamente parado (8,91%→8,53%, `to_flap_fraction` 0,5→0,35):
+    // as margens sobem para 21,6% e 29,4% e sobrevivem aos dois mundos
+    // adversariais. `RobustnessAgent` reporta **0 flips** (era 2).
+    // A cobertura do caminho de erro de #19 continua nas configs sintéticas
+    // marginais de `src/validation/robustness.rs` (`config_marginal_gera_
+    // flip_nomeado`, `envelope_no_mundo_massa_total_flipa_quando_marginal`,
+    // `carga_de_nariz_no_mundo_massa_total_flipa_quando_marginal`, …) e em
+    // `constraint_checker::tests::check_19_transforma_flips_em_violacoes_
+    // nomeadas`.
     let robustez: Vec<&String> = report.violations.iter()
         .filter(|v| v.starts_with("Robustez:")).collect();
-    assert_eq!(robustez.len(), 2,
-        "esperava EXATAMENTE 2 violações de robustez (σ=15%) no baseline real pós-ciclo-7, \
-         ambas de envelope de CG nos cenários leves/dianteiros: {:?}", report.violations);
-    for cenario in ["Solo (piloto)", "2 pax dianteiros"] {
-        assert!(robustez.iter().any(|v| v.contains(cenario)),
-            "violação de robustez esperada para o cenário '{cenario}': {:?}",
-            report.violations);
-    }
-    // Os checks de TREM (o assunto deste arquivo) continuam sem flipar sob
-    // robustez — nenhuma violação de robustez de tipback/carga de nariz.
-    assert!(!robustez.iter().any(|v| v.contains("ipback") || v.contains("arga de nariz")),
-        "nenhum check de TREM deveria flipar sob robustez no baseline real: {:?}",
+    assert!(robustez.is_empty(),
+        "campanha E10: esperava ZERO violações de robustez (σ=15%) no baseline real — eram 2 \
+         (Solo/2 pax) até o ciclo 7: {:?}", report.violations);
+    // E, de ponta a ponta, o baseline real não deve reportar NENHUMA
+    // violação de nenhum tipo — primeiro PASS completo do projeto.
+    assert!(report.violations.is_empty(),
+        "campanha E10: o baseline real deveria reportar ZERO violações: {:?}",
         report.violations);
 }
 
@@ -343,9 +385,18 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     // pesada em todos os componentes aumenta o OEW, o MTOW de missão
     // convergido e o combustível exigido: 14.5581%→**≈14.3273%**
     // (old→new). Continua bem acima do piso de 5%.
-    assert!((fuel_margin_pct - 14.3273).abs() < 0.1,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-4 \
-         ≈14.3273%");
+    // Campanha E10 (2026-08-08): 14.3273%→**≈9.1369%** (old→new, tolerância
+    // INALTERADA) — CUSTO HONESTO da campanha, de duas fontes somadas:
+    //   (a) hélice Ø1,95→1,76 m: menos área de disco → η_p 81,0%→78,4%, o
+    //       que sobe a potência requerida em cruzeiro (114,3→119,2 kW) e o
+    //       consumo (30,4→32,4 L/h);
+    //   (b) +25 kg de bateria: OEW 885,3→899,1 kg reconverge o MTOW de
+    //       missão para cima (1.512,4→1.537,6 kg), pedindo mais combustível.
+    // Combustível de missão 222,7→236,2 L com o tanque inalterado em 260 L.
+    // Continua acima do piso de 5%, com ~4,1 pp de folga (era ~9,3 pp).
+    assert!((fuel_margin_pct - 9.1369).abs() < 0.1,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-E10 \
+         ≈9.1369%");
     assert!(fuel_margin_pct >= 5.0,
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");

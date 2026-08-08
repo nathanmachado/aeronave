@@ -199,8 +199,18 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // subdimensionada para esta missão leve — não uma regressão. OEW não
     // exposto no JSON desta missão; mtow_mission_kg 914,9 → **975,2 kg**;
     // fuel_required_l 68,5 → **71,0 L** (old→new, TOLERÂNCIAS INALTERADAS).
-    let mtow_expected = 975.2_f64;
-    let fuel_expected = 71.0_f64;
+    //
+    // Campanha E10 (2026-08-08): esta missão compartilha a CÉLULA do
+    // baseline (`config/aircraft/baseline_4seat.toml`), então herda os +25
+    // kg de bateria híbrida e a hélice Ø1,95→1,76 m — mas NÃO o motor
+    // (Rotax) nem a missão (ferry, 2 pax/3h). Efeito: OEW sobe (bateria
+    // pesada, parcialmente compensada pelo trem mais curto) e o laço
+    // realimenta com a hélice menos eficiente. mtow_mission_kg 975,2 →
+    // **991,3 kg** (+1,65%); fuel_required_l 71,0 → **71,4 L** (+0,56% —
+    // dentro do ±1% do pin antigo, re-pinado mesmo assim por honestidade).
+    // TOLERÂNCIAS INALTERADAS (±1%).
+    let mtow_expected = 991.3_f64;
+    let fuel_expected = 71.4_f64;
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \

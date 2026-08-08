@@ -263,7 +263,12 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // mais (+4,43 kg, ver `golden_toyota_baseline_regressao_task_2_1`) ⟹
     // mais arrasto induzido ⟹ menos horas com o mesmo tanque cheio:
     // 7.7219126689 → **7.709253917 h** (old→new).
-    let endurance_pin_h = 7.709253917;
+    // Campanha E10 (2026-08-08): a hélice menor (Ø1,95→1,76 m) derruba a
+    // eficiência propulsiva (η_p 81,0%→78,4%) e a bateria de 53 kg eleva o
+    // MTOW convergido (1.512,4→1.537,6 kg) — mais consumo/hora nas duas
+    // frentes: 7.709253917 → **7.232495587 h** (old→new, −6,2%; tolerância
+    // INALTERADA). Bate com o valor esperado no plano da campanha (~7,23 h).
+    let endurance_pin_h = 7.232495587;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -278,7 +283,12 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // Ciclo 4, Task 2 (W_dg de envelope com lag-1): MTOW convergido sobe
     // mais ⟹ mais arrasto induzido ⟹ menos alcance com o mesmo tanque
     // cheio: 2.162,135547 → **2.158,591097 km** (old→new).
-    let range_pin_km = 2_158.591097;
+    // Campanha E10 (2026-08-08): mesma causa da autonomia acima (hélice
+    // menor + MTOW maior) — 2.158,591097 → **2.025,098764 km** (old→new,
+    // −6,2%). Continua sendo um número INFORMATIVO (tanque cheio, consumo
+    // constante); o gate real do projeto é `mission.block_time_h` ≥ 7,0 h,
+    // que segue satisfeito com 7,06 h.
+    let range_pin_km = 2_025.098764;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -427,12 +437,21 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // 37,632378 L (~16,9235%) → **37,250858 L (~16,7232%)** (old→new).
     // Continua CONFORTAVELMENTE POSITIVA — achado central pós-E7
     // permanece válido.
-    let margem_pin_l = 37.250858;
+    // Campanha E10 (2026-08-08): a hélice menor (η_p 81,0%→78,4%, consumo
+    // 30,4→32,4 L/h) e a bateria de 53 kg (MTOW de missão 1.512,4→1.537,6
+    // kg) elevam o combustível exigido de 222,749 para 236,244 L com a mesma
+    // capacidade de 260 L — margem: 37,250858 L (~16,7232%) →
+    // **23,755819 L (~10,0556%)** (old→new, tolerâncias INALTERADAS).
+    // Continua POSITIVA e acima do piso de projeto (`min_fuel_margin_
+    // fraction`=5% da CAPACIDADE, ≈9,14% nessa outra convenção — ver nota
+    // de convenção abaixo), mas é a FOLGA QUE E10 MAIS CONSOME: passou de
+    // ~9× o piso para ~2×.
+    let margem_pin_l = 23.755819;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
-        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E7 \
+        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E10 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 16.7232).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-4 ~16,7232%");
+    assert!((margem_pct - 10.0556).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-E10 ~10,0556%");
     assert!(margem_l > 0.0,
         "achado central pós-E7: com endurance_min_h reduzido, a missão cabe no tanque de 260 L \
          com folga confortável (margem {margem_l:.2} L)");
@@ -529,9 +548,15 @@ fn toyota_v_max_regressao_310kmh() {
     // MTOW convergido — só o efeito do CD0, sem o efeito composto de MTOW
     // maior que aparece em `golden_toyota_baseline_regressao_task_2_1`):
     // 306.066251 → 303.259465 km/h (-2,807 km/h, -0,92%).
-    let v_max_pre_refactor_kmh = 303.259465;
+    // Campanha E10 (2026-08-08): a hélice Ø1,95→1,76 m reduz η_p em
+    // cruzeiro (81,0%→78,4%) — menos potência propulsiva disponível na mesma
+    // massa fixa de 1.461 kg deste teste (nenhum efeito de MTOW aqui):
+    // 303.259465 → **301.964596 km/h** (−1,29 km/h, −0,43%; tolerância
+    // INALTERADA, 1 km/h). O CLmax de pouso 1,72→2,1 não entra em V_max
+    // (regime limpo).
+    let v_max_pre_refactor_kmh = 301.964596;
     assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
-        "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pós-Task-5.2 \
+        "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pós-E10 \
          {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
 }
 
@@ -749,7 +774,16 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // combustível de missão ⟹ mais MTOW): 1.508,008307 →
     // **1.512,442570 kg** (old→new, +4,43 kg, +0,29% — dentro da faixa
     // "~1-2%" prevista, sem surpresa).
-    let mtow_convergido_kg = 1_512.442570484;
+    //
+    // Campanha E10 (2026-08-08): duas fontes somadas, ambas para cima —
+    // (a) +25 kg de bateria híbrida no OEW (885,3→899,1 kg) e (b) hélice
+    // Ø1,95→1,76 m, que baixa η_p de 81,0% para 78,4% e portanto exige mais
+    // combustível de missão (222,7→236,2 L); o laço realimenta (mais massa
+    // ⟹ mais arrasto induzido ⟹ mais combustível ⟹ mais massa):
+    // 1.512,442570 → **1.537,565047 kg** (old→new, +25,12 kg, +1,66% —
+    // batendo com a expectativa da campanha, sem surpresa). Tolerância do
+    // assert INALTERADA (0,5 kg).
+    let mtow_convergido_kg = 1_537.565047159;
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
@@ -760,7 +794,9 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Ciclo 4, Task 2 (W_dg de envelope): MTOW convergido sobe mais (ver
     // `mtow_convergido_kg` acima) ⟹ mais arrasto induzido ⟹ menos horas
     // com o mesmo tanque: 7.7219126689 → **7.709253917 h** (old→new).
-    let endurance_h = 7.709253917;
+    // Campanha E10: hélice menor (η_p 81,0%→78,4%) + MTOW maior ⟹ mais
+    // consumo/hora: 7.709253917 → **7.232495587 h** (old→new, −6,2%).
+    let endurance_h = 7.232495587;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -771,7 +807,10 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Ciclo 4, Task 2 (W_dg de envelope): MTOW convergido sobe mais ⟹ mais
     // potência requerida em cruzeiro: 30.3033730156 → **30.353131770 L/h**
     // (old→new).
-    let fc_lph = 30.353131770;
+    // Campanha E10: hélice Ø1,95→1,76 m derruba η_p (81,0%→78,4%) e o MTOW
+    // maior eleva a potência requerida (114,3→119,2 kW) — o consumo sobe nas
+    // duas frentes: 30.353131770 → **32.353977572 L/h** (old→new, +6,6%).
+    let fc_lph = 32.353977572;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -820,7 +859,19 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // 413,22→417,33 kg (+4,11 kg). OEW 881,219504 → **885,333291 kg**
     // (old→new, +4,114 kg, +0,47% — dentro da faixa "~1-2%" prevista,
     // sem surpresa). Tolerância do assert INALTERADA (5e-5).
-    let oew_kg = 885.333291285;
+    //
+    // Campanha E10 (2026-08-08): saldo de TRÊS mudanças de massa —
+    //   +25,00 kg  bateria híbrida (28→53 kg, item de [[masses.items]])
+    //    −7,23 kg  trem_principal (92,51→85,28) e
+    //    −4,17 kg  trem_nariz (20,10→15,92): pernas mais curtas
+    //               (`main/nose_strut_length_m` 0,67/0,53→0,54/0,40)
+    //    +0,19 kg  realimentação do laço nos demais itens estruturais
+    //               (asa/fuselagem/empenagens sobem uns gramas com o MTOW
+    //               de envelope maior)
+    // Total: 885,333291 → **899,119935 kg** (old→new, +13,79 kg, +1,56% —
+    // bate com o "~+13,8 kg" previsto no plano da campanha). Tolerância do
+    // assert INALTERADA (5e-5).
+    let oew_kg = 899.119934921;
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
         "MTOW convergido {:.6} kg divergiu do valor medido na Task 5.2 (cooling_drag_fraction) \
@@ -869,9 +920,14 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // mais +4,43 kg (ver `mtow_convergido_kg` acima) — mais peso ⟹ mais
     // arrasto induzido ⟹ V_max cai de novo: 302.178330 →
     // **302.073675 km/h** (old→new, -0,105 km/h).
-    let v_max_pos_task_5_2_kmh = 302.073675;
+    // Campanha E10 (2026-08-08): dois efeitos, mesma direção — a hélice
+    // Ø1,95→1,76 m corta η_p (81,0%→78,4%) e o MTOW convergido sobe +25,12
+    // kg (mais arrasto induzido): 302.073675 → **300.216508 km/h** (old→new,
+    // -1,857 km/h, -0,61%; tolerância INALTERADA, 1e-3). Continua acima do
+    // requisito de 280 km/h, com ~20 km/h de folga (era ~22).
+    let v_max_pos_task_5_2_kmh = 300.216508;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
-        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-Task-4 \
+        "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-E10 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
 }
 
@@ -1027,16 +1083,49 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //   vx/vy/best_glide/glide_ratio/climb_gradient_pct/ldg_50ft_m:
     //     INALTERADOS (`wing.cl_max` de pouso segue sendo a referência de
     //     estol da subida/planeio e do pouso).
+    // Campanha E10 (2026-08-08): três mudanças de projeto entram aqui, com
+    // efeitos em direções DIFERENTES por pin — valores MEDIDOS old→new (o
+    // "old" é o valor medido com a config E7, não necessariamente o pin
+    // anterior, que em alguns casos já estava até ~0,9% deslocado dentro da
+    // tolerância de 1%):
+    //   (i)   `cl_max_flaps` 1,72→2,1 (flap SLOTTED): VS0 cai 8,7%
+    //         (113,3→103,4 km/h). Vx e o POUSO são referenciados ao CLmax de
+    //         pouso ⟹ ambos caem forte.
+    //   (ii)  `to_flap_fraction` 0,5→0,35: `cl_max_to` = 1,45+0,35·0,65 =
+    //         1,6775, MAIOR que o 1,585 de E7 ⟹ a decolagem MELHORARIA
+    //         sozinha…
+    //   (iii) …mas a hélice Ø1,95→1,76 m corta a tração estática (menos
+    //         área de disco) e a bateria de 53 kg eleva o MTOW (+25 kg) ⟹
+    //         a decolagem PIORA no saldo.
+    //   vx_kmh:             119.024322 → 108.609445  (-8,75%, efeito (i):
+    //                                       Vx ∝ VS0)
+    //   vy_kmh:             148.497012 → 147.915721  (-0,39%)
+    //   best_glide_kmh:     171.845032 → 173.266373  (+0,83%, MTOW maior)
+    //   glide_ratio:         15.921177 →  15.921177  (~0%, L/Dmax independe
+    //                                       de peso e de flap)
+    //   climb_gradient_pct:  14.500655 →  15.129850  (+4,34% — o gradiente
+    //                                       é avaliado em Vx, que caiu com
+    //                                       (i); CS 23.65 fica MAIS folgado)
+    //   to_50ft_paved_m:    406.902652 → 416.222778  (+2,29%, saldo (ii) vs
+    //                                       (iii): a hélice menor e o MTOW
+    //                                       maior superam o cl_max_to maior)
+    //   to_50ft_grass_m:    457.696644 → 469.331958  (+2,54%; segue com
+    //                                       folga sobre a pista de 600 m)
+    //   ldg_50ft_m:         539.967949 → 502.482013  (-6,94%, efeito (i):
+    //                                       V_ref ∝ VS0 — é ESTA queda que,
+    //                                       na grama, tira o pouso de 605 m
+    //                                       para 557 m e fecha a violação
+    //                                       do check #24)
     // TOLERÂNCIAS INALTERADAS (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             118.756124, 0.01),
-        ("vy_kmh",              perf.vy_kmh,             148.162403, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     171.457813, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             108.609445, 0.01),
+        ("vy_kmh",              perf.vy_kmh,             147.915721, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     173.266373, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  14.645344, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    406.902652, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    457.696644, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         538.861754, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  15.129850, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    416.222778, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    469.331958, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         502.482013, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1072,23 +1161,39 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // 351.054408 → **380.954942**, to_distance_grass_m 421.265290 →
     // **457.145930**. `landing_distance_m` INALTERADO (395.069668, pouso
     // segue com `wing.cl_max`). Tolerâncias INALTERADAS (1%).
-    let to_distance_paved_novo_pin = 380.954942;
+    // Campanha E10 (2026-08-08): a DECOLAGEM piora e o POUSO melhora, por
+    // causas distintas.
+    //   Decolagem — `S_G ∝ 1/(CL_TO·T)`: `cl_max_to` SOBE (1,585→1,6775,
+    //   `to_flap_fraction` 0,5→0,35 aplicado ao flap slotted mais potente),
+    //   o que sozinho encurtaria a corrida; mas a hélice Ø1,95→1,76 m corta
+    //   a tração estática (menos área de disco) e o MTOW sobe +25 kg — o
+    //   saldo é mais longo: to_distance_paved_m 380.954942 → **398.318846**
+    //   (+4,56%), to_distance_grass_m 457.145930 → **477.982615** (+4,56%).
+    //   Pouso — `S ∝ V_ref² ∝ 1/CL_max`: `cl_max_flaps` 1,72→2,1 (flap
+    //   SLOTTED) encurta a corrida em ~1 − 1,72/2,1 = −18% na parte de
+    //   energia, atenuado pelo MTOW maior: landing_distance_m 395.838469 →
+    //   **362.676982** (-8,38%). É esta melhora que fecha o check #24
+    //   (pouso na grama sobre 15 m: 605 → 557 m, pista de 600 m).
+    // Tolerâncias INALTERADAS (1%).
+    let to_distance_paved_novo_pin = 398.318846;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
-        "to_distance_paved_m {:.3} divergiu do pin pós-ciclo-7 {:.3}",
+        "to_distance_paved_m {:.3} divergiu do pin pós-E10 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 457.145930;
+    let to_distance_grass_novo_pin = 477.982615;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
-        "to_distance_grass_m {:.3} divergiu do pin pós-ciclo-7 {:.3}",
+        "to_distance_grass_m {:.3} divergiu do pin pós-E10 {:.3}",
         perf.to_distance_grass_m, to_distance_grass_novo_pin);
     // landing_distance_m: pequena variação refletindo o MTOW convergido —
     // tolerância alargada de "praticamente inalterado" (Task 4.7) para 1%
     // (Task 5.1/5.2/E6/E7 deslocam o MTOW, não a fórmula).
-    let landing_distance_pin = 395.838469;
+    // Campanha E10: `cl_max_flaps` 1,72→2,1 encurta o pouso — ver bloco
+    // acima. 395.838469 → **362.676982** (old→new, tolerância INALTERADA).
+    let landing_distance_pin = 362.676982;
     assert!((perf.landing_distance_m - landing_distance_pin).abs()
                 < landing_distance_pin * 0.01,
-        "landing_distance_m {:.3} divergiu do pin pós-E6 {:.3}",
+        "landing_distance_m {:.3} divergiu do pin pós-E10 {:.3}",
         perf.landing_distance_m, landing_distance_pin);
 
     // Decolagem/pouso sobre 15m devem exceder as estimativas ground-roll-
@@ -1240,6 +1345,19 @@ fn convergencia_independe_do_palpite_inicial() {
 // para esperar `Ok(sized)` — preserva a mesma mutação sintética de 240 L
 // (não depende de um arquivo de configuração inviável estar commitado)
 // como registro do histórico completo.
+//
+// ATUALIZAÇÃO 5 (campanha E10, 2026-08-08) — NÃO vira de novo, mas quase:
+// a hélice Ø1,95→1,76 m (η_p 81,0%→78,4%) e a bateria de 53 kg (MTOW de
+// missão 1.512,4→1.537,6 kg) elevam o combustível exigido de 222,502043 L
+// para **235,961035 L** (old→new, +6,05%). Ainda CABE nos 240 L da mutação
+// sintética, mas a folga desaba de ≈17,50 L (~7,3%) para **4,04 L (~1,7%)**
+// — de volta ao território "apertadíssimo" da ATUALIZAÇÃO 2, onde a Finding
+// 4 já avisava que um modelo de cruzeiro NIVELADO (em vez de Breguet a L/D
+// constante) estaria a ~1% de virar a conclusão. Este número segue sendo o
+// termômetro mais sensível do projeto; o tanque REAL de 260 L continua com
+// margem (9,14% da capacidade, ver `margem_de_combustivel_no_mtow_
+// convergido` e `tests/gear_tipback.rs`). Nome e expectativa `Ok(sized)`
+// INALTERADOS — a reviravolta #4 não aconteceu.
 #[test]
 fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     let toml_real = std::fs::read_to_string(config_path("config/aircraft/baseline_4seat.toml"))
@@ -1283,9 +1401,12 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // task_2_1`) eleva o combustível exigido de novo: 222,319874 →
     // **222,502043 L** (old→new). Continua com folga confortável sobre
     // os 240 L.
-    let necessario_pin_l = 222.502043;
+    // Campanha E10 (2026-08-08): 222,502043 → **235,961035 L** (old→new,
+    // +6,05% — hélice menor + bateria de 53 kg; ver ATUALIZAÇÃO 5 acima).
+    // Tolerância INALTERADA (1e-2).
+    let necessario_pin_l = 235.961035;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E7 {necessario_pin_l:.6} L");
+        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E10 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
         "4ª reviravolta: a missão volta a exigir MENOS combustível do que os 240 L da mutação \
          sintética têm — {necessario_l:.2} L < {:.2} L", cfg.fuel_system.capacity_l);
@@ -1371,7 +1492,13 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // pequeno e na direção OPOSTA à do caso Toyota, consistente
             // com não ser o mesmo tipo de ponto fixo). Continua MUITO
             // acima dos 260 L (~35,9%): achado qualitativo inalterado.
-            let necessario_pin_l = 353.309519;
+            // Campanha E10 (2026-08-08): 353,309519 → **351,876358 L**
+            // (old→new, −0,41%). Direção OPOSTA à do caso Toyota (que sobe)
+            // pelo mesmo motivo já documentado acima: o Rotax nunca
+            // converge, então os intermediários que alimentam o
+            // `CombustivelInsuficiente` não são um ponto fixo. Continua
+            // MUITO acima dos 260 L (~35,3%): achado qualitativo inalterado.
+            let necessario_pin_l = 351.876358;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E7 \
                  {necessario_pin_l:.6} L");
@@ -1436,7 +1563,14 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
     // Ciclo 4, Task 2 (W_dg de envelope com lag-1): MTOW convergido sobe
     // mais +4,43 kg (ver `golden_toyota_baseline_regressao_task_2_1`) →
     // ws_actual ≈ 1.041,48 → **1.044,54 N/m²** (old→new).
-    let ws_actual_esperado = 1_044.54;
+    // Campanha E10 (2026-08-08): MTOW convergido sobe +25,12 kg (bateria de
+    // 53 kg + hélice menos eficiente, ver `golden_toyota_baseline_regressao_
+    // task_2_1`) → ws_actual ≈ 1.044,54 → **1.061,89 N/m²** (old→new).
+    // O veredito W/S ✓ fica MAIS folgado, não menos: `cl_max_flaps` 1,72→2,1
+    // eleva `ws_max_stall` de 1.967,0 para 2.401,6 N/m² — a asa segue muito
+    // abaixo do teto de stall (a área recomendada cai de 7,54 para 6,96 m²,
+    // reforçando o achado pré-existente de que 14,2 m² é generoso).
+    let ws_actual_esperado = 1_061.89;
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);

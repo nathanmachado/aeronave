@@ -485,6 +485,30 @@ documentação a ser corrigido, não um comportamento aceitável.
     28,6%/25,0% e pouso na grama 605 m/600 m) permanecem bit a bit
     INALTERADAS — a Task 1 não toca pouso, VS0/VS1 nem subida. Ver
     `tests/schema_v4.rs`, `tests/cli.rs` e `src/agents/trim_authority.rs`.
+  - **NOTA DE ESTADO (campanha E10, 2026-08-08) — o schema NÃO muda, o
+    baseline sim.** As entradas v4.9 e v5.0 acima descrevem o
+    `validation_status: "FAIL"` do baseline VIGENTE NAQUELAS versões de
+    schema; ficam como registro histórico e não são reescritas. A campanha
+    E10 é uma mudança puramente de DADOS (`config/aircraft/
+    baseline_4seat.toml`: bateria híbrida 28→53 kg a 7,80 m, `x_nose_m`
+    1,40→1,30, `h_cg_ground_m` 1,05→0,92, pernas 0,67/0,53→0,54/0,40,
+    hélice Ø1,95→1,76 m, `cl_max_flaps` 1,72→2,1, `to_flap_fraction`
+    0,5→0,35) — nenhum campo do JSON foi adicionado, removido ou renomeado,
+    logo **`schema_version` permanece `"5.0"`**. O que muda é o VALOR de
+    `validation_status`, que passa a **`"PASS"` com `violations` VAZIO e
+    `robustness.flips` VAZIO** — o primeiro PASS completo do projeto sob os
+    24 checks mais os 3 mundos de robustez. As quatro violações citadas
+    acima fecharam assim: carga de nariz 28,6%→22,77% (teto 25%); pouso na
+    grama 605,0→556,7 m (pista 600 m); e os dois flips de robustez ('Solo
+    (piloto)', '2 pax dianteiros') sumiram porque o CG desses cenários
+    recuou de 9,1%/12,5% para 17,9%/20,5% MAC contra um limite de rotação
+    praticamente parado (8,908%→8,533% MAC). O aviso ELÉTRICO de pico
+    (1.260 W > 900 W) permanece — é aviso, não violação. Custos honestos
+    registrados nos pins: SM mínima 16,25%→9,68% (piso 5%), margem de
+    combustível 14,33%→9,14% da capacidade (piso 5%), cruzeiro
+    302,1→300,2 km/h, autonomia informativa 7,71→7,23 h, decolagem na grama
+    457,7→469,3 m. Ver `aircraft_spec.json`, `tests/cli.rs` e
+    `tests/gear_tipback.rs`.
 
 ## 2. Convenção de eixos e unidades
 

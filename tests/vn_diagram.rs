@@ -85,7 +85,12 @@ fn vn_diagram_baseline_pin_velocidades_e_n_gust() {
     // ~1.544,43 kg para ~1.517,89 kg (ver
     // `tests/generic_engine.rs::golden_toyota_baseline_regressao_task_2_1`)
     // — VS1/VA caem proporcional a √MTOW: 243.176521 → ~241.074 km/h.
-    assert!((vn.va_kmh - 241.074).abs() < 1.0, "VA {:.1} km/h fora do pin (~241.074)", vn.va_kmh);
+    // ATUALIZAÇÃO (Campanha E10, 2026-08-08): a bateria híbrida de 53 kg e a
+    // hélice menor elevam o MTOW de PROJETO convergido de ~1.512,44 kg para
+    // ~1.537,57 kg (+1,66%) — VS1/VA sobem proporcional a √MTOW:
+    // ~241.074 → ~242.633 km/h. `cl_max_flaps` 1,72→2,1 NÃO entra aqui: VA
+    // depende do CLmax LIMPO (1,45, inalterado), não do de pouso.
+    assert!((vn.va_kmh - 242.633).abs() < 1.0, "VA {:.1} km/h fora do pin (~242.633)", vn.va_kmh);
     assert!((vn.vc_kmh - 280.0).abs() < 0.1, "VC {:.1} km/h fora do pin (280.0, requisito de missão)", vn.vc_kmh);
     assert!((vn.vd_kmh - 350.0).abs() < 0.1, "VD {:.1} km/h fora do pin (350.0 = 1.25×VC)", vn.vd_kmh);
     assert!(vn.vb_kmh > 0.0 && vn.vb_kmh < vn.vd_kmh,

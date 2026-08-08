@@ -283,8 +283,9 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// 13,0%) têm folga nominal grande o bastante para absorver a perturbação.
 /// `validation_status` continua `FAIL`, com as MESMAS 3 violações — zero
 /// violações NOVAS de robustez. Ver `tests/gear_tipback.rs::
-/// constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_
-/// baseline_real` para o mesmo achado com os números completos.
+/// constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_
+/// real` (renomeado na campanha E10, quando este achado histórico deixou
+/// de ocorrer) para os números completos.
 ///
 /// ATUALIZAÇÃO (ciclo 6, revisão final — QUARTA violação honesta,
 /// 3 → 4): o ciclo 6 introduziu o requisito de pista (600 m,
@@ -343,8 +344,58 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 ///
 /// Contagem 4 → **4**, `validation_status` continua `FAIL`, e NENHUMA
 /// tolerância foi afrouxada.
+///
+/// ─── ATUALIZAÇÃO (campanha E10, 2026-08-08) — O TESTE INVERTE ───────────
+///
+/// Este teste existia para asserir, POR NOME e POR CONTAGEM, os FAILs
+/// honestos que o baseline real ainda carregava. A campanha E10 resolve os
+/// quatro por PROJETO (dados, nada em `src/` mudou) e o baseline real passa
+/// a reportar `validation_status: PASS` com **0 violações e 0 flips de
+/// robustez** — o primeiro PASS completo do projeto sob o modelo inteiro
+/// (24 checks + robustez a 3 mundos). O teste é reescrito para asserir o
+/// PASS; a cobertura dos CAMINHOS DE ERRO não é perdida: ela vive nas
+/// configs sintéticas mutadas de `src/validation/constraint_checker.rs`
+/// (violações nomeadas de envelope, tipback, carga de nariz, pista, margem
+/// de combustível, hélice, …) e de `src/validation/robustness.rs` (flips
+/// nomeados nos três mundos adversariais), todas verificadas e intactas.
+///
+/// As quatro violações, uma a uma, e o que as fechou:
+///
+///   1. **Carga de nariz 28,6% > teto de 25%** → **22,77%**. Duas mudanças:
+///      `[gear].x_nose_m` 1,40→1,30 (alonga `x_main − x_nose`, o
+///      denominador da fração de carga) e a bateria híbrida de 53 kg
+///      (28→53) a 7,80 m (`arm_offset_m` 0,4 sobre `empennage_cg`), que
+///      recua o CG mais DIANTEIRO real de 9,1% para 17,9% MAC.
+///   2/3. **Robustez (#19) 'Solo (piloto)' e '2 pax dianteiros'** (4,55 e
+///      8,46 vs limite 8,91 %MAC no pior mundo dianteiro) → **0 flips**.
+///      Mesmo recuo de CG do item 1: as margens de autoridade de rotação
+///      desses cenários saem de 0,4% e 7,4% para 21,6% e 29,4%, folga
+///      suficiente para sobreviver a ±15% de massa estrutural nos dois
+///      conjuntos adversariais. O limite de rotação praticamente não se
+///      move (8,908% → 8,533%): `to_flap_fraction` 0,5→0,35 compensa quase
+///      exatamente o `cl_max_flaps` 1,72→2,1 no `cl_max_to`
+///      (1,585 → 1,6775).
+///   4. **Pouso (grama, 15 m) 605 m > pista de 600 m** → **556,7 m**.
+///      `[wing].cl_max_flaps` 1,72→2,1 (flap SIMPLES → SLOTTED) derruba VS0
+///      de 113,3 para 103,4 km/h; a distância de pouso escala com `V_ref²`.
+///
+/// Custos honestos da campanha, todos pinados nos testes citados:
+///   - Hélice Ø1,95→1,76 m (obrigatória: o trem curto `h_cg_ground_m`
+///     1,05→0,92 baixa o eixo 1:1 e a folga de solo cairia para 0,145 m <
+///     0,23 m) ⟹ η_p 81,0%→78,4% ⟹ cruzeiro 302,1→300,2 km/h, consumo
+///     30,4→32,4 L/h, autonomia informativa 7,71→7,23 h.
+///   - +13,8 kg de OEW e +25,1 kg de MTOW convergido ⟹ margem de
+///     combustível 14,33%→9,14% da capacidade (piso 5%).
+///   - Margem estática mínima 16,25%→9,68% (piso de projeto 5%) — o recuo
+///     de CG que fechou o lado DIANTEIRO consome o lado TRASEIRO. Ver
+///     `tests/empennage.rs`.
+///   - Decolagem 2,3–2,6% mais longa (grama 457,7→469,3 m sobre 15 m,
+///     pista de 600 m).
+/// O aviso elétrico de pico (1.260 W > alternador 900 W) PERMANECE — é
+/// aviso, não violação, e agora é coberto pelo banco de baterias de 53 kg
+/// que a própria E10 instalou (ver comentário do item de massa no TOML).
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_carga_de_nariz() {
+fn engine_padrao_explicito_com_out_tempfile_reporta_pass_sem_violacoes() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -371,100 +422,68 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Achado honesto do ciclo 3 (ver nota acima): validation_status É
-    // FAIL, com TRÊS violações NOMEADAS — dois cenários à frente do limite
-    // dianteiro de rotação e a carga de nariz acima do teto de 25%.
-    assert!(json.contains("\"validation_status\": \"FAIL\""),
-        "JSON de saída deveria reportar validation_status FAIL (achado honesto do ciclo 3, \
-         oew-parametrico — ver comentário acima):\n{json}");
+    // Campanha E10 (ver a ATUALIZAÇÃO na docstring): validation_status é
+    // PASS — primeiro PASS completo do projeto (24 checks + robustez a 3
+    // mundos), sem nenhuma violação.
+    assert!(json.contains("\"validation_status\": \"PASS\""),
+        "JSON de saída deveria reportar validation_status PASS (campanha E10 — ver comentário \
+         acima):\n{json}");
     let spec: serde_json::Value = serde_json::from_str(&json)
         .expect("saída deveria ser JSON válido");
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    // Contagem 4 → 4 (ciclo 7, task 1), mas com DUAS violações trocadas
-    // de natureza: as duas de envelope NOMINAL fecharam (limite de rotação
-    // 13,0% → 8,91%) e duas de ROBUSTEZ (±15% de massa estrutural) nos
-    // MESMOS dois cenários tomaram o lugar delas — ver a ATUALIZAÇÃO na
-    // docstring acima para a derivação completa.
-    assert_eq!(violations.len(), 4,
-        "esperava EXATAMENTE 4 violações honestas no baseline real pós-ciclo-7: {violations:#?}");
-    // Ciclo 7: as duas violações de envelope NOMINAL FECHARAM — 'Solo
-    // (piloto)' a 9,1% MAC e '2 pax dianteiros' a 12,5% agora ficam ATRÁS
-    // do limite dianteiro de rotação (8,91%, era 13,0%). Assert NEGATIVO
-    // explícito para que uma regressão que as reabrisse não passe
-    // despercebida escondida na contagem.
-    for cenario in ["Solo (piloto)", "2 pax dianteiros"] {
-        assert!(!violations.iter().any(|v| v.contains(cenario)
-                && v.contains("fora do envelope de CG admissível")),
-            "cenário '{cenario}' deveria estar DENTRO do envelope no NOMINAL desde o ciclo 7 \
-             (limite de rotação 13,0% → 8,91% com o CLmax de DECOLAGEM): {violations:#?}");
-    }
-    // ...mas os MESMOS dois cenários reprovam sob ±15% de incerteza de
-    // massa estrutural (checagem #19) — o achado mudou de categoria, não
-    // desapareceu. Solo: 4,55 vs 8,91 %MAC; 2 pax: 8,46 vs 8,91.
-    for cenario in ["Solo (piloto)", "2 pax dianteiros"] {
-        assert!(violations.iter().any(|v| v.starts_with("Robustez:")
-                && v.contains(cenario)),
-            "esperava violação de ROBUSTEZ (massas estruturais ±15%) para o cenário \
-             '{cenario}' — passa no nominal desde o ciclo 7, mas sem margem para a incerteza \
-             de massa: {violations:#?}");
-    }
-    assert!(violations.iter().any(|v| v.contains("Carga de nariz:")
-            && v.contains("excede o teto")),
-        "esperava violação de carga de nariz (≈28,6% > teto de 25,0%; 29,0%→28,6%, mesma \
-         re-medição do ciclo 4 Task 2): {violations:#?}");
-    // 4ª violação (ciclo 6, revisão final): pouso na GRAMA. O gate #24
-    // usava a distância PAVIMENTADA (539,97 m ≤ 600 m, passava); com
-    // `mu_brake_grass` finalmente consumido, o pouso real na grama é
-    // 604,99 m > 600 m. Assert NOMEADO (não só a contagem) para que uma
-    // futura mudança de superfície/μ não passe despercebida trocando uma
-    // violação por outra.
-    assert!(violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")
-            && v.contains("excede a pista disponível")),
-        "esperava violação de pouso na GRAMA excedendo a pista de 600 m (≈605,0 m — o pouso \
-         pavimentado, 540,0 m, cabia; a grama nunca coube, o modelo é que não olhava): \
+    // Contagem 4 → **0** (campanha E10). Assert de contagem PRIMEIRO, com
+    // a lista inteira na mensagem: qualquer violação nova aparece por
+    // nome no output do teste, sem precisar adivinhar qual foi.
+    assert!(violations.is_empty(),
+        "campanha E10: esperava ZERO violações no baseline real (eram 4 no ciclo 7): \
          {violations:#?}");
-    // A decolagem na grama continua PASSANDO com folga — o achado é do
-    // pouso, não das duas distâncias de pista. Ciclo 7 (task 1): 428,2 m →
-    // 457,7 m (+6,88%), porque a decolagem passou a usar o CLmax de
-    // DECOLAGEM (1,585) em vez do de POUSO (1,72) — o modelo antigo era
-    // OTIMISTA. Folga remanescente: 142 m nos 600 m.
+    // Asserts NOMEADOS por violação fechada — redundantes com a contagem
+    // acima de propósito: se um refactor um dia trocar o texto de uma
+    // violação, a contagem sozinha não diria QUAL regrediu.
+    //
+    // (1) Carga de nariz: 28,6% → 22,77%, abaixo do teto de 25%.
+    assert!(!violations.iter().any(|v| v.contains("Carga de nariz:")),
+        "carga de nariz (≈22,77%) deveria estar abaixo do teto de 25% desde a E10 \
+         (x_nose_m 1,40→1,30 + bateria de 53 kg a 7,80 m): {violations:#?}");
+    // (2/3) Robustez (#19): 2 flips → 0. Os cenários 'Solo (piloto)' e
+    // '2 pax dianteiros' recuaram de 9,1%/12,5% para 17,9%/20,5% MAC e
+    // agora sobrevivem a ±15% de massa estrutural nos dois mundos.
+    assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
+        "campanha E10: esperava ZERO violações de robustez (σ=15%) — eram 2 ('Solo (piloto)' e \
+         '2 pax dianteiros') no ciclo 7: {violations:#?}");
+    // (4) Pouso na GRAMA sobre 15 m: 605,0 m → 556,7 m, dentro dos 600 m
+    // da pista de fazenda, por `cl_max_flaps` 1,72→2,1 (flap SLOTTED:
+    // VS0 113,3→103,4 km/h, distância ∝ V_ref²).
+    assert!(!violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "pouso na grama (≈556,7 m pós-E10, era ≈605,0 m) deveria caber nos 600 m: \
+         {violations:#?}");
+    // A decolagem na grama continua PASSANDO — E10 a alonga um pouco
+    // (457,7 → 469,3 m sobre 15 m: hélice menor + MTOW maior superam o
+    // `cl_max_to` maior), folga remanescente ≈131 m nos 600 m.
     assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
-        "decolagem na grama (≈457,7 m pós-ciclo-7, era ≈428,2 m) deveria continuar dentro dos \
+        "decolagem na grama (≈469,3 m pós-E10, era ≈457,7 m) deveria continuar dentro dos \
          600 m: {violations:#?}");
-    // Os DEMAIS cenários continuam DENTRO do envelope (e sem achado de
-    // robustez) — o achado é dos dois cenários leves/dianteiros, não do
-    // envelope inteiro nem de um envelope vazio.
-    for cenario in ["4 pax sem bagagem", "4 pax + bagagem + cheio",
-                    "4 pax + bagagem + meia", "4 pax + bagagem vazio"] {
+    // Nenhum dos 6 cenários de carga fora do envelope admissível — nem os
+    // dianteiros (que E10 recuou) nem os traseiros (que E10 aproximou do
+    // limite: o pior, '4 pax + bagagem + cheio', vai a 38,8% MAC contra um
+    // limite traseiro de 43,5%).
+    for cenario in ["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem",
+                    "4 pax + bagagem + cheio", "4 pax + bagagem + meia",
+                    "4 pax + bagagem vazio"] {
         assert!(!violations.iter().any(|v| v.contains(cenario)),
-            "cenário '{cenario}' deveria continuar DENTRO do envelope: {violations:#?}");
+            "cenário '{cenario}' deveria estar DENTRO do envelope: {violations:#?}");
     }
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
-    // Tipback, tail-strike e margem de combustível continuam PASSANDO — o
-    // CG mais traseiro também avançou, o que FOLGOU o tipback (15,58° →
-    // 19,17° no achado original do ciclo 3, RE-MEDIDO em 18,85° na Task 2
-    // do ciclo 4 — W_dg de envelope com lag-1); a aeronave mais leve
-    // reduziu o combustível de missão (margem 13,97% → 14,56% do ciclo 3,
-    // RE-MEDIDO em 14,33% no ciclo 4).
+    // Tipback, tail-strike e margem de combustível continuam PASSANDO,
+    // agora com menos folga que no ciclo 4 (custo honesto de E10): tipback
+    // 18,85°→16,74° (piso 15°) e margem de combustível 14,33%→9,14% da
+    // capacidade (piso 5%).
     assert!(!json.contains("Tipback:") && !json.contains("Tail-strike:")
         && !json.contains("Margem de combustível:"),
         "tipback/tail-strike/margem de combustível deveriam continuar sem violação:\n{json}");
-    // Ciclo 4, Task 4 (checagem #19, robustez à incerteza de massa
-    // estrutural): achado honesto INVESTIGADO (ver comentário da função,
-    // acima) — com σ=15% nenhum check que passa no nominal flipa sob os
-    // conjuntos adversariais — zero violações "Robustez:". ATUALIZADO no
-    // ciclo 7 (task 1): agora EXISTEM exatamente DUAS, e só duas, nos
-    // cenários 'Solo (piloto)' e '2 pax dianteiros' (asserts nomeados
-    // acima). Não é uma regressão de robustez: são os mesmos dois
-    // cenários que ANTES violavam o envelope no NOMINAL — com o limite de
-    // rotação corrigido eles passam no nominal, e o gate #19 passa a ser o
-    // que os pega, que é exatamente a função dele.
-    assert_eq!(violations.iter().filter(|v| v.starts_with("Robustez:")).count(), 2,
-        "esperava EXATAMENTE 2 violações de robustez (σ=15%) no baseline real pós-ciclo-7 — \
-         'Solo (piloto)' e '2 pax dianteiros': {violations:#?}");
     // O aviso elétrico de pico (não é violação) continua presente — só
     // confirma que o pipeline real ainda reporta avisos quando aplicável.
     assert!(json.contains("Orçamento elétrico:") && json.contains("banco de baterias"),
@@ -477,9 +496,13 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     // agora (698,82), não num valor histórico já superado. Piso regulatório
     // 1,2×VD = 420 km/h fica LONGE; o pin pega regressão de modelo, não
     // proximidade de limite.
+    // Campanha E10 (2026-08-08): 698,82 → **698,50 km/h** (−0,05%, dentro
+    // do ±1% do pin anterior; re-pinado mesmo assim). A asa fica um fio mais
+    // pesada (W_dg de envelope maior) e o `n_design` cai de 4,201 para
+    // 4,171 g — efeitos que quase se cancelam no flutter.
     let flutter = spec["structure"]["flutter_speed_kmh"].as_f64().unwrap();
-    assert!((flutter - 698.8).abs() < 7.0, // ±1%, padrão dos pins de performance
-        "flutter_speed_kmh = {flutter:.1} divergiu do pin honesto ≈698,8 (±1%)");
+    assert!((flutter - 698.5).abs() < 7.0, // ±1%, padrão dos pins de performance
+        "flutter_speed_kmh = {flutter:.1} divergiu do pin honesto ≈698,5 (±1%)");
 
     let _ = std::fs::remove_file(&out_path);
 }

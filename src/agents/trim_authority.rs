@@ -1039,7 +1039,27 @@ mod tests {
         let state = crate::models::aircraft_state::AircraftState::from_config(&cfg);
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);
         let emp = crate::agents::empennage::EmpennageAgent::run(&wing, &cfg);
-        let engine = crate::models::engine::test_fixtures::motor_generico_teste();
+        // Campanha E10 (2026-08-08): massa de motor representativa da CLASSE
+        // que esta célula assume (~195 kg) em vez dos 150 kg de
+        // `motor_generico_teste()`. O motor está no braço mais dianteiro de
+        // toda a aeronave (`[arms].engine_cg_m` = 0,65 m, ≈2,8 m à frente do
+        // CG), então 45 kg de diferença ali valem ≈6,7 pp de MAC no CG de
+        // TODOS os cenários — viés de fixture que domina qualquer pin
+        // sensível ao CG (aqui: `cl_h_trim_cruise`/`cd_trim`, ancorados no
+        // CG de meia-missão). Com o motor leve o CG de referência desta
+        // fixture ia a 43,42% MAC, praticamente colado no limite traseiro
+        // (43,46%) — um canto irreal, que tornava os pins frágeis e
+        // desconectados do pipeline real. Com 195 kg o CG de referência cai
+        // para 36,22% MAC, perto do valor do pipeline REAL (37,775%, ver
+        // `aircraft_spec.json`/`cargo run`; o resíduo de ~1,6 pp vem de esta
+        // fixture NÃO rodar o laço de convergência de MTOW — usa o palpite
+        // de `[sizing]` — não do motor). O resto do motor segue
+        // sintético/genérico: `src/` não conhece motores concretos (ver
+        // `tests/acceptance.rs::src_nao_contem_nomes_de_motor_especificos`).
+        // Os limites de FLARE e ROTAÇÃO pinados acima NÃO dependem do peso
+        // nem do CG (ver derivação no código), então não se movem com isto.
+        let mut engine = crate::models::engine::test_fixtures::motor_generico_teste();
+        engine.mass_kg = 195.0;
         let masses = masses_do_baseline(&cfg, &engine, &req, &wing, &emp, &state);
         let wb = crate::agents::weight_balance::WeightBalanceAgent::run(
             &state, &wing, &engine, &cfg, &req, &emp, &masses,
@@ -1063,10 +1083,24 @@ mod tests {
 
         println!("flare_limit_pct_mac = {:.6}", trim.flare_limit_pct_mac);
         // Pin pré-refino-ciclo2 (cl_h_max_down=0.95 de config): ≈-9.004%.
-        // Pin novo (cl_h_max_down_calc≈1.0577, geometria): ≈-16.290%.
+        // Pin pré-E10 (cl_h_max_down_calc≈1.0577, geometria): ≈-16.290%.
+        //
+        // Pin NOVO (campanha E10, 2026-08-08): ≈**-8.819%**. Causa única e
+        // fechada: `[wing].cl_max_flaps` 1,72→2,1 (flap SLOTTED). A flare é
+        // avaliada em V_ref = 1,3·VS0, e VS0 ∝ 1/√CL_max ⟹ q_flare cai por
+        // 1,72/2,1 = 0,819 (−18,1%). Todo o momento de profundor disponível
+        // cai na mesma proporção, então o limite de flare RECUA (fica menos
+        // negativo). Hand-check: o limite fica a (x_main − x_flare) do trem;
+        // −16,290% · 0,819 ≈ −13,3% seria a conta ingênua, mas o ΔCm de
+        // flap (cm_flap_delta, INALTERADO em −0,30) NÃO escala com q — só o
+        // momento de profundor escala, e é a razão entre os dois que define
+        // o ponto de equilíbrio, daí o recuo maior (−8,819%). Segue
+        // NEGATIVO ("antes do bordo de ataque"), ou seja, continua nunca
+        // governando: quem governa o limite dianteiro é a ROTAÇÃO (8,53%),
+        // asserido logo abaixo. Tolerância INALTERADA (±1%).
         assert!(
-            (trim.flare_limit_pct_mac - (-16.290)).abs() < 1.0,
-            "flare_limit_pct_mac = {:.3} (esperado ≈-16.290% ±1%)",
+            (trim.flare_limit_pct_mac - (-8.819)).abs() < 1.0,
+            "flare_limit_pct_mac = {:.3} (esperado ≈-8.819% ±1%)",
             trim.flare_limit_pct_mac
         );
 
@@ -1159,12 +1193,25 @@ mod tests {
             trim.cl_h_trim_cruise, trim.cd_trim, trim.cg_reference_scenario, trim.cg_reference_pct_mac);
         assert_eq!(trim.cg_reference_scenario,
             crate::agents::weight_balance::MID_MISSION_SCENARIO_NAME);
-        assert!((trim.cl_h_trim_cruise - 0.048015).abs() < 1e-4,
-            "cl_h_trim_cruise = {:.6} (esperado ≈0.048015 ±1e-4, pin pós-ciclo-4)", trim.cl_h_trim_cruise);
-        assert!((trim.cd_trim - 5.784e-5).abs() < 1e-6,
-            "cd_trim = {:.8} (esperado ≈5.784e-5 ±1e-6, pin pós-ciclo-4)", trim.cd_trim);
+        //
+        // Campanha E10 (2026-08-08): DUAS mudanças entram, na mesma direção.
+        // (a) A bateria híbrida de 53 kg a 7,80 m recua o CG de meia-missão
+        //     desta fixture; (b) a massa de motor da fixture passa de 150
+        //     para 195 kg (classe real — ver comentário acima), o que o
+        //     AVANÇA de volta e mais um pouco. Saldo medido: x̄_cg
+        //     35,9158%→**36,2181%** MAC. Novos pins (mesma fórmula,
+        //     TOLERÂNCIAS INALTERADAS): CL_h_trim_cruise
+        //     0,048015→**0,049682**, ΔCD_trim 5,784e-5→**6,193e-5**.
+        // Sanidade contra o pipeline REAL (`aircraft_spec.json` de E10, que
+        // converge o MTOW de verdade): x̄_cg 37,775%, CL_h_trim 0,052544,
+        // ΔCD_trim 6,927e-5 — mesma ordem e mesmo sinal, a diferença
+        // residual é o laço de convergência que esta fixture não roda.
+        assert!((trim.cl_h_trim_cruise - 0.049682).abs() < 1e-4,
+            "cl_h_trim_cruise = {:.6} (esperado ≈0.049682 ±1e-4, pin pós-E10)", trim.cl_h_trim_cruise);
+        assert!((trim.cd_trim - 6.193e-5).abs() < 1e-6,
+            "cd_trim = {:.8} (esperado ≈6.193e-5 ±1e-6, pin pós-E10)", trim.cd_trim);
         assert!(trim.cl_h_trim_cruise > 0.0,
-            "CG de referência atrás do CA (x̄≈35,5% > 25%) deveria produzir upload \
+            "CG de referência atrás do CA (x̄≈36,2% > 25%) deveria produzir upload \
              (CL_h_trim_cruise > 0) — obtido {:.6}", trim.cl_h_trim_cruise);
     }
 
@@ -1216,7 +1263,28 @@ mod tests {
         // histórico é o mesmo; só o dial da mutação foi reajustado à
         // física corrigida. (Varredura empírica: 0.30→35,7% fechado;
         // 0.28→37,2% vazio; 0.26→38,7% vazio.)
-        cfg.control_surfaces.elevator_chord_frac = 0.28;
+        //
+        // Campanha E10 (2026-08-08): a corda desta MUTAÇÃO passa de 0.28
+        // para 0.26 — mesmo mecanismo do reajuste do ciclo 7. A E10 recua o
+        // CG de todos os cenários ≈+6,5 pp MAC (bateria de 53 kg a 7,80 m)
+        // e alonga o braço de nariz (`x_nose_m` 1,40→1,30); com o dial em
+        // 0.28 o limite de rotação desta config mutada cai para 36,09% MAC,
+        // ATRÁS do limite traseiro (36,615%) — ou seja, o envelope volta a
+        // FECHAR e o achado histórico que este teste existe para guardar
+        // desaparece. Varredura empírica NOVA (config E10 mutada; o limite
+        // traseiro não se move, depende só de NP/`sm_min`):
+        //   c_e/c=0.30 → rot 34,709%  (fechado)
+        //   c_e/c=0.28 → rot 36,092%  (fechado — o dial do ciclo 7)
+        //   c_e/c=0.27 → rot 36,803%  (vazio, mas por só 0,19 pp)
+        //   c_e/c=0.26 → rot 37,526%  (vazio, 0,91 pp — ESCOLHIDO)
+        //   c_e/c=0.24 → rot 39,017%  (vazio, exagerado)
+        // 0.26 dá `cl_h_max_down_calc≈0.800` — ainda uma reprodução
+        // razoável do palpite pré-E6 original (0.85; o 0.28 do ciclo 7 dava
+        // 0.841) e com folga estável sobre o limite traseiro. 0.27 também
+        // restauraria o achado, mas por uma margem fina demais para servir
+        // de guarda. O achado histórico é o MESMO; só o dial da mutação foi
+        // reajustado à nova geometria de massas do baseline.
+        cfg.control_surfaces.elevator_chord_frac = 0.26;
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let state = crate::models::aircraft_state::AircraftState::from_config(&cfg);
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);

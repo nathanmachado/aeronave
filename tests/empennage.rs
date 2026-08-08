@@ -60,6 +60,17 @@ fn baseline_s_h_bate_calculo_manual() {
 /// (SM>3%, `sc.stable`) — não há violação de ESTABILIDADE a reportar (o
 /// achado honesto do ENVELOPE de CG admissível, que é um critério mais
 /// estrito, é tratado à parte em `tests/cli.rs`).
+///
+/// ATUALIZAÇÃO (campanha E10, 2026-08-08): a bateria híbrida de 53 kg a
+/// 7,80 m recua o CG de TODOS os cenários ≈+6,5 pp MAC. Isso é exatamente o
+/// que E10 comprou (carga de nariz e autoridade de rotação robustas) e o
+/// preço é pago aqui, no outro extremo: a SM mínima do baseline real cai de
+/// 16,25% para **9,68%** (old→new) — CUSTO HONESTO MAIS RELEVANTE DA
+/// CAMPANHA. Ainda ≈2× o piso de projeto `[stability].sm_min` = 5%, todos os
+/// 6 cenários seguem estáveis (SM > 3%) e dentro do envelope admissível
+/// (aft = 43,5% MAC vs pior cenário 38,8%). O pin abaixo virou BANDA (não
+/// mais só piso) para detectar deriva nas DUAS direções — a folga traseira
+/// deixou de ser larga o bastante para um pin unilateral ser informativo.
 #[test]
 fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -80,15 +91,20 @@ fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
              coeficiente de volume (V_h={:.2})", sc.name, sc.static_margin, cfg.empennage.v_h);
     }
 
-    // SM mínima (≈12,2% após downwash+fuselagem, ver comentário acima) com
-    // folga bem acima do piso de ESTABILIDADE (3%) — a queda de margem é
-    // honesta (NP mais à frente a cada refinamento de fidelidade), mas não
-    // chega perto de instabilizar nenhum cenário real. O piso de 10% deste
-    // assert é uma checagem de regressão deste teste (não um requisito de
-    // projeto — esse é `[stability].sm_min`=5%, ver `tests/cli.rs` para o
-    // critério de ENVELOPE de CG, que É violado honestamente por dois
-    // cenários dianteiros).
-    assert!(sized.wb.spec.static_margin_pct > 10.0,
-        "SM mínima {:.2}% muito próxima do piso de estabilidade — revisar",
+    // SM mínima do baseline real: ≈12,2% (pós downwash+fuselagem) → 16,25%
+    // (pós-E7) → **9,68%** (campanha E10, ver docstring: bateria de 53 kg no
+    // cone de cauda recua o CG ≈6,5 pp). Banda de regressão deste teste, não
+    // requisito de projeto — o requisito é `[stability].sm_min` = 5%,
+    // explicitamente re-checado logo abaixo, e o critério de ENVELOPE de CG
+    // (mais estrito) está em `tests/cli.rs`, hoje sem nenhuma violação.
+    assert!((9.0..10.5).contains(&sized.wb.spec.static_margin_pct),
+        "SM mínima {:.2}% fora da banda E10 [9.0%, 10.5%) — old≈16.25% (E7) → \
+         new≈9.68% (E10); deriva nas duas direções é regressão a investigar",
         sized.wb.spec.static_margin_pct);
+    // Amarra explícita ao requisito real (o pin de banda acima é só regressão):
+    // a SM mínima segue com folga sobre `[stability].sm_min`, mesmo após o
+    // recuo de CG da campanha E10.
+    assert!(sized.wb.spec.static_margin_pct > cfg.stability.sm_min * 100.0,
+        "SM mínima {:.2}% deveria continuar acima do piso de projeto sm_min={:.1}%",
+        sized.wb.spec.static_margin_pct, cfg.stability.sm_min * 100.0);
 }

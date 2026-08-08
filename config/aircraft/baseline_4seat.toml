@@ -16,7 +16,15 @@ taper_ratio = 0.45
 airfoil = "NACA 23015"
 thickness_ratio = 0.15
 cl_max_clean = 1.45
-cl_max_flaps = 1.72
+# Campanha E10 (2026-08-08): 1.72 → 2.1 — troca do flap SIMPLES (plain) por
+# flap SLOTTED (fenda simples) na mesma envergadura/corda já dimensionada por
+# [control_surfaces] (flap_chord_frac=0.30, 40% da semi-envergadura). 2.1 é
+# valor típico de literatura para asa com slotted flap de fenda simples
+# (Raymer cap. 5 Tab. 5.3 / Gudmundsson cap. 9, faixa 1.8–2.2 para este tipo).
+# CONSEQUÊNCIA que motivou a mudança: VS0 cai, V_ref de pouso cai, e a
+# distância de POUSO EM GRAMA sobre 15 m sai de 605 m (violação, pista de
+# 600 m) para ≈557 m. cl_max_flaps antigo: 1.72.
+cl_max_flaps = 2.1
 cd0_wing = 0.0050
 le_root_x_m = 2.90          # única fonte da posição do bordo de ataque
 # Cm_ac do perfil NACA 23015 em torno do seu próprio CA — quase nulo
@@ -25,6 +33,16 @@ le_root_x_m = 2.90          # única fonte da posição do bordo de ataque
 # Consumidos por agents::trim_authority (task trim-authority) — limite
 # dianteiro FÍSICO do envelope de CG, substitui o antigo proxy
 # [stability].sm_max (removido, ver abaixo).
+#
+# Campanha E10 (2026-08-08): cm_flap_delta permanece −0.30 (INALTERADO)
+# mesmo com a troca para flap SLOTTED (cl_max_flaps 1.72 → 2.1 acima). −0.30
+# é o meio da faixa de Raymer e corresponde a um slotted MODERADO — de fenda
+# simples, corda de 30% e ~40% da semi-envergadura, não a um Fowler de grande
+# translação (que puxaria ΔCm para a ponta pessimista da faixa, ≈−0.45).
+# Registrado explicitamente porque a hipótese fica mais forte com o slotted:
+# se o flap real desta célula render mais ΔCL do que o modelado aqui, o ΔCm
+# associado também sobe e o limite de flare recua — validar em ensaio/CFD
+# antes de congelar (mesma classe de parâmetro semi-empírico que cm_ac).
 cm_ac = -0.008
 cm_flap_delta = -0.30
 
@@ -84,15 +102,24 @@ e_h = 0.70
 thickness_ratio = 0.10
 
 [propeller]
-diameter_m = 1.95
+# Campanha E10 (2026-08-08): 1.95 → 1.76 — consequência OBRIGATÓRIA do trem
+# encurtado ([gear].h_cg_ground_m 1.05 → 0.92, −13 cm). O eixo da hélice
+# desce 1:1 com o CG (ver prop_axis_above_cg_m abaixo), então a folga de
+# ponta de pá ao solo cairia de 0.275 m para ≈0.145 m com Ø1.95 — abaixo do
+# piso de projeto de 0.23 m. Com Ø1.76 a folga volta a 0.240 m ≥ 0.23. Custo
+# honesto: menos área de disco → menos tração estática e um pouco menos de
+# η_p, o que encurta as distâncias de decolagem menos do que antes e reduz
+# levemente a velocidade de cruzeiro. diameter_m antigo: 1.95.
+diameter_m = 1.76
 blades = 2
 psru_ratio = 1.867
 psru_efficiency = 0.97
 # Offset vertical FIXO da célula entre o eixo da hélice e o CG (m) — ciclo 5.
 # A altura do eixo ao solo agora DERIVA do trem: shaft_height =
-# gear.h_cg_ground_m + prop_axis_above_cg_m = 1.05 + 0.20 = 1.25 (idêntico ao
-# shaft_height_m anterior — encurtar o trem consome folga de hélice 1:1
-# automaticamente daqui em diante). Validar no CAD (Fase 3).
+# gear.h_cg_ground_m + prop_axis_above_cg_m = 0.92 + 0.20 = 1.12 (campanha
+# E10; era 1.05 + 0.20 = 1.25 até E7 — encurtar o trem consome folga de
+# hélice 1:1, foi exatamente o que aconteceu aqui e obrigou a reduzir
+# diameter_m acima). Validar no CAD (Fase 3).
 prop_axis_above_cg_m = 0.20
 # Limites de Mach de ponta de pá (Task 4.5) — verificação de compressibilidade.
 tip_mach_max_static = 0.85
@@ -137,13 +164,40 @@ ground_clearance_min_m = 0.23
 # reduz o combustível exigido pela missão (255,9→≈223,7 L) — margem sobre
 # os 260 L sobe de ~1,58% para ≈13,97%. Mantido em 260 L (decisão de
 # projeto já tomada, continua dando mais margem, não menos).
+#
+# ATUALIZAÇÃO (campanha E10, 2026-08-08): `capacity_l` NÃO muda, mas a
+# margem sim, e para baixo — a hélice Ø1,95→1,76 m (η_p 81,0%→78,4%) e os
+# +25 kg de bateria (MTOW de missão 1.512,4→1.537,6 kg) elevam o
+# combustível exigido de 222,7 para 236,2 L: margem 14,33%→**9,14%** da
+# capacidade (piso `min_fuel_margin_fraction` = 5%). É a folga que E10 mais
+# consome. O aviso da Finding 4 acima volta a valer com força: sob a
+# hipótese de CRUZEIRO BREGUET A L/D CONSTANTE a missão cabe; um modelo de
+# cruzeiro NIVELADO comeria boa parte desses 4,1 pp de folga restantes.
+# Mantido em 260 L (nenhuma decisão nova aqui), mas registrado: se uma
+# campanha futura precisar de folga de combustível, este é o primeiro
+# lugar a olhar.
 capacity_l = 260.0
 
 [gear]
 retractable = true
 cd0_fixed_increment = 0.008
-h_cg_ground_m = 1.05
-x_nose_m = 1.40
+# Campanha E10 (2026-08-08): 1.05 → 0.92 — trem CURTO. A altura do CG ao
+# solo é a alavanca do tipback (Raymer cap. 11: quanto mais baixo o CG, maior
+# o ângulo de tipback para o mesmo x_main). E10 adiciona 25 kg de bateria no
+# cone de cauda (ver "bateria_recolocada"), o que recua o CG e por si só já
+# ajuda o tipback; baixar o CG 13 cm dá a folga necessária para que o tipback
+# sobreviva TAMBÉM nos dois mundos adversariais de ±15% de massa estrutural
+# (validation::robustness), não só no nominal. Encurtar o trem custa folga de
+# hélice 1:1 — pago com [propeller].diameter_m 1.95 → 1.76. Coerência
+# dimensional das pernas em [mass_model].*_strut_length_m. Antigo: 1.05.
+h_cg_ground_m = 0.92
+# Campanha E10 (2026-08-08): 1.40 → 1.30 — trem de nariz avançado 10 cm.
+# A carga de nariz é ~(x_cg − x_main)/(x_main − x_nose): afastar o nariz do
+# trem principal alonga o denominador e DILUI a carga percentual no CG mais
+# dianteiro. Era 28.6% (violação do teto de 25%) no baseline E7; com esta
+# mudança + o recuo de CG da bateria de E10 cai para ≈22.8%, com folga
+# suficiente para sobreviver aos mundos adversariais de massa. Antigo: 1.40.
+x_nose_m = 1.30
 # Campanha E1–E6 (2026-08-05), mudança 1: 3.85 → 3.55 — CAUSA RAIZ do
 # envelope de CG vazio do baseline anterior (trem principal longe demais
 # atrás do CG útil desta célula, empurrando o limite de rotação para
@@ -208,6 +262,15 @@ actuators_doors_mass_kg = 20.0
 # permanece ativo — continua detectando a violação em configs sintéticas
 # mutadas (ver tests/gear_tipback.rs, tests/cli.rs — cobertura do check
 # #15 preservada).
+#
+# ATUALIZAÇÃO (campanha E10, 2026-08-08): `tipback_min_deg` e
+# `rotation_attitude_deg` INALTERADOS; o ângulo REAL muda. A bateria de
+# 53 kg a 7,80 m recua o CG mais traseiro (32,2%→38,8% MAC), encurtando
+# `(x_main − x_cg_aft)` e derrubando o tipback; `h_cg_ground_m` 1,05→0,92
+# recupera parte disso (CG mais baixo ⟹ mais tipback). Saldo: 18,85°→
+# **16,74°**, ainda acima do piso de 15° — e agora robusto: com massas
+# estruturais a ±15% (RobustnessAgent, check #19) o tipback continua
+# passando nos três mundos. Tail-strike 14,88° (inalterado, só geometria).
 tipback_min_deg = 15.0
 rotation_attitude_deg = 11.0
 tail_cone_x_m = 7.80
@@ -276,7 +339,16 @@ cl_ground_rotation = 0.5  # CL da asa na corrida de decolagem antes da rotação
 #   ΔCm: Cm_TO = cm_ac + to_flap_fraction·cm_flap_delta        (rotação)
 #   ΔCL: cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)
 #        → Vr da rotação E distâncias de decolagem (antes usavam o CLmax de POUSO)
-to_flap_fraction = 0.5
+#
+# Campanha E10 (2026-08-08): 0.5 → 0.35 — setting de decolagem com MENOS
+# flap. Com o flap SLOTTED de E10 (cl_max_flaps 1.72 → 2.1) manter 0.5 daria
+# um ΔCm de nariz-para-baixo maior no momento da rotação, apertando o limite
+# dianteiro de rotação justo quando o CG recuou. 0.35 mantém cl_max_to
+# praticamente no valor de E7 (1.45 + 0.35·0.65 = 1.6775 vs 1.585 antes —
+# ainda MELHOR para as distâncias de decolagem) enquanto reduz o ΔCm de
+# rotação (0.35·(−0.30) = −0.105 vs −0.15). É o que faz a margem de rotação
+# do cenário mais dianteiro sobreviver aos mundos adversariais. Antigo: 0.5.
+to_flap_fraction = 0.35
 # Coeficiente de Multhopp simplificado (Raymer eq. 16.25, fig. 16.14) para a
 # contribuição desestabilizadora da fuselagem no ponto neutro — faixa típica
 # 0.01-0.03 conforme a posição vertical da asa na fuselagem (asa baixa como
@@ -353,9 +425,23 @@ arm_ref = "avionics"
 # dianteiro (parte dos antigos 60.0 kg de "avionicos") para o cone de
 # cauda — desloca massa para trás, contribuindo para recuar o CG vazio e
 # ajudar a fechar o envelope (junto com as mudanças 1 e 5).
+#
+# Campanha E10 (2026-08-08): 28.0 → 53.0 kg e ganha arm_offset_m = 0.4
+# (braço efetivo 7.40 → 7.80 m). Deixa de ser "a bateria da aviônica
+# recolocada" e passa a ser o BANCO DE BATERIAS DE TRAÇÃO/RESERVA da
+# diretriz de propulsão HÍBRIDA do projeto: ~53 kg de Li-ion a ~150 Wh/kg
+# no nível de pacote ≈ 8 kWh instalados, dos quais ~3 kWh úteis com a janela
+# de SOC conservadora (20–60%) típica de uso aeronáutico de potência.
+# PAPEL DUPLO, ambos desejados: (a) energia para assistência de potência /
+# cobertura do transiente de pico elétrico (ver aviso do [ ELÉTRICO ]:
+# pico 1260 W > alternador 900 W); (b) COMPENSAÇÃO DE PESO no cone de cauda
+# — os 25 kg extras a 7.80 m recuam o CG vazio, que é o que finalmente tira
+# a carga de nariz do teto de 25% e torna tipback e rotação robustos aos
+# mundos de ±15% de massa estrutural. Antigo: 28.0 kg, sem offset (7.40 m).
 name = "bateria_recolocada"
-mass_kg = 28.0
+mass_kg = 53.0
 arm_ref = "empennage_cg"
+arm_offset_m = 0.4
 
 [[masses.items]]
 name = "painel_comandos"
@@ -474,8 +560,14 @@ composite_factor_fuel_system = 1.00  # tanques integrais compostos ≈ metálico
 d_fus_equiv_m                = 1.30  # cabine 1.22 m + estrutura
 fuselage_wetted_coeff        = 0.75  # corpo afilado vs cilindro pleno
 landing_load_factor_ult      = 4.5   # N_l = N_pouso×1.5 (Raymer 15.2)
-main_strut_length_m          = 0.67  # curso oleo E7 (212 mm) + roda ≈ 26.3 in
-nose_strut_length_m          = 0.53  # idem
+# Campanha E10 (2026-08-08): 0.67 → 0.54 e 0.53 → 0.40 — COERÊNCIA
+# DIMENSIONAL com [gear].h_cg_ground_m 1.05 → 0.92 (−13 cm): as pernas
+# encurtam exatamente os mesmos 13 cm que o CG desceu. Estes comprimentos
+# alimentam as equações de massa de trem de Raymer (15.2), então o trem curto
+# também pesa um pouco menos — parte da variação de OEW de E10 vem daqui (o
+# resto, para cima, vem dos +25 kg de bateria). Antigos: 0.67 / 0.53.
+main_strut_length_m          = 0.54  # curso oleo + roda, trem curto E10
+nose_strut_length_m          = 0.40  # idem
 # Ciclo 4 (task robustez): ±σ da estatística de frota das equações de peso
 # acima — Raymer cap. 15/Roskam Classe II citam ±10–20% em projeto
 # conceitual (equações empíricas ajustadas a uma frota histórica, não a
