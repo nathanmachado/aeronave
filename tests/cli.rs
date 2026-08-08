@@ -372,5 +372,13 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     assert!(json.contains("Orçamento elétrico:") && json.contains("banco de baterias"),
         "aviso elétrico de pico esperado (pico 1.260 W > alternador 900 W, não é violação):\n{json}");
 
+    // Pin honesto de flutter (revisão final do ciclo 4: caiu 6,3% no ciclo 3
+    // — 749,55 → 702,60 km/h com a asa computada mais pesada — sem nenhum pin).
+    // Piso regulatório 1,2×VD = 420 km/h fica LONGE; o pin pega regressão de
+    // modelo, não proximidade de limite.
+    let flutter = spec["structure"]["flutter_speed_kmh"].as_f64().unwrap();
+    assert!((flutter - 702.6).abs() < 7.0, // ±1%, padrão dos pins de performance
+        "flutter_speed_kmh = {flutter:.1} divergiu do pin honesto ≈702,6 (±1%)");
+
     let _ = std::fs::remove_file(&out_path);
 }

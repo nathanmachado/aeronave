@@ -740,7 +740,8 @@ fn main() {
         "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)".into());
     fidelity.insert("robustness".into(),
         "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; \
-         limites de envelope nominais — invariantes a massa)".into());
+         limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing \
+         completo com fatores ×(1+σ))".into());
     // task refino-ciclo2: limite dianteiro físico do envelope de CG, agora
     // com a autoridade de profundor CALCULADA por geometria DATCOM/Nelson
     // (não mais um `cl_h_max_down` de config direto — ver

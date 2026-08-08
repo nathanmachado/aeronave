@@ -900,7 +900,33 @@ pub struct ElectricalSpec {
 /// + checagem nova que só pode ADICIONAR violações, nunca remover as
 /// existentes), consumidores v4.5 continuam funcionando sem alteração. Ver
 /// `docs/aircraft_spec.schema.md` §1 e §4.
-pub const SCHEMA_VERSION: &str = "4.6";
+///
+/// v4.7 (Task 4, ciclo5-robustez-total-e-solo): dois campos NOVOS em
+/// blocos já existentes. `ElectricalSpec` ganha `loads`
+/// (`Vec<ElectricalLoadSpec>` — check #20) — eco individual de cada
+/// `[electrical].loads` configurada (nome, potência contínua, potência de
+/// pico), para que `ConstraintChecker::verify` compare o pico DECLARADO
+/// da carga 'trem_retratil' contra `landing_gear.actuator_power_w`
+/// COMPUTADO (checagem só possível pós-convergência). `RobustnessSpec`
+/// ganha `mtow_masstotal_kg` — MTOW re-convergido pelo laço COMPLETO de
+/// `orchestrator::size_aircraft` sob um TERCEIRO conjunto adversarial (as
+/// 5 massas estruturais compostas ×(1+σ), não só ±σ direcional dos dois
+/// casos de CG da v4.6) — checagem #19 ganha o caso "massa-total": um
+/// re-sizing INTEIRO sob incerteza de massa, não apenas a reavaliação
+/// posterior de CG/trem contra limites nominais invariantes. Mudança
+/// ADITIVA (campos novos em blocos já existentes; nenhum campo removido
+/// nem mudou de tipo/unidade), consumidores v4.6 continuam funcionando
+/// sem alteração. Acompanha, do lado da CONFIGURAÇÃO de entrada (não
+/// deste schema JSON — já implementado na Task 1 do mesmo ciclo):
+/// `[propeller].shaft_height_m` (datum ABSOLUTO de altura do eixo) foi
+/// REMOVIDO com erro de migração, substituído por `[propeller].
+/// prop_axis_above_cg_m` (offset vertical FIXO entre eixo e CG) —
+/// `propeller.ground_clearance_m` agora deriva de `gear.h_cg_ground_m +
+/// propeller.prop_axis_above_cg_m`, acoplando a folga de hélice ao
+/// comprimento do trem (encurtar o trem consome folga automaticamente,
+/// em vez de dessincronizar como o datum absoluto antigo). Ver
+/// `docs/aircraft_spec.schema.md` §1 e §4.
+pub const SCHEMA_VERSION: &str = "4.7";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver

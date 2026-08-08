@@ -1,6 +1,6 @@
 {
-  "schema_version": "4.6",
-  "revision": "4.6",
+  "schema_version": "4.7",
+  "revision": "4.7",
   "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
@@ -328,7 +328,44 @@
     "alternator_w": 900.0,
     "continuous_load_w": 430.0,
     "peak_load_w": 1260.0,
-    "margin_continuous_pct": 52.22222222222223
+    "margin_continuous_pct": 52.22222222222223,
+    "loads": [
+      {
+        "name": "avionicos",
+        "continuous_w": 180.0,
+        "peak_w": 220.0
+      },
+      {
+        "name": "luzes_nav_strobe",
+        "continuous_w": 45.0,
+        "peak_w": 90.0
+      },
+      {
+        "name": "bomba_combustivel",
+        "continuous_w": 60.0,
+        "peak_w": 120.0
+      },
+      {
+        "name": "trem_retratil",
+        "continuous_w": 0.0,
+        "peak_w": 520.0
+      },
+      {
+        "name": "flaps",
+        "continuous_w": 0.0,
+        "peak_w": 150.0
+      },
+      {
+        "name": "pitot_aquecido",
+        "continuous_w": 90.0,
+        "peak_w": 90.0
+      },
+      {
+        "name": "radio_transponder",
+        "continuous_w": 55.0,
+        "peak_w": 70.0
+      }
+    ]
   },
   "sizing": {
     "mtow_mission_kg": 1512.4425704838097,
@@ -371,7 +408,8 @@
       13.288250557431223,
       34.64890893674246
     ],
-    "flips": []
+    "flips": [],
+    "mtow_masstotal_kg": 1585.9173566443083
   },
   "fidelity": {
     "control_surfaces": "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de autoridade/eficiência de controle)",
@@ -383,7 +421,7 @@
     "performance": "computed (equações de desempenho em forma fechada, atmosfera ISA padrão)",
     "propeller": "semi-empirical (Mach de ponta + folga de solo; requer mapa de desempenho de hélice real do fabricante)",
     "propulsion": "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)",
-    "robustness": "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa)",
+    "robustness": "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing completo com fatores ×(1+σ))",
     "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
     "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
     "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)",

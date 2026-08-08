@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v4.6
+# `aircraft_spec.json` — contrato do schema v4.7
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -298,6 +298,46 @@ documentação a ser corrigido, não um comportamento aceitável.
   cenários de envelope + carga de nariz máxima, ver entrada "Ciclo 3"
   acima) continuam as ÚNICAS. Ver §3 e §4 abaixo, e `validation::
   robustness` para a dedução completa.
+- **v4.7** (Task 4, ciclo5-robustez-total-e-solo): dois campos NOVOS em
+  blocos já existentes.
+  - `electrical` (`ElectricalSpec`) ganha `loads`
+    (array de `ElectricalLoadSpec` — checagem #20 NOVA em
+    `ConstraintChecker::verify`): eco individual de cada `[electrical].
+    loads` configurada (`name`, `continuous_w`, `peak_w`), para que o
+    checker compare o pico DECLARADO da carga `'trem_retratil'` contra
+    `landing_gear.actuator_power_w` COMPUTADO pelo `LandingGearAgent` —
+    checagem só possível PÓS-convergência (a guarda equivalente de
+    parse-time do ciclo 3 foi removida quando a massa da perna do trem
+    virou computada).
+  - `robustness` (`RobustnessSpec`) ganha `mtow_masstotal_kg` — MTOW (kg)
+    re-convergido pelo laço COMPLETO de `orchestrator::size_aircraft` sob
+    um TERCEIRO conjunto adversarial, "massa-total": as 5 massas
+    estruturais COMPOSTAS (asa, empenagens, fuselagem, trem, tanques) vão
+    todas ×(1+σ) simultaneamente — não ±σ direcional como os dois casos de
+    CG já existentes na v4.6 (que só reavaliam limites nominais contra CG
+    perturbado, sem re-rodar o laço de convergência). A checagem #19 ganha
+    o caso "massa-total": um re-sizing INTEIRO sob incerteza de massa
+    (MTOW/combustível podem mudar, não só o CG). `0.0` quando o sizing
+    perturbado FALHA (`SizingError`) — nesse caso o flip de
+    "Dimensionamento" acompanha e documenta a causa.
+  - Mudança ADITIVA (campos novos em blocos já existentes; nenhum campo
+    removido nem mudou de tipo/unidade), consumidores v4.6 continuam
+    funcionando sem alteração. Achado honesto do baseline real
+    (`config/aircraft/baseline_4seat.toml`): `mtow_masstotal_kg` ≈
+    1585,9 kg, ACIMA do MTOW de missão nominal (`sizing.mtow_mission_kg`
+    ≈ 1512,4 kg) — sizing perturbado converge normalmente, zero flip de
+    Dimensionamento; as MESMAS 3 violações nominais continuam as únicas.
+  - Acompanha, do lado da CONFIGURAÇÃO de entrada (não deste schema JSON
+    — já implementado na Task 1 do mesmo ciclo): `[propeller].
+    shaft_height_m` (datum ABSOLUTO e desacoplado do trem — encurtar o
+    trem NÃO afetava a folga reportada) foi REMOVIDO com erro de
+    migração, substituído por `[propeller].prop_axis_above_cg_m` (offset
+    vertical FIXO entre o eixo da hélice e o CG). `propeller.
+    ground_clearance_m` (campo já existente, sem mudança de nome/tipo)
+    agora deriva de `gear.h_cg_ground_m + propeller.
+    prop_axis_above_cg_m` em vez do datum absoluto antigo — acopla a
+    folga de hélice ao comprimento do trem, para que encurtar o trem
+    consuma folga de hélice automaticamente. Ver §3 e §4 abaixo.
 
 ## 2. Convenção de eixos e unidades
 
@@ -354,7 +394,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `mission` | computed (segmentos + equação de Breguet, L/D constante em cruzeiro) | — |
 | `electrical` | preliminary (soma de cargas nominais configuradas) | Análise transiente/térmica real |
 | `sizing` | computed (laço de convergência de ponto fixo) | — |
-| `robustness` | **v4.6**: computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
+| `robustness` | **v4.7**: computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing completo com fatores ×(1+σ)) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
 
 O texto exato de cada entrada (em português, como gerado pelo pipeline)
 pode variar ligeiramente entre execuções — a tabela acima é a referência
@@ -710,7 +750,7 @@ dedução completa.
 | `source` | string | — | `"config"` (veio de `[propeller].diameter_m`) ou `"derivado"` (calculado pelo agente) |
 | `tip_mach_static` | f64 | — | Mach de ponta de pá, condição estática |
 | `tip_mach_cruise_helical` | f64 | — | Mach de ponta de pá, cruzeiro (composição helicoidal) |
-| `ground_clearance_m` | f64 | m | Folga ponta de pá ↔ solo |
+| `ground_clearance_m` | f64 | m | Folga ponta de pá ↔ solo — `shaft_height − diameter_m/2`, onde `shaft_height = gear.h_cg_ground_m + propeller.prop_axis_above_cg_m` (**datum derivado do trem desde a Task 1 do ciclo 5** — antes, `[propeller].shaft_height_m` era um valor ABSOLUTO independente, e encurtar o trem não afetava a folga reportada; ver §1 histórico v4.7) |
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
@@ -743,6 +783,19 @@ diameter_m`, não `propulsion.prop_diameter_m`.
 | `continuous_load_w` | f64 | W | Soma das cargas CONTÍNUAS configuradas |
 | `peak_load_w` | f64 | W | Soma das cargas de PICO (pior caso, todas simultâneas — conservador) |
 | `margin_continuous_pct` | f64 | % | Margem sobre a capacidade contínua do alternador |
+| `loads` | array de objetos (`ElectricalLoadSpec`, **novo v4.7**) | — | Eco individual de cada `[electrical].loads` configurada — ver sub-tabela abaixo |
+
+Sub-bloco `electrical.loads[]` (`ElectricalLoadSpec`, **novo v4.7** —
+check #20): permite ao consumidor (e ao `ConstraintChecker::verify`)
+comparar o pico DECLARADO de uma carga específica — em especial
+`'trem_retratil'` — contra a potência COMPUTADA pelo agente responsável
+(`landing_gear.actuator_power_w`), checagem só possível PÓS-convergência.
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `name` | string | — | Nome da carga (chave usada por `ConstraintChecker::verify` para localizar `'trem_retratil'`) |
+| `continuous_w` | f64 | W | Potência CONTÍNUA declarada da carga |
+| `peak_w` | f64 | W | Potência de PICO declarada da carga |
 
 ### `sizing` — `SizingReport` (Task 6.1 — `orchestrator::size_aircraft`)
 
@@ -794,12 +847,25 @@ limites (autoridade de profundor do bloco `trim`, tetos/pisos de carga de
 nariz) são derivados de geometria/estabilidade, não da massa estrutural em
 si, logo são invariantes à perturbação.
 
+**Terceiro caso, "massa-total"** (**novo v4.7**): distinto dos dois
+conjuntos direcionais acima (que só reavaliam CG/trem contra os limites
+NOMINAIS já calculados, sem re-rodar o laço de convergência), o caso
+massa-total multiplica as 5 massas estruturais COMPOSTAS (asa,
+empenagens, fuselagem, trem, tanques) todas ×(1+σ) simultaneamente e
+RE-RODA o laço COMPLETO de `orchestrator::size_aircraft` — MTOW e
+combustível de missão podem mudar, não só o CG. O resultado fica em
+`mtow_masstotal_kg`. Se o sizing perturbado FALHAR (`SizingError` — ex.:
+combustível insuficiente sob o peso inflado), a checagem #19 registra um
+flip nomeado "Dimensionamento" e `mtow_masstotal_kg` fica `0.0` (sem
+significado físico nesse caso).
+
 | Campo | Tipo | Unidade | Descrição |
 |---|---|---|---|
 | `sigma_mass_fraction` | f64 | fração (0–1) | σ usado — eco de `[mass_model].sigma_mass_fraction` da configuração |
 | `cg_fwd_case_pct_mac` | array [f64; 2] | %MAC | Faixa de CG observada nos 6 cenários de carga sob o conjunto CG-mais-DIANTEIRO (`[mínimo, máximo]`) |
 | `cg_aft_case_pct_mac` | array [f64; 2] | %MAC | Idem sob o conjunto CG-mais-TRASEIRO |
-| `flips` | array de objetos (`RobustnessFlip`) | — | Checks que PASSAM no nominal mas REPROVAM sob um dos dois conjuntos adversariais. **Array vazio = robusto** (nenhum check descoberto flipa sob ±σ) — não é ausência de dado, é o resultado positivo |
+| `flips` | array de objetos (`RobustnessFlip`) | — | Checks que PASSAM no nominal mas REPROVAM sob um dos TRÊS conjuntos adversariais (dois direcionais de CG + massa-total). **Array vazio = robusto** (nenhum check descoberto flipa) — não é ausência de dado, é o resultado positivo |
+| `mtow_masstotal_kg` | f64 (**novo v4.7**) | kg | MTOW re-convergido pelo laço completo sob o caso massa-total (ver acima) — `0.0` se o sizing perturbado falhou (ver flip "Dimensionamento") |
 
 Sub-bloco `robustness.flips[]` (`RobustnessFlip`):
 

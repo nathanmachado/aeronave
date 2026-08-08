@@ -163,7 +163,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "4.6");
+    assert_eq!(report.schema_version, "4.7");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -180,7 +180,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.6");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "4.7");
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco
@@ -188,11 +188,13 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
 /// `sigma_mass_fraction` (eco de `[mass_model].sigma_mass_fraction`) e
 /// `flips` como array (vazio ou não — o baseline real, σ=15%, não produz
 /// nenhum flip, ver `tests/gear_tipback.rs`/`tests/cli.rs` para o achado
-/// honesto completo). Ciclo 5 (task massa-total, mesma versão de schema
-/// 4.6 — o bump é da Task 4 seguinte): `mtow_masstotal_kg` também presente
-/// e, no baseline real (sem flip de Dimensionamento), estritamente MAIOR
-/// que o MTOW de missão nominal (`sizing.mtow_mission_kg`) — os 5 fatores
-/// de composto só multiplicam por (1+σ) > 1.
+/// honesto completo). Ciclo 5 (task massa-total): `mtow_masstotal_kg`
+/// também presente e, no baseline real (sem flip de Dimensionamento),
+/// estritamente MAIOR que o MTOW de missão nominal
+/// (`sizing.mtow_mission_kg`) — os 5 fatores de composto só multiplicam
+/// por (1+σ) > 1. Schema 4.7 (Task 4, ciclo5-robustez-total-e-solo): o
+/// bump de versão que formaliza `mtow_masstotal_kg` (e `electrical.loads`,
+/// ver teste dedicado abaixo) como parte do contrato.
 #[test]
 fn robustness_presente_com_sigma_e_flips_array() {
     let report = build_baseline_report();
@@ -244,6 +246,34 @@ fn weight_structural_masses_presente_e_positivo() {
     let json = serde_json::to_string(&report).expect("deveria serializar");
     assert!(json.contains("\"structural_masses\""),
         "JSON deveria conter a chave 'structural_masses' dentro de 'weight'");
+}
+
+/// Schema 4.7 (Task 4, ciclo5-robustez-total-e-solo — check #20):
+/// `electrical.loads` (`Vec<ElectricalLoadSpec>`) ecoa individualmente
+/// cada `[electrical].loads` configurada — nome, potência contínua e
+/// potência de pico — para que `ConstraintChecker::verify` compare o pico
+/// DECLARADO da carga 'trem_retratil' contra `landing_gear.
+/// actuator_power_w` COMPUTADO (checagem só possível pós-convergência).
+#[test]
+fn electrical_loads_presente_nao_vazio_com_name_e_peak_w() {
+    let report = build_baseline_report();
+    let electrical = report.electrical.as_ref().expect("electrical deveria estar presente");
+    assert!(!electrical.loads.is_empty(),
+        "electrical.loads deveria ser um array NÃO-vazio (cargas configuradas do baseline)");
+    for load in &electrical.loads {
+        assert!(!load.name.is_empty(), "cada carga elétrica deveria ter um 'name' não-vazio");
+        assert!(load.peak_w > 0.0, "carga '{}' deveria ter peak_w positivo, obteve {}", load.name, load.peak_w);
+    }
+
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let loads = value["electrical"]["loads"].as_array()
+        .expect("electrical.loads deveria ser um array no JSON");
+    assert!(!loads.is_empty(), "electrical.loads não deveria estar vazio no JSON");
+    for load in loads {
+        assert!(load["name"].is_string(), "cada item de electrical.loads deveria ter 'name' string");
+        assert!(load["peak_w"].is_number(), "cada item de electrical.loads deveria ter 'peak_w' numérico");
+    }
 }
 
 #[test]
