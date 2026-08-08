@@ -719,6 +719,30 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // [gear]
     require_non_negative("gear.cd0_fixed_increment", cfg.gear.cd0_fixed_increment)?;
     require_positive("gear.h_cg_ground_m", cfg.gear.h_cg_ground_m)?;
+    // Composta trem×hélice (achado de review, ciclo 5, Important 3): a
+    // remoção de `require_positive(shaft_height_m)` (migração para datum
+    // DERIVADO, ver `check_shaft_height_migration` acima) deixou de existir
+    // qualquer guarda sobre a SOMA `gear.h_cg_ground_m +
+    // propeller.prop_axis_above_cg_m` (o shaft_height efetivo) — cada campo
+    // é validado isoladamente (positivo/faixa acima), mas nada impedia
+    // `h_cg_ground_m` pequeno + `prop_axis_above_cg_m` bem negativo somarem
+    // um shaft_height <= `ground_clearance_min_m` (ou até negativo). Sem
+    // esta guarda, `AircraftState::from_config` (bootstrap do diâmetro
+    // provisório de hélice, só quando `[propeller].diameter_m` está
+    // OMITIDO) calcularia `diameter_max_by_clearance_m` NEGATIVO — ver
+    // `.max(0.0)` de defesa em profundidade nesse construtor.
+    let shaft_height_derivado_m = cfg.gear.h_cg_ground_m + cfg.propeller.prop_axis_above_cg_m;
+    if shaft_height_derivado_m <= cfg.propeller.ground_clearance_min_m {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: altura do eixo da hélice DERIVADA \
+             (gear.h_cg_ground_m {:.3} + propeller.prop_axis_above_cg_m {:.3} = {:.3} m) deve \
+             exceder propeller.ground_clearance_min_m ({:.3} m) — do contrário o diâmetro \
+             provisório de hélice (bootstrap, quando [propeller].diameter_m está omitido) seria \
+             calculado NEGATIVO",
+            cfg.gear.h_cg_ground_m, cfg.propeller.prop_axis_above_cg_m, shaft_height_derivado_m,
+            cfg.propeller.ground_clearance_min_m
+        )));
+    }
     require_non_negative("gear.x_nose_m", cfg.gear.x_nose_m)?;
     require_non_negative("gear.x_main_m", cfg.gear.x_main_m)?;
     if cfg.gear.x_main_m <= cfg.gear.x_nose_m {
@@ -1635,6 +1659,26 @@ mod tests {
             .replace("ground_clearance_min_m = 0.23", "ground_clearance_min_m = 0.10");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("propeller.ground_clearance_min_m"), "{err}");
+    }
+
+    /// Achado de review (ciclo 5, Important 3): cada campo individual
+    /// (`gear.h_cg_ground_m` positivo, `propeller.prop_axis_above_cg_m` em
+    /// (-0.3, 0.8)) passa nas checagens isoladas, mas a SOMA dos dois — o
+    /// shaft_height DERIVADO — fica ABAIXO de `ground_clearance_min_m`
+    /// (0.05 + (-0.29) = -0.24 < 0.23). Sem a guarda composta, isso
+    /// parsearia com sucesso e produziria um diâmetro de hélice provisório
+    /// NEGATIVO no bootstrap (`AircraftState::from_config`, quando
+    /// `[propeller].diameter_m` está omitido).
+    #[test]
+    fn rejeita_shaft_height_derivado_nao_maior_que_ground_clearance_min_m() {
+        let toml = aircraft_toml_valido()
+            .replace("h_cg_ground_m = 1.0", "h_cg_ground_m = 0.05")
+            .replace("prop_axis_above_cg_m = 0.20", "prop_axis_above_cg_m = -0.29");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("gear.h_cg_ground_m")
+                && err.to_string().contains("propeller.prop_axis_above_cg_m")
+                && err.to_string().contains("propeller.ground_clearance_min_m"),
+            "erro deveria citar os três campos envolvidos na composta: {err}");
     }
 
     #[test]

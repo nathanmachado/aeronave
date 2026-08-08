@@ -109,12 +109,25 @@ impl AircraftState {
             // rodado após o laço de convergência de MTOW (ver `main.rs`).
             prop_diameter_m: cfg.propeller.diameter_m.unwrap_or_else(|| {
                 crate::agents::propeller::round_down_cm(
-                    crate::agents::propeller::diameter_max_by_clearance_m(
+                    (crate::agents::propeller::diameter_max_by_clearance_m(
                         // Ciclo 5 (task 1): shaft_height agora DERIVA do trem —
                         // ver `agents::propeller::PropellerAgent::run`.
                         cfg.gear.h_cg_ground_m + cfg.propeller.prop_axis_above_cg_m,
                         cfg.propeller.ground_clearance_min_m,
-                    ) - 0.02,
+                    ) - 0.02)
+                        // Defesa em profundidade (achado de review, ciclo 5,
+                        // Important 3): `models::config::validate_aircraft`
+                        // já rejeita configs em que o shaft_height DERIVADO
+                        // (gear.h_cg_ground_m + propeller.prop_axis_above_cg_m)
+                        // não excede propeller.ground_clearance_min_m — para
+                        // configs carregadas de TOML (`parse_aircraft`), este
+                        // `.max(0.0)` nunca deveria disparar. Mas configs
+                        // montadas em memória (what-ifs, testes que não
+                        // passam por `parse_aircraft`) não têm essa garantia
+                        // — sem o clamp, um shaft_height <=
+                        // ground_clearance_min_m produziria um diâmetro
+                        // provisório NEGATIVO aqui.
+                        .max(0.0),
                 )
             }),
             fuel_capacity_l: cfg.fuel_system.capacity_l,

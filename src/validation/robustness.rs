@@ -68,7 +68,9 @@ use crate::models::specs::{
     WingSpec,
 };
 use crate::orchestrator::SizingError;
-use crate::validation::constraint_checker::{NOSE_LOAD_MAX_CEILING_PCT, NOSE_LOAD_MIN_FLOOR_PCT};
+use crate::validation::constraint_checker::{
+    NOSE_LOAD_MAX_CEILING_PCT, NOSE_LOAD_MIN_FLOOR_PCT, RC_SL_MIN_MS, SERVICE_CEILING_MIN_M,
+};
 
 /// Constrói os 2 conjuntos adversariais de massas estruturais (±σ).
 /// Determinístico: classifica cada um dos 7 componentes comparando seu
@@ -288,20 +290,41 @@ impl RobustnessAgent {
         match crate::orchestrator::size_aircraft(&cfg_p, engine, req) {
             Err(e) => {
                 mtow_masstotal_kg = 0.0; // sem ponto convergido; flip documenta
-                flips.push(RobustnessFlip {
-                    check: "Dimensionamento".to_string(),
-                    caso: "massa-total".to_string(),
-                    valor: match &e {
-                        SizingError::CombustivelInsuficiente { necessario_l, .. } => *necessario_l,
-                        SizingError::MtowExcedido { mtow, .. } => *mtow,
-                        _ => f64::NAN,
-                    },
-                    limite: match &e {
-                        SizingError::CombustivelInsuficiente { capacidade_l, .. } => *capacidade_l,
-                        SizingError::MtowExcedido { limite, .. } => *limite,
-                        _ => f64::NAN,
-                    },
-                });
+                // Achado de review (ciclo 5, Important 2): o `match` anterior
+                // só cobria 2 das 4 variantes de `SizingError`, caindo em
+                // `f64::NAN` para `NaoConvergiu`/`MissaoInviavel` — NaN vira
+                // `null` no JSON (`RobustnessFlip::valor`/`limite` são
+                // tipados `f64` no schema, sem variante "ausente") e a
+                // mensagem de violação (#19, `ConstraintChecker::verify`)
+                // imprimia literalmente "NaN vs NaN", sem diagnóstico
+                // nenhum. As 4 variantes abaixo produzem valor/limite SEMPRE
+                // finitos:
+                //   - `CombustivelInsuficiente`/`MtowExcedido`: já tinham um
+                //     par valor/limite natural (necessário vs. capacidade;
+                //     MTOW vs. limite configurado).
+                //   - `NaoConvergiu { ultimo_mtow }`: sem um "limite" natural
+                //     (o laço simplesmente não fechou) — usa `ultimo_mtow`
+                //     vs. `cfg.sizing.mtow_max_kg` (o teto de projeto, a
+                //     referência mais informativa disponível).
+                //   - `MissaoInviavel`: idem, sem par valor/limite natural
+                //     (subida travou ou distância de cruzeiro
+                //     não-positiva) — usa o MTOW NOMINAL (`state.mtow_kg`,
+                //     parâmetro de `run`, já convergido, ver PRECONDIÇÃO na
+                //     docstring de `run`) vs. `cfg.sizing.mtow_max_kg`, e o
+                //     `check` carrega a mensagem completa do erro
+                //     (`SizingError` implementa `Display`) para não perder o
+                //     diagnóstico original.
+                let (check, valor, limite) = match &e {
+                    SizingError::CombustivelInsuficiente { necessario_l, capacidade_l } =>
+                        ("Dimensionamento".to_string(), *necessario_l, *capacidade_l),
+                    SizingError::MtowExcedido { mtow, limite } =>
+                        ("Dimensionamento".to_string(), *mtow, *limite),
+                    SizingError::NaoConvergiu { ultimo_mtow } =>
+                        ("Dimensionamento".to_string(), *ultimo_mtow, cfg.sizing.mtow_max_kg),
+                    SizingError::MissaoInviavel(_) =>
+                        (format!("Dimensionamento ({e})"), state.mtow_kg, cfg.sizing.mtow_max_kg),
+                };
+                flips.push(RobustnessFlip { check, caso: "massa-total".to_string(), valor, limite });
             }
             Ok(sized_p) => {
                 mtow_masstotal_kg = sized_p.state.mtow_kg;
@@ -323,16 +346,25 @@ impl RobustnessAgent {
                         caso: "massa-total".into(),
                         valor: sized_p.wing.stall_speed_flaps_kmh, limite: vs0_lim });
                 }
-                // desempenho no mundo +σ (mesmos gates do pipeline nominal):
+                // desempenho no mundo +σ (mesmos gates do pipeline nominal).
+                // `&cfg_p.performance` (não `&cfg.performance` — achado de
+                // review, ciclo 5, Minor 4): `[performance]` não é mutado
+                // entre `cfg`/`cfg_p` neste caso (só os 5 fatores de
+                // composto de massa o são), então os dois eram
+                // numericamente idênticos — mas `cfg_p` é a config do mundo
+                // +σ que este bloco está de fato avaliando, e usar `cfg`
+                // aqui era um desalinhamento de intenção silencioso (poderia
+                // divergir silenciosamente se `[performance]` algum dia
+                // passasse a depender de `sigma`).
                 let perf_p = crate::agents::performance::PerformanceAgent::run(
                     &sized_p.state, &sized_p.wing, &sized_p.prop,
-                    sized_p.state.mtow_kg, engine, req, &cfg.performance);
+                    sized_p.state.mtow_kg, engine, req, &cfg_p.performance);
                 for (nome, nom, p, lim, maior_melhor) in [
-                    ("Razão de subida", perf_nominal.rc_sl_ms, perf_p.rc_sl_ms, 1.5, true),
+                    ("Razão de subida", perf_nominal.rc_sl_ms, perf_p.rc_sl_ms, RC_SL_MIN_MS, true),
                     ("Velocidade de cruzeiro", perf_nominal.v_cruise_kmh, perf_p.v_cruise_kmh,
                      req.cruise_speed_min_kmh, true),
                     ("Teto de serviço", perf_nominal.service_ceiling_m,
-                     perf_p.service_ceiling_m, 3_000.0, true),
+                     perf_p.service_ceiling_m, SERVICE_CEILING_MIN_M, true),
                 ] {
                     let nom_ok = if maior_melhor { nom >= lim } else { nom <= lim };
                     let p_ok = if maior_melhor { p >= lim } else { p <= lim };
@@ -571,7 +603,14 @@ mod tests {
         assert_eq!(out.flips.len(), 1,
             "esperava exatamente 1 flip (Dimensionamento/massa-total): {:?}", out.flips);
         let flip = &out.flips[0];
-        assert_eq!(flip.check, "Dimensionamento");
+        // `starts_with` (achado de review, ciclo 5, ver fix do Important 2):
+        // este cenário dispara `SizingError::CombustivelInsuficiente`, cujo
+        // `check` continua sendo exatamente "Dimensionamento" — mas
+        // `starts_with` deixa o teste resiliente ao caso `MissaoInviavel`
+        // (não exercitado por ESTA fixture), cujo `check` carrega a
+        // mensagem completa do erro (`"Dimensionamento (...)"`).
+        assert!(flip.check.starts_with("Dimensionamento"),
+            "check do flip deveria começar com \"Dimensionamento\": {:?}", flip.check);
         assert_eq!(flip.caso, "massa-total");
         assert!(flip.valor > flip.limite,
             "CombustivelInsuficiente: necessario_l ({}) deveria exceder capacidade_l ({})",

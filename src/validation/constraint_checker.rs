@@ -25,6 +25,24 @@ pub const NOSE_LOAD_MAX_CEILING_PCT: f64 = 25.0;
 /// `pub` pelo mesmo motivo de `NOSE_LOAD_MAX_CEILING_PCT`.
 pub const NOSE_LOAD_MIN_FLOOR_PCT: f64 = 8.0;
 
+/// Razão de subida mínima ao nível do mar, MTOW (m/s) — checagem #21.
+/// `pub` (achado de review, ciclo 5): antes deste fix, este piso era
+/// hardcoded independentemente em DOIS lugares que podiam divergir —
+/// `main.rs` (só IMPRIMIA o gate `rc_ok`, sem alimentar
+/// `ConstraintChecker::verify`) e `validation::robustness` (caso
+/// "massa-total", comparando o mundo +σ contra o MESMO número por
+/// coincidência de literal, não por fonte única). Fonte única agora.
+pub const RC_SL_MIN_MS: f64 = 1.5;
+/// Teto de serviço mínimo, MTOW (m) — checagem #22. `pub` pelo mesmo motivo
+/// de `RC_SL_MIN_MS`.
+pub const SERVICE_CEILING_MIN_M: f64 = 3_000.0;
+
+/// Nome da carga elétrica declarada em `[[electrical.loads]]` para o
+/// atuador de retração do trem — checagem #20. `pub` para fonte única entre
+/// a checagem e os testes que a exercitam (achado de review, ciclo 5: antes
+/// era um literal `"trem_retratil"` repetido em produção e em testes).
+pub const GEAR_ACTUATOR_LOAD_NAME: &str = "trem_retratil";
+
 #[derive(Debug)]
 pub struct ConstraintReport {
     pub violations: Vec<String>,
@@ -423,19 +441,54 @@ impl ConstraintChecker {
         // parse removida no ciclo 3 (`models::config::validate_aircraft` —
         // a massa da perna virou computada) — a checagem só é possível
         // PÓS-convergência, aqui.
-        match electrical.loads.iter().find(|l| l.name == "trem_retratil") {
-            None => violations.push(
-                "Carga 'trem_retratil' ausente do orçamento elétrico — aeronave de \
-                 trem retrátil precisa declarar o pico do atuador em [[electrical.loads]]"
-                    .to_string(),
-            ),
-            Some(l) if l.peak_w < gear.actuator_power_w => violations.push(format!(
-                "Atuador de retração: pico declarado em [[electrical.loads]] \
-                 'trem_retratil' ({:.1} W) menor que a potência computada do atuador \
-                 ({:.1} W) — orçamento elétrico subdimensionado",
-                l.peak_w, gear.actuator_power_w
-            )),
-            Some(_) => {}
+        //
+        // Gate de retrátil (achado de review, ciclo 5, Minor 5): uma
+        // aeronave de trem FIXO não tem atuador de retração elétrico
+        // (`gear.actuator_power_w` não se aplica) — exigir a carga
+        // 'trem_retratil' nesse caso seria um falso positivo. A checagem só
+        // se aplica quando `[gear].retractable = true`.
+        if gear_cfg.retractable {
+            match electrical.loads.iter().find(|l| l.name == GEAR_ACTUATOR_LOAD_NAME) {
+                None => violations.push(format!(
+                    "Carga '{GEAR_ACTUATOR_LOAD_NAME}' ausente do orçamento elétrico — aeronave \
+                     de trem retrátil precisa declarar o pico do atuador em \
+                     [[electrical.loads]]"
+                )),
+                Some(l) if l.peak_w < gear.actuator_power_w => violations.push(format!(
+                    "Atuador de retração: pico declarado em [[electrical.loads]] \
+                     '{GEAR_ACTUATOR_LOAD_NAME}' ({:.1} W) menor que a potência computada do \
+                     atuador ({:.1} W) — orçamento elétrico subdimensionado",
+                    l.peak_w, gear.actuator_power_w
+                )),
+                Some(_) => {}
+            }
+        }
+
+        // 21. Razão de subida ao nível do mar, MTOW (achado de review, ciclo
+        // 5, Important 1): `main.rs` já IMPRIMIA este piso (`rc_ok`) desde
+        // antes deste fix, mas `ConstraintChecker::verify` nunca o CHECAVA
+        // nominalmente — só a checagem #19 (robustez) comparava um mundo
+        // perturbado contra ele, indiretamente. Isso produzia um veredito
+        // NÃO-MONOTÔNICO: uma aeronave nominal rc=1.6 m/s cujo perturbado
+        // caísse a 1.4 m/s REPROVARIA (#19, "passa no nominal mas reprova
+        // perturbado"), enquanto uma aeronave nominal rc=1.4 m/s (JÁ abaixo
+        // do piso) PASSARIA (nenhuma checagem de `report.violations` olhava
+        // para `rc_sl_ms` diretamente) — pior nominal, melhor veredito.
+        // Fecha essa lacuna: o piso nominal agora é verificado aqui.
+        if perf.rc_sl_ms < RC_SL_MIN_MS {
+            violations.push(format!(
+                "Razão de subida ao nível do mar (MTOW) {:.2} m/s abaixo do mínimo de {:.1} m/s",
+                perf.rc_sl_ms, RC_SL_MIN_MS
+            ));
+        }
+
+        // 22. Teto de serviço, MTOW (achado de review, ciclo 5, Important
+        // 1) — mesmo raciocínio de monotonicidade da checagem #21 acima.
+        if perf.service_ceiling_m < SERVICE_CEILING_MIN_M {
+            violations.push(format!(
+                "Teto de serviço (MTOW) {:.0} m abaixo do mínimo de {:.0} m",
+                perf.service_ceiling_m, SERVICE_CEILING_MIN_M
+            ));
         }
 
         ConstraintReport { violations, warnings }
@@ -680,9 +733,17 @@ mod tests {
              o MTOW real reconvergido — ver docstring): {:?}", report.violations);
         let cheio = wb.scenarios.iter().find(|s| s.name == "4 pax + bagagem + cheio")
             .expect("cenário '4 pax + bagagem + cheio' deveria existir nos scenarios");
-        assert!(cheio.static_margin > 0.05,
-            "SM do cenário '4 pax + bagagem + cheio' ({:.4}) deveria ficar acima do piso de 5% \
-             agora que a fixture reconverge — achado honesto do ciclo 5 (old≈0.0497→new)",
+        // Pin de banda (achado de review, ciclo 5, Minor 6): `> 0.05` sozinho
+        // é um pin honesto FRACO — passaria para qualquer SM acima do piso
+        // de 5%, mascarando uma regressão que deslocasse o SM medido
+        // (~11,07%) para, digamos, 6% sem quebrar o teste. A banda abaixo
+        // (10,5%–11,5%) é centrada no valor medido e detecta esse tipo de
+        // deriva silenciosa, mantendo a folga de arredondamento de ponto
+        // flutuante entre runs.
+        assert!((0.105..0.115).contains(&cheio.static_margin),
+            "SM do cenário '4 pax + bagagem + cheio' ({:.4}) deveria ficar na banda [10.5%, \
+             11.5%) em torno do valor medido (~11,07%) agora que a fixture reconverge — pin \
+             honesto do ciclo 5 (old≈0.0497→new≈0.1107)",
             cheio.static_margin);
     }
 
@@ -938,6 +999,94 @@ mod tests {
              8.3%, obteve: {:?}", report.violations);
     }
 
+    // ─── Ciclo 5 (fix de review): checagens #21/#22 — RC ao nível do mar e
+    // teto de serviço, nominais ─────────────────────────────────────────
+    //
+    // Antes deste fix, `main.rs` computava `rc_ok`/`ceil_ok` localmente
+    // (hardcoded 1.5/3_000.0) só para IMPRIMIR o gate — `ConstraintChecker::
+    // verify` nunca os checava, então nenhum teste desta suíte cobria o
+    // caminho de violação. Mesmo padrão de `performance_spec_com_gradiente`
+    // acima: `PerformanceSpec` sintética mínima construída à mão, variando
+    // só os dois campos relevantes.
+
+    fn performance_spec_com_rc_e_teto(rc_sl_ms: f64, service_ceiling_m: f64) -> PerformanceSpec {
+        PerformanceSpec {
+            v_cruise_kmh: 300.0,
+            v_stall_kmh: 100.0,
+            rc_sl_ms,
+            rc_cruise_alt_ms: 4.0,
+            service_ceiling_m,
+            to_distance_paved_m: 300.0,
+            to_distance_grass_m: 360.0,
+            landing_distance_m: 400.0,
+            range_km: 2_000.0,
+            endurance_h: 8.0,
+            vx_kmh: 120.0,
+            vy_kmh: 150.0,
+            best_glide_kmh: 170.0,
+            glide_ratio: 15.0,
+            climb_gradient_pct: 10.0,
+            to_50ft_paved_m: 400.0,
+            to_50ft_grass_m: 450.0,
+            ldg_50ft_m: 550.0,
+        }
+    }
+
+    #[test]
+    fn violacao_de_rc_sl_aparece_quando_abaixo_do_minimo() {
+        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        let perf = performance_spec_com_rc_e_teto(1.4, 5_000.0); // RC abaixo de RC_SL_MIN_MS (1.5)
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
+
+        assert!(report.violations.iter().any(|v| v.contains("Razão de subida ao nível do mar")),
+            "esperava violação de RC ao nível do mar, obteve: {:?}", report.violations);
+        assert!(report.violations.iter().any(|v| v.contains("1.40") && v.contains("1.5")),
+            "violação deveria citar o RC observado (1.40) e o piso (1.5): {:?}", report.violations);
+    }
+
+    #[test]
+    fn sem_violacao_de_rc_sl_quando_acima_do_minimo() {
+        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        let perf = performance_spec_com_rc_e_teto(5.0, 5_000.0);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Razão de subida ao nível do mar")),
+            "não deveria haver violação de RC ao nível do mar quando rc_sl_ms (5.0) >= \
+             RC_SL_MIN_MS (1.5), obteve: {:?}", report.violations);
+    }
+
+    #[test]
+    fn violacao_de_teto_de_servico_aparece_quando_abaixo_do_minimo() {
+        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        let perf = performance_spec_com_rc_e_teto(5.0, 2_500.0); // teto abaixo de SERVICE_CEILING_MIN_M (3_000)
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
+
+        assert!(report.violations.iter().any(|v| v.contains("Teto de serviço")),
+            "esperava violação de teto de serviço, obteve: {:?}", report.violations);
+        assert!(report.violations.iter().any(|v| v.contains("2500") && v.contains("3000")),
+            "violação deveria citar o teto observado (2500) e o mínimo (3000): {:?}",
+            report.violations);
+    }
+
+    #[test]
+    fn sem_violacao_de_teto_de_servico_quando_acima_do_minimo() {
+        let (req, wing, prop, engine, wb, propeller, _perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        let perf = performance_spec_com_rc_e_teto(5.0, 5_000.0);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness);
+
+        assert!(!report.violations.iter().any(|v| v.contains("Teto de serviço")),
+            "não deveria haver violação de teto de serviço quando service_ceiling_m (5000) >= \
+             SERVICE_CEILING_MIN_M (3000), obteve: {:?}", report.violations);
+    }
+
     // ─── Task 5.2: orçamento elétrico ────────────────────────────────────
 
     /// `ElectricalSpec` sintética mínima para os testes de violação/aviso
@@ -957,7 +1106,7 @@ mod tests {
             peak_load_w,
             margin_continuous_pct: (alternator_w - continuous_load_w) / alternator_w * 100.0,
             loads: vec![ElectricalLoadSpec {
-                name: "trem_retratil".to_string(),
+                name: GEAR_ACTUATOR_LOAD_NAME.to_string(),
                 continuous_w: 0.0,
                 peak_w: 1.0e6,
             }],
@@ -1230,7 +1379,7 @@ mod tests {
     #[test]
     fn check_20_reprova_peak_w_declarado_menor_que_atuador_computado() {
         let (req, wing, prop, engine, wb, propeller, perf, mission, mut electrical, gear, gear_cfg, robustness) = setup();
-        let carga = electrical.loads.iter_mut().find(|l| l.name == "trem_retratil")
+        let carga = electrical.loads.iter_mut().find(|l| l.name == GEAR_ACTUATOR_LOAD_NAME)
             .expect("pré-condição do teste: fixture sintética deveria ter a carga 'trem_retratil'");
         carga.peak_w = 1.0;
         assert!(gear.actuator_power_w > 1.0,
@@ -1243,7 +1392,7 @@ mod tests {
                                                  &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v|
-                v.contains("trem_retratil") && v.contains("1.0")
+                v.contains(GEAR_ACTUATOR_LOAD_NAME) && v.contains("1.0")
                 && v.contains(&format!("{:.1}", gear.actuator_power_w))),
             "esperava violação citando 'trem_retratil', o peak_w declarado (1.0) e a potência \
              computada do atuador ({:.1}): {:?}", gear.actuator_power_w, report.violations);
@@ -1255,20 +1404,40 @@ mod tests {
     #[test]
     fn check_20_reprova_carga_trem_retratil_ausente() {
         let (req, wing, prop, engine, wb, propeller, perf, mission, mut electrical, gear, gear_cfg, robustness) = setup();
-        let tinha_a_carga = electrical.loads.iter().any(|l| l.name == "trem_retratil");
+        let tinha_a_carga = electrical.loads.iter().any(|l| l.name == GEAR_ACTUATOR_LOAD_NAME);
         assert!(tinha_a_carga,
             "pré-condição do teste: fixture sintética deveria ter a carga 'trem_retratil' antes \
              da remoção");
-        electrical.loads.retain(|l| l.name != "trem_retratil");
+        electrical.loads.retain(|l| l.name != GEAR_ACTUATOR_LOAD_NAME);
 
         let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness);
 
         assert!(report.violations.iter().any(|v|
-                v.contains("trem_retratil") && v.contains("ausente")),
+                v.contains(GEAR_ACTUATOR_LOAD_NAME) && v.contains("ausente")),
             "esperava violação citando a ausência da carga 'trem_retratil', obteve: {:?}",
             report.violations);
+    }
+
+    /// Gate de retrátil (achado de review, ciclo 5, Minor 5): com
+    /// `gear_cfg.retractable = false`, a checagem #20 NÃO deve disparar
+    /// mesmo sem nenhuma carga 'trem_retratil' declarada — uma aeronave de
+    /// trem FIXO não tem atuador elétrico de retração, então exigir essa
+    /// carga seria um falso positivo.
+    #[test]
+    fn check_20_nao_dispara_com_trem_fixo_mesmo_sem_carga_declarada() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, mut electrical, gear, mut gear_cfg, robustness) = setup();
+        gear_cfg.retractable = false;
+        electrical.loads.retain(|l| l.name != GEAR_ACTUATOR_LOAD_NAME);
+
+        let report = ConstraintChecker::verify(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness);
+
+        assert!(!report.violations.iter().any(|v| v.contains(GEAR_ACTUATOR_LOAD_NAME)),
+            "trem FIXO (retractable=false) não deveria exigir a carga 'trem_retratil', mesmo \
+             ausente: {:?}", report.violations);
     }
 
     /// Caminho PASS: fixture intacta (peak_w sintético 480 W do

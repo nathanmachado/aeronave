@@ -625,7 +625,12 @@ pub struct RobustnessFlip {
     pub check: String,
     /// Conjunto adversarial que o derrubou: "dianteiro" | "traseiro".
     pub caso: String,
-    /// Valor sob perturbação e limite violado.
+    /// Valor sob perturbação e limite violado. SEMPRE finitos (achado de
+    /// review, ciclo 5): antes deste fix, o caso "massa-total" podia emitir
+    /// `f64::NAN` aqui para 2 das 4 variantes de `SizingError` (serializa
+    /// como `null` no JSON) — `validation::robustness::RobustnessAgent::run`
+    /// agora escolhe um par valor/limite finito e informativo para toda
+    /// variante de erro (ver comentário no local da construção).
     pub valor: f64,
     pub limite: f64,
 }

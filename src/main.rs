@@ -14,7 +14,9 @@ use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION};
 use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::ConstraintChecker;
+use aeronave::validation::constraint_checker::{
+    ConstraintChecker, RC_SL_MIN_MS, SERVICE_CEILING_MIN_M,
+};
 use aeronave::validation::robustness::RobustnessAgent;
 
 fn sep() { println!("{}", "─".repeat(64)); }
@@ -520,7 +522,14 @@ fn main() {
     let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp, sm, wb, &gear,
                                            mission, &perf);
     println!("[ ROBUSTEZ ] RobustnessAgent — Incerteza de Massa Estrutural (±σ)");
-    println!("  σ={:.0}%: {} flip(s)", robustness.sigma_mass_fraction * 100.0, robustness.flips.len());
+    // `mtow_masstotal_kg` (achado de review, ciclo 5, Minor 7): MTOW
+    // re-convergido do 3º caso adversarial (massa-total, todas as 5 massas
+    // compostas ×(1+σ)) — `0.0` quando esse sizing perturbado FALHOU (ver
+    // docstring de `RobustnessSpec::mtow_masstotal_kg`), nesse caso o flip
+    // "Dimensionamento" (impresso no loop abaixo) documenta a causa.
+    println!("  σ={:.0}%: {} flip(s)  |  MTOW nominal: {:.1}kg  |  MTOW mundo +σ (massa-total): {:.1}kg",
+             robustness.sigma_mass_fraction * 100.0, robustness.flips.len(),
+             design_mtow_kg, robustness.mtow_masstotal_kg);
     for flip in &robustness.flips {
         println!("    {} (caso {}): {:.2} vs limite {:.2}",
                  flip.check, flip.caso, flip.valor, flip.limite);
@@ -580,8 +589,15 @@ fn main() {
                                              &propeller, &perf, mission, &electrical,
                                              &gear, &cfg.gear, cfg.fuel_system.capacity_l,
                                              &robustness);
-    let rc_ok   = perf.rc_sl_ms   >= 1.5;
-    let ceil_ok = perf.service_ceiling_m >= 3_000.0;
+    // Achado de review (ciclo 5): estes dois pisos agora são consumidos de
+    // `validation::constraint_checker` (fonte única) em vez de literais
+    // hardcoded aqui — `ConstraintChecker::verify` também os checa
+    // nominalmente (#21/#22), então `rc_ok`/`ceil_ok` abaixo ficam
+    // redundantes com `report.all_satisfied()`, mas mantidos como gates
+    // explícitos no relatório de console (rótulo próprio, mais legível que
+    // procurar dentro de `report.violations`).
+    let rc_ok   = perf.rc_sl_ms   >= RC_SL_MIN_MS;
+    let ceil_ok = perf.service_ceiling_m >= SERVICE_CEILING_MIN_M;
     let fl_ok   = struc.flutter_ok;
     let tip_ok  = gear.tipover_angle_deg < 55.0;
     // Carga de nariz (dois extremos), tipback e tail-strike (Task 2,
@@ -612,8 +628,8 @@ fn main() {
         // informativo — ver seu doc-comment em `specs.rs`).
         (mission.block_time_h >= req.endurance_min_h,
             format!("Autonomia da missão (block_time_h) ≥ {:.1} h", req.endurance_min_h)),
-        (rc_ok,                               "RC ≥ 1.5 m/s ao nível do mar".to_string()),
-        (ceil_ok,                             "Teto de serviço ≥ 3.000 m".to_string()),
+        (rc_ok,                               format!("RC ≥ {RC_SL_MIN_MS:.1} m/s ao nível do mar")),
+        (ceil_ok,                             format!("Teto de serviço ≥ {SERVICE_CEILING_MIN_M:.0} m")),
         (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)".to_string()),
         (tip_ok,                              "Anti-tombamento (lateral) < 55°".to_string()),
         (all_stable,                          "Estabilidade longitudinal (todos cenários, SM>3%, referência)".to_string()),
