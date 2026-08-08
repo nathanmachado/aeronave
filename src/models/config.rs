@@ -2761,6 +2761,29 @@ mod tests {
         assert!(err.to_string().contains("valor: 250"), "{err}");
     }
 
+    /// Fronteiras da faixa de `runway_available_m`: o intervalo é ABERTO
+    /// nos dois lados — `(300, 2000)`, comparadores `<=`/`>=` em
+    /// `validar_missao` — então 300,0 e 2000,0 são REJEITADOS e os
+    /// vizinhos imediatos aceitos. Testa a fronteira exata, não só um
+    /// valor bem fora dela (o teste acima usa 250,0).
+    #[test]
+    fn fronteiras_de_runway_available_m() {
+        for exato in ["300.0", "2000.0"] {
+            let toml = mission_toml_valido()
+                .replace("runway_available_m = 700.0", &format!("runway_available_m = {exato}"));
+            let err = parse_mission(&toml).expect_err(
+                "fronteira EXCLUSIVA da faixa de runway_available_m deveria ser rejeitada");
+            assert!(err.to_string().contains("runway_available_m"),
+                "erro de {exato} deveria nomear o campo: {err}");
+        }
+        for dentro in ["300.1", "1999.9"] {
+            let toml = mission_toml_valido()
+                .replace("runway_available_m = 700.0", &format!("runway_available_m = {dentro}"));
+            parse_mission(&toml)
+                .unwrap_or_else(|e| panic!("{dentro} (dentro da faixa aberta) deveria ser aceito: {e}"));
+        }
+    }
+
     // ─── [analysis] (Task 5.1) ──────────────────────────────────────────────
 
     #[test]

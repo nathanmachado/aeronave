@@ -285,6 +285,24 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// violações NOVAS de robustez. Ver `tests/gear_tipback.rs::
 /// constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_
 /// baseline_real` para o mesmo achado com os números completos.
+///
+/// ATUALIZAÇÃO (ciclo 6, revisão final — QUARTA violação honesta,
+/// 3 → 4): o ciclo 6 introduziu o requisito de pista (600 m,
+/// `config/missions/default.toml`, checks #23/#24) e, na revisão final do
+/// mesmo ciclo, descobriu-se que o check #24 gateava a pista de GRAMA com
+/// a distância de pouso PAVIMENTADA (`ldg_50ft_m`, μ de frenagem 0,40) —
+/// `mu_brake_grass` (0,30) era validado na config e NUNCA consumido. Com
+/// o pouso na grama de fato computado (`ldg_50ft_grass_m`), a rolagem de
+/// frenagem alonga ~65 m e a distância vai de **539,97 m (pavimentado,
+/// passava) para 604,99 m (grama, NÃO passa)** contra os 600 m
+/// disponíveis. Violação NOVA e honesta:
+/// `"Pouso (grama, 15 m): 605 m excede a pista disponível de 600 m"`.
+/// Ou seja: o pouso na grama nunca coube na pista de fazenda de 600 m —
+/// o modelo é que não estava olhando. Contagem esperada 3 → **4**;
+/// nenhuma tolerância foi afrouxada e nenhuma das 3 violações anteriores
+/// mudou de texto ou valor. A decolagem na grama (#23, 428,2 m) continua
+/// passando com folga. Ver `.superpowers/sdd/2026-08-08-ciclo6-pista-e-
+/// robustez-final/task-5-report.md` (seção "Correção pós-revisão final").
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_carga_de_nariz() {
     let out_path = std::env::temp_dir().join(format!(
@@ -324,8 +342,11 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    assert_eq!(violations.len(), 3,
-        "esperava EXATAMENTE 3 violações honestas no baseline real pós-ciclo-3: {violations:#?}");
+    // 3 → 4 (ciclo 6, revisão final): a 4ª é o pouso na GRAMA excedendo os
+    // 600 m da pista de fazenda — ver a ATUALIZAÇÃO na docstring acima. As
+    // 3 anteriores seguem idênticas, em texto e valor.
+    assert_eq!(violations.len(), 4,
+        "esperava EXATAMENTE 4 violações honestas no baseline real pós-ciclo-6: {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("Solo (piloto)")
             && v.contains("fora do envelope de CG admissível")),
         "esperava violação de envelope para o cenário 'Solo (piloto)' (CG ≈9,1% MAC, à frente \
@@ -339,6 +360,21 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
             && v.contains("excede o teto")),
         "esperava violação de carga de nariz (≈28,6% > teto de 25,0%; 29,0%→28,6%, mesma \
          re-medição do ciclo 4 Task 2): {violations:#?}");
+    // 4ª violação (ciclo 6, revisão final): pouso na GRAMA. O gate #24
+    // usava a distância PAVIMENTADA (539,97 m ≤ 600 m, passava); com
+    // `mu_brake_grass` finalmente consumido, o pouso real na grama é
+    // 604,99 m > 600 m. Assert NOMEADO (não só a contagem) para que uma
+    // futura mudança de superfície/μ não passe despercebida trocando uma
+    // violação por outra.
+    assert!(violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")
+            && v.contains("excede a pista disponível")),
+        "esperava violação de pouso na GRAMA excedendo a pista de 600 m (≈605,0 m — o pouso \
+         pavimentado, 540,0 m, cabia; a grama nunca coube, o modelo é que não olhava): \
+         {violations:#?}");
+    // A decolagem na grama (#23, ≈428,2 m) continua PASSANDO com folga —
+    // o achado é do pouso, não das duas distâncias de pista.
+    assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
+        "decolagem na grama (≈428,2 m) deveria continuar dentro dos 600 m: {violations:#?}");
     // Os DEMAIS cenários continuam DENTRO do envelope — o achado é de dois
     // cenários leves/dianteiros, não do envelope inteiro nem de um
     // envelope vazio.

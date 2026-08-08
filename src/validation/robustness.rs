@@ -168,6 +168,25 @@ pub fn adversarial_masses(
 /// mundo avaliado (dos dois casos direcionais, `m_p.trem_*_kg`; do caso
 /// massa-total, `sized_p.structural_masses.trem_*_kg`) — usadas pelo
 /// `LandingGearAgent` junto com o MTOW/CG extremos de `wb_p`.
+///
+/// POR QUE os limites de envelope são os NOMINAIS mesmo no mundo
+/// massa-total, onde o pipeline INTEIRO foi re-convergido (e portanto
+/// `wb_p.spec.cg_limit_{fwd,aft}_pct_mac` existem, recalculados) — duas
+/// razões, e as duas precisam valer:
+///   1. Semântica de FLIP: um flip é "o nominal passava, o perturbado
+///      não". A régua tem de ser a MESMA nos dois lados da comparação,
+///      senão um limite que se mexe mascara (ou inventa) um flip.
+///   2. Numérica: os limites de CG em %MAC são derivados de geometria da
+///      asa/empenagem, margem de estabilidade e autoridade de profundor —
+///      nenhuma dessas responde ao MTOW no modelo atual, então os limites
+///      re-convergidos do mundo +σ são numericamente os nominais. É a
+///      razão 2 que torna a razão 1 gratuita (nada é perdido por usar a
+///      régua nominal). Se um dia a geometria da asa passar a responder
+///      ao MTOW (área alar dimensionada por carga alar, por exemplo), a
+///      razão 2 cai e a escolha vira uma decisão de modelagem de verdade
+///      — daí o `debug_assert!` no chamador do caso massa-total (`run`),
+///      que grita exatamente nesse dia em vez de deixar a divergência
+///      passar silenciosa.
 fn evaluate_world(
     cfg: &AircraftConfig,
     caso: &str,
@@ -411,10 +430,13 @@ impl RobustnessAgent {
                     sized_p.state.mtow_kg, engine, req, &cfg_p.performance);
                 // Pista (Ciclo 6, task 2/3): mesma comparação de
                 // `ConstraintChecker::verify` #23/#24 (`perf.{to_50ft_grass,
-                // ldg_50ft}_m > req.runway_available_m` é violação, logo
-                // "melhor" é MENOR distância — `maior_melhor = false`) —
-                // acrescentadas à lista existente de gates de desempenho,
-                // mesmo gate `nom_ok && !p_ok` dos demais.
+                // ldg_50ft_grass}_m > req.runway_available_m` é violação,
+                // logo "melhor" é MENOR distância — `maior_melhor = false`)
+                // — acrescentadas à lista existente de gates de desempenho,
+                // mesmo gate `nom_ok && !p_ok` dos demais. As DUAS
+                // grandezas são de GRAMA, iguais às do checker (revisão
+                // final do ciclo 6: o pouso passou a usar
+                // `ldg_50ft_grass_m` — ver `PerformanceSpec`).
                 for (nome, nom, p, lim, maior_melhor) in [
                     ("Razão de subida", perf_nominal.rc_sl_ms, perf_p.rc_sl_ms, RC_SL_MIN_MS, true),
                     ("Velocidade de cruzeiro", perf_nominal.v_cruise_kmh, perf_p.v_cruise_kmh,
@@ -423,8 +445,8 @@ impl RobustnessAgent {
                      perf_p.service_ceiling_m, SERVICE_CEILING_MIN_M, true),
                     ("Decolagem (grama, 15 m)", perf_nominal.to_50ft_grass_m, perf_p.to_50ft_grass_m,
                      req.runway_available_m, false),
-                    ("Pouso (15 m)", perf_nominal.ldg_50ft_m, perf_p.ldg_50ft_m,
-                     req.runway_available_m, false),
+                    ("Pouso (grama, 15 m)", perf_nominal.ldg_50ft_grass_m,
+                     perf_p.ldg_50ft_grass_m, req.runway_available_m, false),
                 ] {
                     let nom_ok = if maior_melhor { nom >= lim } else { nom <= lim };
                     let p_ok = if maior_melhor { p >= lim } else { p <= lim };
@@ -444,8 +466,41 @@ impl RobustnessAgent {
                 // próprio em `RobustnessSpec` (só os dois casos direcionais
                 // têm `cg_fwd_case_pct_mac`/`cg_aft_case_pct_mac`) —
                 // descartada aqui.
+                //
+                // PRÉ-CONDIÇÃO da comparação contra limites NOMINAIS (ver
+                // razão 2 da docstring de `evaluate_world`): o mundo +σ
+                // re-convergiu o pipeline inteiro, logo `sized_p.wb.spec`
+                // TEM limites de CG próprios — e eles precisam coincidir
+                // com os nominais, senão a régua do flip estaria se
+                // mexendo junto com o valor medido. Vale hoje porque a
+                // geometria da asa não responde ao MTOW; se um dia
+                // responder, este assert grita em vez de deixar a
+                // divergência passar silenciosa.
+                debug_assert!(
+                    (sized_p.wb.spec.cg_limit_fwd_pct_mac
+                        - wb_nominal.spec.cg_limit_fwd_pct_mac).abs() < 1e-9
+                    && (sized_p.wb.spec.cg_limit_aft_pct_mac
+                        - wb_nominal.spec.cg_limit_aft_pct_mac).abs() < 1e-9,
+                    "limites de CG do mundo massa-total divergiram dos nominais \
+                     (fwd {:.12}% vs {:.12}%, aft {:.12}% vs {:.12}% MAC) — o caso \
+                     massa-total compara o CG re-convergido contra a régua NOMINAL, \
+                     no MESMO frame de %MAC (fração da MAC medida a partir do bordo \
+                     de ataque da MAC), o que só é honesto enquanto os limites forem \
+                     invariantes ao MTOW. Se a geometria da asa passou a responder ao \
+                     MTOW, esta comparação precisa ser reprojetada, não silenciada.",
+                    sized_p.wb.spec.cg_limit_fwd_pct_mac, wb_nominal.spec.cg_limit_fwd_pct_mac,
+                    sized_p.wb.spec.cg_limit_aft_pct_mac, wb_nominal.spec.cg_limit_aft_pct_mac,
+                );
+                // `&cfg_p` (não `cfg` — mesmo ruling do ciclo 5, Minor 4,
+                // já aplicado ao `PerformanceAgent` acima): este bloco
+                // avalia o mundo +σ, e é a config DESSE mundo que deve
+                // alimentar a geometria/gear usados na avaliação. Hoje
+                // `[wing]`/`[gear]` não são mutados entre `cfg`/`cfg_p`
+                // (só os 5 fatores de composto o são), então os dois são
+                // numericamente idênticos — mas passar `cfg` era um
+                // desalinhamento de intenção silencioso.
                 let (_cg_range_masstotal, flips_masstotal) = evaluate_world(
-                    cfg, "massa-total", &sized_p.wb,
+                    &cfg_p, "massa-total", &sized_p.wb,
                     sized_p.structural_masses.trem_principal_kg,
                     sized_p.structural_masses.trem_nariz_kg,
                     wb_nominal, gear_nominal,
@@ -808,6 +863,79 @@ mod tests {
             "distância de decolagem sob +σ ({:.1} m) deveria exceder a pista marginal ({:.1} m) — \
              é isso que caracteriza o flip", flip.valor, flip.limite);
         assert!((flip.limite - n.req.runway_available_m).abs() < 1e-9);
+    }
+
+
+    /// Carga de NARIZ no mundo massa-total (deferred da Task 3 do ciclo 6,
+    /// fechado na revisão final): fixture com `gear.x_main_m` recuado de
+    /// 3,75 para 3,30 m (achado por sonda numérica) até a carga de nariz
+    /// MÍNIMA nominal ficar logo ACIMA do piso de 8% (≈8,50%) — o mundo +σ
+    /// re-convergido a derruba para ≈7,02%, cruzando o piso e gerando o
+    /// flip "Carga de nariz mín" caso "massa-total".
+    ///
+    /// POR QUE o piso (mín) e não o TETO (máx), como o achado de revisão
+    /// sugeria: no modelo atual, o mundo massa-total desloca o CG para
+    /// TRÁS (as 5 massas de composto ×(1+σ) são dominadas por componentes
+    /// atrás do CG vazio), e carga de nariz CAI com CG traseiro. Medido na
+    /// mesma sonda, para `x_main_m` de 3,16 a 3,32 m: a carga de nariz
+    /// MÁXIMA (medida no CG mais dianteiro) vai de ≈24,4→20,9%,
+    /// 24,9→21,5%, ..., 29,9→26,6% — SEMPRE menor no mundo +σ que no
+    /// nominal. Logo o TETO de 25% é inatingível por esse mundo: para o
+    /// perturbado cruzá-lo, o nominal já teria de estar acima (e aí não há
+    /// flip, por definição). O piso mín é o lado do gate de carga de
+    /// nariz que este mundo de fato pressiona — testá-lo é o teste
+    /// dirigido honesto; forçar o teto exigiria uma fixture em que o +σ
+    /// movesse o CG para a FRENTE, o que este modelo de massas não
+    /// produz.
+    #[test]
+    fn carga_de_nariz_no_mundo_massa_total_flipa_quando_marginal() {
+        let mut cfg = config_teste();
+        cfg.gear.x_main_m = 3.30; // sonda numérica: mín nominal ≈8,50% (piso 8%)
+        let n = nominal_pipeline(cfg);
+        assert!(n.gear.nose_load_min_pct >= NOSE_LOAD_MIN_FLOOR_PCT,
+            "pré-condição do teste: carga de nariz MÍNIMA nominal ({:.3}%) deveria passar por \
+             pouco o piso de {:.1}%", n.gear.nose_load_min_pct, NOSE_LOAD_MIN_FLOOR_PCT);
+        assert!(n.gear.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT,
+            "pré-condição/documentação da fixture: a carga de nariz MÁXIMA nominal ({:.3}%) já \
+             está acima do teto de {:.1}% nesta posição de trem — nenhum flip de 'Carga de nariz \
+             máx' é possível aqui, por definição de flip (ver docstring)",
+             n.gear.nose_load_max_pct, NOSE_LOAD_MAX_CEILING_PCT);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+
+        let flips_nariz: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Carga de nariz mín" && f.caso == "massa-total")
+            .collect();
+        assert_eq!(flips_nariz.len(), 1,
+            "esperava exatamente 1 flip Carga de nariz mín/massa-total: {:?}", out.flips);
+        let flip = flips_nariz[0];
+        assert!((flip.limite - NOSE_LOAD_MIN_FLOOR_PCT).abs() < 1e-9,
+            "limite do flip deveria ser o piso de carga de nariz: {} vs {}",
+            flip.limite, NOSE_LOAD_MIN_FLOOR_PCT);
+        assert!(flip.valor < flip.limite,
+            "carga de nariz mín sob +σ ({:.3}%) deveria ficar ABAIXO do piso ({:.3}%) — é isso \
+             que caracteriza o flip", flip.valor, flip.limite);
+        assert!(flip.valor < n.gear.nose_load_min_pct,
+            "o mundo +σ deveria REDUZIR a carga de nariz mínima (CG mais traseiro): {:.3}% \
+             perturbado vs {:.3}% nominal", flip.valor, n.gear.nose_load_min_pct);
+
+        // Fixture folgada (`config_teste()` intacta, trem em 3,75 m): a
+        // carga de nariz mínima nominal tem folga ampla sobre o piso —
+        // nenhum flip de nariz é gerado no caso massa-total.
+        let n_folgada = nominal_pipeline(config_teste());
+        let out_folgada = RobustnessAgent::run(
+            &n_folgada.cfg, &n_folgada.engine, &n_folgada.req, &n_folgada.state, &n_folgada.wing,
+            &n_folgada.emp, &n_folgada.masses, &n_folgada.wb, &n_folgada.gear, &n_folgada.mission,
+            &n_folgada.perf,
+        );
+        assert!(!out_folgada.flips.iter().any(|f| f.check.starts_with("Carga de nariz")
+            && f.caso == "massa-total"),
+            "fixture folgada não deveria produzir flip de carga de nariz no caso massa-total: {:?}",
+            out_folgada.flips);
     }
 
     /// Envelope/nariz no mundo massa-total: fixture com `arms.pax_rear_m`

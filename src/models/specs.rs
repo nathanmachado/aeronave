@@ -478,8 +478,20 @@ pub struct PerformanceSpec {
     /// Distância de decolagem sobre obstáculo de 15m/50ft (grama/terra, m).
     pub to_50ft_grass_m: f64,
     /// Distância de pouso sobre obstáculo de 15m/50ft (pista pavimentada, m)
-    /// — soma de segmentos: aproximação (γ padrão) + flare + ground roll.
+    /// — soma de segmentos: aproximação (γ padrão) + flare + ground roll
+    /// com `mu_brake_paved`. INFORMATIVO desde o ciclo 6 (revisão final):
+    /// o gate de pista (#24) usa `ldg_50ft_grass_m`, não este campo.
     pub ldg_50ft_m: f64,
+    /// Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (m) —
+    /// mesmos segmentos de `ldg_50ft_m`, mas a rolagem de solo usa
+    /// `mu_brake_grass` (menor que `mu_brake_paved`): frenagem pior
+    /// ALONGA a rolagem, logo esta distância é sempre MAIOR que a
+    /// pavimentada. É o caso DIMENSIONANTE da premissa de pista do
+    /// projeto (operação em pista de terra/grama, não pavimentada) e a
+    /// grandeza comparada contra `runway_available_m` na checagem #24
+    /// (`ConstraintChecker::verify`) — simétrico ao par
+    /// `to_50ft_paved_m`/`to_50ft_grass_m` da decolagem.
+    pub ldg_50ft_grass_m: f64,
 }
 
 /// Saída do StructuralAgent
@@ -932,28 +944,43 @@ pub struct ElectricalSpec {
 /// em vez de dessincronizar como o datum absoluto antigo). Ver
 /// `docs/aircraft_spec.schema.md` §1 e §4.
 ///
-/// v4.8 (Task 4, ciclo6-pista-e-robustez-final): NENHUM campo NOVO no JSON
-/// — bump puramente de CONTRATO DE COMPORTAMENTO, não de forma. Três
-/// mudanças, nenhuma delas visível na estrutura de `AircraftReport`:
+/// v4.8 (Task 4, ciclo6-pista-e-robustez-final; entrada EMENDADA na
+/// revisão final do mesmo ciclo — a 4.8 ainda não havia shipado quando o
+/// achado abaixo apareceu, então foi corrigida aqui em vez de virar uma
+/// 4.9): UM campo NOVO no JSON, `performance.ldg_50ft_grass_m`, mais o
+/// contrato de comportamento das checagens de pista. Quatro mudanças:
 /// (1) `Requirements` (config de missão, não schema JSON) ganha um campo
 /// NOVO obrigatório, `runway_available_m` (faixa válida (300, 2000) m) —
 /// TOMLs de missão antigos sem esse campo falham o parse do crate `toml`
 /// por campo ausente, mesmo padrão de migração sem valor-padrão implícito
-/// já usado no `e_h` da v4.4; (2) `ConstraintChecker::verify` ganha as
-/// checagens #23 (decolagem na grama sobre obstáculo de 15 m > pista
-/// disponível) e #24 (pouso sobre 15 m > pista disponível) — só podem
-/// ADICIONAR strings a `violations`, nunca remover as existentes; (3) o
-/// caso "massa-total" do check #19 (`RobustnessAgent`, `robustness.flips`)
-/// deixa de descartar `sized_p.wb` e passa a avaliar TAMBÉM pista
-/// (#23/#24) e envelope/nariz/tipback sob o mundo re-convergido ×(1+σ) —
-/// antes só os gates de desempenho (margem, VS0, rc, v_cruise, teto) eram
-/// checados nesse mundo; os casos direcionais (±σ) já cobriam CG desde a
-/// v4.6. Mudança ADITIVA em comportamento (mais violações/flips
-/// POSSÍVEIS, nunca menos), consumidores v4.7 continuam funcionando sem
-/// alteração — o baseline real (σ=15%, pista 600 m) não muda de veredito:
-/// FAIL com as MESMAS 3 violações de v4.7 (checks #23/#24 passam limpos,
-/// 428,2/540,0 m ≤ 600 m) e zero flips novos no caso massa-total. Ver
-/// `docs/aircraft_spec.schema.md` §1.
+/// já usado no `e_h` da v4.4; (2) `PerformanceSpec` ganha
+/// `ldg_50ft_grass_m` (f64, m) — distância de pouso sobre 15 m em GRAMA,
+/// mesmos segmentos de `ldg_50ft_m` mas com `mu_brake_grass` na rolagem
+/// de frenagem. Campo ADITIVO (nenhum existente muda de nome/tipo/
+/// unidade); `ldg_50ft_m` (pavimentado) permanece, agora INFORMATIVO;
+/// (3) `ConstraintChecker::verify` ganha as checagens #23 (decolagem na
+/// grama sobre obstáculo de 15 m > pista disponível) e #24 (pouso na
+/// GRAMA sobre 15 m > pista disponível — usa `ldg_50ft_grass_m`, não o
+/// pavimentado: gatear uma pista de grama com a distância pavimentada era
+/// otimista por construção, e `mu_brake_grass` era validado na config
+/// desde a Task 4.7 sem NUNCA ser consumido) — só podem ADICIONAR strings
+/// a `violations`, nunca remover as existentes; (4) o caso "massa-total"
+/// do check #19 (`RobustnessAgent`, `robustness.flips`) deixa de
+/// descartar `sized_p.wb` e passa a avaliar TAMBÉM pista (#23/#24, ambas
+/// as grandezas de grama) e envelope/nariz/tipback sob o mundo
+/// re-convergido ×(1+σ) — antes só os gates de desempenho (margem, VS0,
+/// rc, v_cruise, teto) eram checados nesse mundo; os casos direcionais
+/// (±σ) já cobriam CG desde a v4.6. Mudança ADITIVA em forma e em
+/// comportamento (um campo a mais; mais violações/flips POSSÍVEIS, nunca
+/// menos), consumidores v4.7 continuam funcionando sem alteração.
+/// ACHADO HONESTO do baseline real (σ=15%, pista 600 m): `validation_
+/// status` continua `"FAIL"`, mas com **4** violações, não 3 — a QUARTA é
+/// `"Pouso (grama, 15 m): 605 m excede a pista disponível de 600 m"`. O
+/// pouso pavimentado (539,97 m) cabia nos 600 m; o de grama (604,99 m)
+/// não cabe, e nunca coubera — o modelo é que não estava olhando. A
+/// decolagem na grama (#23, 428,2 m) passa limpa, e o caso massa-total
+/// ampliado não produz nenhum flip novo. Ver `docs/aircraft_spec.schema.md`
+/// §1 e `tests/cli.rs`.
 pub const SCHEMA_VERSION: &str = "4.8";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as

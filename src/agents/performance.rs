@@ -571,6 +571,14 @@ impl PerformanceAgent {
         let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, perf_cfg.mu_brake_paved);
         let d_ldg_50ft = landing_distance_50ft_m(mass_ldg, rho_sl, wing, perf_cfg.mu_brake_paved,
                                                    perf_cfg);
+        // Pouso na GRAMA sobre 15 m (revisão final do ciclo 6): MESMA
+        // chamada do pavimentado acima, só o μ de frenagem troca
+        // (`mu_brake_grass` < `mu_brake_paved` ⇒ rolagem mais longa). Até
+        // esta correção, `mu_brake_grass` era validado em `config.rs` e
+        // NUNCA consumido — o check #24 gateava a pista de grama com a
+        // distância de pouso PAVIMENTADA, otimista por construção.
+        let d_ldg_50ft_grass = landing_distance_50ft_m(mass_ldg, rho_sl, wing,
+                                                         perf_cfg.mu_brake_grass, perf_cfg);
 
         // Melhor planeio (Task 4.7) — MTOW, nível do mar, motor cortado.
         let (v_bg_kmh, ld_max) = best_glide(mtow_kg, rho_sl, wing);
@@ -600,6 +608,7 @@ impl PerformanceAgent {
             to_50ft_paved_m:      d_to_50ft_paved,
             to_50ft_grass_m:      d_to_50ft_grass,
             ldg_50ft_m:           d_ldg_50ft,
+            ldg_50ft_grass_m:     d_ldg_50ft_grass,
         }
     }
 }

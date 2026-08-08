@@ -105,6 +105,10 @@ fn carrega_missao_default_do_disco_campo_a_campo() {
     assert_eq!(req.airfield_altitude_m, 0.0);
     assert_eq!(req.isa_delta_c, 0.0);
     assert_eq!(req.min_fuel_margin_fraction, 0.05);
+    // Ciclo 6 (task 2): premissa de pista de fazenda — 600 m disponíveis,
+    // gate dos checks #23 (decolagem na grama sobre 15 m) e #24 (pouso na
+    // grama sobre 15 m).
+    assert_eq!(req.runway_available_m, 600.0);
     assert_eq!(req.analysis.taxi_fuel_l, 3.0);
     assert_eq!(req.analysis.descent_rate_ms, 4.0);
     assert_eq!(req.analysis.descent_power_fraction, 0.20);

@@ -200,7 +200,8 @@
     "climb_gradient_pct": 14.500655464532814,
     "to_50ft_paved_m": 381.4134154981647,
     "to_50ft_grass_m": 428.2206699463652,
-    "ldg_50ft_m": 539.967948720707
+    "ldg_50ft_m": 539.967948720707,
+    "ldg_50ft_grass_m": 604.9911713391879
   },
   "vn_diagram": {
     "va_kmh": 240.63410896066634,
@@ -432,7 +433,8 @@
   "violations": [
     "Cenário 'Solo (piloto)': CG 9.1% MAC fora do envelope de CG admissível [13.0%–43.5%] (SM=0.393; x_cg=3.014m, limites em x: [3.062m, 3.442m])",
     "Cenário '2 pax dianteiros': CG 12.5% MAC fora do envelope de CG admissível [13.0%–43.5%] (SM=0.360; x_cg=3.056m, limites em x: [3.062m, 3.442m])",
-    "Carga de nariz: 28.6% no CG mais DIANTEIRO real excede o teto de 25.0% (risco de sobrecarga estrutural/pneu do trem de nariz)"
+    "Carga de nariz: 28.6% no CG mais DIANTEIRO real excede o teto de 25.0% (risco de sobrecarga estrutural/pneu do trem de nariz)",
+    "Pouso (grama, 15 m): 605 m excede a pista disponível de 600 m"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"

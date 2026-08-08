@@ -446,8 +446,13 @@ fn main() {
               (rolagem ×1,5 — estimativa simplificada)",
              perf.to_distance_paved_m, perf.to_distance_grass_m,
              perf.landing_distance_m);
-    println!("  Sobre 15m/50ft — TO pav: {:.0}m  TO grama: {:.0}m  Pouso: {:.0}m\n",
-             perf.to_50ft_paved_m, perf.to_50ft_grass_m, perf.ldg_50ft_m);
+    // As duas distâncias GATEADAS (#23/#24) são as de grama — ecoadas com a
+    // pista disponível ao lado para que o print sozinho já mostre folga ou
+    // estouro; as pavimentadas seguem informativas.
+    println!("  Sobre 15m/50ft — TO pav: {:.0}m  TO grama: {:.0}m (vs pista {:.0}m)  \
+              Pouso pav: {:.0}m  Pouso grama: {:.0}m (vs pista {:.0}m)\n",
+             perf.to_50ft_paved_m, perf.to_50ft_grass_m, req.runway_available_m,
+             perf.ldg_50ft_m, perf.ldg_50ft_grass_m, req.runway_available_m);
 
     // ── Agente 5: Estrutura ───────────────────────────────────────────────────
     println!("[ AGENTE 5 ] StructuralAgent — Longarina e Flutter");

@@ -430,10 +430,14 @@ pub struct PerformanceCfg {
     pub mu_brake_paved: f64,
     /// Coeficiente de atrito de frenagem em grama firme/terra compactada.
     /// As funções de pouso (`agents::performance::landing_distance_m`/
-    /// `landing_distance_50ft_m`) recebem `mu_brake` genericamente — este
-    /// valor está pronto para uso, mas `PerformanceSpec` hoje só modela
-    /// pouso em pista pavimentada (mesma assimetria pré-existente: só
-    /// decolagem tinha variantes pavimentada/grama antes da Task 4.7).
+    /// `landing_distance_50ft_m`) recebem `mu_brake` genericamente; desde
+    /// a revisão final do ciclo 6 este valor é de fato CONSUMIDO, em
+    /// `PerformanceSpec::ldg_50ft_grass_m` — o pouso na grama, que é o
+    /// caso dimensionante da premissa de pista do projeto e a grandeza
+    /// gateada pela checagem #24. Antes disso o campo era só validado
+    /// (`config.rs`) e nunca usado: `PerformanceSpec` modelava apenas
+    /// pouso pavimentado (assimetria pré-existente — só a decolagem tinha
+    /// variantes pavimentada/grama desde a Task 4.7).
     pub mu_brake_grass: f64,
     /// Fator empírico (McCormick) aplicado sobre a tração estática IDEAL de
     /// Rankine-Froude (disco atuador) — a teoria de disco atuador

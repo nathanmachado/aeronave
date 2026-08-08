@@ -515,18 +515,33 @@ impl ConstraintChecker {
         // disponível (Ciclo 6, task 2) — premissa fundadora do projeto:
         // operação em pista de terra/grama (`req.runway_available_m`,
         // `config/missions/default.toml`), não pavimentada.
+        //
+        // Semântica INCLUSIVA deliberada nos dois checks (#23/#24): o
+        // comparador é `>`, logo distância EXATAMENTE igual à pista
+        // disponível PASSA. Consistente com `ok_clearance` da hélice
+        // (`agents::propeller`, `>=`) e com os demais pisos/tetos deste
+        // arquivo — o limite pertence à região aceitável, e a margem
+        // operacional real é responsabilidade do valor configurado em
+        // `runway_available_m`, não de uma folga implícita no operador.
         if perf.to_50ft_grass_m > req.runway_available_m {
             violations.push(format!(
                 "Decolagem (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
                 perf.to_50ft_grass_m, req.runway_available_m
             ));
         }
-        // 24. Pouso sobre obstáculo de 15 m dentro da pista disponível
-        // (Ciclo 6, task 2) — mesmo raciocínio da checagem #23 acima.
-        if perf.ldg_50ft_m > req.runway_available_m {
+        // 24. Pouso na GRAMA sobre obstáculo de 15 m dentro da pista
+        // disponível (Ciclo 6, task 2; superfície corrigida na revisão
+        // final do mesmo ciclo) — mesmo raciocínio da checagem #23 acima,
+        // inclusive a semântica inclusiva. Usa `ldg_50ft_grass_m`
+        // (`mu_brake_grass`), NÃO `ldg_50ft_m` (pavimentado): gatear uma
+        // pista de grama com a distância de pouso pavimentada era otimista
+        // por construção — a frenagem pior da grama alonga a rolagem, e é
+        // esse o caso dimensionante da premissa de pista. O pavimentado
+        // permanece no spec como informativo.
+        if perf.ldg_50ft_grass_m > req.runway_available_m {
             violations.push(format!(
-                "Pouso (15 m): {:.0} m excede a pista disponível de {:.0} m",
-                perf.ldg_50ft_m, req.runway_available_m
+                "Pouso (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
+                perf.ldg_50ft_grass_m, req.runway_available_m
             ));
         }
 
@@ -1034,6 +1049,7 @@ mod tests {
             to_50ft_paved_m: 400.0,
             to_50ft_grass_m: 450.0,
             ldg_50ft_m: 550.0,
+            ldg_50ft_grass_m: 620.0,
         }
     }
 
@@ -1096,6 +1112,7 @@ mod tests {
             to_50ft_paved_m: 400.0,
             to_50ft_grass_m: 450.0,
             ldg_50ft_m: 550.0,
+            ldg_50ft_grass_m: 620.0,
         }
     }
 
@@ -1181,15 +1198,42 @@ mod tests {
     #[test]
     fn check_24_reprova_pouso_maior_que_pista() {
         let (mut req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
-        req.runway_available_m = perf.ldg_50ft_m - 1.0;
+        // Revisão final do ciclo 6: o gate é o pouso na GRAMA
+        // (`ldg_50ft_grass_m`), não o pavimentado.
+        req.runway_available_m = perf.ldg_50ft_grass_m - 1.0;
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness));
 
-        assert!(report.violations.iter().any(|v| v.contains("Pouso") && v.contains("pista disponível")),
-            "esperava violação de pouso excedendo a pista disponível \
-             ({:.1} m > {:.1} m), obteve: {:?}", perf.ldg_50ft_m, req.runway_available_m,
+        assert!(report.violations.iter().any(|v| v.contains("Pouso (grama") && v.contains("pista disponível")),
+            "esperava violação de pouso na grama excedendo a pista disponível \
+             ({:.1} m > {:.1} m), obteve: {:?}", perf.ldg_50ft_grass_m, req.runway_available_m,
              report.violations);
+    }
+
+    /// O gate #24 é o pouso na GRAMA, não o pavimentado: com a pista
+    /// disponível ajustada para ficar ENTRE as duas distâncias (acima do
+    /// pavimentado, abaixo da grama), o check DEVE reprovar. Antes da
+    /// revisão final do ciclo 6 (quando #24 comparava `ldg_50ft_m`), esta
+    /// faixa passava limpo — é exatamente a janela de otimismo que a
+    /// correção fecha.
+    #[test]
+    fn check_24_usa_a_grama_e_nao_o_pavimentado() {
+        let (mut req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
+        assert!(perf.ldg_50ft_grass_m > perf.ldg_50ft_m,
+            "pré-condição física: frenagem pior na grama (mu_brake_grass < mu_brake_paved) deveria \
+             ALONGAR o pouso — grama {:.1} m vs pavimentado {:.1} m",
+             perf.ldg_50ft_grass_m, perf.ldg_50ft_m);
+        // Pista entre as duas distâncias: o pavimentado caberia, a grama não.
+        req.runway_available_m = (perf.ldg_50ft_m + perf.ldg_50ft_grass_m) / 2.0;
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness));
+
+        assert!(report.violations.iter().any(|v| v.contains("Pouso (grama")),
+            "pista de {:.1} m acomoda o pouso pavimentado ({:.1} m) mas NÃO o de grama ({:.1} m) — \
+             #24 deveria reprovar: {:?}", req.runway_available_m, perf.ldg_50ft_m,
+             perf.ldg_50ft_grass_m, report.violations);
     }
 
     #[test]
@@ -1201,8 +1245,9 @@ mod tests {
 
         assert!(!report.violations.iter().any(|v| v.contains("pista disponível")),
             "fixture intacta (pista de {:.0} m sintéticos) não deveria violar #23/#24 — \
-             decolagem grama {:.1} m, pouso {:.1} m: {:?}",
-             req.runway_available_m, perf.to_50ft_grass_m, perf.ldg_50ft_m, report.violations);
+             decolagem grama {:.1} m, pouso grama {:.1} m: {:?}",
+             req.runway_available_m, perf.to_50ft_grass_m, perf.ldg_50ft_grass_m,
+             report.violations);
     }
 
     // ─── Task 5.2: orçamento elétrico ────────────────────────────────────

@@ -338,26 +338,49 @@ documentação a ser corrigido, não um comportamento aceitável.
     prop_axis_above_cg_m` em vez do datum absoluto antigo — acopla a
     folga de hélice ao comprimento do trem, para que encurtar o trem
     consuma folga de hélice automaticamente. Ver §3 e §4 abaixo.
-- **v4.8** (Task 4, ciclo6-pista-e-robustez-final): NENHUM campo NOVO
-  neste schema JSON — bump puramente de CONTRATO DE COMPORTAMENTO
-  (`violations`/`flips` podem conter textos NOVOS; nenhum bloco/campo
-  existente muda de nome, tipo ou unidade). Três mudanças:
+- **v4.8** (Task 4, ciclo6-pista-e-robustez-final; entrada **EMENDADA**
+  na revisão final do mesmo ciclo — a v4.8 ainda NÃO havia shipado
+  quando o achado do pouso na grama apareceu, então a entrada foi
+  corrigida no lugar em vez de virar uma v4.9): **UM campo NOVO** neste
+  schema JSON (`performance.ldg_50ft_grass_m`), mais contrato de
+  COMPORTAMENTO (`violations`/`flips` podem conter textos NOVOS; nenhum
+  bloco/campo existente muda de nome, tipo ou unidade). Quatro mudanças:
   1. **Requisito de pista** — `ConstraintChecker::verify` ganha as
      checagens #23 (decolagem na GRAMA sobre obstáculo de 15 m,
      `performance.to_50ft_grass_m`, excede a pista disponível) e #24
-     (pouso sobre 15 m, `performance.ldg_50ft_m`, idem) — comparadas
-     contra `runway_available_m`, um requisito NOVO **obrigatório** de
-     missão (não deste schema JSON — ver migração de CONFIGURAÇÃO
-     abaixo). Textos de violação NOVOS possíveis: `"Decolagem (grama,
-     15 m): {d} m excede a pista disponível de {p} m"` e `"Pouso (15 m):
-     {d} m excede a pista disponível de {p} m"`.
+     (pouso na GRAMA sobre 15 m, `performance.ldg_50ft_grass_m`, idem) —
+     comparadas contra `runway_available_m`, um requisito NOVO
+     **obrigatório** de missão (não deste schema JSON — ver migração de
+     CONFIGURAÇÃO abaixo). Textos de violação NOVOS possíveis:
+     `"Decolagem (grama, 15 m): {d} m excede a pista disponível de
+     {p} m"` e `"Pouso (grama, 15 m): {d} m excede a pista disponível de
+     {p} m"`. Os dois comparadores são `>`, isto é, semântica
+     **INCLUSIVA deliberada**: distância EXATAMENTE igual à pista
+     disponível PASSA — consistente com `propeller.ok_clearance` (`>=`)
+     e com os demais pisos/tetos do checker; a margem operacional é
+     responsabilidade do valor configurado em `runway_available_m`, não
+     de uma folga implícita no operador.
+  1b. **Campo NOVO `performance.ldg_50ft_grass_m`** (f64, m) — distância
+     de pouso sobre 15 m em GRAMA: mesmos segmentos de `ldg_50ft_m`
+     (aproximação + flare + rolagem de frenagem), mas a rolagem usa
+     `[performance].mu_brake_grass` em vez de `mu_brake_paved`. Frenagem
+     pior ALONGA a rolagem, logo é sempre MAIOR que a pavimentada, e é o
+     caso DIMENSIONANTE da premissa de pista do projeto. Motivo do
+     campo: `mu_brake_grass` existia na config desde a Task 4.7,
+     validado e **nunca consumido** — o check #24 gateava uma pista de
+     grama com a distância de pouso PAVIMENTADA, otimista por
+     construção. `ldg_50ft_m` permanece no JSON, agora INFORMATIVO
+     (simétrico ao par `to_50ft_paved_m`/`to_50ft_grass_m` da
+     decolagem). Campo ADITIVO — consumidores v4.7 que ignoram campos
+     desconhecidos seguem funcionando.
   2. **Gates do caso "massa-total" ampliados** (checagem #19,
      `robustness.flips`) — até a v4.7, o mundo "massa-total"
      (`RobustnessAgent`, MTOW re-convergido com as 5 massas estruturais
      compostas ×(1+σ)) só avaliava os gates de DESEMPENHO (margem de
      combustível, VS0, razão de subida, v_cruise, teto de serviço);
      `sized_p.wb` (o CG re-convergido desse mundo) era descartado. Desde
-     esta task, o mundo massa-total avalia TAMBÉM pista (#23/#24 acima) e
+     esta task, o mundo massa-total avalia TAMBÉM pista (#23/#24 acima,
+     as duas grandezas de GRAMA, iguais às do checker) e
      envelope de CG/carga de nariz/tipback — a MESMA avaliação já aplicada
      aos dois casos direcionais (±σ) desde a v4.6, agora reutilizada
      (função helper compartilhada) sobre `sized_p.wb`/`LandingGearAgent`
@@ -370,9 +393,10 @@ documentação a ser corrigido, não um comportamento aceitável.
      posicionais) — mudança de assinatura Rust interna, ZERO efeito no
      JSON gerado (mesmos valores, mesma ordem de checagem, mesmas
      mensagens para os checks #1-22 já existentes).
-  - Mudança ADITIVA em comportamento (mais violações/flips POSSÍVEIS,
-    nunca menos; nenhum texto/campo existente removido ou alterado),
-    consumidores v4.7 continuam funcionando sem alteração.
+  - Mudança ADITIVA em forma e em comportamento (um campo novo; mais
+    violações/flips POSSÍVEIS, nunca menos; nenhum texto/campo existente
+    removido ou alterado), consumidores v4.7 continuam funcionando sem
+    alteração.
   - **Migração de CONFIGURAÇÃO** (`mission.toml`, não deste schema
     JSON): ganha um campo NOVO **obrigatório** — `runway_available_m`
     (faixa válida (300, 2000) m). TOMLs de missão antigos sem esse campo
@@ -382,17 +406,29 @@ documentação a ser corrigido, não um comportamento aceitável.
     de pista de fazenda, deliberadamente apertada) e `rotax_ferry.toml`
     (800 m — ferry entre aeródromos) para valores de referência.
   - **Achado honesto do baseline real** (`config/aircraft/
-    baseline_4seat.toml`, missão `default.toml`, pista 600 m): os checks
-    #23/#24 passam LIMPOS (`to_50ft_grass_m` ≈ 428,2 m e `ldg_50ft_m` ≈
-    540,0 m, ambos ≤ 600 m) — nenhuma violação nova de pista. O caso
-    massa-total ampliado não produz nenhum flip novo (as margens
-    nominais que já absorviam a perturbação ±σ direcional desde a v4.6
-    também absorvem a perturbação ×(1+σ) do massa-total, no mundo de
-    desempenho JÁ verificado desde a v4.7). `validation_status` continua
-    `"FAIL"` com as MESMAS 3 violações nominais (dois cenários de
-    envelope + carga de nariz máxima, ver entrada "Ciclo 3" acima). Ver
-    `tests/cli.rs`, `src/validation/constraint_checker.rs` (mod tests) e
-    `src/validation/robustness.rs` (mod tests).
+    baseline_4seat.toml`, missão `default.toml`, pista 600 m) —
+    CORRIGIDO na revisão final do ciclo; a redação anterior desta
+    entrada dizia que "os checks #23/#24 passam LIMPOS", o que era
+    verdade apenas porque #24 media a superfície ERRADA:
+    - **#23 (decolagem na grama) PASSA** — `to_50ft_grass_m` ≈ 428,2 m
+      contra 600 m, folga de ≈172 m.
+    - **#24 (pouso na grama) REPROVA** — `ldg_50ft_grass_m` ≈ 605,0 m
+      contra 600 m. Com o μ pavimentado (o que o check media antes da
+      correção) a distância era 540,0 m e cabia; com `mu_brake_grass`
+      = 0,30 a rolagem de frenagem alonga ≈65 m e a distância estoura a
+      pista por ≈5 m. Não é uma regressão de projeto: o pouso na grama
+      nunca coubera nos 600 m — o modelo é que não estava olhando.
+    - O caso massa-total ampliado não produz nenhum flip novo (as
+      margens nominais que já absorviam a perturbação ±σ direcional
+      desde a v4.6 também absorvem a perturbação ×(1+σ) do massa-total,
+      no mundo de desempenho JÁ verificado desde a v4.7).
+    - `validation_status` continua `"FAIL"`, agora com **4** violações:
+      as 3 nominais de sempre (dois cenários de envelope + carga de
+      nariz máxima, ver entrada "Ciclo 3" acima, inalteradas em texto e
+      valor) MAIS `"Pouso (grama, 15 m): 605 m excede a pista disponível
+      de 600 m"`.
+    Ver `tests/cli.rs`, `src/validation/constraint_checker.rs` (mod
+    tests) e `src/validation/robustness.rs` (mod tests).
 
 ## 2. Convenção de eixos e unidades
 
@@ -742,7 +778,8 @@ dedução completa.
 | `best_glide_kmh` / `glide_ratio` | f64 | km/h / — | Velocidade e razão L/D de melhor planeio |
 | `climb_gradient_pct` | f64 | % | Gradiente de subida em Vx, solo, MTOW (CS 23.65 exige ≥ 8,3%) |
 | `to_50ft_paved_m` / `to_50ft_grass_m` | f64 | m | Distância de decolagem sobre obstáculo de 15 m/50 ft |
-| `ldg_50ft_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft |
+| `ldg_50ft_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft, pista PAVIMENTADA (`mu_brake_paved`) — **INFORMATIVO** desde a v4.8: não é o gate de pista |
+| `ldg_50ft_grass_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (`mu_brake_grass`) — sempre > `ldg_50ft_m`; é a grandeza gateada pela checagem #24 contra `runway_available_m` |
 
 ### `vn_diagram` — `VnDiagramSpec` (VnDiagramAgent, CS 23.333/.335/.337/.341)
 
