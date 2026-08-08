@@ -73,7 +73,10 @@ fn gear_real() -> aeronave::models::specs::GearSpec {
 /// RESOLVIDO na campanha E7 (2026-08-06): `x_main_m` 3.55→3.66m recua o
 /// trem mais um pouco, viável porque a autoridade de rotação DATCOM
 /// (ciclo 2) alargou o limite dianteiro do envelope de CG para ≈13,0% MAC
-/// nesta posição — fecha o tipback ACIMA do piso de 15° (ver comentário em
+/// nesta posição (valor da época, ciclos 2-6; o ciclo 7/`cl_max_to` recuou
+/// esse limite ainda mais, para 8,908% MAC — MAIS folga, não menos; a
+/// conclusão de viabilidade abaixo fica FORTALECIDA) — fecha o tipback
+/// ACIMA do piso de 15° (ver comentário em
 /// `config/aircraft/baseline_4seat.toml`). Renomeado (o nome antigo dizia
 /// "fica_abaixo"). O caminho de erro (tipback abaixo do piso) continua
 /// coberto por config sintética mutada em código — ver

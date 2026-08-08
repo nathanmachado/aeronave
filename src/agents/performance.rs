@@ -767,6 +767,15 @@ mod tests {
     /// do trade-off — a rotação fica mais exigente, o limite dianteiro de
     /// rotação sobe — está em
     /// `trim_authority::tests::mais_flap_de_decolagem_sobe_o_limite_de_rotacao`.)
+    ///
+    /// Essa monotonicidade só vale porque a polar de arrasto NÃO tem
+    /// incremento de arrasto de flap (lacuna de modelo já declarada acima em
+    /// `climb_rate_ms`, linhas 139-141: "não existe modelo de flap na polar
+    /// deste crate"). Mais flap aqui só aumenta `cl_max_to` sem custo de
+    /// arrasto — daí a decolagem encurtar estritamente. Um futuro modelo de
+    /// arrasto de flap (que penalizasse frações altas) pode quebrar esta
+    /// direção LEGITIMAMENTE; se isso acontecer, revisar o teste, não achar
+    /// que é regressão.
     #[test]
     fn mais_flap_de_decolagem_encurta_a_decolagem() {
         let req = crate::models::requirements::test_fixtures::requisitos_teste();

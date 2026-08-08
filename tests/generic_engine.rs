@@ -1075,12 +1075,12 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     let to_distance_paved_novo_pin = 380.954942;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
-        "to_distance_paved_m {:.3} divergiu do pin pós-E7 {:.3}",
+        "to_distance_paved_m {:.3} divergiu do pin pós-ciclo-7 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
     let to_distance_grass_novo_pin = 457.145930;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
-        "to_distance_grass_m {:.3} divergiu do pin pós-E7 {:.3}",
+        "to_distance_grass_m {:.3} divergiu do pin pós-ciclo-7 {:.3}",
         perf.to_distance_grass_m, to_distance_grass_novo_pin);
     // landing_distance_m: pequena variação refletindo o MTOW convergido —
     // tolerância alargada de "praticamente inalterado" (Task 4.7) para 1%

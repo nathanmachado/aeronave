@@ -741,7 +741,9 @@ fn main() {
         "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; \
          hardware: itens configurados não pesados — validar na balança)".into());
     fidelity.insert("performance".into(),
-        "computed (equações de desempenho em forma fechada, atmosfera ISA padrão)".into());
+        "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de \
+         decolagem (cl_max_to) interpolado sem incremento de arrasto de flap na polar — viés \
+         otimista em frações altas de flap".into());
     fidelity.insert("vn_diagram".into(),
         "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)".into());
     fidelity.insert("structure".into(),

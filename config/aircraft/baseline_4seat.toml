@@ -158,7 +158,11 @@ x_nose_m = 1.40
 # nariz ≤25% (≈24,8%) e o envelope de CG fechado 6/6 cenários. Só é
 # viável porque a autoridade DATCOM de profundor (ciclo 2,
 # TrimAuthorityAgent) alargou o limite de rotação para ~13,0% MAC nesta
-# posição — sem essa folga o trem não poderia recuar mais. Janela viável
+# posição (valor da época, ciclos 2-6) — sem essa folga o trem não poderia
+# recuar mais. ATUALIZAÇÃO (ciclo 7, cl_max_to): o limite dianteiro de
+# rotação recuou ainda mais, para 8,908% MAC (ver docs/aircraft_spec.
+# schema.md §1 v5.0) — MAIS folga que a época de E7 assumia, não menos;
+# a conclusão de viabilidade acima fica FORTALECIDA, não invalidada. Janela viável
 # da campanha: 3,65–3,66 m; 3,66 escolhido pela melhor pior-margem entre
 # os 6 cenários de carga. Validado experimentalmente (campanha E7, 48
 # execuções do pipeline real). x_main_m antigo (E1–E6): 3.55.

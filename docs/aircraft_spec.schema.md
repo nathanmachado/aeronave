@@ -443,9 +443,11 @@ documentação a ser corrigido, não um comportamento aceitável.
      é o mesmo valor de pouso) pela MESMA `trim.to_flap_fraction` que já
      sinalizava o ΔCm da rotação: `cl_max_to = cl_max_clean +
      to_flap_fraction·(cl_max_flaps − cl_max_clean)`. Consumido pela Vr/VS0
-     da ROTAÇÃO (`trim`) e pelas três distâncias de DECOLAGEM
-     (`performance.takeoff_ground_roll_m`/`takeoff_distance_m`/
-     `takeoff_distance_50ft_m`) — antes essas grandezas derivavam do
+     da ROTAÇÃO (`trim`) e pelas quatro distâncias de DECOLAGEM
+     (`performance.to_distance_paved_m`/`to_distance_grass_m`/
+     `to_50ft_paved_m`/`to_50ft_grass_m`, calculadas internamente por
+     `agents::performance::takeoff_distance_m`/`takeoff_distance_50ft_m`) —
+     antes essas grandezas derivavam do
      `cl_max` de POUSO (flap CHEIO), fisicamente incoerente (ninguém decola
      com flap de pouso) e otimista. Isoladamente esta mudança seria
      ADITIVA; é o renome abaixo que força o MAJOR.
@@ -464,7 +466,12 @@ documentação a ser corrigido, não um comportamento aceitável.
     rotação, número único invariante ao peso) recua de **12,995% para
     8,908% MAC** — a Vr correta é MAIOR (menos CL_max disponível na
     rotação), logo há MAIS autoridade de profundor disponível; o modelo
-    anterior era pessimista, não o contrário. `validation_status`
+    anterior era pessimista, não o contrário. O espelho honesto desse
+    ganho: as distâncias de DECOLAGEM alongam (`to_50ft_grass_m` 428,2 →
+    457,7 m; `to_50ft_paved_m` 381,4 → 406,9 m) — o modelo anterior era
+    otimista na decolagem, não o contrário; a decolagem na grama continua
+    PASSANDO nos 600 m de pista disponível, com folga de 142 m.
+    `validation_status`
     PERMANECE `"FAIL"` com as MESMAS **4** violações em CONTAGEM
     (inalterado desde a v4.8), mas DUAS trocam de NATUREZA: os cenários
     'Solo (piloto)' e '2 pax dianteiros', que na v4.8 violavam o limite
@@ -592,7 +599,7 @@ esperado na saída atual do pipeline**.
 | `cd_cruise` | f64 | — | CD de cruzeiro. **v4.4**: inclui o arrasto de trim de cruzeiro (`ΔCD_trim`, ver bloco `trim` §4/`cd_trim`) somado ao `cd0+cdi` do build-up — nome/tipo/unidade inalterados, só o VALOR mudou |
 | `cl_max` | f64 | — | CL_max com flap/slat em configuração de POUSO (flap cheio) — usado nas distâncias de POUSO e no VS0. **Desde a v5.0**: NÃO é mais o CL_max das distâncias de DECOLAGEM nem da Vr da rotação — ver `cl_max_to` abaixo |
 | `cl_max_clean` | f64 | — | CL_max em configuração limpa (cruzeiro) |
-| `cl_max_to` | f64 (**novo v5.0**) | — | CL_max em configuração de DECOLAGEM (flap PARCIAL) — DERIVADO por interpolação linear entre `cl_max_clean` e `cl_max_flaps` (não ecoado; `cl_max` é o valor de pouso) pela mesma `trim.to_flap_fraction`: `cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)`. Consumido pela Vr/VS0 da ROTAÇÃO (bloco `trim`) e pelas distâncias de DECOLAGEM (`performance.takeoff_ground_roll_m`/`takeoff_distance_m`/`takeoff_distance_50ft_m`) — ver §1 (v5.0) para o motivo da mudança |
+| `cl_max_to` | f64 (**novo v5.0**) | — | CL_max em configuração de DECOLAGEM (flap PARCIAL) — DERIVADO por interpolação linear entre `cl_max_clean` e `cl_max_flaps` (não ecoado; `cl_max` é o valor de pouso) pela mesma `trim.to_flap_fraction`: `cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)`. Consumido pela Vr/VS0 da ROTAÇÃO (bloco `trim`) e pelas distâncias de DECOLAGEM (`performance.to_distance_paved_m`/`to_distance_grass_m`/`to_50ft_paved_m`/`to_50ft_grass_m`, calculadas internamente por `agents::performance::takeoff_distance_m`/`takeoff_distance_50ft_m`) — ver §1 (v5.0) para o motivo da mudança |
 | `stall_speed_flaps_kmh` | f64 | km/h | VS0 — stall com flap |
 | `stall_speed_clean_kmh` | f64 | km/h | VS1 — stall configuração limpa |
 | `ld_ratio_cruise` | f64 | — | L/D em cruzeiro. **v4.4**: recalculado com `cd_cruise` já incluindo o arrasto de trim (ver acima) |
