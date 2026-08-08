@@ -371,10 +371,17 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 ///      Mesmo recuo de CG do item 1: as margens de autoridade de rotação
 ///      desses cenários saem de 0,4% e 7,4% para 21,6% e 29,4%, folga
 ///      suficiente para sobreviver a ±15% de massa estrutural nos dois
-///      conjuntos adversariais. O limite de rotação praticamente não se
-///      move (8,908% → 8,533%): `to_flap_fraction` 0,5→0,35 compensa quase
-///      exatamente o `cl_max_flaps` 1,72→2,1 no `cl_max_to`
-///      (1,585 → 1,6775).
+///      conjuntos adversariais. O que fecha os flips é o CG dos CENÁRIOS
+///      recuar, não o LIMITE se mover: o limite de rotação é invariante ao
+///      peso e ao CG (não recebe nem um nem outro — ver
+///      `agents::trim_authority::rotation_fwd_limit_m`) e praticamente não
+///      anda, 8,908% → 8,533% MAC. Esses 0,375 pp são o saldo de dois
+///      efeitos OPOSTOS, os únicos canais por onde E10 alcança o limite:
+///      `cl_max_to` 1,585→1,6775 o recuaria sozinho para 11,78% (menos
+///      `q_r`), e `Cm_TO` −0,158→−0,113 o avançaria sozinho para 5,47%
+///      (menos flap de decolagem, menos nariz-para-baixo) — ambos governados
+///      por `to_flap_fraction` 0,5→0,35 (o primeiro também por
+///      `cl_max_flaps`).
 ///   4. **Pouso (grama, 15 m) 605 m > pista de 600 m** → **556,7 m**.
 ///      `[wing].cl_max_flaps` 1,72→2,1 (flap SIMPLES → SLOTTED) derruba VS0
 ///      de 113,3 para 103,4 km/h; a distância de pouso escala com `V_ref²`.

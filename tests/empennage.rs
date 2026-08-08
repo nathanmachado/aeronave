@@ -71,6 +71,8 @@ fn baseline_s_h_bate_calculo_manual() {
 /// (aft = 43,5% MAC vs pior cenário 38,8%). O pin abaixo virou BANDA (não
 /// mais só piso) para detectar deriva nas DUAS direções — a folga traseira
 /// deixou de ser larga o bastante para um pin unilateral ser informativo.
+/// Essa troca de forma é a ÚNICA exceção da campanha E10 à regra
+/// "tolerâncias INALTERADAS", declarada como tal no comentário do assert.
 #[test]
 fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -97,8 +99,23 @@ fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     // requisito de projeto — o requisito é `[stability].sm_min` = 5%,
     // explicitamente re-checado logo abaixo, e o critério de ENVELOPE de CG
     // (mais estrito) está em `tests/cli.rs`, hoje sem nenhuma violação.
-    assert!((9.0..10.5).contains(&sized.wb.spec.static_margin_pct),
-        "SM mínima {:.2}% fora da banda E10 [9.0%, 10.5%) — old≈16.25% (E7) → \
+    //
+    // ⚠ ÚNICA EXCEÇÃO da campanha E10 à regra "TOLERÂNCIAS INALTERADAS".
+    // Todos os demais pins de E10 mantêm a tolerância anterior; este aqui
+    // MUDA DE FORMA: o piso unilateral `> 10.0` deixou de ser satisfeito
+    // pelo valor medido (9,68%) e deixaria de ser informativo de qualquer
+    // jeito — com só 4,68 pp entre o medido e o piso de projeto (5%), um
+    // piso solto não distingue "9,68% saudável" de "6% em deriva". Trocado
+    // por uma BANDA `[9.2%, 10.2%)` centrada no medido, com largura 1,0 pp
+    // (a mesma largura da banda irmã de `validation::constraint_checker::
+    // tests::envelope_de_cg_fechado_sem_violacao_no_baseline_real`), MAIS a
+    // amarra explícita ao requisito real logo abaixo. O resultado é mais
+    // ESTRITO que o piso antigo em dois sentidos — pega deriva para cima
+    // também, e passa a testar o requisito de projeto por nome — mas a
+    // mudança de forma está declarada aqui em vez de escondida como
+    // "re-pin". old: `> 10.0`; new: `(9.2..10.2)` + `> sm_min·100`.
+    assert!((9.2..10.2).contains(&sized.wb.spec.static_margin_pct),
+        "SM mínima {:.2}% fora da banda E10 [9.2%, 10.2%) — old≈16.25% (E7) → \
          new≈9.68% (E10); deriva nas duas direções é regressão a investigar",
         sized.wb.spec.static_margin_pct);
     // Amarra explícita ao requisito real (o pin de banda acima é só regressão):

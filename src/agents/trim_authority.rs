@@ -1247,8 +1247,9 @@ mod tests {
         // Task refino-ciclo2: `[stability].cl_h_max_down` foi REMOVIDO (a
         // autoridade agora é CALCULADA por geometria) — para reproduzir uma
         // autoridade reduzida equivalente ao antigo palpite pré-E6 (0.85),
-        // reduz a corda do profundor (`elevator_chord_frac` 0.40→0.28, τ
-        // menor).
+        // reduz a corda do profundor (`elevator_chord_frac` 0.40→0.26 no
+        // valor ATUAL do dial, τ menor — o histórico de reajustes do dial
+        // vem logo abaixo).
         //
         // Ciclo 7 (task 1): a corda desta MUTAÇÃO passou de 0.30 para 0.28.
         // Motivo: com a rotação usando o CLmax de DECOLAGEM (`cl_max_to`),
@@ -1265,11 +1266,29 @@ mod tests {
         // 0.28→37,2% vazio; 0.26→38,7% vazio.)
         //
         // Campanha E10 (2026-08-08): a corda desta MUTAÇÃO passa de 0.28
-        // para 0.26 — mesmo mecanismo do reajuste do ciclo 7. A E10 recua o
-        // CG de todos os cenários ≈+6,5 pp MAC (bateria de 53 kg a 7,80 m)
-        // e alonga o braço de nariz (`x_nose_m` 1,40→1,30); com o dial em
-        // 0.28 o limite de rotação desta config mutada cai para 36,09% MAC,
-        // ATRÁS do limite traseiro (36,615%) — ou seja, o envelope volta a
+        // para 0.26 — MESMO mecanismo do reajuste do ciclo 7, `cl_max_to`
+        // de novo (mais o `Cm_TO`), NÃO o recuo de CG da bateria. Vale
+        // insistir porque é contraintuitivo: `rotation_fwd_limit_m` não
+        // recebe CG, massa nem `x_nose_m` — é invariante ao peso (prova
+        // algébrica na docstring da função, prova numérica em
+        // `rotation_limit_e_invariante_a_massas_diferentes`). Os ÚNICOS
+        // parâmetros de E10 que o alcançam são `cl_max_flaps` e
+        // `to_flap_fraction`, pelos dois termos que eles governam:
+        //   M/W ∝ (1/cl_max_to)·[A + B + Cm_TO·S_w·MAC]
+        //   cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)
+        //   Cm_TO     = cm_ac + to_flap_fraction·cm_flap_delta
+        // (A = termo de profundor, B = termo de sustentação na corrida;
+        // ambos só geometria/autoridade — é onde o DIAL desta mutação age.)
+        // E10 move os dois em direções OPOSTAS: `cl_max_to` 1,585→1,6775
+        // (+5,8%) reduz `q_r` e portanto M/W, RECUANDO o limite; `Cm_TO`
+        // −0,158→−0,113 (menos flap na decolagem, menos nariz-para-baixo)
+        // aumenta o colchete e M/W, AVANÇANDO o limite. No baseline real o
+        // segundo ganha por pouco (8,908%→8,533% MAC, hand-check fechado no
+        // pin de `rotation_limit_pct_mac` acima). NESTA config mutada o
+        // segundo ganha por MUITO mais: com `v_h` 0,70 e a corda de
+        // profundor reduzida, o termo A encolhe, então o termo de `Cm_TO`
+        // pesa relativamente mais — o limite cai de ≈37,2% para 36,09% MAC,
+        // ATRÁS do limite traseiro (36,615%). Ou seja: o envelope volta a
         // FECHAR e o achado histórico que este teste existe para guardar
         // desaparece. Varredura empírica NOVA (config E10 mutada; o limite
         // traseiro não se move, depende só de NP/`sm_min`):

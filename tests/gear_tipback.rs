@@ -320,9 +320,15 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // margem de rotação apertadíssima (0,4% e 7,4%) e reprovavam sob ±15%
     // de massa. A campanha E10 recua o CG desses cenários para 17,9%/20,5%
     // MAC (bateria de 53 kg no cone de cauda) enquanto o limite de rotação
-    // fica praticamente parado (8,91%→8,53%, `to_flap_fraction` 0,5→0,35):
-    // as margens sobem para 21,6% e 29,4% e sobrevivem aos dois mundos
-    // adversariais. `RobustnessAgent` reporta **0 flips** (era 2).
+    // fica praticamente parado (8,908%→8,533%): as margens sobem para 21,6%
+    // e 29,4% e sobrevivem aos dois mundos adversariais. Quem fecha os
+    // flips é o CG dos CENÁRIOS, não o limite — este é invariante ao peso e
+    // ao CG (não recebe nenhum dos dois, ver
+    // `agents::trim_authority::rotation_fwd_limit_m`) e se move só pelos
+    // 0,375 pp de saldo entre `cl_max_to` 1,585→1,6775 (recuaria sozinho
+    // para 11,78%) e `Cm_TO` −0,158→−0,113 (avançaria sozinho para 5,47%),
+    // ambos governados por `to_flap_fraction` 0,5→0,35.
+    // `RobustnessAgent` reporta **0 flips** (era 2).
     // A cobertura do caminho de erro de #19 continua nas configs sintéticas
     // marginais de `src/validation/robustness.rs` (`config_marginal_gera_
     // flip_nomeado`, `envelope_no_mundo_massa_total_flipa_quando_marginal`,
