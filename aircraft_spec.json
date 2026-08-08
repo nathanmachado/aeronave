@@ -308,7 +308,8 @@
     "diameter_max_by_clearance_m": 1.7800000000000002,
     "ok_mach_static": true,
     "ok_mach_cruise": true,
-    "ok_clearance": true
+    "ok_clearance": true,
+    "prop_clearance_critical_m": 0.03254002243295617
   },
   "mission": {
     "fuel_taxi_kg": 2.52,

@@ -58,7 +58,7 @@ fn build_baseline_report() -> AircraftReport {
     // o bloco `trim` do relatório, mesma sequência de `main.rs`.
     let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb);
 
-    let propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
+    let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
     let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
 
     let mass_light_kg = wb.scenarios.iter()
@@ -84,13 +84,18 @@ fn build_baseline_report() -> AircraftReport {
     let mass_nose = sized.structural_masses.trem_nariz_kg;
     let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
 
+    // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
+    // no MESMO caminho de `main.rs` — depois que `gear` existe.
+    propeller.with_critical_clearance(&gear, &cfg.gear);
+
     let electrical = ElectricalAgent::run(&cfg);
 
     // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
     // de `main.rs` — logo após o `LandingGearAgent`, contra os limites
     // NOMINAIS já calculados (`wb`/`gear`).
     let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp,
-                                           &sized.structural_masses, wb, &gear, mission, &perf);
+                                           &sized.structural_masses, wb, &gear, &propeller,
+                                           mission, &perf);
 
     let report = ConstraintChecker::verify(&VerifyInputs {
         req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,

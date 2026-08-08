@@ -315,6 +315,15 @@ tail_cone_x_m = 7.80
 # 14,88° → ≈13,19° (folga MENOR, ainda acima do piso de 11°,
 # `rotation_attitude_deg`). Antigo (pré-E10): 1.10.
 tail_cone_height_m = 0.97
+# Ciclo 8 (task 2, 2026-08-08): deflexão TOTAL do pneu de nariz na condição
+# CRÍTICA de CS 23.925 (batente do amortecedor de nariz TOTALMENTE
+# COMPRIMIDO + pneu MURCHO/estourado) — pneu 5.00-5 típico desta classe.
+# Hélice TRATORA: é o trem de NARIZ que governa a folga crítica de hélice
+# (fica sob o eixo do motor/hélice, dianteiro), não o principal. Consumido
+# por `specs::PropellerSpec::with_critical_clearance` junto com
+# `GearSpec::nose_oleo_stroke_mm` — ver checagem #25,
+# `validation::constraint_checker::ConstraintChecker::verify`.
+tire_deflation_delta_m = 0.08
 
 [arms]      # braços de momento (m do datum no nariz)
 engine_cg_m = 0.65

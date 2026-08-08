@@ -928,6 +928,7 @@ dedução completa.
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
+| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — ainda dentro de v5.0, bump formal para v5.1 pendente do restante do ciclo**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio) — `ground_clearance_m − (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m)`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::with_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. Checagem #25 de `ConstraintChecker::verify` reprova quando `<= 0.0`. Baseline real E10: ≈+0,033 m (PASS) |
 
 **Nota de consistência**: quando `source == "derivado"`, o diâmetro aqui
 (autoritativo) pode divergir do `propulsion.prop_diameter_m` (provisório,

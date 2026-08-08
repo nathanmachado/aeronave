@@ -298,6 +298,16 @@ pub struct GearCfg {
     /// de pneu/geometria do trem, ver docstring do agente). Faixa validada
     /// (0.3, 2.5).
     pub tail_cone_height_m: f64,
+    /// Deflexão TOTAL do pneu de nariz (m) na condição crítica de CS 23.925
+    /// — batente do amortecedor de nariz TOTALMENTE COMPRIMIDO + pneu
+    /// MURCHO/estourado. Típica de um pneu 5.00-5 (deflexão de projeto
+    /// total, não só a seção de borracha) — consumida por
+    /// `specs::PropellerSpec::with_critical_clearance` junto com
+    /// `GearSpec::nose_oleo_stroke_mm` (hélice TRATORA: é o trem de NARIZ
+    /// que governa a folga crítica, não o principal — a hélice fica à
+    /// frente, sobre o eixo de nariz). Ciclo 8, task 2. Faixa validada
+    /// (0.03, 0.15).
+    pub tire_deflation_delta_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -684,6 +694,10 @@ pub mod test_fixtures {
                 rotation_attitude_deg: 10.0,
                 tail_cone_x_m: 7.20,
                 tail_cone_height_m: 1.00,
+                // Distinto do baseline real (0.08, ciclo 8 task 2) — mesma
+                // justificativa de "nenhum destes números coincide com o
+                // baseline real" usada nas demais seções desta fixture.
+                tire_deflation_delta_m: 0.05,
             },
             arms: ArmsCfg {
                 engine_cg_m: 0.60,

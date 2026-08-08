@@ -148,6 +148,11 @@ impl PropellerAgent {
             ok_mach_static: tip_mach_static <= pcfg.tip_mach_max_static,
             ok_mach_cruise: tip_mach_cruise_helical <= pcfg.tip_mach_max_cruise,
             ok_clearance: ground_clearance_m >= pcfg.ground_clearance_min_m,
+            // PLACEHOLDER — nunca NaN (ciclo 8, task 2): este agente roda
+            // ANTES do trem de pouso no pipeline real e não tem `GearSpec`
+            // em mãos; `PropellerSpec::with_critical_clearance` preenche o
+            // valor real depois — ver docstring do campo.
+            prop_clearance_critical_m: 0.0,
         }
     }
 }

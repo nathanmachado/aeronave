@@ -303,17 +303,20 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let wb = &sized.wb;
     let mission = &sized.mission;
 
-    let propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, prop, &req);
+    let mut propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
         &sized.state, wing, prop, sized.state.mtow_kg, &engine, &req, &cfg.performance,
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();
+    // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
+    // no MESMO caminho de `main.rs` — depois que `gear` existe.
+    propeller.with_critical_clearance(&gear, &cfg.gear);
     // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
     // de `main.rs`, contra os limites NOMINAIS já calculados (`wb`/`gear`).
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
         &cfg, &engine, &req, &sized.state, wing, emp, &sized.structural_masses, wb, &gear,
-        mission, &perf,
+        &propeller, mission, &perf,
     );
 
     let report = ConstraintChecker::verify(&VerifyInputs {
@@ -429,16 +432,19 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");
 
-    let propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, &sized.prop, &req);
+    let mut propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, &sized.prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
         &sized.state, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &req,
         &cfg.performance,
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();
+    // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
+    // no MESMO caminho de `main.rs` — depois que `gear` existe.
+    propeller.with_critical_clearance(&gear, &cfg.gear);
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
         &cfg, &engine, &req, &sized.state, &sized.wing, &sized.emp, &sized.structural_masses,
-        &sized.wb, &gear, mission, &perf,
+        &sized.wb, &gear, &propeller, mission, &perf,
     );
 
     let report = ConstraintChecker::verify(&VerifyInputs {

@@ -394,6 +394,11 @@ mod tests {
             rotation_attitude_deg: 11.0,
             tail_cone_x_m: 7.80,
             tail_cone_height_m: 1.10,
+            // Não consumido por `LandingGearAgent` (só por
+            // `specs::PropellerSpec::with_critical_clearance`/
+            // `ConstraintChecker`/`RobustnessAgent`, ciclo 8 task 2) —
+            // presente aqui só porque é campo obrigatório de `GearCfg`.
+            tire_deflation_delta_m: 0.05,
         }
     }
 

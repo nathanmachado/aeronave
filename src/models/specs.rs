@@ -741,6 +741,40 @@ pub struct PropellerSpec {
     pub ok_mach_static: bool,
     pub ok_mach_cruise: bool,
     pub ok_clearance: bool,
+    /// Folga entre a ponta da pá e o solo na condição CRÍTICA de CS 23.925
+    /// (ciclo 8, task 2) — amortecedor do trem de NARIZ TOTALMENTE
+    /// COMPRIMIDO (batente) + pneu MURCHO/estourado, não a condição
+    /// estática de `ground_clearance_m`. Hélice TRATORA: o trem de NARIZ
+    /// governa (fica sob o eixo da hélice), não o principal.
+    /// `ground_clearance_m − (gear.nose_oleo_stroke_mm/1000 +
+    /// gear_cfg.tire_deflation_delta_m)` — ver `with_critical_clearance`.
+    ///
+    /// PREENCHIDO EM DOIS PASSOS: `PropellerAgent::run` (este arquivo não
+    /// tem acesso a `GearSpec`, e a hélice roda ANTES do trem de pouso no
+    /// pipeline real — `main.rs`, "Agente 9" precede "Agente 6" na ordem de
+    /// EXECUÇÃO apesar da numeração conceitual) inicializa este campo em
+    /// `0.0` — PLACEHOLDER explícito, nunca `NaN` (lição do ciclo 5, ver
+    /// `RobustnessFlip::valor`) — e `with_critical_clearance` o preenche de
+    /// verdade depois que `LandingGearAgent::run` produz `GearSpec`. Todo
+    /// caminho que constrói um `PropellerSpec` para consumo real (`main.rs`,
+    /// a fixture de `validation::constraint_checker`, `tests/schema_v4.rs`,
+    /// `tests/gear_tipback.rs`) precisa chamar `with_critical_clearance`
+    /// logo após o trem de pouso — senão este campo fica preso no
+    /// placeholder `0.0`, que a checagem #25 interpretaria como violação
+    /// (`0.0 <= 0.0`).
+    pub prop_clearance_critical_m: f64,
+}
+
+impl PropellerSpec {
+    /// Preenche `prop_clearance_critical_m` — condição CRÍTICA de CS 23.925
+    /// (ciclo 8, task 2): batente do amortecedor de nariz + pneu murcho,
+    /// hélice TRATORA (trem de NARIZ governa). Chamado DEPOIS que
+    /// `LandingGearAgent::run` produz `gear` — ver docstring do campo para
+    /// o porquê da ordem (a hélice roda antes do trem no pipeline real).
+    pub fn with_critical_clearance(&mut self, gear: &GearSpec, gear_cfg: &crate::models::aircraft_config::GearCfg) {
+        self.prop_clearance_critical_m = self.ground_clearance_m
+            - (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m);
+    }
 }
 
 /// Saída do MissionAgent (Task 5.1) — análise de missão por segmentos
@@ -1190,4 +1224,99 @@ pub struct AircraftReport {
     /// task só `violations` era serializado — `warnings` existia em
     /// `ConstraintReport` mas era descartado ao montar o JSON final.
     pub warnings: Vec<String>,
+}
+
+// ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `GearSpec` sintético mínimo — só `nose_oleo_stroke_mm` importa para
+    /// `PropellerSpec::with_critical_clearance`; os demais campos recebem
+    /// valores plausíveis arbitrários (não usados pelo método sob teste).
+    fn gear_spec_teste(nose_oleo_stroke_mm: f64) -> GearSpec {
+        GearSpec {
+            gear_type: "triciclo retrátil".to_string(),
+            track_width_m: 2.2,
+            wheelbase_m: 2.3,
+            tipover_angle_deg: 30.0,
+            nose_load_max_pct: 15.0,
+            nose_load_min_pct: 10.0,
+            tipback_angle_deg: 16.0,
+            tail_strike_margin_deg: 13.0,
+            main_gear_load_n: 6_000.0,
+            nose_gear_load_n: 2_000.0,
+            main_oleo_stroke_mm: 200.0,
+            nose_oleo_stroke_mm,
+            main_tire: "6.00-6".to_string(),
+            nose_tire: "5.00-5".to_string(),
+            tire_pressure_psi: 30.0,
+            max_sink_rate_ms: 3.0,
+            retraction_time_s: 7.0,
+            actuator_power_w: 500.0,
+            total_weight_kg: 60.0,
+        }
+    }
+
+    fn propeller_spec_teste(ground_clearance_m: f64) -> PropellerSpec {
+        PropellerSpec {
+            diameter_m: 1.80,
+            blades: 2,
+            source: "config".to_string(),
+            tip_mach_static: 0.5,
+            tip_mach_cruise_helical: 0.5,
+            ground_clearance_m,
+            diameter_max_by_mach_m: 2.0,
+            diameter_max_by_clearance_m: 2.0,
+            ok_mach_static: true,
+            ok_mach_cruise: true,
+            ok_clearance: true,
+            prop_clearance_critical_m: 0.0, // placeholder — preenchido pelo método sob teste
+        }
+    }
+
+    fn gear_cfg_teste_com_deflacao(tire_deflation_delta_m: f64) -> crate::models::aircraft_config::GearCfg {
+        let mut cfg = crate::models::aircraft_config::test_fixtures::config_teste().gear;
+        cfg.tire_deflation_delta_m = tire_deflation_delta_m;
+        cfg
+    }
+
+    /// Hand-check: folga estática 0,300 m, curso de nariz 120 mm (0,120 m),
+    /// pneu murcho 0,05 m ⟹ folga crítica = 0,300 − 0,120 − 0,05 = 0,130 m.
+    #[test]
+    fn with_critical_clearance_bate_com_a_formula_fechada() {
+        let mut propeller = propeller_spec_teste(0.300);
+        let gear = gear_spec_teste(120.0);
+        let gear_cfg = gear_cfg_teste_com_deflacao(0.05);
+
+        propeller.with_critical_clearance(&gear, &gear_cfg);
+
+        assert!((propeller.prop_clearance_critical_m - 0.130).abs() < 1e-9,
+            "prop_clearance_critical_m = {:.6} (esperado 0.130 exato)",
+            propeller.prop_clearance_critical_m);
+    }
+
+    /// Property (ciclo 8, task 2, RED-first): quanto MAIOR a deflexão do
+    /// pneu configurada (`gear_cfg.tire_deflation_delta_m`), MENOR a folga
+    /// crítica resultante — os dois termos subtraídos de `ground_clearance_m`
+    /// são independentes, e este é estritamente monotônico decrescente no
+    /// segundo.
+    #[test]
+    fn folga_critica_diminui_quando_deflacao_de_pneu_aumenta() {
+        let gear = gear_spec_teste(120.0);
+
+        let mut propeller_pouca_deflacao = propeller_spec_teste(0.300);
+        propeller_pouca_deflacao.with_critical_clearance(&gear, &gear_cfg_teste_com_deflacao(0.04));
+
+        let mut propeller_muita_deflacao = propeller_spec_teste(0.300);
+        propeller_muita_deflacao.with_critical_clearance(&gear, &gear_cfg_teste_com_deflacao(0.10));
+
+        assert!(propeller_muita_deflacao.prop_clearance_critical_m
+                < propeller_pouca_deflacao.prop_clearance_critical_m,
+            "folga crítica com deflação MAIOR ({:.4}) deveria ficar ABAIXO da folga com \
+             deflação MENOR ({:.4})",
+            propeller_muita_deflacao.prop_clearance_critical_m,
+            propeller_pouca_deflacao.prop_clearance_critical_m);
+    }
 }

@@ -200,7 +200,7 @@ fn main() {
     // propulsão porque precisa de `prop.prop_rpm_cruise` (rpm de cruzeiro já
     // escolhido pela busca de BSFC do PropulsionAgent).
     println!("[ AGENTE 9 ] PropellerAgent — Mach de Ponta e Folga de Solo");
-    let propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
+    let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
     println!("  Diâmetro: {:.2}m ({})  |  Pás: {}",
              propeller.diameter_m, propeller.source, propeller.blades);
     println!("  Mach de ponta: {:.3} estático / {:.3} cruzeiro (helicoidal)  |  Folga de solo: {:.3}m",
@@ -518,6 +518,14 @@ fn main() {
              gear.retraction_time_s, gear.actuator_power_w,
              gear.actuator_power_w / 28.0, gear.total_weight_kg);
 
+    // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25,
+    // CS 23.925) — só possível AGORA que `gear` existe (ver docstring de
+    // `PropellerSpec::prop_clearance_critical_m`).
+    propeller.with_critical_clearance(&gear, &cfg.gear);
+    println!("  Folga crítica CS 23.925 (batente + pneu murcho): {:.3}m  |  {}",
+             propeller.prop_clearance_critical_m,
+             if propeller.prop_clearance_critical_m > 0.0 { "✓" } else { "✗" });
+
     // ── Robustez à incerteza do modelo de massas (ciclo 4, task robustez) ──────
     // Pior-caso determinístico ±σ sobre as 7 massas estruturais (equações
     // Raymer cap. 15.2, incerteza típica de projeto conceitual ±10-20%,
@@ -526,7 +534,7 @@ fn main() {
     // completa. Checagem #19 de `ConstraintChecker::verify` transforma cada
     // flip numa violação nomeada.
     let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp, sm, wb, &gear,
-                                           mission, &perf);
+                                           &propeller, mission, &perf);
     println!("[ ROBUSTEZ ] RobustnessAgent — Incerteza de Massa Estrutural (±σ)");
     // `mtow_masstotal_kg` (achado de review, ciclo 5, Minor 7): MTOW
     // re-convergido do 3º caso adversarial (massa-total, todas as 5 massas

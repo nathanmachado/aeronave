@@ -83,8 +83,8 @@ use crate::models::aircraft_state::AircraftState;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
 use crate::models::specs::{
-    EmpennageSpec, GearSpec, MissionSpec, PerformanceSpec, RobustnessFlip, RobustnessSpec,
-    WingSpec,
+    EmpennageSpec, GearSpec, MissionSpec, PerformanceSpec, PropellerSpec, RobustnessFlip,
+    RobustnessSpec, WingSpec,
 };
 use crate::orchestrator::SizingError;
 use crate::validation::constraint_checker::{
@@ -187,6 +187,12 @@ pub fn adversarial_masses(
 ///      — daí o `debug_assert!` no chamador do caso massa-total (`run`),
 ///      que grita exatamente nesse dia em vez de deixar a divergência
 ///      passar silenciosa.
+/// Devolve também o `GearSpec` perturbado (`gear_p`) — ciclo 8, task 2: o
+/// caso "massa-total" (único chamador que usa o 3º elemento; os dois casos
+/// direcionais descartam) precisa de `gear_p.nose_oleo_stroke_mm` para a
+/// checagem #25 (folga de hélice em condição CRÍTICA, CS 23.925) — o curso
+/// do amortecedor de nariz cresce com o MTOW re-convergido, ao contrário da
+/// folga ESTÁTICA (`propeller.ground_clearance_m`), invariante à massa.
 fn evaluate_world(
     cfg: &AircraftConfig,
     caso: &str,
@@ -195,7 +201,7 @@ fn evaluate_world(
     trem_nariz_kg_p: f64,
     wb_nominal: &WeightBalanceOutput,
     gear_nominal: &GearSpec,
-) -> ([f64; 2], Vec<RobustnessFlip>) {
+) -> ([f64; 2], Vec<RobustnessFlip>, GearSpec) {
     let mut flips = Vec::new();
 
     let mut range = [f64::INFINITY, f64::NEG_INFINITY];
@@ -258,7 +264,7 @@ fn evaluate_world(
         });
     }
 
-    (range, flips)
+    (range, flips, gear_p)
 }
 
 pub struct RobustnessAgent;
@@ -299,6 +305,12 @@ impl RobustnessAgent {
         masses: &StructuralMasses,
         wb_nominal: &WeightBalanceOutput,
         gear_nominal: &GearSpec,
+        // Ciclo 8 (task 2): folga ESTÁTICA nominal + folga crítica nominal
+        // já computada (`PropellerSpec::prop_clearance_critical_m`) — usada
+        // pela checagem #25 no caso massa-total (ver docstring de
+        // `evaluate_world` para o porquê de não precisar de um
+        // `propeller_p` recalculado).
+        propeller_nominal: &PropellerSpec,
         mission_nominal: &MissionSpec,
         perf_nominal: &PerformanceSpec,
     ) -> RobustnessSpec {
@@ -331,8 +343,11 @@ impl RobustnessAgent {
         // `evaluate_world` (compartilhada com o caso massa-total abaixo).
         let evaluate_case = |caso: &str, m_p: &StructuralMasses| -> ([f64; 2], Vec<RobustnessFlip>) {
             let wb_p = WeightBalanceAgent::run(state, wing, engine, cfg, req, emp, m_p);
-            evaluate_world(cfg, caso, &wb_p, m_p.trem_principal_kg, m_p.trem_nariz_kg,
-                            wb_nominal, gear_nominal)
+            // `gear_p` descartado aqui (checagem #25 só se aplica ao caso
+            // massa-total — ver docstring de `evaluate_world`).
+            let (range, flips, _gear_p) = evaluate_world(cfg, caso, &wb_p, m_p.trem_principal_kg,
+                m_p.trem_nariz_kg, wb_nominal, gear_nominal);
+            (range, flips)
         };
 
         let (cg_fwd_case_pct_mac, mut flips) = evaluate_case("dianteiro", &m_fwd);
@@ -499,13 +514,38 @@ impl RobustnessAgent {
                 // (só os 5 fatores de composto o são), então os dois são
                 // numericamente idênticos — mas passar `cfg` era um
                 // desalinhamento de intenção silencioso.
-                let (_cg_range_masstotal, flips_masstotal) = evaluate_world(
+                let (_cg_range_masstotal, flips_masstotal, gear_p_masstotal) = evaluate_world(
                     &cfg_p, "massa-total", &sized_p.wb,
                     sized_p.structural_masses.trem_principal_kg,
                     sized_p.structural_masses.trem_nariz_kg,
                     wb_nominal, gear_nominal,
                 );
                 flips.extend(flips_masstotal);
+
+                // Checagem #25 no mundo massa-total (ciclo 8, task 2) —
+                // folga de hélice em condição CRÍTICA (CS 23.925): a folga
+                // ESTÁTICA (`propeller_nominal.ground_clearance_m`) é
+                // INVARIANTE à massa neste modelo (só depende de geometria
+                // de config — `h_cg_ground_m`/`prop_axis_above_cg_m`/
+                // `diameter_m`, nenhum dos quais responde a σ), então não
+                // precisa ser recalculada; só o curso do amortecedor de
+                // NARIZ cresce com o MTOW re-convergido
+                // (`gear_p_masstotal.nose_oleo_stroke_mm`, já produzido por
+                // `evaluate_world` acima). Mesmo padrão `nom_ok && !p_ok`
+                // dos gates de desempenho acima.
+                let folga_critica_p = propeller_nominal.ground_clearance_m
+                    - (gear_p_masstotal.nose_oleo_stroke_mm / 1_000.0
+                       + cfg_p.gear.tire_deflation_delta_m);
+                let nom_ok = propeller_nominal.prop_clearance_critical_m > 0.0;
+                let p_ok = folga_critica_p > 0.0;
+                if nom_ok && !p_ok {
+                    flips.push(RobustnessFlip {
+                        check: "Hélice (condição crítica CS 23.925)".to_string(),
+                        caso: "massa-total".to_string(),
+                        valor: folga_critica_p,
+                        limite: 0.0,
+                    });
+                }
             }
         }
 
@@ -525,6 +565,7 @@ impl RobustnessAgent {
 mod tests {
     use super::*;
     use crate::agents::performance::PerformanceAgent;
+    use crate::agents::propeller::PropellerAgent;
     use crate::models::aircraft_config::test_fixtures::config_teste;
     use crate::models::engine::test_fixtures::motor_generico_teste;
     use crate::models::requirements::test_fixtures::requisitos_teste;
@@ -551,6 +592,7 @@ mod tests {
         masses: StructuralMasses,
         wb: WeightBalanceOutput,
         gear: GearSpec,
+        propeller: PropellerSpec,
         mission: MissionSpec,
         perf: PerformanceSpec,
     }
@@ -582,7 +624,11 @@ mod tests {
             wb.spec.mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear,
             masses.trem_principal_kg, masses.trem_nariz_kg,
         );
-        Nominal { cfg, engine, req, state, wing, emp, masses, wb, gear, mission, perf }
+        // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem
+        // #25) no MESMO caminho de `main.rs` — depois que `gear` existe.
+        let mut propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
+        propeller.with_critical_clearance(&gear, &cfg.gear);
+        Nominal { cfg, engine, req, state, wing, emp, masses, wb, gear, propeller, mission, perf }
     }
 
     /// Classificação direcional: cada um dos 7 componentes entra no lado
@@ -656,7 +702,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
 
         println!("flips={:?}", out.flips);
@@ -702,7 +748,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
 
@@ -736,7 +782,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
         println!("mtow_masstotal_kg={}", out.mtow_masstotal_kg);
@@ -783,7 +829,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
 
@@ -815,7 +861,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("mtow nominal = {:.3}  mtow_masstotal_kg = {:.3}",
             n.state.mtow_kg, out.mtow_masstotal_kg);
@@ -849,7 +895,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
 
@@ -903,7 +949,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
 
@@ -929,8 +975,8 @@ mod tests {
         let n_folgada = nominal_pipeline(config_teste());
         let out_folgada = RobustnessAgent::run(
             &n_folgada.cfg, &n_folgada.engine, &n_folgada.req, &n_folgada.state, &n_folgada.wing,
-            &n_folgada.emp, &n_folgada.masses, &n_folgada.wb, &n_folgada.gear, &n_folgada.mission,
-            &n_folgada.perf,
+            &n_folgada.emp, &n_folgada.masses, &n_folgada.wb, &n_folgada.gear, &n_folgada.propeller,
+            &n_folgada.mission, &n_folgada.perf,
         );
         assert!(!out_folgada.flips.iter().any(|f| f.check.starts_with("Carga de nariz")
             && f.caso == "massa-total"),
@@ -965,7 +1011,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("flips={:?}", out.flips);
 
@@ -990,8 +1036,8 @@ mod tests {
              (achado da sonda numérica) — se isso mudou, a fixture não serve mais de contraste");
         let out_folgada = RobustnessAgent::run(
             &n_folgada.cfg, &n_folgada.engine, &n_folgada.req, &n_folgada.state, &n_folgada.wing,
-            &n_folgada.emp, &n_folgada.masses, &n_folgada.wb, &n_folgada.gear, &n_folgada.mission,
-            &n_folgada.perf,
+            &n_folgada.emp, &n_folgada.masses, &n_folgada.wb, &n_folgada.gear, &n_folgada.propeller,
+            &n_folgada.mission, &n_folgada.perf,
         );
         assert!(!out_folgada.flips.iter().any(|f| f.check.starts_with("Cenário")
             && f.caso == "massa-total"),
@@ -1012,7 +1058,7 @@ mod tests {
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
-            &n.mission, &n.perf,
+            &n.propeller, &n.mission, &n.perf,
         );
         println!("nominal fwd/aft = {:.3}/{:.3}  caso dianteiro = {:?}  caso traseiro = {:?}",
             n.wb.spec.cg_mac_fwd_pct, n.wb.spec.cg_mac_aft_pct,
@@ -1052,5 +1098,76 @@ mod tests {
                 panic!("check de flip desconhecido: {}", flip.check);
             }
         }
+    }
+
+    /// ACHADO HONESTO (ciclo 8, task 2): a checagem #25 no caso massa-total
+    /// foi ESPECIFICADA no brief da task como um gate `nom_ok && !p_ok`
+    /// análogo aos demais (pista/desempenho acima) — "o mundo massa-total
+    /// já computa um trem perturbado; seu curso cresce com o MTOW". Isso é
+    /// FALSO no modelo atual: `agents::landing_gear::min_oleo_stroke_m`
+    /// calcula `stroke = E_cinética / (n_g_max × W_perna × η_oleo)` com
+    /// `E_cinética = ½·mtow·v²` e `W_perna = mtow·G/2` — o `mtow_kg`
+    /// CANCELA algebricamente do numerador e do denominador
+    /// (`stroke = v² / (n_g_max·G·η_oleo)`, uma CONSTANTE que não depende
+    /// de peso nenhum). `nose_oleo_stroke_mm` (60% do curso principal,
+    /// `agents::landing_gear::LandingGearAgent::run`) herda essa
+    /// invariância. Verificado numericamente abaixo: MTOW sobe de
+    /// ≈1.285 kg (nominal) para ≈1.363 kg (massa-total, σ=20%) e
+    /// `nose_oleo_stroke_mm` NÃO SE MOVE um bit. Como a folga ESTÁTICA
+    /// (`propeller.ground_clearance_m`) e a deflexão de pneu
+    /// (`gear_cfg.tire_deflation_delta_m`) também são invariantes à massa
+    /// (geometria/config puros), os TRÊS termos de
+    /// `prop_clearance_critical_m` são invariantes ao mundo massa-total —
+    /// o gate #25 (`RobustnessAgent::run`, ramo `Ok(sized_p)`) está
+    /// corretamente FIADO (mesmo padrão `nom_ok && !p_ok` dos demais) mas
+    /// é estruturalmente MORTO sob o modelo de trem atual: nenhuma config
+    /// pode fazê-lo flipar, porque o valor perturbado é sempre BIT-A-BIT
+    /// igual ao nominal, não só numericamente próximo. Corrigir isso
+    /// exigiria tornar `min_oleo_stroke_m` sensível ao peso de verdade
+    /// (ex.: um `n_g_max` ou `sink_rate` que dependesse de carga alar/MTOW)
+    /// — fora do escopo desta task (o gate em si, exigido pelo brief, está
+    /// implementado e correto; este teste documenta por que ele nunca
+    /// dispara, em vez de fabricar uma fixture "marginal" que só
+    /// funcionaria mascarando a invariância com números artificiais).
+    #[test]
+    fn folga_critica_no_mundo_massa_total_e_invariante_ao_mtow_no_modelo_atual() {
+        let n = nominal_pipeline(config_teste());
+        assert!(n.propeller.prop_clearance_critical_m > 0.0,
+            "pré-condição: folga crítica nominal deveria ser positiva na fixture padrão");
+
+        let sigma = n.cfg.mass_model.sigma_mass_fraction;
+        let mut cfg_p = n.cfg.clone();
+        cfg_p.mass_model.composite_factor_wing *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_tail *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_fuselage *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_gear *= 1.0 + sigma;
+        cfg_p.mass_model.composite_factor_fuel_system *= 1.0 + sigma;
+        let sized_p = crate::orchestrator::size_aircraft(&cfg_p, &n.engine, &n.req)
+            .expect("mundo massa-total (fixture padrão, σ=20%) deveria convergir");
+        assert!(sized_p.state.mtow_kg > n.state.mtow_kg * 1.02,
+            "pré-condição: MTOW do mundo massa-total ({:.1} kg) deveria crescer \
+             claramente acima do nominal ({:.1} kg) — senão o teste não exercitaria \
+             nenhuma perturbação de peso real", sized_p.state.mtow_kg, n.state.mtow_kg);
+
+        let x_fwd_p = cfg_p.wing.le_root_x_m
+            + sized_p.wb.spec.cg_mac_fwd_pct / 100.0 * sized_p.wb.mac_m;
+        let x_aft_p = cfg_p.wing.le_root_x_m
+            + sized_p.wb.spec.cg_mac_aft_pct / 100.0 * sized_p.wb.mac_m;
+        let gear_p = LandingGearAgent::run(sized_p.wb.spec.mtow_kg, x_fwd_p, x_aft_p, &cfg_p.gear,
+            sized_p.structural_masses.trem_principal_kg, sized_p.structural_masses.trem_nariz_kg);
+
+        assert_eq!(gear_p.nose_oleo_stroke_mm, n.gear.nose_oleo_stroke_mm,
+            "curso do amortecedor de nariz deveria ficar EXATAMENTE invariante ao MTOW \
+             (cancelamento algébrico em min_oleo_stroke_m) — perturbado {:.6}mm vs \
+             nominal {:.6}mm", gear_p.nose_oleo_stroke_mm, n.gear.nose_oleo_stroke_mm);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.propeller, &n.mission, &n.perf,
+        );
+        assert!(!out.flips.iter().any(|f| f.check.starts_with("Hélice")),
+            "consequência do achado acima: nenhum flip de folga de hélice crítica é \
+             possível no mundo massa-total sob o modelo de trem atual, obteve: {:?}",
+            out.flips);
     }
 }

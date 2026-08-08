@@ -1114,11 +1114,10 @@ mod tests {
         // Pin pré-refino-ciclo2: ≈10.948%. Pin pré-E7 (refino-ciclo2): ≈6.099%.
         // Pin pré-ciclo-7 (campanha E7, gear.x_main_m 3.55→3.66m): ≈12.995%.
         //
-        // Pin NOVO (ciclo 7, task 1 — `cl_max_to`): ≈8.908%, uma queda de
-        // 4,087 pp EXPLICADA EXATAMENTE pela física, não por afrouxamento
-        // (a tolerância ±1.5 é a MESMA de antes). A rotação passou a usar
-        // o CLmax de DECOLAGEM (1,585 = 1,45 + 0,5·(1,72−1,45)) no lugar
-        // do CLmax de POUSO (1,72):
+        // Pin ciclo 7 (task 1 — `cl_max_to`): ≈8.908%, uma queda de 4,087 pp
+        // EXPLICADA EXATAMENTE pela física (não afrouxamento). A rotação
+        // passou a usar o CLmax de DECOLAGEM (1,585 = 1,45 + 0,5·(1,72−1,45))
+        // no lugar do CLmax de POUSO (1,72):
         //   Vs0_TO/Vr crescem √(1,72/1,585) = +4,21%
         //   q_r e, com ele, TODO o momento disponível: ×1,72/1,585 = +8,52%
         //   x_cg_rot = x_main − M/W ⟹ Δx = −0,08517·(x_main − x_cg_rot_antigo)
@@ -1132,9 +1131,23 @@ mod tests {
         // MAIS autoridade de profundor na rotação — o limite dianteiro
         // AVANÇA. O modelo antigo era pessimista, não conservador por
         // escolha.
+        //
+        // APERTO DELIBERADO (ciclo 8, task 2, §4 — dívida do ciclo 7): a
+        // tolerância ±1.5 acima nunca foi reapertada depois que o valor
+        // REAL do baseline convergiu para ≈8,533% (ver comentário mais
+        // abaixo, linha ≈1291, e `tests/gear_tipback.rs`/`tests/cli.rs`,
+        // que já documentavam esse número desde o ciclo 7) — o pin ficou
+        // frouxo o bastante (0,375 pp de folga real dentro de uma banda de
+        // ±1,5 pp) para não detectar uma regressão de até ~1,1 pp na
+        // autoridade de rotação. RE-CENTRADO no valor MEDIDO atual
+        // (8,533%, não recalculado — mesma fórmula/config de sempre) e a
+        // tolerância aperta para ±0,05, a mesma disciplina de todos os
+        // outros pins honestos deste arquivo. Isto NÃO é uma mudança de
+        // física — é fechar uma folga de cobertura de teste.
         assert!(
-            (trim.rotation_limit_pct_mac - 8.908).abs() < 1.5,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈8.908% ±1.5%)",
+            (trim.rotation_limit_pct_mac - 8.533).abs() < 0.05,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈8.533% ±0.05% — pin reapertado no ciclo 8, \
+             task 2, §4)",
             trim.rotation_limit_pct_mac
         );
 

@@ -545,6 +545,29 @@ impl ConstraintChecker {
             ));
         }
 
+        // 25. Folga de hélice em condição CRÍTICA (CS 23.925) — ciclo 8,
+        // task 2: até esta task, a única folga de hélice checada era a
+        // ESTÁTICA (`ok_clearance` acima, check #10) — amortecedores
+        // estendidos, pneus cheios. CS 23.925 também exige folga positiva
+        // na condição CRÍTICA: amortecedor TOTALMENTE COMPRIMIDO (batente)
+        // + pneu MURCHO/estourado. Hélice TRATORA: é o trem de NARIZ que
+        // governa (fica sob o eixo da hélice, dianteiro), não o principal
+        // — daí `gear.nose_oleo_stroke_mm`, não `main_oleo_stroke_mm`. Lê
+        // `propeller.prop_clearance_critical_m` já PRECOMPUTADO (ver
+        // `specs::PropellerSpec::with_critical_clearance`, chamado em
+        // `main.rs`/nas fixtures de teste logo após o trem de pouso) — os
+        // três termos abaixo (`ground_clearance_m`/`nose_oleo_stroke_mm`/
+        // `tire_deflation_delta_m`) só narram a mensagem, não recalculam o
+        // resultado (fonte única).
+        if propeller.prop_clearance_critical_m <= 0.0 {
+            violations.push(format!(
+                "Hélice (condição crítica CS 23.925): folga estática {:.3} m − curso do nariz \
+                 {:.3} m − pneu murcho {:.3} m = {:.3} m ≤ 0",
+                propeller.ground_clearance_m, gear.nose_oleo_stroke_mm / 1_000.0,
+                gear_cfg.tire_deflation_delta_m, propeller.prop_clearance_critical_m
+            ));
+        }
+
         ConstraintReport { violations, warnings }
     }
 }
@@ -689,7 +712,7 @@ mod tests {
         // `wb` já sai do laço com `apply_trim` aplicado (ver docstring de
         // `orchestrator::SizedAircraft::wb`) — não precisa reaplicar aqui.
         let wb = sized.wb;
-        let propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
+        let mut propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
         let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
                                           &cfg.performance);
         let mission = sized.mission;
@@ -707,13 +730,16 @@ mod tests {
             masses.trem_principal_kg, masses.trem_nariz_kg,
         );
         let gear_cfg = cfg.gear.clone();
+        // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (check
+        // #25) no MESMO caminho de `main.rs` — depois que `gear` existe.
+        propeller.with_critical_clearance(&gear, &gear_cfg);
         // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA
         // sequência de `main.rs` — os dois conjuntos adversariais avaliados
         // contra os limites NOMINAIS já calculados acima (`wb`/`gear`, já
         // com o trim aplicado); ciclo 5, `mission`/`perf` NOMINAIS (do MESMO
         // `SizedAircraft` convergido) para o 3º caso (massa-total).
         let robustness = crate::validation::robustness::RobustnessAgent::run(
-            &cfg, &engine, &req, &state, &wing, &emp, &masses, &wb, &gear, &mission, &perf,
+            &cfg, &engine, &req, &state, &wing, &emp, &masses, &wb, &gear, &propeller, &mission, &perf,
         );
         (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness)
     }
@@ -1806,5 +1832,74 @@ mod tests {
         assert!(!report.violations.iter().any(|v| v.contains("atuador")),
             "fixture intacta (peak_w declarado bem acima do computado) não deveria gerar \
              nenhuma violação da checagem #20, obteve: {:?}", report.violations);
+    }
+
+    // ─── Ciclo 8, task 2: folga de hélice em condição CRÍTICA (CS 23.925,
+    // checagem #25) ───────────────────────────────────────────────────────
+
+    /// Ramo de VIOLAÇÃO — override SINTÉTICO direto de
+    /// `propeller.prop_clearance_critical_m` (mesmo padrão de
+    /// `violacao_de_helice_aparece_quando_algum_ok_e_falso` acima, que
+    /// sobrescreve `ok_mach_static`/`tip_mach_static` diretamente): a
+    /// checagem lê o campo PRECOMPUTADO, não recalcula a partir de
+    /// `ground_clearance_m`/`nose_oleo_stroke_mm`/`tire_deflation_delta_m`
+    /// — por isso o override isolado (sem tocar nos três termos, que só
+    /// narram a mensagem) já é suficiente para exercitar o ramo de violação.
+    #[test]
+    fn check_25_violacao_de_folga_critica_aparece_com_override_sintetico() {
+        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear,
+             gear_cfg, robustness) = setup();
+        propeller.prop_clearance_critical_m = -0.012;
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+            "esperava violação de folga crítica CS 23.925, obteve: {:?}", report.violations);
+        assert!(report.violations.iter().any(|v| v.contains("-0.012")),
+            "violação deveria citar a folga crítica observada: {:?}", report.violations);
+    }
+
+    /// Ramo PASS — a fixture sintética padrão (`config_teste()`, folga
+    /// estática 0,200 m, curso de nariz do baseline sintético ≈127,46 mm,
+    /// pneu murcho 0,05 m — ver `with_critical_clearance`) já produz
+    /// `prop_clearance_critical_m ≈ +0,0225 m > 0` NATURALMENTE (não
+    /// forçado) — mesmo espírito do achado natural de
+    /// `violacao_de_folga_de_solo_aparece_naturalmente_na_fixture_sintetica`
+    /// acima, mas no sentido inverso (aqui a fixture passa, não falha).
+    #[test]
+    fn check_25_sem_violacao_na_fixture_padrao() {
+        let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg,
+             robustness) = setup();
+        assert!(propeller.prop_clearance_critical_m > 0.0,
+            "pré-condição do teste: fixture sintética deveria passar a folga crítica \
+             NATURALMENTE — obtido prop_clearance_critical_m={:.4}",
+            propeller.prop_clearance_critical_m);
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(!report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+            "não deveria haver violação de folga crítica CS 23.925, obteve: {:?}",
+            report.violations);
+    }
+
+    /// Ramo PASS explícito no limite: `prop_clearance_critical_m` positivo
+    /// mas bem pequeno não deveria violar — só `<= 0.0` viola (semântica
+    /// consistente com os demais pisos/tetos deste arquivo).
+    #[test]
+    fn check_25_sem_violacao_quando_folga_critica_positiva_forcada() {
+        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear,
+             gear_cfg, robustness) = setup();
+        propeller.prop_clearance_critical_m = 0.001;
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
+                                                 &propeller, &perf, &mission, &electrical, &gear,
+                                                 &gear_cfg, 220.0, &robustness));
+
+        assert!(!report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+            "folga crítica positiva (0.001 m) não deveria violar: {:?}", report.violations);
     }
 }

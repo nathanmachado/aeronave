@@ -841,6 +841,16 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.gear.tail_cone_x_m, cfg.gear.x_main_m
         )));
     }
+    // Deflexão total do pneu de nariz na condição crítica CS 23.925 (ciclo
+    // 8, task 2) — ver docstring de `GearCfg::tire_deflation_delta_m`.
+    require_positive("gear.tire_deflation_delta_m", cfg.gear.tire_deflation_delta_m)?;
+    if cfg.gear.tire_deflation_delta_m <= 0.03 || cfg.gear.tire_deflation_delta_m >= 0.15 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.tire_deflation_delta_m deve estar em \
+             (0.03, 0.15) m — deflexão total de pneu 5.00-5 típica, CS 23.925 (valor: {})",
+            cfg.gear.tire_deflation_delta_m
+        )));
+    }
 
     // [arms] — braços de momento: não-negativos e finitos.
     require_non_negative("arms.engine_cg_m", cfg.arms.engine_cg_m)?;
@@ -1532,6 +1542,7 @@ mod tests {
             rotation_attitude_deg = 11.0
             tail_cone_x_m = 7.5
             tail_cone_height_m = 1.05
+            tire_deflation_delta_m = 0.06
             [arms]
             engine_cg_m = 0.6
             avionics_m = 1.0
@@ -2141,6 +2152,32 @@ mod tests {
             .replace("tail_cone_height_m = 1.05", "tail_cone_height_m = 3.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("tail_cone_height_m"), "{err}");
+    }
+
+    // ─── [gear] tire_deflation_delta_m (ciclo 8, task 2 — CS 23.925) ───────
+
+    #[test]
+    fn rejeita_tire_deflation_delta_m_fora_da_faixa_alta() {
+        let toml = aircraft_toml_valido()
+            .replace("tire_deflation_delta_m = 0.06", "tire_deflation_delta_m = 0.20");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tire_deflation_delta_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tire_deflation_delta_m_muito_baixo() {
+        let toml = aircraft_toml_valido()
+            .replace("tire_deflation_delta_m = 0.06", "tire_deflation_delta_m = 0.01");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tire_deflation_delta_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_tire_deflation_delta_m_nao_positivo() {
+        let toml = aircraft_toml_valido()
+            .replace("tire_deflation_delta_m = 0.06", "tire_deflation_delta_m = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("tire_deflation_delta_m"), "{err}");
     }
 
     #[test]
