@@ -68,11 +68,33 @@ pub struct WingSpec {
     pub cd0: f64,
     pub cl_cruise: f64,
     pub cd_cruise: f64,
-    /// CL_max com flap/slat (configuração de pouso/decolagem) — usado nas
-    /// distâncias de decolagem/pouso (performance.rs).
+    /// CL_max com flap/slat em configuração de POUSO (flap cheio) — usado
+    /// nas distâncias de POUSO e no VS0 de referência (`performance.rs`).
+    /// Ciclo 7 (task 1): NÃO é mais o CL_max das distâncias de DECOLAGEM
+    /// nem da Vr da rotação — esses migraram para `cl_max_to`.
     pub cl_max: f64,
     /// CL_max em configuração limpa (cruzeiro, sem flap).
     pub cl_max_clean: f64,
+    /// CL_max em configuração de DECOLAGEM (flap PARCIAL) — DERIVADO
+    /// (ciclo 7, task 1) por interpolação linear de deployment de flap:
+    ///
+    ///   `cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)`
+    ///
+    /// com a MESMA `[stability].to_flap_fraction` que o `trim_authority` já
+    /// aplica ao ΔCm de flap na rotação — uma única fração de deployment
+    /// governando os dois efeitos do flap (ver `aircraft_config::
+    /// StabilityCfg::to_flap_fraction`). Consumido pela Vr/Vs0 da ROTAÇÃO
+    /// (`agents::trim_authority`) e pelas distâncias de DECOLAGEM
+    /// (`agents::performance`: `takeoff_ground_roll_m`,
+    /// `takeoff_distance_m`, `takeoff_distance_50ft_m`).
+    ///
+    /// Motivação (campanha E10): antes, a rotação derivava Vr do CLmax de
+    /// POUSO enquanto usava o Cm do flap PARCIAL de decolagem — incoerente
+    /// —, e as distâncias de decolagem também usavam o CLmax de pouso
+    /// (otimistas). Com flap slotted (CLmax 2,2) a Vr modelada ficava 13%
+    /// lenta demais (q_r −24%) e o limite dianteiro de rotação explodia:
+    /// artefato de modelagem, não física.
+    pub cl_max_to: f64,
     /// VS0 — velocidade de stall com flap (configuração de pouso), km/h.
     pub stall_speed_flaps_kmh: f64,
     /// VS1 — velocidade de stall em configuração limpa, km/h.
@@ -407,7 +429,11 @@ pub struct TrimSpec {
     pub capped_by_stall: bool,
     pub trim_margin: f64,
     pub cl_ground_rotation: f64,
-    pub to_flap_cm_fraction: f64,
+    /// Fração de deployment do flap de decolagem — eco de
+    /// `[stability].to_flap_fraction` (ciclo 7, task 1: renomeada de
+    /// `to_flap_cm_fraction`; PAPEL DUPLO, governa o ΔCm da rotação E o
+    /// `cl_max_to` de `WingSpec`).
+    pub to_flap_fraction: f64,
     // ─── Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) ─────────────
     /// `CL_h_trim` — sustentação/download que a empenagem horizontal precisa
     /// gerar em cruzeiro (sem flap), no CG de referência da missão
@@ -835,7 +861,7 @@ pub struct ElectricalSpec {
 /// CONFIGURAÇÃO de entrada (não deste schema JSON): `[stability].sm_max`
 /// foi REMOVIDO de `aircraft.toml` (proxy de autoridade de profundor sem
 /// base física direta) e substituído por `[stability].cl_h_max_down`/
-/// `trim_margin`/`cl_ground_rotation`/`to_flap_cm_fraction` +
+/// `trim_margin`/`cl_ground_rotation`/`to_flap_fraction` +
 /// `[wing].cm_ac`/`cm_flap_delta` — ver `docs/aircraft_spec.schema.md` §1 e
 /// `models::config::parse_aircraft` (erro de migração claro se `sm_max`
 /// ainda estiver presente no TOML).

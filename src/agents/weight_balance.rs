@@ -1173,7 +1173,7 @@ mod tests {
             capped_by_stall: false,
             trim_margin: 0.10,
             cl_ground_rotation: 0.5,
-            to_flap_cm_fraction: 0.5,
+            to_flap_fraction: 0.5,
             cl_h_trim_cruise: 0.04,
             cd_trim: 5.0e-5,
             cg_reference_scenario: MID_MISSION_SCENARIO_NAME.to_string(),

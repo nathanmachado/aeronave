@@ -98,7 +98,7 @@ pub struct WingCfg {
     /// arfagem com o flap totalmente estendido, adimensional, negativo) —
     /// semi-empírico (Raymer cap. 16, faixa típica −0,20 a −0,45).
     /// Consumido por `agents::trim_authority` (flare usa o valor cheio;
-    /// rotação usa `stability.to_flap_cm_fraction · cm_flap_delta`, flap de
+    /// rotação usa `stability.to_flap_fraction · cm_flap_delta`, flap de
     /// decolagem parcial).
     pub cm_flap_delta: f64,
 }
@@ -360,10 +360,28 @@ pub struct StabilityCfg {
     /// de sustentação nariz-para-cima em `agents::trim_authority`
     /// (`rotation_fwd_limit_m`, termo `L_g`).
     pub cl_ground_rotation: f64,
-    /// Fração de `[wing].cm_flap_delta` aplicável em configuração de flap
-    /// de DECOLAGEM (tipicamente parcial, menos extensão que o flap de
-    /// pouso usado na flare) — usado no `Cm` de perfil+flap da rotação.
-    pub to_flap_cm_fraction: f64,
+    /// Fração de DEPLOYMENT do flap no setting de DECOLAGEM (tipicamente
+    /// parcial, menos extensão que o flap de pouso usado na flare) —
+    /// faixa 0–1. **PAPEL DUPLO** (ciclo 7, task 1 — antes chamado
+    /// `to_flap_cm_fraction`, ver `models::config::
+    /// check_to_flap_cm_fraction_migration`): a MESMA fração governa os
+    /// DOIS efeitos do flap parcial de decolagem —
+    ///
+    ///   - ΔCm: `Cm_TO = cm_ac + to_flap_fraction·cm_flap_delta`
+    ///     (`agents::trim_authority::rotation_available_moment_nm`);
+    ///   - ΔCL: `cl_max_to = cl_max_clean + to_flap_fraction·
+    ///     (cl_max_flaps − cl_max_clean)` (`agents::aerodynamics::
+    ///     AerodynamicsAgent::run` → `specs::WingSpec::cl_max_to`),
+    ///     consumido pela Vr da rotação (`trim_authority`) e pelas
+    ///     distâncias de DECOLAGEM (`agents::performance`).
+    ///
+    /// Antes do ciclo 7 a fração governava só o ΔCm, enquanto a Vr da
+    /// rotação e as distâncias de decolagem usavam o `cl_max_flaps` de
+    /// POUSO — inconsistência exposta pela campanha E10 (flap slotted):
+    /// rotação pessimista (Vr 13% lenta demais, q_r −24%) e decolagem
+    /// otimista, os dois lados do MESMO erro. Ninguém decola com flap de
+    /// pouso.
+    pub to_flap_fraction: f64,
     /// Coeficiente empírico de momento de arfagem da fuselagem (Multhopp
     /// simplificado, Raymer eq. 16.25, fig. 16.14) — usado por
     /// `weight_balance::fuselage_np_shift_mac` para corrigir o ponto neutro
@@ -670,7 +688,7 @@ pub mod test_fixtures {
                 cl_h_stall_limit: 1.05,
                 trim_margin: 0.12,
                 cl_ground_rotation: 0.55,
-                to_flap_cm_fraction: 0.5,
+                to_flap_fraction: 0.5,
                 fuselage_kf: 0.018,
             },
             // Só itens NÃO-estruturais (equipamentos/instalação). As 7

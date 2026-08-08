@@ -152,8 +152,9 @@ fn main() {
              wing.span_m, wing.area_m2, wing.aspect_ratio);
     println!("  Perfil: {}  |  e={:.3}  |  L/D={:.1}",
              wing.airfoil, wing.oswald_efficiency, wing.ld_ratio_cruise);
-    println!("  CD0={:.4}  CL_cruise={:.3}  CD_cruise={:.4}  CL_max(flap)={:.2}  CL_max(limpa)={:.2}",
-             wing.cd0, wing.cl_cruise, wing.cd_cruise, wing.cl_max, wing.cl_max_clean);
+    println!("  CD0={:.4}  CL_cruise={:.3}  CD_cruise={:.4}  CL_max: limpa={:.2} / decolagem={:.3} / pouso={:.2}",
+             wing.cd0, wing.cl_cruise, wing.cd_cruise, wing.cl_max_clean, wing.cl_max_to,
+             wing.cl_max);
     println!("  VS0 (flap, SL): {:.1} km/h  |  VS1 (limpa, SL): {:.1} km/h\n",
              wing.stall_speed_flaps_kmh, wing.stall_speed_clean_kmh);
 

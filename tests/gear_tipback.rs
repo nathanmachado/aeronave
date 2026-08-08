@@ -261,17 +261,39 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
          no baseline real: {:?}", report.violations);
     // Ciclo 4, Task 4 (checagem #19, robustez à incerteza de massa
     // estrutural): investigado — com σ=15% (`[mass_model].
-    // sigma_mass_fraction`), NENHUM dos checks que passam no nominal
+    // sigma_mass_fraction`), NENHUM dos checks que passavam no nominal
     // (tipback ≈18,85° vs. piso 15°; carga de nariz mínima ≈15,86% vs.
-    // piso 8%; os 4 cenários de CG dentro do envelope) flipa sob os dois
-    // conjuntos adversariais — as margens nominais folgadas absorvem a
-    // perturbação de ±15% nas 7 massas estruturais. Achado honesto: zero
-    // violações NOVAS desta checagem no baseline real; as 3 violações
-    // nominais (2 cenários de envelope + carga de nariz máxima) continuam
-    // as ÚNICAS.
-    assert!(!report.violations.iter().any(|v| v.starts_with("Robustez:")),
-        "achado honesto do ciclo 4 (σ=15%): nenhum check que passa no nominal deveria flipar \
-         sob os conjuntos adversariais no baseline real: {:?}", report.violations);
+    // piso 8%; os 4 cenários de CG dentro do envelope) flipava sob os dois
+    // conjuntos adversariais.
+    //
+    // ATUALIZADO no ciclo 7 (task 1, `cl_max_to`): agora existem
+    // EXATAMENTE DUAS violações de robustez, e só duas. Com a rotação
+    // usando o CLmax de DECOLAGEM (1,585) em vez do de POUSO (1,72), o
+    // limite dianteiro de rotação caiu de 12,995% para 8,908% MAC
+    // (−4,087 pp, `q_r ∝ 1/CL_max_TO`) e os cenários 'Solo (piloto)'
+    // (9,1% MAC) e '2 pax dianteiros' (12,5%) ENTRARAM no envelope no
+    // nominal — deixando de ser violações nominais e passando a ser
+    // exatamente o caso que a checagem #19 existe para pegar: passam no
+    // nominal, reprovam sob ±15% de massa estrutural (Solo 4,55 vs 8,91;
+    // 2 pax 8,46 vs 8,91 %MAC no pior caso dianteiro). O achado não é
+    // novo nem pior — é o MESMO achado, reclassificado. Tipback,
+    // tail-strike e carga de nariz mínima continuam sem flipar. Ver
+    // `tests/cli.rs::engine_padrao_explicito_...` para o old→new completo.
+    let robustez: Vec<&String> = report.violations.iter()
+        .filter(|v| v.starts_with("Robustez:")).collect();
+    assert_eq!(robustez.len(), 2,
+        "esperava EXATAMENTE 2 violações de robustez (σ=15%) no baseline real pós-ciclo-7, \
+         ambas de envelope de CG nos cenários leves/dianteiros: {:?}", report.violations);
+    for cenario in ["Solo (piloto)", "2 pax dianteiros"] {
+        assert!(robustez.iter().any(|v| v.contains(cenario)),
+            "violação de robustez esperada para o cenário '{cenario}': {:?}",
+            report.violations);
+    }
+    // Os checks de TREM (o assunto deste arquivo) continuam sem flipar sob
+    // robustez — nenhuma violação de robustez de tipback/carga de nariz.
+    assert!(!robustez.iter().any(|v| v.contains("ipback") || v.contains("arga de nariz")),
+        "nenhum check de TREM deveria flipar sob robustez no baseline real: {:?}",
+        report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de

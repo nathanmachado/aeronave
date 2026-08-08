@@ -212,6 +212,7 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_mass_main_leg_migration(toml_str)?;
     check_mass_nose_migration(toml_str)?;
     check_shaft_height_migration(toml_str)?;
+    check_to_flap_cm_fraction_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -221,7 +222,7 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
 /// REMOVIDO — o limite dianteiro do envelope de CG agora é calculado
 /// fisicamente pelo `TrimAuthorityAgent` a partir da autoridade de
 /// profundor (`[stability].trim_margin`/`cl_ground_rotation`/
-/// `to_flap_cm_fraction` + `[control_surfaces].elevator_deflection_max_deg`
+/// `to_flap_fraction` + `[control_surfaces].elevator_deflection_max_deg`
 /// + `[stability].cl_h_stall_limit`, task refino-ciclo2 — autoridade
 /// calculada por geometria, não mais um `cl_h_max_down` de config direto)
 /// + `[wing].cm_ac`/`cm_flap_delta` (ver `models::aircraft_config::
@@ -240,7 +241,7 @@ fn check_sm_max_migration(toml_str: &str) -> Result<(), ConfigError> {
         return Err(ConfigError::Validation(
             "configuração de aeronave inválida: [stability].sm_max foi substituído por um \
              limite dianteiro de CG calculado fisicamente (TrimAuthorityAgent) — remova \
-             sm_max e adicione [stability].trim_margin/cl_ground_rotation/to_flap_cm_fraction/\
+             sm_max e adicione [stability].trim_margin/cl_ground_rotation/to_flap_fraction/\
              cl_h_stall_limit + [control_surfaces].elevator_deflection_max_deg + \
              [wing].cm_ac/cm_flap_delta (ver docs/aircraft_spec.schema.md e \
              config/aircraft/baseline_4seat.toml para valores de referência)"
@@ -435,6 +436,40 @@ fn check_shaft_height_migration(toml_str: &str) -> Result<(), ConfigError> {
              automaticamente — use [propeller].prop_axis_above_cg_m. Ver \
              docs/aircraft_spec.schema.md e config/aircraft/baseline_4seat.toml para valores de \
              referência"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 7, task 1): `[stability].to_flap_cm_fraction`
+/// foi RENOMEADO para `[stability].to_flap_fraction`. O renome acompanha uma
+/// mudança de PAPEL, não só de nome: a fração deixou de governar apenas o
+/// ΔCm de flap na rotação e passou a ser a fração de DEPLOYMENT do flap de
+/// decolagem, aplicada também ao ΔCL — `cl_max_to = cl_max_clean +
+/// to_flap_fraction·(cl_max_flaps − cl_max_clean)` (ver
+/// `agents::aerodynamics::AerodynamicsAgent::run` e
+/// `specs::WingSpec::cl_max_to`), que agora alimenta a Vr da rotação
+/// (`agents::trim_authority`) e as distâncias de DECOLAGEM
+/// (`agents::performance`), antes calculadas com o CL_max de POUSO.
+/// Como nenhuma struct deste crate usa `#[serde(deny_unknown_fields)]`, um
+/// TOML antigo com o nome velho seria IGNORADO em silêncio e a config
+/// falharia no campo AUSENTE (`to_flap_fraction`) com uma mensagem de serde
+/// que não explica nada — pior ainda, se um dia o campo ganhasse `default`,
+/// carregaria com um valor que o operador não escolheu. Falha alto e claro
+/// ANTES do parse tipado (mesmo padrão de `check_shaft_height_migration`).
+fn check_to_flap_cm_fraction_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("stability").and_then(|s| s.get("to_flap_cm_fraction")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [stability].to_flap_cm_fraction foi RENOMEADO \
+             para [stability].to_flap_fraction — a fração deixou de ser só a fração do ΔCm de \
+             flap e passou a ser a fração de DEPLOYMENT do flap de DECOLAGEM, aplicada aos DOIS \
+             efeitos do flap: o ΔCm da rotação (como antes) e o ΔCL, via cl_max_to = \
+             cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean), que agora alimenta a \
+             Vr da rotação e as distâncias de decolagem (antes calculadas com o CL_max de \
+             POUSO). Renomeie a chave (o valor numérico e a faixa [0, 1] são os mesmos). Ver \
+             docs/aircraft_spec.schema.md e config/aircraft/baseline_4seat.toml"
                 .to_string(),
         ));
     }
@@ -844,7 +879,7 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // o limite TRASEIRO (0 < sm_min); sm_max foi REMOVIDO (ver
     // `check_sm_max_migration`) — o limite DIANTEIRO agora vem da
     // autoridade de profundor (`cl_h_max_down`/`trim_margin`/
-    // `cl_ground_rotation`/`to_flap_cm_fraction`), validada abaixo.
+    // `cl_ground_rotation`/`to_flap_fraction`), validada abaixo.
     require_finite("stability.sm_min", cfg.stability.sm_min)?;
     if cfg.stability.sm_min <= 0.0 {
         return Err(ConfigError::Validation(format!(
@@ -883,12 +918,12 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.stability.cl_ground_rotation
         )));
     }
-    require_finite("stability.to_flap_cm_fraction", cfg.stability.to_flap_cm_fraction)?;
-    if cfg.stability.to_flap_cm_fraction < 0.0 || cfg.stability.to_flap_cm_fraction > 1.0 {
+    require_finite("stability.to_flap_fraction", cfg.stability.to_flap_fraction)?;
+    if cfg.stability.to_flap_fraction < 0.0 || cfg.stability.to_flap_fraction > 1.0 {
         return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: stability.to_flap_cm_fraction deve estar em \
+            "configuração de aeronave inválida: stability.to_flap_fraction deve estar em \
              [0, 1] (valor: {})",
-            cfg.stability.to_flap_cm_fraction
+            cfg.stability.to_flap_fraction
         )));
     }
     // fuselage_kf (Multhopp simplificado, Raymer fig. 16.14) — faixa típica
@@ -1508,7 +1543,7 @@ mod tests {
             cl_h_stall_limit = 1.10
             trim_margin = 0.10
             cl_ground_rotation = 0.5
-            to_flap_cm_fraction = 0.5
+            to_flap_fraction = 0.5
             fuselage_kf = 0.02
             [performance]
             mu_brake_paved = 0.40
@@ -1990,7 +2025,7 @@ mod tests {
     }
 
     // ─── [stability] cl_h_stall_limit / trim_margin / cl_ground_rotation /
-    //     to_flap_cm_fraction (task refino-ciclo2) ──────────────────────────
+    //     to_flap_fraction (task refino-ciclo2; renomeado no ciclo 7) ──────
 
     #[test]
     fn rejeita_cl_h_stall_limit_fora_da_faixa() {
@@ -2319,16 +2354,32 @@ mod tests {
     }
 
     #[test]
-    fn rejeita_to_flap_cm_fraction_fora_de_0_1() {
-        let toml = aircraft_toml_valido().replace("to_flap_cm_fraction = 0.5", "to_flap_cm_fraction = 1.3");
+    fn rejeita_to_flap_fraction_fora_de_0_1() {
+        let toml = aircraft_toml_valido().replace("to_flap_fraction = 0.5", "to_flap_fraction = 1.3");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("stability.to_flap_cm_fraction"), "{err}");
+        assert!(err.to_string().contains("stability.to_flap_fraction"), "{err}");
     }
 
     #[test]
-    fn aceita_to_flap_cm_fraction_no_limite_zero() {
-        let toml = aircraft_toml_valido().replace("to_flap_cm_fraction = 0.5", "to_flap_cm_fraction = 0.0");
-        parse_aircraft(&toml).expect("to_flap_cm_fraction = 0.0 (limite inferior) deveria ser válido");
+    fn aceita_to_flap_fraction_no_limite_zero() {
+        let toml = aircraft_toml_valido().replace("to_flap_fraction = 0.5", "to_flap_fraction = 0.0");
+        parse_aircraft(&toml).expect("to_flap_fraction = 0.0 (limite inferior) deveria ser válido");
+    }
+
+    /// Ciclo 7 (task 1): `[stability].to_flap_cm_fraction` foi RENOMEADO
+    /// para `to_flap_fraction` porque deixou de ser só a fração do ΔCm —
+    /// agora é a fração de DEPLOYMENT do flap de decolagem, aplicada
+    /// também ao ΔCL (`cl_max_to`). Um TOML antigo com o nome velho seria
+    /// IGNORADO em silêncio pelo parser (sem `deny_unknown_fields`), então
+    /// falha alto e claro ANTES do parse tipado.
+    #[test]
+    fn rejeita_config_antiga_com_to_flap_cm_fraction_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido()
+            .replace("to_flap_fraction = 0.5", "to_flap_cm_fraction = 0.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("to_flap_cm_fraction"), "{err}");
+        assert!(err.to_string().contains("to_flap_fraction"), "{err}");
+        assert!(err.to_string().contains("cl_max_to"), "{err}");
     }
 
     // ─── [performance] (Task 4.7) ────────────────────────────────────────────

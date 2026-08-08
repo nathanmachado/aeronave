@@ -267,7 +267,12 @@ sm_min = 0.05   # margem estática mínima — limite TRASEIRO do CG
 cl_h_stall_limit = 1.10
 trim_margin = 0.10        # fração da autoridade reservada como margem (efeito solo + certificação)
 cl_ground_rotation = 0.5  # CL da asa na corrida de decolagem antes da rotação (faixa 0-1)
-to_flap_cm_fraction = 0.5 # fração de cm_flap_delta aplicável em flap de decolagem
+# Fração de DEPLOYMENT do flap no setting de DECOLAGEM (ciclo 7 — renomeada de
+# `to_flap_cm_fraction`, PAPEL DUPLO): governa os dois efeitos do flap parcial
+#   ΔCm: Cm_TO = cm_ac + to_flap_fraction·cm_flap_delta        (rotação)
+#   ΔCL: cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)
+#        → Vr da rotação E distâncias de decolagem (antes usavam o CLmax de POUSO)
+to_flap_fraction = 0.5
 # Coeficiente de Multhopp simplificado (Raymer eq. 16.25, fig. 16.14) para a
 # contribuição desestabilizadora da fuselagem no ponto neutro — faixa típica
 # 0.01-0.03 conforme a posição vertical da asa na fuselagem (asa baixa como

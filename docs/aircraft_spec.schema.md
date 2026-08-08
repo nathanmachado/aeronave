@@ -49,7 +49,7 @@ documentação a ser corrigido, não um comportamento aceitável.
     não quebra consumidores existentes. Configs `aircraft.toml` antigas com
     `sm_max` presente são REJEITADAS com um erro de migração claro por
     `models::config::parse_aircraft` — substitua `[stability].sm_max` por
-    `[stability].trim_margin`/`cl_ground_rotation`/`to_flap_cm_fraction` +
+    `[stability].trim_margin`/`cl_ground_rotation`/`to_flap_fraction` +
     `[wing].cm_ac`/`cm_flap_delta` (ver `config/aircraft/baseline_4seat.toml`
     para valores de referência).
 - **v4.2** (task refino-ciclo2): `TrimSpec` ganha três campos NOVOS
@@ -727,7 +727,7 @@ completa (em português) na docstring de
 | `cl_h_max_down_calc` | f64 (**novo v4.2**) | — | `cl_h_max_down` BRUTO (`a_t·τ·δe_max_rad`), ANTES do truncamento pelo teto de stall — igual a `cl_h_max_down` quando `capped_by_stall == false` |
 | `tau_elevator` | f64 (**novo v4.2**) | — | Eficácia de superfície do profundor τ(c_e/c), ajuste de Nelson |
 | `capped_by_stall` | bool (**novo v4.2**) | — | `true` quando `cl_h_max_down_calc` excede `[stability].cl_h_stall_limit` — o teto de stall, não a geometria do profundor, é o fator limitante |
-| `trim_margin` / `cl_ground_rotation` / `to_flap_cm_fraction` | f64 | — | Parâmetros ecoados de `[stability]` |
+| `trim_margin` / `cl_ground_rotation` / `to_flap_fraction` | f64 | — | Parâmetros ecoados de `[stability]` (`to_flap_fraction`: renomeado de `to_flap_cm_fraction` no ciclo 7 — papel duplo, ΔCm da rotação **e** `wing.cl_max_to`) |
 | `cl_h_trim_cruise` | f64 (**novo v4.4**) | — | CL_h de TRIM em cruzeiro (sem flap) — upload (positivo, CG atrás do CA da asa) ou download (negativo, CG à frente), calculado no CG de REFERÊNCIA da missão (`cg_reference_scenario`, JÁ CONVERGIDO — não o valor lag-1 usado dentro do laço de MTOW). Ver fórmula/dedução em §1 (v4.4) |
 | `cd_trim` | f64 (**novo v4.4**) | — | ΔCD_trim — arrasto INDUZIDO da empenagem ao gerar `cl_h_trim_cruise`. O delta somado a `wing.cd_cruise`/refletido em `wing.ld_ratio_cruise` usa o CG LAG-1 do laço de convergência do MTOW; este campo é RECALCULADO no CG JÁ CONVERGIDO (mesma distinção de `cl_h_trim_cruise` acima) — na prática os dois coincidem a um resíduo de convergência (~1e-9), não são estritamente o mesmo número ecoado |
 | `cg_reference_scenario` | string (**novo v4.4**) | — | Nome do cenário de carga (`weight`) usado como CG de referência da missão — sempre `"4 pax + bagagem + meia"` neste modelo (meia-missão) |

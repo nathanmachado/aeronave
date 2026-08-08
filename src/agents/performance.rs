@@ -289,7 +289,17 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 /// Rolagem de solo na decolagem (método energético de Raymer, Cap. 5):
 ///
 ///   S_G = W² / (g · ρ · S · CL_TO · T_avg)
-///     onde CL_TO = 0.8·CL_max (flap parcial)
+///     onde CL_TO = 0.8·CL_max_TO
+///
+/// Ciclo 7 (task 1): `CL_max_TO` é o CLmax da configuração de DECOLAGEM
+/// (`WingSpec::cl_max_to`, flap PARCIAL — interpolado por
+/// `[stability].to_flap_fraction`), não mais o `cl_max` de POUSO. Ninguém
+/// decola com flap de pouso: usar o CLmax cheio produzia distâncias de
+/// decolagem OTIMISTAS, o espelho exato do pessimismo que a mesma
+/// inconsistência causava na rotação (`agents::trim_authority`). O 0,8 que
+/// multiplica continua sendo o fator de Raymer para o CL efetivo na
+/// corrida (a aeronave rola abaixo do CL_max), agora aplicado ao CLmax
+/// certo.
 ///
 /// `T_avg` (Task 4.7): tração ESTÁTICA corrigida (Rankine-Froude × fator
 /// empírico `static_thrust_factor`, ver `thrust_available_n`/
@@ -307,7 +317,7 @@ fn takeoff_ground_roll_m(
     static_thrust_factor: f64,
 ) -> f64 {
     let w = mass_kg * G;
-    let cl_to = 0.80 * wing.cl_max; // flap parcial na decolagem
+    let cl_to = 0.80 * wing.cl_max_to; // CLmax do flap PARCIAL de decolagem
     let t_avg = thrust_available_n(
         0.0, // tração estática (solo, V=0)
         engine,
@@ -357,8 +367,9 @@ pub fn takeoff_distance_m(
 ///                superfície (a superfície só afeta o atrito no solo, não
 ///                a rotação/subida no ar)
 ///     S_rotação: V_LOF × `rotation_time_s` (rotação a V_LOF ≈ constante)
-///     S_subida:  15 / tan(γ), γ = arcsin(RC/V) avaliado a 1,2·V_s (flap
-///                decolagem), potência de decolagem, nível do mar
+///     S_subida:  15 / tan(γ), γ = arcsin(RC/V) avaliado a 1,2·V_s_TO
+///                (flap de decolagem, `cl_max_to`), potência de decolagem,
+///                nível do mar
 pub fn takeoff_distance_50ft_m(
     mass_kg: f64,
     rho: f64,
@@ -373,7 +384,10 @@ pub fn takeoff_distance_50ft_m(
                                           perf_cfg.static_thrust_factor) * surface_factor;
 
     let w = mass_kg * G;
-    let v_s_to = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    // Ciclo 7 (task 1): `cl_max_to` (flap PARCIAL de decolagem), não o
+    // `cl_max` de POUSO — V_s_to/V_LOF/V_climb são velocidades de
+    // DECOLAGEM.
+    let v_s_to = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
     let v_lo = 1.10 * v_s_to;
     let s_rotation = v_lo * perf_cfg.rotation_time_s;
 
@@ -744,6 +758,45 @@ mod tests {
         assert!(s_50ft > s_ground,
             "distância sobre 15m ({s_50ft:.0}m) deveria ser MAIOR que a rolagem de solo pura \
              ({s_ground:.0}m) — inclui rotação + subida");
+    }
+
+    /// Ciclo 7 (task 1): o trade-off físico que `[stability].to_flap_fraction`
+    /// passa a carregar do lado da DECOLAGEM — mais deployment de flap no
+    /// setting de decolagem ⟹ `cl_max_to` maior ⟹ `CL_TO` maior e `V_s_to`
+    /// menor ⟹ decolagem sobre 15 m ESTRITAMENTE mais CURTA. (O outro lado
+    /// do trade-off — a rotação fica mais exigente, o limite dianteiro de
+    /// rotação sobe — está em
+    /// `trim_authority::tests::mais_flap_de_decolagem_sobe_o_limite_de_rotacao`.)
+    #[test]
+    fn mais_flap_de_decolagem_encurta_a_decolagem() {
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let engine = engine_teste();
+
+        // Duas configurações idênticas EXCETO pela fração de flap de
+        // decolagem — a asa é recomputada em cada uma (é o
+        // `AerodynamicsAgent` que deriva `cl_max_to`).
+        let s_50ft_para = |fracao: f64| {
+            let mut cfg = config_teste();
+            cfg.stability.to_flap_fraction = fracao;
+            let state = AircraftState::from_config(&cfg);
+            let wing = AerodynamicsAgent::run(&state, &req);
+            let perf_cfg = cfg.performance.clone();
+            (
+                wing.cl_max_to,
+                takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+                                        0.0, &perf_cfg),
+            )
+        };
+
+        let (cl_03, s_03) = s_50ft_para(0.3);
+        let (cl_07, s_07) = s_50ft_para(0.7);
+        println!("fração 0.3: cl_max_to={cl_03:.4} S_50ft={s_03:.1}m  |  \
+                  fração 0.7: cl_max_to={cl_07:.4} S_50ft={s_07:.1}m");
+        assert!(cl_07 > cl_03, "fração maior deveria dar cl_max_to maior");
+        assert!(s_07 < s_03,
+            "mais flap de decolagem (fração 0.7, cl_max_to={cl_07:.4}) deveria ENCURTAR \
+             ESTRITAMENTE a decolagem sobre 15 m em relação a 0.3 (cl_max_to={cl_03:.4}): \
+             S(0.7)={s_07:.1}m, S(0.3)={s_03:.1}m");
     }
 
     // ─── Ciclo 6 (task 2): sensibilidade ao diâmetro de hélice ─────────────

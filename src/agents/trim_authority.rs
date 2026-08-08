@@ -10,9 +10,14 @@
 ///     momentos em torno do CG, voo 1g, FECHADO pela contribuição de
 ///     sustentação da própria empenagem (ver `cl_h_required_flare`) —
 ///     resolvido por bisseção (`flare_fwd_limit_frac`).
-///   - **Rotação na decolagem** (Vr = 1,1·Vs0(W), flap de decolagem):
+///   - **Rotação na decolagem** (Vr = 1,1·Vs0_TO(W), flap de DECOLAGEM):
 ///     balanço de momentos em torno do TREM PRINCIPAL (é o trem, não o CG,
-///     que faz de pivô na rotação) — solução fechada
+///     que faz de pivô na rotação) — solução fechada. Ciclo 7 (task 1):
+///     `Vs0_TO` usa `WingSpec::cl_max_to` (CLmax do flap PARCIAL de
+///     decolagem), NÃO o `cl_max_flaps` de pouso — coerente com o `Cm_TO`
+///     de flap parcial que este mesmo balanço já usava. A flare continua
+///     com o CLmax de POUSO (`wing.cl_max`), que é a configuração certa
+///     para ela.
 ///     (`rotation_fwd_limit_m`). **INVARIANTE ao peso** — ver a docstring
 ///     de `rotation_fwd_limit_m` para a dedução completa do cancelamento
 ///     algébrico de `W`.
@@ -58,10 +63,12 @@ const G: f64 = 9.807; // m/s²
 /// (`TrimSensitivity`) — ±0,05, conforme o brief da task.
 const SENSITIVITY_DELTA: f64 = 0.05;
 
-/// `Vr/Vs0` — Vr = 1,1·Vs0, usado tanto para a dinâmica da rotação quanto
-/// (elevado ao quadrado) para o cancelamento algébrico de peso em
+/// `Vr/Vs0_TO` — Vr = 1,1·Vs0_TO, usado tanto para a dinâmica da rotação
+/// quanto (elevado ao quadrado) para o cancelamento algébrico de peso em
 /// `rotation_fwd_limit_m`/`rotation_available_moment_nm` — ver a docstring
-/// dessas funções.
+/// dessas funções. `Vs0_TO` é a velocidade de estol na configuração de
+/// DECOLAGEM (`WingSpec::cl_max_to`, flap parcial — ciclo 7, task 1), não a
+/// de pouso.
 const VR_OVER_VS0: f64 = 1.1;
 
 /// Variação de `[control_surfaces].elevator_deflection_max_deg` usada no
@@ -229,14 +236,24 @@ pub fn flare_fwd_limit_frac(
 /// TODAS com o sinal físico correto (fix de revisão — a versão anterior
 /// usava `|Cm_TO|`, perdendo o sinal; ver nota abaixo):
 ///
-///   q_r(W) = 0,5·ρ·Vr² ,  Vr = 1,1·Vs0(W) ,  Vs0(W) = √(2W/(ρ·S_w·CL_max_flaps))
-///          ⟹ q_r(W) = 1,21·W / (S_w·CL_max_flaps)      [PROPORCIONAL a W]
+///   q_r(W) = 0,5·ρ·Vr² ,  Vr = 1,1·Vs0_TO(W) ,  Vs0_TO(W) = √(2W/(ρ·S_w·CL_max_TO))
+///          ⟹ q_r(W) = 1,21·W / (S_w·CL_max_TO)         [PROPORCIONAL a W]
 ///
 ///   F_h = q_r·S_h·η_h·cl_h_max_down·(1−trim_margin)    [download da EH, N — nariz-ACIMA]
 ///   L_g = q_r·S_w·cl_ground_rotation                    [sustentação da asa, N — nariz-ACIMA]
-///   Cm_TO = cm_ac + to_flap_cm_fraction·cm_flap_delta    [perfil+flap TO, SINALIZADO]
+///   Cm_TO = cm_ac + to_flap_fraction·cm_flap_delta       [perfil+flap TO, SINALIZADO]
 ///
 ///   M_disponível = F_h·(x_ac_tail−x_main) + L_g·(x_main−x_ac_wing) + Cm_TO·q_r·S_w·MAC
+///
+/// `CL_max_TO` (ciclo 7, task 1) é o CLmax do flap PARCIAL de DECOLAGEM
+/// (`WingSpec::cl_max_to` = `cl_max_clean + to_flap_fraction·(cl_max_flaps
+/// − cl_max_clean)`) — a MESMA `to_flap_fraction` que sinaliza o `Cm_TO`
+/// logo abaixo. Antes deste ciclo, `Vs0` vinha do `cl_max_flaps` de POUSO
+/// enquanto o `Cm` já era o do flap parcial: as duas metades do mesmo
+/// balanço descreviam configurações de flap DIFERENTES. A incoerência era
+/// inofensiva com flap simples (1,72 vs 1,585), mas com flap slotted
+/// (CLmax 2,2) subestimava Vr em 13% (q_r −24%) e inflava artificialmente
+/// o limite dianteiro de rotação (campanha E10).
 ///
 /// `Cm_TO` é SOMADO (não subtraído) com seu próprio sinal: por convenção
 /// aerodinâmica, `Cm` POSITIVO é nariz-ACIMA (ajuda a rotação — deve
@@ -252,7 +269,7 @@ pub fn flare_fwd_limit_frac(
 pub fn rotation_available_moment_nm(
     weight_n: f64,
     s_w_m2: f64,
-    cl_max_flaps: f64,
+    cl_max_to: f64,
     s_h_m2: f64,
     eta_h: f64,
     cl_h_max_down: f64,
@@ -262,14 +279,14 @@ pub fn rotation_available_moment_nm(
     cl_ground_rotation: f64,
     x_ac_wing_m: f64,
     cm_ac: f64,
-    to_flap_cm_fraction: f64,
+    to_flap_fraction: f64,
     cm_flap_delta: f64,
     mac_m: f64,
 ) -> f64 {
-    let q_r = VR_OVER_VS0 * VR_OVER_VS0 * weight_n / (s_w_m2 * cl_max_flaps);
+    let q_r = VR_OVER_VS0 * VR_OVER_VS0 * weight_n / (s_w_m2 * cl_max_to);
     let f_h = q_r * s_h_m2 * eta_h * cl_h_max_down * (1.0 - trim_margin);
     let l_g = q_r * s_w_m2 * cl_ground_rotation;
-    let cm_to = cm_ac + to_flap_cm_fraction * cm_flap_delta;
+    let cm_to = cm_ac + to_flap_fraction * cm_flap_delta;
     f_h * (x_ac_tail_m - x_main_m) + l_g * (x_main_m - x_ac_wing_m) + cm_to * q_r * s_w_m2 * mac_m
 }
 
@@ -282,7 +299,7 @@ pub fn rotation_available_moment_nm(
 /// **INVARIANTE AO PESO** (achado da revisão desta task — a primeira
 /// versão deste agente calculava um limite DIFERENTE por cenário de carga,
 /// partindo da premissa de que `x_cg_rot` dependeria do peso, mas com
-/// `Vr = 1,1·Vs0(W)` isso NÃO acontece — a dependência em `W` cancela
+/// `Vr = 1,1·Vs0_TO(W)` isso NÃO acontece — a dependência em `W` cancela
 /// exatamente): `q_r(W)` é PROPORCIONAL a `W` (ver
 /// `rotation_available_moment_nm`) — logo `F_h`, `L_g` e o termo de
 /// `Cm_TO` são TODOS proporcionais a `W`, e `M_disponível(W)` também é
@@ -291,10 +308,18 @@ pub fn rotation_available_moment_nm(
 /// resultado é o MESMO para qualquer cenário de carga (prova numérica em
 /// `tests::rotation_limit_e_invariante_a_massas_diferentes`). Fisicamente
 /// isso faz sentido: sob esta política de velocidade, uma aeronave mais
-/// pesada rotaciona a uma Vr proporcionalmente maior (`Vs0 ∝ √W`), o que
+/// pesada rotaciona a uma Vr proporcionalmente maior (`Vs0_TO ∝ √W`), o que
 /// aumenta `q_r` na medida exata (`q_r ∝ W`) para que a autoridade de
 /// profundor disponível cresça na MESMA proporção que o momento de peso
-/// que precisa vencer — os dois efeitos se cancelam.
+/// que precisa vencer — os dois efeitos se cancelam. A troca de
+/// `cl_max_flaps` por `cl_max_to` (ciclo 7, task 1) NÃO afeta esta prova:
+/// `cl_max_to` é, como `cl_max_flaps`, uma constante da CONFIGURAÇÃO
+/// (interpolação de dois CLmax de config por uma fração de config), não uma
+/// função de `W` — o cancelamento algébrico é idêntico. O que muda é o
+/// VALOR: `cl_max_to < cl_max_flaps` ⟹ `Vs0_TO`/`Vr` maiores ⟹ `q_r`
+/// maior ⟹ mais autoridade disponível ⟹ limite dianteiro mais À FRENTE do
+/// que o modelo antigo (que rodava a rotação com o CLmax de pouso)
+/// indicava. Não é uma folga nova: é a Vr correta.
 ///
 /// Implementação: chama `rotation_available_moment_nm` com `weight_n=1,0`
 /// (peso unitário) — como o resultado é proporcional a `W`, o valor obtido
@@ -306,7 +331,7 @@ pub fn rotation_available_moment_nm(
 #[allow(clippy::too_many_arguments)]
 pub fn rotation_fwd_limit_m(
     s_w_m2: f64,
-    cl_max_flaps: f64,
+    cl_max_to: f64,
     s_h_m2: f64,
     eta_h: f64,
     cl_h_max_down: f64,
@@ -316,13 +341,13 @@ pub fn rotation_fwd_limit_m(
     cl_ground_rotation: f64,
     x_ac_wing_m: f64,
     cm_ac: f64,
-    to_flap_cm_fraction: f64,
+    to_flap_fraction: f64,
     cm_flap_delta: f64,
     mac_m: f64,
 ) -> f64 {
     let moment_per_unit_weight = rotation_available_moment_nm(
-        1.0, s_w_m2, cl_max_flaps, s_h_m2, eta_h, cl_h_max_down, trim_margin, x_ac_tail_m,
-        x_main_m, cl_ground_rotation, x_ac_wing_m, cm_ac, to_flap_cm_fraction, cm_flap_delta,
+        1.0, s_w_m2, cl_max_to, s_h_m2, eta_h, cl_h_max_down, trim_margin, x_ac_tail_m,
+        x_main_m, cl_ground_rotation, x_ac_wing_m, cm_ac, to_flap_fraction, cm_flap_delta,
         mac_m,
     );
     x_main_m - moment_per_unit_weight
@@ -462,11 +487,14 @@ impl TrimAuthorityAgent {
         // do datum (bordo de ataque da asa + 0,25·MAC [+ braço da EH]).
         let x_ac_wing = cfg.wing.le_root_x_m + 0.25 * mac;
         let x_ac_tail = cfg.wing.le_root_x_m + 0.25 * mac + emp.arm_h_m;
+        // Ciclo 7 (task 1): `wing.cl_max_to` (flap PARCIAL de decolagem),
+        // não `wing.cl_max` (flap de POUSO) — a Vr da rotação agora é
+        // coerente com o `Cm_TO` de flap parcial usado no mesmo balanço.
         let x_rot = rotation_fwd_limit_m(
-            wing.area_m2, wing.cl_max, emp.s_horizontal_m2, emp.eta_h,
+            wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
             cl_h_max_down, cfg.stability.trim_margin, x_ac_tail, cfg.gear.x_main_m,
             cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
-            cfg.stability.to_flap_cm_fraction, cfg.wing.cm_flap_delta, mac,
+            cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac,
         );
         let rotation_limit_pct = cg_pct_mac(x_rot, mac_le, mac);
 
@@ -477,10 +505,10 @@ impl TrimAuthorityAgent {
         for sc in &wb.scenarios {
             let w_n = sc.total_mass_kg * G;
             let available = rotation_available_moment_nm(
-                w_n, wing.area_m2, wing.cl_max, emp.s_horizontal_m2, emp.eta_h,
+                w_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
                 cl_h_max_down, cfg.stability.trim_margin, x_ac_tail,
                 cfg.gear.x_main_m, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
-                cfg.stability.to_flap_cm_fraction, cfg.wing.cm_flap_delta, mac,
+                cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac,
             );
             let required = w_n * (cfg.gear.x_main_m - sc.x_cg_m);
             let margin_pct = (available - required) / required * 100.0;
@@ -577,7 +605,7 @@ impl TrimAuthorityAgent {
             capped_by_stall,
             trim_margin: cfg.stability.trim_margin,
             cl_ground_rotation: cfg.stability.cl_ground_rotation,
-            to_flap_cm_fraction: cfg.stability.to_flap_cm_fraction,
+            to_flap_fraction: cfg.stability.to_flap_fraction,
             cl_h_trim_cruise: cl_h_trim_cruise_val,
             cd_trim: cd_trim_val,
             cg_reference_scenario: cg_ref.name.to_string(),
@@ -774,21 +802,26 @@ mod tests {
 
     /// `rotation_fwd_limit_m` (fechado, assume `W=1`) deve bater com uma
     /// avaliação TOTALMENTE INDEPENDENTE do balanço de momentos — computa
-    /// `Vs0(W)` via `sqrt`, `Vr`, `q_r` explicitamente para um peso
+    /// `Vs0_TO(W)` via `sqrt`, `Vr`, `q_r` explicitamente para um peso
     /// arbitrário (12.000 N), em vez de usar a substituição algébrica
-    /// `q_r(W) = 1,21·W/(S·CL_max)` usada internamente pela função.
+    /// `q_r(W) = 1,21·W/(S·CL_max_TO)` usada internamente pela função.
+    ///
+    /// Ciclo 7 (task 1): o CLmax deste hand-check passa a ser o de
+    /// DECOLAGEM — 1,585 = 1,45 + 0,5·(1,72 − 1,45), a interpolação do
+    /// baseline real (`cl_max_clean` 1,45, `cl_max_flaps` 1,72,
+    /// `to_flap_fraction` 0,5) — e não mais o 1,72 de POUSO.
     #[test]
     fn rotation_fwd_limit_m_bate_com_balanco_de_momentos_independente() {
         let mac = 1.2463161361039574;
         let s_h = 2.5809129985152786;
         let s_w = 14.2;
-        let cl_max_flaps = 1.72;
+        let cl_max_to = 1.45 + 0.5 * (1.72 - 1.45); // = 1.585 (flap de DECOLAGEM)
         let x_ac_wing = 2.90 + 0.25 * mac;
         let x_ac_tail = 2.90 + 0.25 * mac + 4.80;
         let x_main = 3.85;
 
         let w_n = 12_000.0_f64;
-        let vs0 = (2.0 * w_n / (RHO_SL * s_w * cl_max_flaps)).sqrt();
+        let vs0 = (2.0 * w_n / (RHO_SL * s_w * cl_max_to)).sqrt();
         let vr = 1.1 * vs0;
         let q_r = 0.5 * RHO_SL * vr * vr;
         let f_h = q_r * s_h * 0.90 * 0.85 * (1.0 - 0.10);
@@ -799,7 +832,7 @@ mod tests {
         let x_independente = x_main - moment / w_n;
 
         let x_fechado = rotation_fwd_limit_m(
-            s_w, cl_max_flaps, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
+            s_w, cl_max_to, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
             -0.008, 0.5, -0.30, mac,
         );
 
@@ -825,7 +858,7 @@ mod tests {
         let x_ac_tail = 2.90 + 0.25 * mac + 4.80;
         let x_main = 3.85;
 
-        // to_flap_cm_fraction=0 e cm_flap_delta=0 (irrelevantes) — só
+        // to_flap_fraction=0 e cm_flap_delta=0 (irrelevantes) — só
         // cm_ac controla o sinal de Cm_TO aqui.
         let x_positivo = rotation_fwd_limit_m(
             s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
@@ -841,6 +874,54 @@ mod tests {
             "Cm_TO positivo (+0.04, {x_positivo:.4}m) deveria mover o limite de rotação para a \
              FRENTE (x menor) em relação ao Cm_TO negativo (-0.04, {x_negativo:.4}m) — Cm \
              positivo é nariz-acima e ajuda a rotação");
+    }
+
+    /// Ciclo 7 (task 1): o OUTRO lado do trade-off que
+    /// `[stability].to_flap_fraction` carrega — mais deployment de flap no
+    /// setting de decolagem ⟹ `cl_max_to` maior ⟹ `Vs0_TO`/`Vr` MENORES
+    /// ⟹ `q_r` menor ⟹ menos momento nariz-acima disponível na rotação ⟹
+    /// limite dianteiro de rotação SOBE (x_cg_rot maior, mais atrás,
+    /// ESTRITAMENTE). Vem acompanhado, na mesma direção, do ΔCm de flap
+    /// (mais nariz-abaixo com fração maior). O ganho de decolagem está em
+    /// `performance::tests::mais_flap_de_decolagem_encurta_a_decolagem`.
+    #[test]
+    fn mais_flap_de_decolagem_sobe_o_limite_de_rotacao() {
+        use crate::agents::aerodynamics::AerodynamicsAgent;
+        use crate::models::aircraft_config::test_fixtures::config_teste;
+        use crate::models::aircraft_state::AircraftState;
+
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let mac = 1.2463161361039574;
+        let s_h = 2.5809129985152786;
+        let x_ac_wing = 2.90 + 0.25 * mac;
+        let x_ac_tail = 2.90 + 0.25 * mac + 4.80;
+        let x_main = 3.85;
+
+        // Duas configurações idênticas EXCETO pela fração de flap de
+        // decolagem — a asa (e portanto `cl_max_to`) é recomputada em cada.
+        let x_rot_para = |fracao: f64| {
+            let mut cfg = config_teste();
+            cfg.stability.to_flap_fraction = fracao;
+            let state = AircraftState::from_config(&cfg);
+            let wing = AerodynamicsAgent::run(&state, &req);
+            let x = rotation_fwd_limit_m(
+                wing.area_m2, wing.cl_max_to, s_h, 0.90, 0.85, cfg.stability.trim_margin,
+                x_ac_tail, x_main, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
+                cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac,
+            );
+            (wing.cl_max_to, x)
+        };
+
+        let (cl_03, x_03) = x_rot_para(0.3);
+        let (cl_07, x_07) = x_rot_para(0.7);
+        println!("fração 0.3: cl_max_to={cl_03:.4} x_cg_rot={x_03:.4}m  |  \
+                  fração 0.7: cl_max_to={cl_07:.4} x_cg_rot={x_07:.4}m");
+        assert!(cl_07 > cl_03, "fração maior deveria dar cl_max_to maior");
+        assert!(x_07 > x_03,
+            "mais flap de decolagem (fração 0.7, cl_max_to={cl_07:.4}) deveria SUBIR \
+             ESTRITAMENTE o limite dianteiro de rotação (Vr menor ⟹ q_r menor ⟹ menos \
+             autoridade) em relação a 0.3 (cl_max_to={cl_03:.4}): \
+             x(0.7)={x_07:.4}m, x(0.3)={x_03:.4}m");
     }
 
     // ─── Propriedades da flare ────────────────────────────────────────────
@@ -992,10 +1073,29 @@ mod tests {
         println!("rotation_limit_pct_mac = {:.6}", trim.rotation_limit_pct_mac);
         println!("cg_limit_aft_pct_mac = {:.6}", wb.spec.cg_limit_aft_pct_mac);
         // Pin pré-refino-ciclo2: ≈10.948%. Pin pré-E7 (refino-ciclo2): ≈6.099%.
-        // Pin novo (campanha E7, 2026-08-06, gear.x_main_m 3.55→3.66m): ≈12.995%.
+        // Pin pré-ciclo-7 (campanha E7, gear.x_main_m 3.55→3.66m): ≈12.995%.
+        //
+        // Pin NOVO (ciclo 7, task 1 — `cl_max_to`): ≈8.908%, uma queda de
+        // 4,087 pp EXPLICADA EXATAMENTE pela física, não por afrouxamento
+        // (a tolerância ±1.5 é a MESMA de antes). A rotação passou a usar
+        // o CLmax de DECOLAGEM (1,585 = 1,45 + 0,5·(1,72−1,45)) no lugar
+        // do CLmax de POUSO (1,72):
+        //   Vs0_TO/Vr crescem √(1,72/1,585) = +4,21%
+        //   q_r e, com ele, TODO o momento disponível: ×1,72/1,585 = +8,52%
+        //   x_cg_rot = x_main − M/W ⟹ Δx = −0,08517·(x_main − x_cg_rot_antigo)
+        //                            = −0,08517·(3,660 − 3,0620) = −0,0509 m
+        //   em %MAC (MAC = 1,2463 m): −4,087 pp → 12,995 − 4,087 = 8,908 ✓
+        // (verificado no baseline real com erro 0,0e0 m; o "≈2–3 pp"
+        // estimado na spec §3 subestimava por ignorar a AMPLIFICAÇÃO do
+        // braço: o limite fica 0,60 m à frente do trem, então 8,5% de
+        // momento vale 5 cm de CG — e a MAC tem só 1,25 m.)
+        // Sinal: com a Vr CORRETA (mais alta), há MAIS pressão dinâmica e
+        // MAIS autoridade de profundor na rotação — o limite dianteiro
+        // AVANÇA. O modelo antigo era pessimista, não conservador por
+        // escolha.
         assert!(
-            (trim.rotation_limit_pct_mac - 12.995).abs() < 1.5,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈12.995% ±1.5%)",
+            (trim.rotation_limit_pct_mac - 8.908).abs() < 1.5,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈8.908% ±1.5%)",
             trim.rotation_limit_pct_mac
         );
 
@@ -1100,12 +1200,23 @@ mod tests {
         // Task refino-ciclo2: `[stability].cl_h_max_down` foi REMOVIDO (a
         // autoridade agora é CALCULADA por geometria) — para reproduzir uma
         // autoridade reduzida equivalente ao antigo palpite pré-E6 (0.85),
-        // reduz a corda do profundor (`elevator_chord_frac` 0.40→0.30, τ
-        // menor). 0.30 dá cl_h_max_down_calc≈0.880 (mais perto do palpite
-        // antigo 0.85 que a corda pré-mudança-6, 0.35, que já dá ≈0.972 —
-        // ALTA o bastante para não mais reproduzir o envelope vazio sob a
-        // física corrigida; checado empiricamente, ver task-1-report.md).
-        cfg.control_surfaces.elevator_chord_frac = 0.30;
+        // reduz a corda do profundor (`elevator_chord_frac` 0.40→0.28, τ
+        // menor).
+        //
+        // Ciclo 7 (task 1): a corda desta MUTAÇÃO passou de 0.30 para 0.28.
+        // Motivo: com a rotação usando o CLmax de DECOLAGEM (`cl_max_to`),
+        // a Vr correta é 4,2% maior, `q_r` 8,5% maior e TODO limite de
+        // rotação avança ~4 pp — inclusive o desta config mutada, que caiu
+        // de ≈38,9% para ≈35,7% e deixou de ficar À FRENTE do limite
+        // traseiro (36,6%), ou seja, deixou de reproduzir o envelope VAZIO
+        // que este teste existe para guardar. 0.28 dá
+        // cl_h_max_down_calc≈0.841 — que, além de restaurar o achado
+        // (≈37,2% > 36,6%), é uma reprodução MELHOR do palpite pré-E6
+        // original (0.85) do que o 0.30 anterior (≈0.880). O achado
+        // histórico é o mesmo; só o dial da mutação foi reajustado à
+        // física corrigida. (Varredura empírica: 0.30→35,7% fechado;
+        // 0.28→37,2% vazio; 0.26→38,7% vazio.)
+        cfg.control_surfaces.elevator_chord_frac = 0.28;
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let state = crate::models::aircraft_state::AircraftState::from_config(&cfg);
         let wing = crate::agents::aerodynamics::AerodynamicsAgent::run(&state, &req);
@@ -1267,4 +1378,5 @@ mod tests {
              ({cd_alto_e_h:.8})");
     }
 }
+
 

@@ -859,17 +859,20 @@ mod tests {
         cfg.gear.x_main_m = 3.85;                       // valor pré-E6 — causa raiz original
         cfg.empennage.v_h = 0.70;                       // valor pré-E6
         // Task refino-ciclo2: `[stability].cl_h_max_down` foi REMOVIDO — o
-        // equivalente é reduzir `elevator_chord_frac` (0.40→0.30, τ menor)
-        // para reproduzir uma autoridade de download reduzida (≈0.88, perto
-        // do palpite antigo 0.85) — ver comentário equivalente em
-        // `agents::trim_authority::tests::trim_authority_agent_run_hand_
-        // check_baseline_mutado_parametros_pre_e6`.
-        cfg.control_surfaces.elevator_chord_frac = 0.30;
+        // equivalente é reduzir `elevator_chord_frac` (0.40→0.28, τ menor)
+        // para reproduzir uma autoridade de download reduzida (≈0.84, perto
+        // do palpite antigo 0.85). Ciclo 7 (task 1): 0.30→0.28 porque a
+        // rotação passou a usar o CLmax de DECOLAGEM (`cl_max_to`), o que
+        // avança TODO limite de rotação ~4 pp e fazia esta mutação deixar
+        // de reproduzir o envelope vazio (35,7% < 36,6%) — ver comentário
+        // completo em `agents::trim_authority::tests::trim_authority_agent_
+        // run_hand_check_baseline_mutado_parametros_pre_e6`.
+        cfg.control_surfaces.elevator_chord_frac = 0.28;
         let fuel_capacity_l = cfg.fuel_system.capacity_l;
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup_with_cfg(cfg);
         assert!(wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac,
             "pré-condição do teste: parâmetros pré-E6 (x_main_m=3.85, v_h=0.70, \
-             elevator_chord_frac=0.30, config real mutada) deveriam reproduzir o envelope de \
+             elevator_chord_frac=0.28, config real mutada) deveriam reproduzir o envelope de \
              CG vazio original (fwd={:.2}% > aft={:.2}%)",
             wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 

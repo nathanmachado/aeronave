@@ -303,6 +303,46 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// mudou de texto ou valor. A decolagem na grama (#23, 428,2 m) continua
 /// passando com folga. Ver `.superpowers/sdd/2026-08-08-ciclo6-pista-e-
 /// robustez-final/task-5-report.md` (seção "Correção pós-revisão final").
+///
+/// ATUALIZAÇÃO (ciclo 7, task 1 — `cl_max_to`): MESMA contagem (4), mas
+/// DUAS violações TROCADAS de natureza. A rotação passou a derivar Vr do
+/// CLmax de DECOLAGEM (`cl_max_to` = 1,585 = 1,45 + 0,5·(1,72−1,45)) em
+/// vez do CLmax de POUSO (1,72), coerente com o `Cm_TO` de flap parcial
+/// que o mesmo balanço já usava; e as distâncias de DECOLAGEM passaram a
+/// usar o mesmo `cl_max_to`. Consequências, TODAS verificadas:
+///
+///   - **Limite dianteiro de rotação 12,995% → 8,908% MAC** (−4,087 pp).
+///     Explicação fechada: `q_r ∝ 1/CL_max_TO` ⟹ todo o momento
+///     disponível ×(1,72/1,585) = +8,52%; `x_cg_rot = x_main − M/W` ⟹
+///     Δx = −0,08517·(3,660 − 3,0620) = −0,0509 m = −4,087 pp de MAC
+///     (MAC 1,2463 m). Bate com o observado a 0,0e0 m. A Vr correta é
+///     MAIOR (+4,21%), logo há MAIS pressão dinâmica e MAIS autoridade de
+///     profundor na rotação — o modelo antigo era pessimista, não
+///     conservador por escolha.
+///   - **As DUAS violações NOMINAIS de envelope FECHARAM**: 'Solo
+///     (piloto)' (9,1% MAC) e '2 pax dianteiros' (12,5%) agora ficam
+///     ATRÁS do limite dianteiro de 8,91% — dentro do envelope
+///     [8,9%–43,5%]. As margens de autoridade de rotação por cenário
+///     saíram do vermelho: Solo −7,46% → +0,42%, 2 pax −1,07% → +7,36%.
+///   - **Duas violações NOVAS de ROBUSTEZ** tomaram o lugar delas: os
+///     MESMOS dois cenários passam no NOMINAL mas reprovam com massas
+///     estruturais ±15% (checagem #19): Solo 4,55 vs 8,91 e 2 pax 8,46 vs
+///     8,91 (%MAC no pior caso dianteiro). O achado não sumiu, mudou de
+///     categoria — deixou de ser "fora do envelope no nominal" e virou
+///     "sem margem para a incerteza de massa estrutural". É exatamente
+///     para isso que a checagem #19 existe; ela não disparava antes
+///     porque o nominal já violava.
+///   - **Decolagem mais LONGA** (o espelho honesto do ganho na rotação —
+///     o modelo antigo era otimista na decolagem): grama 15 m 428,2 →
+///     457,7 m (+6,88%), pavimentada 381,4 → 406,9 m; estimativas
+///     simplificadas (×1,5) grama 421,3 → 457,1 m e pavimentada 351,1 →
+///     381,0 m (+8,52% exatos, `S_G ∝ 1/CL_TO`). A decolagem na grama
+///     continua PASSANDO nos 600 m (folga 142 m).
+///   - Pouso (grama e pavimentado), VS0, VS1 e o gradiente de subida:
+///     INALTERADOS — nenhum deles descreve decolagem.
+///
+/// Contagem 4 → **4**, `validation_status` continua `FAIL`, e NENHUMA
+/// tolerância foi afrouxada.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_carga_de_nariz() {
     let out_path = std::env::temp_dir().join(format!(
@@ -342,20 +382,34 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    // 3 → 4 (ciclo 6, revisão final): a 4ª é o pouso na GRAMA excedendo os
-    // 600 m da pista de fazenda — ver a ATUALIZAÇÃO na docstring acima. As
-    // 3 anteriores seguem idênticas, em texto e valor.
+    // Contagem 4 → 4 (ciclo 7, task 1), mas com DUAS violações trocadas
+    // de natureza: as duas de envelope NOMINAL fecharam (limite de rotação
+    // 13,0% → 8,91%) e duas de ROBUSTEZ (±15% de massa estrutural) nos
+    // MESMOS dois cenários tomaram o lugar delas — ver a ATUALIZAÇÃO na
+    // docstring acima para a derivação completa.
     assert_eq!(violations.len(), 4,
-        "esperava EXATAMENTE 4 violações honestas no baseline real pós-ciclo-6: {violations:#?}");
-    assert!(violations.iter().any(|v| v.contains("Solo (piloto)")
-            && v.contains("fora do envelope de CG admissível")),
-        "esperava violação de envelope para o cenário 'Solo (piloto)' (CG ≈9,1% MAC, à frente \
-         do limite de rotação de 13,0%; 8,3% no achado honesto original do ciclo 3, RE-MEDIDO \
-         em 9,1% na Task 2 do ciclo 4 — W_dg de envelope com lag-1): {violations:#?}");
-    assert!(violations.iter().any(|v| v.contains("2 pax dianteiros")
-            && v.contains("fora do envelope de CG admissível")),
-        "esperava violação de envelope para o cenário '2 pax dianteiros' (CG ≈12,5% MAC; \
-         11,8%→12,5%, mesmo re-medição do ciclo 4 Task 2): {violations:#?}");
+        "esperava EXATAMENTE 4 violações honestas no baseline real pós-ciclo-7: {violations:#?}");
+    // Ciclo 7: as duas violações de envelope NOMINAL FECHARAM — 'Solo
+    // (piloto)' a 9,1% MAC e '2 pax dianteiros' a 12,5% agora ficam ATRÁS
+    // do limite dianteiro de rotação (8,91%, era 13,0%). Assert NEGATIVO
+    // explícito para que uma regressão que as reabrisse não passe
+    // despercebida escondida na contagem.
+    for cenario in ["Solo (piloto)", "2 pax dianteiros"] {
+        assert!(!violations.iter().any(|v| v.contains(cenario)
+                && v.contains("fora do envelope de CG admissível")),
+            "cenário '{cenario}' deveria estar DENTRO do envelope no NOMINAL desde o ciclo 7 \
+             (limite de rotação 13,0% → 8,91% com o CLmax de DECOLAGEM): {violations:#?}");
+    }
+    // ...mas os MESMOS dois cenários reprovam sob ±15% de incerteza de
+    // massa estrutural (checagem #19) — o achado mudou de categoria, não
+    // desapareceu. Solo: 4,55 vs 8,91 %MAC; 2 pax: 8,46 vs 8,91.
+    for cenario in ["Solo (piloto)", "2 pax dianteiros"] {
+        assert!(violations.iter().any(|v| v.starts_with("Robustez:")
+                && v.contains(cenario)),
+            "esperava violação de ROBUSTEZ (massas estruturais ±15%) para o cenário \
+             '{cenario}' — passa no nominal desde o ciclo 7, mas sem margem para a incerteza \
+             de massa: {violations:#?}");
+    }
     assert!(violations.iter().any(|v| v.contains("Carga de nariz:")
             && v.contains("excede o teto")),
         "esperava violação de carga de nariz (≈28,6% > teto de 25,0%; 29,0%→28,6%, mesma \
@@ -371,13 +425,17 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
         "esperava violação de pouso na GRAMA excedendo a pista de 600 m (≈605,0 m — o pouso \
          pavimentado, 540,0 m, cabia; a grama nunca coube, o modelo é que não olhava): \
          {violations:#?}");
-    // A decolagem na grama (#23, ≈428,2 m) continua PASSANDO com folga —
-    // o achado é do pouso, não das duas distâncias de pista.
+    // A decolagem na grama continua PASSANDO com folga — o achado é do
+    // pouso, não das duas distâncias de pista. Ciclo 7 (task 1): 428,2 m →
+    // 457,7 m (+6,88%), porque a decolagem passou a usar o CLmax de
+    // DECOLAGEM (1,585) em vez do de POUSO (1,72) — o modelo antigo era
+    // OTIMISTA. Folga remanescente: 142 m nos 600 m.
     assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
-        "decolagem na grama (≈428,2 m) deveria continuar dentro dos 600 m: {violations:#?}");
-    // Os DEMAIS cenários continuam DENTRO do envelope — o achado é de dois
-    // cenários leves/dianteiros, não do envelope inteiro nem de um
-    // envelope vazio.
+        "decolagem na grama (≈457,7 m pós-ciclo-7, era ≈428,2 m) deveria continuar dentro dos \
+         600 m: {violations:#?}");
+    // Os DEMAIS cenários continuam DENTRO do envelope (e sem achado de
+    // robustez) — o achado é dos dois cenários leves/dianteiros, não do
+    // envelope inteiro nem de um envelope vazio.
     for cenario in ["4 pax sem bagagem", "4 pax + bagagem + cheio",
                     "4 pax + bagagem + meia", "4 pax + bagagem vazio"] {
         assert!(!violations.iter().any(|v| v.contains(cenario)),
@@ -397,12 +455,16 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_envelope_e_c
     // Ciclo 4, Task 4 (checagem #19, robustez à incerteza de massa
     // estrutural): achado honesto INVESTIGADO (ver comentário da função,
     // acima) — com σ=15% nenhum check que passa no nominal flipa sob os
-    // conjuntos adversariais. Zero violações NOVAS ("Robustez:") — já
-    // implícito no `assert_eq!(violations.len(), 3, ...)` acima, explicito
-    // aqui para documentar a checagem #19 especificamente.
-    assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
-        "achado honesto do ciclo 4 (σ=15%): nenhuma violação de robustez nova esperada no \
-         baseline real: {violations:#?}");
+    // conjuntos adversariais — zero violações "Robustez:". ATUALIZADO no
+    // ciclo 7 (task 1): agora EXISTEM exatamente DUAS, e só duas, nos
+    // cenários 'Solo (piloto)' e '2 pax dianteiros' (asserts nomeados
+    // acima). Não é uma regressão de robustez: são os mesmos dois
+    // cenários que ANTES violavam o envelope no NOMINAL — com o limite de
+    // rotação corrigido eles passam no nominal, e o gate #19 passa a ser o
+    // que os pega, que é exatamente a função dele.
+    assert_eq!(violations.iter().filter(|v| v.starts_with("Robustez:")).count(), 2,
+        "esperava EXATAMENTE 2 violações de robustez (σ=15%) no baseline real pós-ciclo-7 — \
+         'Solo (piloto)' e '2 pax dianteiros': {violations:#?}");
     // O aviso elétrico de pico (não é violação) continua presente — só
     // confirma que o pipeline real ainda reporta avisos quando aplicável.
     assert!(json.contains("Orçamento elétrico:") && json.contains("banco de baterias"),

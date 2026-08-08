@@ -154,6 +154,15 @@ impl AerodynamicsAgent {
         let cd_cruise = cd0 + cdi;
         let ld = ld_ratio(cl_cruise, cd_cruise);
 
+        // CL_max de DECOLAGEM (ciclo 7, task 1 — ver `WingSpec::cl_max_to`):
+        // interpolação linear de DEPLOYMENT de flap entre limpo e pouso,
+        // com a MESMA fração `[stability].to_flap_fraction` que o
+        // `trim_authority` aplica ao ΔCm de flap na rotação — uma única
+        // fração para os dois efeitos do flap parcial de decolagem. Com
+        // fração 0 recai no limpo, com 1 no flap de pouso.
+        let cl_max_to = state.cl_max_clean
+            + state.to_flap_fraction * (state.cl_max_flaps - state.cl_max_clean);
+
         // Velocidades de stall ao nível do mar (condição mais crítica).
         // VS0 — configuração com flap/pouso (CL_max maior → V_stall MENOR).
         let v_stall_flaps_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, state.cl_max_flaps);
@@ -173,6 +182,7 @@ impl AerodynamicsAgent {
             cd_cruise,
             cl_max:                 state.cl_max_flaps,
             cl_max_clean:           state.cl_max_clean,
+            cl_max_to,
             stall_speed_flaps_kmh:  v_stall_flaps_ms * 3.6,
             stall_speed_clean_kmh:  v_stall_clean_ms * 3.6,
             ld_ratio_cruise:  ld,
@@ -227,6 +237,29 @@ mod tests {
         assert!(wing.stall_speed_clean_kmh > 110.0 && wing.stall_speed_clean_kmh < 135.0,
             "VS1 {:.1} km/h fora da faixa esperada (110-135 km/h)",
             wing.stall_speed_clean_kmh);
+    }
+
+    /// Ciclo 7 (task 1): `cl_max_to` é a INTERPOLAÇÃO LINEAR de deployment
+    /// de flap entre o CL_max limpo e o CL_max de pouso, com a MESMA fração
+    /// (`[stability].to_flap_fraction`) que o `trim_authority` já aplica ao
+    /// ΔCm de flap — e fica ESTRITAMENTE entre os dois extremos para uma
+    /// fração em (0,1).
+    #[test]
+    fn cl_max_to_interpola_entre_limpo_e_pouso() {
+        let cfg = config_teste();
+        let state = AircraftState::from_config(&cfg);
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing = AerodynamicsAgent::run(&state, &req);
+
+        let esperado = cfg.wing.cl_max_clean
+            + cfg.stability.to_flap_fraction * (cfg.wing.cl_max_flaps - cfg.wing.cl_max_clean);
+        println!("cl_max_to = {:.6} (esperado {esperado:.6}); limpo={:.3} pouso={:.3}",
+                 wing.cl_max_to, cfg.wing.cl_max_clean, cfg.wing.cl_max_flaps);
+        assert!((wing.cl_max_to - esperado).abs() < 1e-12,
+            "cl_max_to {:.12} deveria ser a interpolação {esperado:.12}", wing.cl_max_to);
+        assert!(wing.cl_max_to > cfg.wing.cl_max_clean && wing.cl_max_to < cfg.wing.cl_max_flaps,
+            "cl_max_to {:.4} deveria ficar ESTRITAMENTE entre limpo ({:.4}) e pouso ({:.4})",
+            wing.cl_max_to, cfg.wing.cl_max_clean, cfg.wing.cl_max_flaps);
     }
 
     #[test]

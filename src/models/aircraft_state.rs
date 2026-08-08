@@ -21,8 +21,14 @@ pub struct AircraftState {
     // --- Perfil aerodinâmico e build-up de arrasto ---
     /// CL_max em configuração limpa (cruzeiro, sem flap) — usado para VS1.
     pub cl_max_clean: f64,
-    /// CL_max com flap/slat (pouso/decolagem) — usado para VS0.
+    /// CL_max com flap CHEIO (POUSO) — usado para VS0.
     pub cl_max_flaps: f64,
+    /// Fração de deployment do flap no setting de DECOLAGEM — eco de
+    /// `[stability].to_flap_fraction`. Vive aqui (e não só em
+    /// `AircraftConfig`) porque o `AerodynamicsAgent` recebe o ESTADO, não
+    /// a config, e é ele quem deriva `WingSpec::cl_max_to` a partir dela
+    /// (ciclo 7, task 1).
+    pub to_flap_fraction: f64,
     pub cd0_wing: f64,
     pub cd0_fuselage: f64,
     /// CD0 da empenagem — task refino-ciclo2 (1b): deixou de ser um eco
@@ -86,6 +92,7 @@ impl AircraftState {
 
             cl_max_clean: cfg.wing.cl_max_clean,
             cl_max_flaps: cfg.wing.cl_max_flaps,
+            to_flap_fraction: cfg.stability.to_flap_fraction,
             cd0_wing: cfg.wing.cd0_wing,
             cd0_fuselage: cfg.fuselage.cd0,
             cd0_empennage,

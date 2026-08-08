@@ -1012,6 +1012,21 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //   to_50ft_paved_m:    384.063691 → 378.116151  (-1,55%)
     //   to_50ft_grass_m:    431.208536 → 424.502945  (-1,56%)
     //   ldg_50ft_m:         540.852273 → 538.861754  (-0,37%)
+    // Ciclo 7 (task 1, `cl_max_to`, 2026-08-08): as distâncias de
+    // DECOLAGEM passam a usar o CLmax de DECOLAGEM (1,585 = 1,45 +
+    // 0,5·(1,72−1,45)) em vez do de POUSO (1,72) — ninguém decola com
+    // flap de pouso, e o modelo antigo era OTIMISTA. Só os pins de
+    // decolagem se movem; subida, planeio e POUSO ficam INTOCADOS (nenhum
+    // deles descreve decolagem). Valores MEDIDOS old→new (o "old" aqui é
+    // o valor medido HOJE com o código antigo, não o pin de ciclo 3, que
+    // já estava ~0,9% abaixo dentro da tolerância de 1%):
+    //   to_50ft_paved_m:    381.413415 → 406.902652  (+6,68%)
+    //   to_50ft_grass_m:    428.220670 → 457.696644  (+6,88%)
+    //   (o ganho é menor que os +8,52% da rolagem pura porque S_rotação e
+    //    S_subida escalam com V_LOF/γ, não com 1/CL_TO)
+    //   vx/vy/best_glide/glide_ratio/climb_gradient_pct/ldg_50ft_m:
+    //     INALTERADOS (`wing.cl_max` de pouso segue sendo a referência de
+    //     estol da subida/planeio e do pouso).
     // TOLERÂNCIAS INALTERADAS (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
         ("vx_kmh",             perf.vx_kmh,             118.756124, 0.01),
@@ -1019,8 +1034,8 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         ("best_glide_kmh",      perf.best_glide_kmh,     171.457813, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
         ("climb_gradient_pct",  perf.climb_gradient_pct,  14.645344, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    378.116151, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    424.502945, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    406.902652, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    457.696644, 0.01),
         ("ldg_50ft_m",          perf.ldg_50ft_m,         538.861754, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
@@ -1051,12 +1066,18 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // Ciclo 3 (oew-parametrico): 353.586335 → **347.900958** (-1,61%),
     // 424.303602 → **417.481149** (-1,61%), 395.838469 → **394.108258**
     // (-0,44%) — old→new, tolerâncias INALTERADAS (1%).
-    let to_distance_paved_novo_pin = 347.900958;
+    // Ciclo 7 (task 1, `cl_max_to`): a rolagem de solo é `S_G ∝ 1/CL_TO`,
+    // então as duas distâncias de DECOLAGEM crescem por EXATAMENTE
+    // 1,72/1,585 = +8,5173%. Medidos old→new: to_distance_paved_m
+    // 351.054408 → **380.954942**, to_distance_grass_m 421.265290 →
+    // **457.145930**. `landing_distance_m` INALTERADO (395.069668, pouso
+    // segue com `wing.cl_max`). Tolerâncias INALTERADAS (1%).
+    let to_distance_paved_novo_pin = 380.954942;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
         "to_distance_paved_m {:.3} divergiu do pin pós-E7 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 417.481149;
+    let to_distance_grass_novo_pin = 457.145930;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
         "to_distance_grass_m {:.3} divergiu do pin pós-E7 {:.3}",
