@@ -170,7 +170,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "5.0");
+    assert_eq!(report.schema_version, "5.1");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -187,7 +187,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.0");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.1");
 }
 
 /// Schema 5.0 (Task 2, ciclo7-clmax-decolagem — bump MAJOR): `wing.cl_max_to`
@@ -270,6 +270,41 @@ fn wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada() {
         "wing.cd0_flap_to_extra ({obtido:.6}) deveria ficar ESTRITAMENTE entre 0 e o delta \
          cheio de pouso ({:.6})", cfg.wing.cd0_flap_delta
     );
+}
+
+/// Schema 5.1 (Task 3, ciclo8-flap-e-solo — bump formal MINOR que
+/// formaliza os dois campos aditivos das Tasks 1/2 do mesmo ciclo, ver
+/// `docs/aircraft_spec.schema.md` §1): `propeller.prop_clearance_critical_m`
+/// (NOVO, ciclo 8 task 2 — folga ponta de pá ↔ solo na condição CRÍTICA de
+/// CS 23.925, checagem #25) está presente e numérico no JSON. Baseline real
+/// E10: ≈+0,033 m (PASS) — mesmo precedente de
+/// `wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada` acima, mas
+/// sem fórmula fechada independente aqui (o campo já depende de dois
+/// agentes distintos rodando em sequência — `PropellerAgent` +
+/// `LandingGearAgent`/`PropellerSpec::with_critical_clearance` — reproduzir
+/// a fórmula neste teste duplicaria a lógica do pipeline sem adicionar
+/// cobertura; a fórmula fechada já é coberta por
+/// `models::specs::tests::with_critical_clearance_bate_com_a_formula_fechada`).
+#[test]
+fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado() {
+    let report = build_baseline_report();
+
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let obtido = value["propeller"].get("prop_clearance_critical_m")
+        .and_then(|v| v.as_f64());
+    assert!(
+        obtido.is_some(),
+        "propeller.prop_clearance_critical_m deveria estar presente e ser numérico no JSON"
+    );
+    let obtido = obtido.unwrap();
+    assert!(
+        (obtido - 0.0325).abs() < 0.001,
+        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈0,033 m \
+         (baseline real E10, checagem #25 PASS)"
+    );
+    assert!(obtido > 0.0,
+        "baseline real deveria PASSAR a checagem #25 (folga crítica positiva)");
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco

@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.0
+# `aircraft_spec.json` — contrato do schema v5.1
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -509,6 +509,61 @@ documentação a ser corrigido, não um comportamento aceitável.
     302,1→300,2 km/h, autonomia informativa 7,71→7,23 h, decolagem na grama
     457,7→469,3 m. Ver `aircraft_spec.json`, `tests/cli.rs` e
     `tests/gear_tipback.rs`.
+- **v5.1** (Task 3, ciclo8-flap-e-solo — bump **MINOR**): formaliza dois
+  campos ADITIVOS já serializados desde as Tasks 1/2 do mesmo ciclo (a
+  entrada v5.0/NOTA DE ESTADO acima é sobre a campanha E10, um bump
+  ANTERIOR e não relacionado — este é o bump que fecha o ciclo 8).
+  Nenhum campo existente foi renomeado/removido nem mudou de tipo/unidade
+  — consumidores v5.0 continuam funcionando sem alteração.
+  1. **Campo NOVO `wing.cd0_flap_to_extra`** (f64, Task 1, §1 do ciclo) —
+     ver tabela do bloco `wing` abaixo.
+  2. **Campo NOVO `propeller.prop_clearance_critical_m`** (f64, m, Task 2,
+     §3 do ciclo) — ver tabela do bloco `propeller` abaixo. Acompanhado da
+     **checagem NOVA #25** em `ConstraintChecker::verify` (reprova quando
+     `prop_clearance_critical_m <= 0.0`) — mudança ADITIVA em
+     comportamento (só pode ADICIONAR violações, nunca remover as
+     existentes).
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema
+    JSON, Task 1/2): `[wing].cd0_flap_delta` (faixa (0.005, 0.05),
+    baseline 0,015) e `[gear].tire_deflation_delta_m` (faixa
+    (0.03, 0.15) m, baseline 0,08) são campos NOVOS **obrigatórios** —
+    TOMLs antigos sem esses campos falham o parse (`missing field`),
+    mesmo padrão sem erro de migração dedicado das v4.3/v4.4/v4.8. Ver
+    `config/aircraft/baseline_4seat.toml` para os valores de referência.
+  - **Achado honesto consolidado do baseline real E10** (consequência
+    FÍSICA das Tasks 1-2, não deste bump em si):
+    - §1-§2 (arrasto de flap + gradiente CS 23.65 honesto):
+      `performance.climb_gradient_pct` recua de **15,129850% para
+      13,896713%** (−1,233137 p.p.), decomposto em dois efeitos isolados
+      por medição direta: **~72%** (−0,888093 p.p.) vem do deslocamento
+      do PONTO de avaliação (referência de estol `wing.cl_max` de pouso →
+      `wing.cl_max_to` de decolagem parcial); **~28%** (−0,345045 p.p.)
+      vem do arrasto extra do flap (`cd0_flap_to_extra`) somado à polar
+      nesse ponto. `performance.vx_kmh` sobe **+11,89%**
+      (108,609→121,520 km/h). `performance.to_50ft_paved_m`/
+      `to_50ft_grass_m` alongam **~+1%** (420,47/473,58 m — só o segmento
+      de SUBIDA da decolagem consome a polar nova; rolagem de solo e
+      aproximação de pouso permanecem bit-a-bit INALTERADAS). O gradiente
+      continua acima do piso CS 23.65 (8,3%), folga ~5,6 p.p.
+    - **Viés remanescente NOMEADO** (achado da revisão da Task 1,
+      PRÉ-EXISTENTE ao ciclo 8, não introduzido por ele —
+      `best_climb_angle_ms` devolve o PISO da varredura de velocidade
+      (1,05·V_s_to), não um máximo interior; à referência típica da CS
+      23.65 (≥1,2·V_s) o gradiente do baseline real seria ≈12,4486%, não
+      os 13,896713% retornados — ~1,45 p.p. de viés OTIMISTA
+      remanescente). Não corrigido nesta task (fora de escopo por
+      instrução explícita do brief); ver `fidelity.performance` e a
+      docstring de `agents::performance::best_climb_angle_ms`.
+    - §3-§4 (folga crítica CS 23.925 + pin de rotação):
+      `propeller.prop_clearance_critical_m` ≈ **+0,0325 m** — checagem
+      #25 **PASSA** (folga positiva). `trim.rotation_limit_pct_mac`
+      recentrado em `8,533% ± 0,05%` (era `8,908% ± 1,5%` desde o ciclo
+      7, dívida de cobertura reapertada nesta task).
+    - `validation_status` do baseline real **PERMANECE `"PASS"`** com
+      `violations` VAZIO e `robustness.flips` VAZIO — mesmo veredito da
+      campanha E10 (v5.0), sem nenhum flip novo introduzido pelas
+      Tasks 1-2 deste ciclo. Ver `aircraft_spec.json`, `tests/schema_v4.rs`
+      e `tests/generic_engine.rs`.
 
 ## 2. Convenção de eixos e unidades
 
@@ -624,7 +679,7 @@ esperado na saída atual do pipeline**.
 | `cl_max` | f64 | — | CL_max com flap/slat em configuração de POUSO (flap cheio) — usado nas distâncias de POUSO e no VS0. **Desde a v5.0**: NÃO é mais o CL_max das distâncias de DECOLAGEM nem da Vr da rotação — ver `cl_max_to` abaixo |
 | `cl_max_clean` | f64 | — | CL_max em configuração limpa (cruzeiro) |
 | `cl_max_to` | f64 (**novo v5.0**) | — | CL_max em configuração de DECOLAGEM (flap PARCIAL) — DERIVADO por interpolação linear entre `cl_max_clean` e `cl_max_flaps` (não ecoado; `cl_max` é o valor de pouso) pela mesma `trim.to_flap_fraction`: `cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)`. Consumido pela Vr/VS0 da ROTAÇÃO (bloco `trim`) e pelas distâncias de DECOLAGEM (`performance.to_distance_paved_m`/`to_distance_grass_m`/`to_50ft_paved_m`/`to_50ft_grass_m`, calculadas internamente por `agents::performance::takeoff_distance_m`/`takeoff_distance_50ft_m`) — ver §1 (v5.0) para o motivo da mudança |
-| `cd0_flap_to_extra` | f64 (**novo, ciclo 8 task 1 — ainda dentro de v5.0, bump formal para v5.1 pendente de §3/§4 do mesmo ciclo**) | — | ΔCD0 do flap PARCIAL de decolagem = `to_flap_fraction · [wing].cd0_flap_delta` — mesma fração de `cl_max_to` acima, agora aplicada ao arrasto. Consumido por `agents::performance::excess_power_kw` no segmento de SUBIDA da decolagem (`to_50ft_paved_m`/`to_50ft_grass_m`) e no gradiente CS 23.65 (`performance.climb_gradient_pct`, avaliado em Vx). Fecha a lacuna "não existe modelo de flap na polar deste crate" declarada desde o ciclo 7 — ver `fidelity.performance` para o detalhe de quais segmentos consomem/não consomem a polar |
+| `cd0_flap_to_extra` | f64 (**novo, ciclo 8 task 1 — formalizado na v5.1**) | — | ΔCD0 do flap PARCIAL de decolagem = `to_flap_fraction · [wing].cd0_flap_delta` — mesma fração de `cl_max_to` acima, agora aplicada ao arrasto. Consumido por `agents::performance::excess_power_kw` no segmento de SUBIDA da decolagem (`to_50ft_paved_m`/`to_50ft_grass_m`) e no gradiente CS 23.65 (`performance.climb_gradient_pct`, avaliado em Vx). Fecha a lacuna "não existe modelo de flap na polar deste crate" declarada desde o ciclo 7 — ver `fidelity.performance` para o detalhe de quais segmentos consomem/não consomem a polar |
 | `stall_speed_flaps_kmh` | f64 | km/h | VS0 — stall com flap |
 | `stall_speed_clean_kmh` | f64 | km/h | VS1 — stall configuração limpa |
 | `ld_ratio_cruise` | f64 | — | L/D em cruzeiro. **v4.4**: recalculado com `cd_cruise` já incluindo o arrasto de trim (ver acima) |
@@ -928,7 +983,7 @@ dedução completa.
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
-| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — ainda dentro de v5.0, bump formal para v5.1 pendente do restante do ciclo**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio) — `ground_clearance_m − (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m)`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::with_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. Checagem #25 de `ConstraintChecker::verify` reprova quando `<= 0.0`. Baseline real E10: ≈+0,033 m (PASS) |
+| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio) — `ground_clearance_m − (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m)`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::with_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. Baseline real E10: ≈+0,033 m (PASS) |
 
 **Nota de consistência**: quando `source == "derivado"`, o diâmetro aqui
 (autoritativo) pode divergir do `propulsion.prop_diameter_m` (provisório,

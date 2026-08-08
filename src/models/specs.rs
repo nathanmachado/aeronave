@@ -1092,7 +1092,66 @@ pub struct ElectricalSpec {
 /// (nominal → robustez). As outras duas violações (carga de nariz máxima e
 /// pouso na grama, v4.8) ficam bit a bit INALTERADAS. Ver
 /// `docs/aircraft_spec.schema.md` §1 e `tests/schema_v4.rs`.
-pub const SCHEMA_VERSION: &str = "5.0";
+///
+/// v5.1 (Task 3, ciclo8-flap-e-solo — bump MINOR: formaliza dois campos
+/// ADITIVOS introduzidos nas Tasks 1/2 do mesmo ciclo, que já estavam
+/// serializados desde antes deste bump mas documentados como "pendentes"
+/// — ver `docs/aircraft_spec.schema.md` §1 v5.0/nota de estado E10; nenhum
+/// campo existente foi renomeado/removido nem mudou de tipo/unidade,
+/// consumidores v5.0 continuam funcionando sem alteração):
+///   1. `WingSpec` ganha `cd0_flap_to_extra` (f64, Task 1) — ΔCD0 do flap
+///      PARCIAL de decolagem (`to_flap_fraction · [wing].cd0_flap_delta`),
+///      consumido por `agents::performance::excess_power_kw` no segmento
+///      de SUBIDA da decolagem e no gradiente CS 23.65 (`best_climb_angle_ms`,
+///      avaliado em Vx). Fecha a lacuna "sem modelo de flap na polar",
+///      declarada desde o ciclo 7.
+///   2. `PropellerSpec` ganha `prop_clearance_critical_m` (f64, m, Task 2)
+///      — folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925
+///      (amortecedor do trem de nariz totalmente comprimido + pneu
+///      murcho), distinta de `ground_clearance_m` (folga ESTÁTICA).
+///      Checagem NOVA #25 em `ConstraintChecker::verify` reprova quando
+///      `<= 0.0` — mudança ADITIVA em comportamento (só pode ADICIONAR
+///      violações, nunca remover as existentes).
+/// ACHADO HONESTO consolidado do baseline real E10 (consequência FÍSICA
+/// das Tasks 1-2, não deste bump em si):
+///   - §1-§2 (arrasto de flap + gradiente CS 23.65 honesto, Task 1):
+///     `climb_gradient_pct` recua de 15,129850% para **13,896713%**
+///     (−1,233137 p.p.), decomposto em dois efeitos isolados por medição
+///     direta (não estimativa): ~72% (−0,888093 p.p.) vem do deslocamento
+///     do PONTO de avaliação (referência de estol `wing.cl_max` de pouso →
+///     `wing.cl_max_to` de decolagem parcial, CL_max menor → Vx maior);
+///     ~28% (−0,345045 p.p.) vem do arrasto extra do flap
+///     (`cd0_flap_to_extra`) somado à polar nesse ponto. `vx_kmh` sobe
+///     **+11,89%** (108,609→121,520 km/h — reflexo direto do CL_max_to
+///     menor). `to_50ft_paved_m`/`to_50ft_grass_m` alongam **~+1%**
+///     (420,47/473,58 m — só o segmento de SUBIDA da decolagem consome a
+///     polar nova; rolagem de solo/aproximação de pouso permanecem
+///     bit-a-bit inalteradas, método energético/ângulo fixo sem termo de
+///     CD0). `climb_gradient_pct` continua acima do piso CS 23.65 (8,3%),
+///     folga ~5,6 p.p. — `validation_status` PASS mantido.
+///   - **Viés remanescente NOMEADO** (achado da revisão, PRÉ-EXISTENTE ao
+///     ciclo 8, não introduzido por ele — permanece registrado aqui para
+///     rastreabilidade do bump): `best_climb_angle_ms` devolve o PISO da
+///     varredura de velocidade (1,05·V_s_to), não um máximo interior — RC/V
+///     é monotonicamente DECRESCENTE na faixa modelada para esta célula. A
+///     CS 23.65 tipicamente avalia a ≥1,2·V_s; nessa referência o gradiente
+///     do baseline real seria ≈12,4486%, não os 13,896713% retornados
+///     (~1,45 p.p. de viés OTIMISTA remanescente). Documentado na docstring
+///     de `agents::performance::best_climb_angle_ms` e em `fidelity.
+///     performance` — item de ciclo futuro, não corrigido nesta task por
+///     instrução explícita do brief (Task 1 já havia isolado e nomeado o
+///     achado; reavaliar a velocidade de referência fica fora de escopo).
+///   - §3-§4 (folga crítica CS 23.925 + pin de rotação, Task 2):
+///     `prop_clearance_critical_m` ≈ **+0,0325 m** (checagem #25 PASS —
+///     folga positiva, sem necessidade de PARAR). `rotation_limit_pct_mac`
+///     recentrado em `8,533% ± 0,05%` (era `8,908% ± 1,5%` desde o ciclo 7,
+///     dívida de cobertura reaper­tada nesta task).
+/// `validation_status` do baseline real PERMANECE `"PASS"` com `violations`
+/// VAZIO e `robustness.flips` VAZIO — mesmo veredito da campanha E10 (v5.0),
+/// sem nenhum flip novo introduzido pelas Tasks 1-2. Ver
+/// `docs/aircraft_spec.schema.md` §1 e `tests/schema_v4.rs`/
+/// `tests/generic_engine.rs`.
+pub const SCHEMA_VERSION: &str = "5.1";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
