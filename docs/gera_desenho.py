@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rascunho técnico do baseline E7 — vistas superior e lateral, em escala,
+"""Rascunho técnico do baseline E10 — vistas superior e lateral, em escala,
 gerado diretamente do aircraft_spec.json (nada desenhado 'de cabeça')."""
 import json, math, pathlib, re
 
@@ -54,8 +54,8 @@ INK, THIN, DIM = "#1a2b45", "#5b7395", "#8895ac"
 svg = []
 svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" font-family="Iosevka, Menlo, monospace">')
 svg.append(f'<rect width="{W}" height="{H}" fill="#f7f5ef"/>')
-svg.append(f'<text x="{W/2}" y="38" text-anchor="middle" fill="{INK}" font-size="19" font-weight="bold">AERONAVE 4 LUGARES — BASELINE E7 (rascunho em escala)</text>')
-svg.append(f'<text x="{W/2}" y="56" text-anchor="middle" fill="{DIM}" font-size="12">gerado de aircraft_spec.json — 2026-08-06 — PASS, 0 violações</text>')
+svg.append(f'<text x="{W/2}" y="38" text-anchor="middle" fill="{INK}" font-size="19" font-weight="bold">AERONAVE 4 LUGARES — BASELINE E10 (rascunho em escala)</text>')
+svg.append(f'<text x="{W/2}" y="56" text-anchor="middle" fill="{DIM}" font-size="12">gerado de aircraft_spec.json — 2026-08-08 — PASS, 0 violações, 0 flips (robustez)</text>')
 
 def poly(pts, view, fill="none", sw=2.0, dash=None, color=INK):
     f = {"t": lambda p: (X(p[0]), Yt(p[1])), "s": lambda p: (X(p[0]), Ys(p[1]))}[view]
@@ -162,6 +162,6 @@ for i, t in enumerate(dados):
     label(bx, by + i * 17, t, 11.5, INK)
 
 svg.append("</svg>")
-out = SC / "aeronave_e7_rascunho.svg"
+out = SC / "aeronave_e10_rascunho.svg"
 out.write_text("\n".join(svg))
 print(out, f"{W}x{H}")
