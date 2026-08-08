@@ -26,7 +26,7 @@ use aeronave::models::specs::{
     AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION,
 };
 use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::ConstraintChecker;
+use aeronave::validation::constraint_checker::{ConstraintChecker, VerifyInputs};
 use aeronave::validation::robustness::RobustnessAgent;
 use std::collections::BTreeMap;
 
@@ -92,10 +92,12 @@ fn build_baseline_report() -> AircraftReport {
     let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp,
                                            &sized.structural_masses, wb, &gear, mission, &perf);
 
-    let report = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
-                                            &propeller, &perf, mission, &electrical,
-                                            &gear, &cfg.gear, cfg.fuel_system.capacity_l,
-                                            &robustness);
+    let report = ConstraintChecker::verify(&VerifyInputs {
+        req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
+        propeller: &propeller, perf: &perf, mission, electrical: &electrical,
+        gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
+        robustness: &robustness,
+    });
     let all_ok = report.all_satisfied();
 
     let geometry = GeometrySpec {

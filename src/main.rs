@@ -15,7 +15,7 @@ use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION};
 use aeronave::orchestrator::size_aircraft;
 use aeronave::validation::constraint_checker::{
-    ConstraintChecker, RC_SL_MIN_MS, SERVICE_CEILING_MIN_M,
+    ConstraintChecker, VerifyInputs, RC_SL_MIN_MS, SERVICE_CEILING_MIN_M,
 };
 use aeronave::validation::robustness::RobustnessAgent;
 
@@ -585,10 +585,12 @@ fn main() {
     // ── Validação Global ──────────────────────────────────────────────────────
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&req, wing, prop, design_mtow_kg, &engine, wb,
-                                             &propeller, &perf, mission, &electrical,
-                                             &gear, &cfg.gear, cfg.fuel_system.capacity_l,
-                                             &robustness);
+    let report  = ConstraintChecker::verify(&VerifyInputs {
+        req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
+        propeller: &propeller, perf: &perf, mission, electrical: &electrical,
+        gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
+        robustness: &robustness,
+    });
     // Achado de review (ciclo 5): estes dois pisos agora são consumidos de
     // `validation::constraint_checker` (fonte única) em vez de literais
     // hardcoded aqui — `ConstraintChecker::verify` também os checa

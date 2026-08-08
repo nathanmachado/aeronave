@@ -35,7 +35,7 @@ use std::path::PathBuf;
 use aeronave::agents::landing_gear::LandingGearAgent;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::ConstraintChecker;
+use aeronave::validation::constraint_checker::{ConstraintChecker, VerifyInputs};
 
 fn config_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
@@ -236,10 +236,12 @@ fn constraint_checker_reporta_so_carga_de_nariz_como_violacao_de_trem_no_baselin
         mission, &perf,
     );
 
-    let report = ConstraintChecker::verify(
-        &req, wing, prop, sized.state.mtow_kg, &engine, wb, &propeller, &perf, mission,
-        &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l, &robustness,
-    );
+    let report = ConstraintChecker::verify(&VerifyInputs {
+        req: &req, wing, prop, mtow_kg: sized.state.mtow_kg, engine: &engine, wb,
+        propeller: &propeller, perf: &perf, mission, electrical: &electrical,
+        gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
+        robustness: &robustness,
+    });
 
     assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
         "não deveria haver violação de tipback no baseline real pós-E7: {:?}", report.violations);
@@ -335,10 +337,12 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
         &sized.wb, &gear, mission, &perf,
     );
 
-    let report = ConstraintChecker::verify(
-        &req, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &sized.wb, &propeller,
-        &perf, mission, &electrical, &gear, &cfg.gear, cfg.fuel_system.capacity_l, &robustness,
-    );
+    let report = ConstraintChecker::verify(&VerifyInputs {
+        req: &req, wing: &sized.wing, prop: &sized.prop, mtow_kg: sized.state.mtow_kg,
+        engine: &engine, wb: &sized.wb, propeller: &propeller, perf: &perf, mission,
+        electrical: &electrical, gear: &gear, gear_cfg: &cfg.gear,
+        fuel_capacity_l: cfg.fuel_system.capacity_l, robustness: &robustness,
+    });
 
     assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),
         "não deveria haver violação de margem de combustível no baseline real pós-E7: {:?}",
