@@ -53,6 +53,25 @@
 //! casos de CG acima — este caso precisa do estado FÍSICO recalculado,
 //! porque a asa/hélice/missão também respondem ao MTOW maior). Ver o corpo
 //! de `RobustnessAgent::run` para o caso 3.
+//!
+//! Ciclo 6 (task massa-total-completo): até aqui, a divisão de trabalho
+//! entre os 3 mundos era por TIPO de check — os dois casos direcionais
+//! cobriam o envelope de CG/trem de pouso (pior-caso de DIREÇÃO de CG,
+//! ±σ nas 7 massas mantendo o resto nominal), e o massa-total cobria só
+//! MTOW/combustível/VS0/desempenho em nível (todas as massas +σ juntas,
+//! `sized_p.wb` DESCARTADO após o re-sizing). Essa divisão era um atalho,
+//! não uma garantia física: nada impede o mundo massa-total (MTOW maior,
+//! geometria re-convergida) de também empurrar algum cenário de CG para
+//! fora do envelope nominal, ou a pista de decolagem/pouso para além da
+//! disponível — casos que a divisão anterior simplesmente não olhava. A
+//! partir desta task, os 3 mundos avaliam TUDO: pista (decolagem/pouso
+//! 50 ft), envelope de CG por cenário, carga de nariz máx/mín e tipback
+//! (via `evaluate_world`, extraída da lógica antes embutida só nos dois
+//! casos direcionais) além de MTOW/combustível/VS0/desempenho — cada um
+//! contra os MESMOS limites nominais, só a fonte do `wb`/gear perturbado
+//! muda por mundo (`WeightBalanceAgent::run` com massas ±σ para os
+//! direcionais; `sized_p.wb`/`sized_p.structural_masses` re-convergidos
+//! para o massa-total).
 
 use crate::agents::landing_gear::LandingGearAgent;
 use crate::agents::mass_model::StructuralMasses;
@@ -130,6 +149,99 @@ pub fn adversarial_masses(
     (fwd, aft)
 }
 
+/// Avalia um `WeightBalanceOutput` JÁ COMPUTADO de um "mundo" perturbado
+/// (`wb_p` — dos dois casos direcionais via `WeightBalanceAgent::run` com
+/// massas ±σ, ou do caso massa-total via `sized_p.wb` re-convergido) contra
+/// os limites NOMINAIS (`wb_nominal`/`gear_nominal`): cenários de CG
+/// (envelope dianteiro/traseiro) + trem de pouso (tipback, carga de nariz
+/// máx/mín) — devolve a faixa de CG observada e os flips encontrados.
+/// `caso` rotula os flips gerados ("dianteiro"/"traseiro"/"massa-total").
+///
+/// Compartilhada pelos 3 mundos avaliados por `RobustnessAgent::run`
+/// (ciclo 6, task massa-total-completo): antes desta extração, os dois
+/// casos direcionais tinham essa lógica embutida numa closure local e o
+/// caso massa-total DESCARTAVA `sized_p.wb` — este helper é o ÚNICO lugar
+/// que compara cenários/gear perturbados contra limites nominais, evitando
+/// duplicação entre os 3 mundos.
+///
+/// `trem_principal_kg_p`/`trem_nariz_kg_p`: massas do trem PERTURBADAS do
+/// mundo avaliado (dos dois casos direcionais, `m_p.trem_*_kg`; do caso
+/// massa-total, `sized_p.structural_masses.trem_*_kg`) — usadas pelo
+/// `LandingGearAgent` junto com o MTOW/CG extremos de `wb_p`.
+fn evaluate_world(
+    cfg: &AircraftConfig,
+    caso: &str,
+    wb_p: &WeightBalanceOutput,
+    trem_principal_kg_p: f64,
+    trem_nariz_kg_p: f64,
+    wb_nominal: &WeightBalanceOutput,
+    gear_nominal: &GearSpec,
+) -> ([f64; 2], Vec<RobustnessFlip>) {
+    let mut flips = Vec::new();
+
+    let mut range = [f64::INFINITY, f64::NEG_INFINITY];
+    for (sc_nom, sc_p) in wb_nominal.scenarios.iter().zip(wb_p.scenarios.iter()) {
+        range[0] = range[0].min(sc_p.cg_pct_mac);
+        range[1] = range[1].max(sc_p.cg_pct_mac);
+
+        let dentro_do_envelope_nominal = sc_p.cg_pct_mac >= wb_nominal.spec.cg_limit_fwd_pct_mac
+            && sc_p.cg_pct_mac <= wb_nominal.spec.cg_limit_aft_pct_mac;
+        if !dentro_do_envelope_nominal && sc_nom.inside_envelope {
+            let limite = if sc_p.cg_pct_mac < wb_nominal.spec.cg_limit_fwd_pct_mac {
+                wb_nominal.spec.cg_limit_fwd_pct_mac
+            } else {
+                wb_nominal.spec.cg_limit_aft_pct_mac
+            };
+            flips.push(RobustnessFlip {
+                check: format!("Cenário '{}'", sc_nom.name),
+                caso: caso.to_string(),
+                valor: sc_p.cg_pct_mac,
+                limite,
+            });
+        }
+    }
+
+    let x_fwd_p = cfg.wing.le_root_x_m + wb_p.spec.cg_mac_fwd_pct / 100.0 * wb_p.mac_m;
+    let x_aft_p = cfg.wing.le_root_x_m + wb_p.spec.cg_mac_aft_pct / 100.0 * wb_p.mac_m;
+    let gear_p = LandingGearAgent::run(
+        wb_p.spec.mtow_kg, x_fwd_p, x_aft_p, &cfg.gear,
+        trem_principal_kg_p, trem_nariz_kg_p,
+    );
+
+    if gear_p.tipback_angle_deg < cfg.gear.tipback_min_deg
+        && gear_nominal.tipback_angle_deg >= cfg.gear.tipback_min_deg
+    {
+        flips.push(RobustnessFlip {
+            check: "Tipback".to_string(),
+            caso: caso.to_string(),
+            valor: gear_p.tipback_angle_deg,
+            limite: cfg.gear.tipback_min_deg,
+        });
+    }
+    if gear_p.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT
+        && gear_nominal.nose_load_max_pct <= NOSE_LOAD_MAX_CEILING_PCT
+    {
+        flips.push(RobustnessFlip {
+            check: "Carga de nariz máx".to_string(),
+            caso: caso.to_string(),
+            valor: gear_p.nose_load_max_pct,
+            limite: NOSE_LOAD_MAX_CEILING_PCT,
+        });
+    }
+    if gear_p.nose_load_min_pct < NOSE_LOAD_MIN_FLOOR_PCT
+        && gear_nominal.nose_load_min_pct >= NOSE_LOAD_MIN_FLOOR_PCT
+    {
+        flips.push(RobustnessFlip {
+            check: "Carga de nariz mín".to_string(),
+            caso: caso.to_string(),
+            valor: gear_p.nose_load_min_pct,
+            limite: NOSE_LOAD_MIN_FLOOR_PCT,
+        });
+    }
+
+    (range, flips)
+}
+
 pub struct RobustnessAgent;
 
 impl RobustnessAgent {
@@ -194,76 +306,14 @@ impl RobustnessAgent {
         let sigma = cfg.mass_model.sigma_mass_fraction;
         let (m_fwd, m_aft) = adversarial_masses(cfg, engine, masses, sigma);
 
-        // Avalia um conjunto adversarial (`caso` = "dianteiro"/"traseiro")
-        // contra os limites nominais: cenários de CG (envelope
-        // dianteiro/traseiro) + trem de pouso (tipback, carga de nariz
-        // máx/mín) — devolve a faixa de CG observada e os flips
-        // encontrados.
+        // Avalia um conjunto adversarial (`caso` = "dianteiro"/"traseiro"):
+        // computa `wb_p` deste mundo (massas ±σ, resto do pipeline
+        // NOMINAL fixo) e delega a comparação contra os limites nominais a
+        // `evaluate_world` (compartilhada com o caso massa-total abaixo).
         let evaluate_case = |caso: &str, m_p: &StructuralMasses| -> ([f64; 2], Vec<RobustnessFlip>) {
-            let mut flips = Vec::new();
             let wb_p = WeightBalanceAgent::run(state, wing, engine, cfg, req, emp, m_p);
-
-            let mut range = [f64::INFINITY, f64::NEG_INFINITY];
-            for (sc_nom, sc_p) in wb_nominal.scenarios.iter().zip(wb_p.scenarios.iter()) {
-                range[0] = range[0].min(sc_p.cg_pct_mac);
-                range[1] = range[1].max(sc_p.cg_pct_mac);
-
-                let dentro_do_envelope_nominal = sc_p.cg_pct_mac >= wb_nominal.spec.cg_limit_fwd_pct_mac
-                    && sc_p.cg_pct_mac <= wb_nominal.spec.cg_limit_aft_pct_mac;
-                if !dentro_do_envelope_nominal && sc_nom.inside_envelope {
-                    let limite = if sc_p.cg_pct_mac < wb_nominal.spec.cg_limit_fwd_pct_mac {
-                        wb_nominal.spec.cg_limit_fwd_pct_mac
-                    } else {
-                        wb_nominal.spec.cg_limit_aft_pct_mac
-                    };
-                    flips.push(RobustnessFlip {
-                        check: format!("Cenário '{}'", sc_nom.name),
-                        caso: caso.to_string(),
-                        valor: sc_p.cg_pct_mac,
-                        limite,
-                    });
-                }
-            }
-
-            let x_fwd_p = cfg.wing.le_root_x_m + wb_p.spec.cg_mac_fwd_pct / 100.0 * wb_p.mac_m;
-            let x_aft_p = cfg.wing.le_root_x_m + wb_p.spec.cg_mac_aft_pct / 100.0 * wb_p.mac_m;
-            let gear_p = LandingGearAgent::run(
-                wb_p.spec.mtow_kg, x_fwd_p, x_aft_p, &cfg.gear,
-                m_p.trem_principal_kg, m_p.trem_nariz_kg,
-            );
-
-            if gear_p.tipback_angle_deg < cfg.gear.tipback_min_deg
-                && gear_nominal.tipback_angle_deg >= cfg.gear.tipback_min_deg
-            {
-                flips.push(RobustnessFlip {
-                    check: "Tipback".to_string(),
-                    caso: caso.to_string(),
-                    valor: gear_p.tipback_angle_deg,
-                    limite: cfg.gear.tipback_min_deg,
-                });
-            }
-            if gear_p.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT
-                && gear_nominal.nose_load_max_pct <= NOSE_LOAD_MAX_CEILING_PCT
-            {
-                flips.push(RobustnessFlip {
-                    check: "Carga de nariz máx".to_string(),
-                    caso: caso.to_string(),
-                    valor: gear_p.nose_load_max_pct,
-                    limite: NOSE_LOAD_MAX_CEILING_PCT,
-                });
-            }
-            if gear_p.nose_load_min_pct < NOSE_LOAD_MIN_FLOOR_PCT
-                && gear_nominal.nose_load_min_pct >= NOSE_LOAD_MIN_FLOOR_PCT
-            {
-                flips.push(RobustnessFlip {
-                    check: "Carga de nariz mín".to_string(),
-                    caso: caso.to_string(),
-                    valor: gear_p.nose_load_min_pct,
-                    limite: NOSE_LOAD_MIN_FLOOR_PCT,
-                });
-            }
-
-            (range, flips)
+            evaluate_world(cfg, caso, &wb_p, m_p.trem_principal_kg, m_p.trem_nariz_kg,
+                            wb_nominal, gear_nominal)
         };
 
         let (cg_fwd_case_pct_mac, mut flips) = evaluate_case("dianteiro", &m_fwd);
@@ -359,12 +409,22 @@ impl RobustnessAgent {
                 let perf_p = crate::agents::performance::PerformanceAgent::run(
                     &sized_p.state, &sized_p.wing, &sized_p.prop,
                     sized_p.state.mtow_kg, engine, req, &cfg_p.performance);
+                // Pista (Ciclo 6, task 2/3): mesma comparação de
+                // `ConstraintChecker::verify` #23/#24 (`perf.{to_50ft_grass,
+                // ldg_50ft}_m > req.runway_available_m` é violação, logo
+                // "melhor" é MENOR distância — `maior_melhor = false`) —
+                // acrescentadas à lista existente de gates de desempenho,
+                // mesmo gate `nom_ok && !p_ok` dos demais.
                 for (nome, nom, p, lim, maior_melhor) in [
                     ("Razão de subida", perf_nominal.rc_sl_ms, perf_p.rc_sl_ms, RC_SL_MIN_MS, true),
                     ("Velocidade de cruzeiro", perf_nominal.v_cruise_kmh, perf_p.v_cruise_kmh,
                      req.cruise_speed_min_kmh, true),
                     ("Teto de serviço", perf_nominal.service_ceiling_m,
                      perf_p.service_ceiling_m, SERVICE_CEILING_MIN_M, true),
+                    ("Decolagem (grama, 15 m)", perf_nominal.to_50ft_grass_m, perf_p.to_50ft_grass_m,
+                     req.runway_available_m, false),
+                    ("Pouso (15 m)", perf_nominal.ldg_50ft_m, perf_p.ldg_50ft_m,
+                     req.runway_available_m, false),
                 ] {
                     let nom_ok = if maior_melhor { nom >= lim } else { nom <= lim };
                     let p_ok = if maior_melhor { p >= lim } else { p <= lim };
@@ -373,6 +433,24 @@ impl RobustnessAgent {
                             caso: "massa-total".into(), valor: p, limite: lim });
                     }
                 }
+
+                // Envelope/nariz/tipback no mundo massa-total (ciclo 6,
+                // task massa-total-completo): MESMA avaliação dos dois
+                // casos direcionais (`evaluate_world`, extraída acima) —
+                // `sized_p.wb` deixa de ser DESCARTADO. Massas do trem
+                // PERTURBADAS (`sized_p.structural_masses`, não `masses`
+                // nominais) — coerente com o resto do mundo +σ que este
+                // bloco avalia. A faixa de CG devolvida não tem campo
+                // próprio em `RobustnessSpec` (só os dois casos direcionais
+                // têm `cg_fwd_case_pct_mac`/`cg_aft_case_pct_mac`) —
+                // descartada aqui.
+                let (_cg_range_masstotal, flips_masstotal) = evaluate_world(
+                    cfg, "massa-total", &sized_p.wb,
+                    sized_p.structural_masses.trem_principal_kg,
+                    sized_p.structural_masses.trem_nariz_kg,
+                    wb_nominal, gear_nominal,
+                );
+                flips.extend(flips_masstotal);
             }
         }
 
@@ -546,7 +624,14 @@ mod tests {
     /// ABAIXO do tipback nominal (nominal passa por pouco) — com σ=0.20 o
     /// conjunto CG-TRASEIRO empurra o CG mais para trás, reduzindo o
     /// tipback (`θ = atan((x_main−x_cg_aft)/h_cg)`, x_cg_aft maior ⇒ θ
-    /// menor) o suficiente para derrubar o check.
+    /// menor) o suficiente para derrubar o check. Ciclo 6 (task
+    /// massa-total-completo): o mundo massa-total agora avalia tipback
+    /// também (`evaluate_world` compartilhada, ver docstring do módulo) —
+    /// as massas estruturais mais pesadas nesse mundo deslocam o CG aft o
+    /// suficiente para cruzar o MESMO piso apertado, então esta fixture
+    /// (desenhada só para o caso "traseiro") agora produz 2 flips de
+    /// Tipback, não 1: "traseiro" (achado original) e "massa-total"
+    /// (achado honesto desta task — não forçado, apenas verificado).
     #[test]
     fn config_marginal_gera_flip_nomeado() {
         let n0 = nominal_pipeline(config_teste());
@@ -566,15 +651,18 @@ mod tests {
         );
         println!("flips={:?}", out.flips);
 
-        assert_eq!(out.flips.len(), 1,
-            "esperava exatamente 1 flip (Tipback/traseiro): {:?}", out.flips);
-        let flip = &out.flips[0];
-        assert_eq!(flip.check, "Tipback");
-        assert_eq!(flip.caso, "traseiro");
-        assert!(flip.valor < flip.limite,
-            "valor ({}) deveria estar abaixo do limite ({}) — é isso que caracteriza o flip",
-            flip.valor, flip.limite);
-        assert!((flip.limite - n.cfg.gear.tipback_min_deg).abs() < 1e-9);
+        assert_eq!(out.flips.len(), 2,
+            "esperava exatamente 2 flips (Tipback/traseiro + Tipback/massa-total): {:?}",
+            out.flips);
+        for flip in &out.flips {
+            assert_eq!(flip.check, "Tipback");
+            assert!(flip.caso == "traseiro" || flip.caso == "massa-total",
+                "caso inesperado para o flip de Tipback: {}", flip.caso);
+            assert!(flip.valor < flip.limite,
+                "valor ({}) deveria estar abaixo do limite ({}) — é isso que caracteriza o flip",
+                flip.valor, flip.limite);
+            assert!((flip.limite - n.cfg.gear.tipback_min_deg).abs() < 1e-9);
+        }
     }
 
     /// Tanque apertado (`fuel_system.capacity_l = 172.0`, achado por sonda
@@ -684,6 +772,103 @@ mod tests {
         assert!(out.mtow_masstotal_kg > n.state.mtow_kg,
             "mtow_masstotal_kg ({:.3}) deveria ficar ACIMA do MTOW nominal ({:.3}) — \
              perturbação para CIMA", out.mtow_masstotal_kg, n.state.mtow_kg);
+    }
+
+    /// Pista marginal no nominal flipa no massa-total (distância cresce com
+    /// MTOW): `req.runway_available_m` ajustado para logo ACIMA do
+    /// `to_50ft_grass_m` nominal (nominal passa por pouco); o mundo +σ
+    /// re-convergido tem MTOW maior ⇒ distância de decolagem maior,
+    /// estourando a pista apertada — gera o flip "Decolagem (grama, 15 m)"
+    /// caso "massa-total". Valores achados por sonda numérica na fixture
+    /// intacta (`config_teste()`): `to_50ft_grass_m` nominal ≈366,2 m,
+    /// massa-total ≈409,0 m.
+    #[test]
+    fn decolagem_marginal_flipa_no_caso_massa_total() {
+        let mut req = requisitos_teste();
+        let n0 = nominal_pipeline_with_req(config_teste(), req.clone());
+        req.runway_available_m = n0.perf.to_50ft_grass_m + 1.0; // logo acima do nominal
+        let n = nominal_pipeline_with_req(config_teste(), req);
+        assert!(n.perf.to_50ft_grass_m <= n.req.runway_available_m,
+            "pré-condição do teste: decolagem nominal ({:.1} m) deveria passar por pouco a pista \
+             marginal ({:.1} m)", n.perf.to_50ft_grass_m, n.req.runway_available_m);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+
+        let flips_pista: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Decolagem (grama, 15 m)" && f.caso == "massa-total")
+            .collect();
+        assert_eq!(flips_pista.len(), 1,
+            "esperava exatamente 1 flip Decolagem (grama, 15 m)/massa-total: {:?}", out.flips);
+        let flip = flips_pista[0];
+        assert!(flip.valor > flip.limite,
+            "distância de decolagem sob +σ ({:.1} m) deveria exceder a pista marginal ({:.1} m) — \
+             é isso que caracteriza o flip", flip.valor, flip.limite);
+        assert!((flip.limite - n.req.runway_available_m).abs() < 1e-9);
+    }
+
+    /// Envelope/nariz no mundo massa-total: fixture com `arms.pax_rear_m`
+    /// deslocado (5.75→6.2, achado por sonda numérica) até o cenário "4 pax
+    /// sem bagagem" ficar bem DENTRO do envelope nominal (≈34,97% MAC,
+    /// entre `cg_limit_fwd_pct_mac`≈34,06% e `cg_limit_aft_pct_mac`
+    /// ≈36,41% — ambos INVARIANTES à massa, ver docstring do módulo) — o
+    /// mundo +σ re-convergido (MTOW maior desloca o CG desse cenário para
+    /// TRÁS, ≈37,35%) cruza o limite traseiro, gerando o flip nomeado
+    /// "Cenário '4 pax sem bagagem'" caso "massa-total". Fixture folgada
+    /// (`config_teste()` intacta, sem o ajuste de `pax_rear_m`): NENHUM
+    /// cenário passa no nominal (`inside_envelope` sempre `false` nessa
+    /// fixture sintética — o envelope nominal nunca abraça a faixa de CG
+    /// carregado dela, achado da sonda), logo nenhum flip de "Cenário" é
+    /// sequer POSSÍVEL — confirmado abaixo, não só assumido.
+    #[test]
+    fn envelope_no_mundo_massa_total_flipa_quando_marginal() {
+        let mut cfg = config_teste();
+        cfg.arms.pax_rear_m = 6.2;
+        let n = nominal_pipeline(cfg);
+        let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")
+            .expect("fixture deveria ter o cenário '4 pax sem bagagem'");
+        assert!(sc_marginal.inside_envelope,
+            "pré-condição do teste: cenário '4 pax sem bagagem' deveria passar no envelope \
+             nominal (cg={:.3}%, fwd={:.3}%, aft={:.3}%)", sc_marginal.cg_pct_mac,
+            n.wb.spec.cg_limit_fwd_pct_mac, n.wb.spec.cg_limit_aft_pct_mac);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+
+        let flips_cenario: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Cenário '4 pax sem bagagem'" && f.caso == "massa-total")
+            .collect();
+        assert_eq!(flips_cenario.len(), 1,
+            "esperava exatamente 1 flip Cenário '4 pax sem bagagem'/massa-total: {:?}", out.flips);
+        let flip = flips_cenario[0];
+        assert!((flip.limite - n.wb.spec.cg_limit_aft_pct_mac).abs() < 1e-9,
+            "limite do flip deveria ser o limite traseiro nominal (cruzado por trás): {} vs {}",
+            flip.limite, n.wb.spec.cg_limit_aft_pct_mac);
+        assert!(flip.valor > flip.limite,
+            "cg sob +σ ({:.3}%) deveria exceder o limite traseiro ({:.3}%) — é isso que \
+             caracteriza o flip", flip.valor, flip.limite);
+
+        // Fixture folgada (config_teste() intacta): nenhum cenário passa no
+        // envelope nominal nela — logo nenhum flip de "Cenário" é possível.
+        let n_folgada = nominal_pipeline(config_teste());
+        assert!(n_folgada.wb.scenarios.iter().all(|s| !s.inside_envelope),
+            "pré-condição da fixture folgada: nenhum cenário deveria passar no envelope nominal \
+             (achado da sonda numérica) — se isso mudou, a fixture não serve mais de contraste");
+        let out_folgada = RobustnessAgent::run(
+            &n_folgada.cfg, &n_folgada.engine, &n_folgada.req, &n_folgada.state, &n_folgada.wing,
+            &n_folgada.emp, &n_folgada.masses, &n_folgada.wb, &n_folgada.gear, &n_folgada.mission,
+            &n_folgada.perf,
+        );
+        assert!(!out_folgada.flips.iter().any(|f| f.check.starts_with("Cenário")
+            && f.caso == "massa-total"),
+            "fixture folgada não deveria produzir flip de Cenário no caso massa-total: {:?}",
+            out_folgada.flips);
     }
 
     /// Fixture intacta (`config_teste()`, σ=0.20 da fixture): saída
