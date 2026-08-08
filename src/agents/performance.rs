@@ -107,6 +107,15 @@ pub fn power_required_kw(v_ms: f64, drag_n: f64) -> f64 {
 // ─── RAZÃO DE SUBIDA ──────────────────────────────────────────────────────────
 
 /// Excesso de potência disponível sobre a necessária (kW)
+///
+/// `cd0_extra` (ciclo 8, task 1): incremento de CD0 somado ao polar de
+/// `drag_level_n` ANTES de calcular a potência necessária — fecha a lacuna
+/// "não existe modelo de flap na polar deste crate" declarada desde o ciclo
+/// 7. Cada chamador decide o valor: configuração de decolagem/subida em
+/// configuração de decolagem passa `wing.cd0_flap_to_extra` (flap PARCIAL,
+/// `to_flap_fraction · cd0_flap_delta`); configuração limpa/en-route (Vy,
+/// teto de serviço, cruzeiro) passa `0.0` — ver auditoria de call sites em
+/// cada função abaixo.
 pub fn excess_power_kw(
     v_ms: f64,
     mass_kg: f64,
@@ -120,8 +129,11 @@ pub fn excess_power_kw(
     isa_delta_c: f64,
     static_thrust_factor: f64,
     psru_efficiency: f64,
+    cd0_extra: f64,
 ) -> f64 {
-    let drag   = drag_level_n(v_ms, mass_kg, rho, wing);
+    let drag_limpo = drag_level_n(v_ms, mass_kg, rho, wing);
+    let q = 0.5 * rho * v_ms * v_ms;
+    let drag = drag_limpo + q * wing.area_m2 * cd0_extra;
     let p_req  = power_required_kw(v_ms, drag);
     let thrust = thrust_available_n(v_ms, engine, engine_rpm, psru_ratio, prop_diam_m,
                                      altitude_m, isa_delta_c, static_thrust_factor,
@@ -133,17 +145,18 @@ pub fn excess_power_kw(
 /// Razão de subida máxima (m/s) — varre velocidades para encontrar o pico
 /// RC = P_excess / W
 ///
-/// Nota de modelo (pré-existente, não introduzida por esta função): a
-/// referência de estol usa `wing.cl_max`, que é o CL_max COM FLAP
-/// (`cl_max_flaps` — ver `WingSpec::cl_max`/`aerodynamics.rs`), não o CL_max
-/// limpo. Já `excess_power_kw`→`drag_level_n` usa a polar de arrasto
-/// (`wing.cd0`) SEM nenhum incremento de arrasto de flap — não existe modelo
-/// de flap na polar deste crate. O resultado é um híbrido "CL de estol
-/// flapado + arrasto limpo", não uma condição limpa nem uma condição de
-/// decolagem/pouso fisicamente consistente. Documentado como limitação
-/// conhecida do gate CS 23.65 (`ConstraintChecker`), que consome
-/// `climb_gradient_pct` calculado sobre este mesmo híbrido (ver
-/// `best_climb_angle_ms` abaixo).
+/// Nota de modelo (pré-existente, não introduzida por esta função — ciclo 8,
+/// task 1: PERMANECE híbrida, fora de escopo desta task): a referência de
+/// estol usa `wing.cl_max`, que é o CL_max COM FLAP (`cl_max_flaps` — ver
+/// `WingSpec::cl_max`/`aerodynamics.rs`), não o CL_max limpo, enquanto
+/// `excess_power_kw` recebe `cd0_extra = 0.0` (configuração limpa) — Vy é
+/// usada como referência de razão de subida EN-ROUTE (teto de serviço,
+/// `service_ceiling_m`), não como check de decolagem, então não faz sentido
+/// somar arrasto de flap aqui. O híbrido "CL de estol flapado + arrasto
+/// limpo" que resulta é uma inconsistência conhecida, preexistente ao ciclo
+/// 8 — o gradiente CS 23.65 (que É um check de decolagem) foi corrigido
+/// separadamente em `best_climb_angle_ms` abaixo (ciclo futuro: reavaliar se
+/// Vy/`climb_rate_ms` deveria ter sua própria referência limpa consistente).
 pub fn climb_rate_ms(
     mass_kg: f64,
     altitude_m: f64,
@@ -170,10 +183,13 @@ pub fn climb_rate_ms(
 
     for i in 0..=steps {
         let v = v_min + i as f64 * dv;
+        // Auditoria (ciclo 8, task 1): Vy é referência EN-ROUTE (teto de
+        // serviço), configuração limpa — cd0_extra=0.0, NÃO tocar a
+        // referência de estol (wing.cl_max) acima, ver docstring da função.
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
-                                   static_thrust_factor, state.psru_efficiency);
+                                   static_thrust_factor, state.psru_efficiency, 0.0);
         let rc = pex * 1_000.0 / (mass_kg * G);
         if rc > best_rc {
             best_rc = rc;
@@ -195,15 +211,24 @@ pub fn climb_rate_ms(
 /// Retorna `(gradiente_max, Vx_kmh)` — gradiente como FRAÇÃO adimensional
 /// (RC/V, não %); `PerformanceAgent::run` converte para `climb_gradient_pct`.
 ///
-/// Mesma nota de modelo de `climb_rate_ms`: a referência de estol usa
-/// `wing.cl_max` — CL_max COM FLAP, não limpo — enquanto o arrasto somado
-/// (via `excess_power_kw`) não tem nenhum incremento de flap. É um híbrido
-/// "CL de estol flapado + arrasto limpo" herdado de `climb_rate_ms`/Vy, não
-/// uma condição de decolagem CS 23.65 fisicamente consistente (que exigiria
-/// flap de decolagem tanto no CL_max de referência quanto no CD0). O
-/// gradiente resultante (`climb_gradient_pct`) é checado contra o piso de
-/// 8,3% da CS 23.65 sobre ESTE híbrido — ver limitação documentada em
-/// `task-4.7-report.md`.
+/// HISTÓRICO (Task 4.7 → ciclo 7): a referência de estol usava `wing.cl_max`
+/// — CL_max COM FLAP DE POUSO — enquanto o arrasto somado (via
+/// `excess_power_kw`) não tinha nenhum incremento de flap: um híbrido "CL de
+/// estol flapado (pouso) + arrasto limpo", não uma condição de decolagem CS
+/// 23.65 fisicamente consistente (que exige flap de DECOLAGEM, parcial,
+/// tanto no CL_max de referência quanto no CD0).
+///
+/// CORRIGIDO (ciclo 8, task 1): este é um check de configuração de
+/// DECOLAGEM (CS 23.65), não de pouso — a referência de estol passa a ser
+/// `wing.cl_max_to` (flap PARCIAL, mesma interpolação de `to_flap_fraction`
+/// já usada pelas distâncias de decolagem) e `excess_power_kw` recebe
+/// `wing.cd0_flap_to_extra` (`to_flap_fraction · cd0_flap_delta`) em vez de
+/// 0.0 — CL_max de referência e CD0 agora refletem a MESMA configuração de
+/// decolagem parcial, de ponta a ponta. Consequência esperada: o gradiente
+/// CAI (mais arrasto, V_ref muda) em relação ao valor híbrido antigo — ver
+/// pin `climb_gradient_pct` em `tests/generic_engine.rs` para o valor
+/// old→new medido, e o piso de 8,3% da CS 23.65 continua sendo checado
+/// sobre este valor corrigido (`ConstraintChecker`).
 pub fn best_climb_angle_ms(
     mass_kg: f64,
     altitude_m: f64,
@@ -216,7 +241,9 @@ pub fn best_climb_angle_ms(
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     let engine_rpm_climb = engine.rpm_max_continuous;
 
-    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    // Ciclo 8 (task 1): referência de estol de DECOLAGEM (flap PARCIAL) —
+    // não mais `wing.cl_max` (pouso), ver docstring acima.
+    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
 
     let v_min = 1.05 * v_stall;
     let v_max = 1.80 * v_stall;
@@ -228,10 +255,13 @@ pub fn best_climb_angle_ms(
 
     for i in 0..=steps {
         let v = v_min + i as f64 * dv;
+        // Ciclo 8 (task 1): cd0_flap_to_extra — arrasto de flap PARCIAL de
+        // decolagem, mesma fração da referência de estol acima.
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
-                                   static_thrust_factor, state.psru_efficiency);
+                                   static_thrust_factor, state.psru_efficiency,
+                                   wing.cd0_flap_to_extra);
         let rc = pex * 1_000.0 / (mass_kg * G);
         let grad = rc / v;
         if grad > best_grad {
@@ -307,6 +337,15 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 /// da tração a V_lo/2"). Isso tende a ALONGAR a rolagem de solo (a tração
 /// estática corrigida é, para esta célula/hélice/motor, menor que a antiga
 /// estimativa em V_lo/2) — ver task-4.7-report.md para a tabela antes/depois.
+///
+/// NÃO recebe `cd0_extra`/arrasto de flap (ciclo 8, task 1 — auditoria de
+/// call sites): a fórmula é o método ENERGÉTICO de Raymer (Cap. 5) —
+/// trabalho da tração sobre a distância = energia cinética em V_LOF — que,
+/// por construção, não tem um termo de arrasto explícito (T_avg já é a
+/// tração LÍQUIDA média assumida constante; o arrasto entra implicitamente
+/// na calibração empírica de T_avg/CL_TO de Raymer, não como uma parcela
+/// somável de CD0). Não há onde inserir `cd0_flap_delta` sem reescrever o
+/// método inteiro — fora de escopo desta task.
 fn takeoff_ground_roll_m(
     mass_kg: f64,
     rho: f64,
@@ -393,9 +432,14 @@ pub fn takeoff_distance_50ft_m(
 
     let v_climb = 1.20 * v_s_to;
     let engine_rpm_to = engine.rpm_max_continuous;
+    // Ciclo 8 (task 1): cd0_flap_to_extra — único segmento de decolagem que
+    // consome a polar de arrasto (rolagem é o método ENERGÉTICO de Raymer,
+    // sem termo de arrasto; rotação é puramente cinemática, V_LOF×tempo —
+    // ver `takeoff_ground_roll_m` e o parágrafo acima).
     let pex = excess_power_kw(v_climb, mass_kg, rho, wing, engine, engine_rpm_to,
                                state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
-                               perf_cfg.static_thrust_factor, state.psru_efficiency);
+                               perf_cfg.static_thrust_factor, state.psru_efficiency,
+                               wing.cd0_flap_to_extra);
     let rc = pex * 1_000.0 / (mass_kg * G);
     if rc <= 0.0 {
         // Não consegue sustentar subida nesta condição — obstáculo
@@ -442,6 +486,19 @@ pub fn landing_distance_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64
 ///     S_ar:    15 / tan(γ_app), γ_app = `approach_angle_deg` (padrão 3°)
 ///     S_flare: V_ref × `flare_time_s`
 ///     S_ground: rolagem de solo (`landing_ground_roll_m`, `mu_brake`)
+///
+/// AUDITORIA (ciclo 8, task 1): nenhum dos três segmentos consome a polar de
+/// arrasto (`wing.cd0`), logo nenhum recebe `cd0_flap_delta` — `cd0_flap_
+/// ldg_extra` NÃO existe em `WingSpec` porque nada o consumiria (ver
+/// docstring de `WingCfg::cd0_flap_delta`):
+///   - S_ar usa um ângulo de aproximação FIXO (`approach_angle_deg`, dado de
+///     projeto), não uma razão L/D derivada da polar — diferente de
+///     `best_glide` (que usa `wing.cd0`, mas é planeio com motor cortado,
+///     conceito distinto de aproximação de pouso com flap, fora de escopo);
+///   - S_flare é puramente cinemático (V_ref × tempo fixo);
+///   - S_ground é dominado por frenagem (`mu_brake`), sem termo de arrasto.
+/// `wing.cl_max` (CL_max de POUSO, flap CHEIO) já é a referência correta de
+/// V_s/V_ref aqui — isso não mudou.
 pub fn landing_distance_50ft_m(
     mass_kg: f64,
     rho: f64,
@@ -490,9 +547,12 @@ pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, isa_delta_c: f64, wing:
     let engine_rpm = engine.rpm_rated;
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
     let (lo, hi) = (1.2 * v_stall, 200.0);
+    // Auditoria (ciclo 8, task 1): velocidade máxima nivelada é cruzeiro,
+    // configuração limpa — cd0_extra=0.0.
     let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine, engine_rpm,
                                        state.psru_ratio, state.prop_diameter_m, altitude_m,
-                                       isa_delta_c, static_thrust_factor, state.psru_efficiency);
+                                       isa_delta_c, static_thrust_factor, state.psru_efficiency,
+                                       0.0);
 
     // Varredura grosseira: 100 passos (101 amostras) sobre [lo, hi]
     const STEPS: usize = 100;
@@ -700,6 +760,59 @@ mod tests {
              melhor ângulo de subida ocorre em velocidade mais baixa que melhor razão");
     }
 
+    // ─── Ciclo 8 (task 1): arrasto de flap na polar, gradiente honesto ──────
+
+    /// Hand-check direto: `excess_power_kw` com `cd0_extra=0.01` deve ser
+    /// ESTRITAMENTE menor que com `0.0` (mesmos demais argumentos) — mais
+    /// CD0 ⟹ mais arrasto ⟹ mais potência necessária ⟹ menos excesso.
+    #[test]
+    fn excess_power_kw_cai_estritamente_com_cd0_extra() {
+        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let v = 60.0; // m/s, velocidade genérica de subida
+        let rho = RHO_SL;
+        let pex_limpo = excess_power_kw(v, state.mtow_kg, rho, &wing, &engine,
+                                         engine.rpm_max_continuous, state.psru_ratio,
+                                         state.prop_diameter_m, 0.0, 0.0,
+                                         perf_cfg.static_thrust_factor, state.psru_efficiency, 0.0);
+        let pex_com_extra = excess_power_kw(v, state.mtow_kg, rho, &wing, &engine,
+                                             engine.rpm_max_continuous, state.psru_ratio,
+                                             state.prop_diameter_m, 0.0, 0.0,
+                                             perf_cfg.static_thrust_factor, state.psru_efficiency,
+                                             0.01);
+        println!("P_excesso(cd0_extra=0.0)={pex_limpo:.3}kW  P_excesso(cd0_extra=0.01)={pex_com_extra:.3}kW");
+        assert!(pex_com_extra < pex_limpo,
+            "excesso de potência com cd0_extra=0.01 ({pex_com_extra:.3}kW) deveria ser \
+             ESTRITAMENTE menor que com cd0_extra=0.0 ({pex_limpo:.3}kW)");
+    }
+
+    /// Property (estrita): o gradiente CS 23.65 (`best_climb_angle_ms`, que
+    /// desde esta task usa `cl_max_to` + `cd0_flap_to_extra`) CAI quando
+    /// `[wing].cd0_flap_delta` sobe — mais arrasto de flap parcial na
+    /// configuração de decolagem, menos gradiente. Resto da config idêntico.
+    #[test]
+    fn gradiente_cs2365_cai_estritamente_com_cd0_flap_delta_maior() {
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let engine = engine_teste();
+
+        let gradiente_para = |delta: f64| {
+            let mut cfg = config_teste();
+            cfg.wing.cd0_flap_delta = delta;
+            let state = AircraftState::from_config(&cfg);
+            let wing = AerodynamicsAgent::run(&state, &req);
+            let (grad, _vx) = best_climb_angle_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine,
+                                                   cfg.performance.static_thrust_factor);
+            grad
+        };
+
+        let grad_baixo = gradiente_para(0.006);
+        let grad_alto  = gradiente_para(0.045);
+        println!("gradiente(cd0_flap_delta=0.006)={grad_baixo:.6}  \
+                   gradiente(cd0_flap_delta=0.045)={grad_alto:.6}");
+        assert!(grad_alto < grad_baixo,
+            "gradiente com cd0_flap_delta MAIOR (0.045, {grad_alto:.6}) deveria ser \
+             ESTRITAMENTE menor que com delta menor (0.006, {grad_baixo:.6})");
+    }
+
     #[test]
     fn melhor_planeio_bate_com_formula_fechada() {
         let (state, wing, _prop, _engine, _req, _perf_cfg) = setup();
@@ -760,30 +873,39 @@ mod tests {
              ({s_ground:.0}m) — inclui rotação + subida");
     }
 
-    /// Ciclo 7 (task 1): o trade-off físico que `[stability].to_flap_fraction`
-    /// passa a carregar do lado da DECOLAGEM — mais deployment de flap no
-    /// setting de decolagem ⟹ `cl_max_to` maior ⟹ `CL_TO` maior e `V_s_to`
-    /// menor ⟹ decolagem sobre 15 m ESTRITAMENTE mais CURTA. (O outro lado
-    /// do trade-off — a rotação fica mais exigente, o limite dianteiro de
-    /// rotação sobe — está em
-    /// `trim_authority::tests::mais_flap_de_decolagem_sobe_o_limite_de_rotacao`.)
-    ///
-    /// Essa monotonicidade só vale porque a polar de arrasto NÃO tem
-    /// incremento de arrasto de flap (lacuna de modelo já declarada acima em
-    /// `climb_rate_ms`, linhas 139-141: "não existe modelo de flap na polar
-    /// deste crate"). Mais flap aqui só aumenta `cl_max_to` sem custo de
-    /// arrasto — daí a decolagem encurtar estritamente. Um futuro modelo de
-    /// arrasto de flap (que penalizasse frações altas) pode quebrar esta
-    /// direção LEGITIMAMENTE; se isso acontecer, revisar o teste, não achar
-    /// que é regressão.
+    /// Ciclo 7 (task 1) → Ciclo 8 (task 1): a docstring original PREVIU a
+    /// própria morte — "um futuro modelo de arrasto de flap (que penalizasse
+    /// frações altas) pode quebrar esta direção LEGITIMAMENTE; se isso
+    /// acontecer, revisar o teste, não achar que é regressão". Este ciclo
+    /// implementou esse modelo (`cd0_flap_to_extra`), então o teste foi
+    /// reescrito para medir o TRADE-OFF completo em vez de assumir uma lei
+    /// monotônica de um lado só. Dois efeitos competem quando
+    /// `to_flap_fraction` sobe:
+    ///   - CL: `cl_max_to` sobe ⟹ `V_s_to` cai ⟹ rolagem de solo mais curta
+    ///     (`S_G ∝ 1/CL_TO`, `takeoff_ground_roll_m` — que NÃO recebe o
+    ///     delta de arrasto, ver sua docstring);
+    ///   - CD0: `cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta` sobe
+    ///     ⟹ menos excesso de potência no segmento de SUBIDA
+    ///     (`excess_power_kw` dentro de `takeoff_distance_50ft_m`) ⟹
+    ///     gradiente pior ⟹ S_subida mais longa.
+    /// Com o delta REAL da fixture (`cd0_flap_delta=0.020`, ver
+    /// `aircraft_config::test_fixtures::config_teste`), o benefício de CL na
+    /// rolagem de solo (dominante na distância total) supera o custo de
+    /// arrasto no segmento de subida (que é uma fração menor da distância
+    /// total) — a direção líquida MEDIDA continua sendo "mais flap encurta",
+    /// mas por MENOS margem que antes (ver valores no `println!` abaixo). O
+    /// pin é do RESULTADO observado, não de uma lei imposta a priori: se um
+    /// ajuste de modelo futuro (ex.: `cd0_flap_delta` maior, ou um perfil com
+    /// mais penalidade de arrasto) inverter a direção, revisar o teste, não
+    /// achar que é regressão — mesmo espírito da docstring original.
     #[test]
-    fn mais_flap_de_decolagem_encurta_a_decolagem() {
+    fn mais_flap_de_decolagem_trade_off_liquido_na_decolagem_sobre_15m() {
         let req = crate::models::requirements::test_fixtures::requisitos_teste();
         let engine = engine_teste();
 
         // Duas configurações idênticas EXCETO pela fração de flap de
         // decolagem — a asa é recomputada em cada uma (é o
-        // `AerodynamicsAgent` que deriva `cl_max_to`).
+        // `AerodynamicsAgent` que deriva `cl_max_to` E `cd0_flap_to_extra`).
         let s_50ft_para = |fracao: f64| {
             let mut cfg = config_teste();
             cfg.stability.to_flap_fraction = fracao;
@@ -792,20 +914,29 @@ mod tests {
             let perf_cfg = cfg.performance.clone();
             (
                 wing.cl_max_to,
+                wing.cd0_flap_to_extra,
                 takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
                                         0.0, &perf_cfg),
             )
         };
 
-        let (cl_03, s_03) = s_50ft_para(0.3);
-        let (cl_07, s_07) = s_50ft_para(0.7);
-        println!("fração 0.3: cl_max_to={cl_03:.4} S_50ft={s_03:.1}m  |  \
-                  fração 0.7: cl_max_to={cl_07:.4} S_50ft={s_07:.1}m");
+        let (cl_03, cd0_03, s_03) = s_50ft_para(0.3);
+        let (cl_07, cd0_07, s_07) = s_50ft_para(0.7);
+        println!("fração 0.3: cl_max_to={cl_03:.4} cd0_flap_to_extra={cd0_03:.5} S_50ft={s_03:.3}m  |  \
+                  fração 0.7: cl_max_to={cl_07:.4} cd0_flap_to_extra={cd0_07:.5} S_50ft={s_07:.3}m");
         assert!(cl_07 > cl_03, "fração maior deveria dar cl_max_to maior");
+        assert!(cd0_07 > cd0_03, "fração maior deveria dar cd0_flap_to_extra maior (mais custo de arrasto)");
+        // RESULTADO medido (ciclo 8, task 1): com o delta real da fixture
+        // (0.020), o benefício de CL na rolagem de solo ainda supera o custo
+        // de arrasto na subida — a decolagem continua encurtando com mais
+        // flap, mas a margem relativa CAIU em relação à direção "livre" do
+        // ciclo 7 (era ~14% de diferença sem custo de arrasto).
         assert!(s_07 < s_03,
-            "mais flap de decolagem (fração 0.7, cl_max_to={cl_07:.4}) deveria ENCURTAR \
-             ESTRITAMENTE a decolagem sobre 15 m em relação a 0.3 (cl_max_to={cl_03:.4}): \
-             S(0.7)={s_07:.1}m, S(0.3)={s_03:.1}m");
+            "trade-off líquido medido: mais flap de decolagem (fração 0.7, cl_max_to={cl_07:.4}, \
+             cd0_flap_to_extra={cd0_07:.5}) deveria encurtar a decolagem sobre 15 m em relação a \
+             0.3 (cl_max_to={cl_03:.4}, cd0_flap_to_extra={cd0_03:.5}) com o delta desta fixture: \
+             S(0.7)={s_07:.3}m, S(0.3)={s_03:.3}m — se isso não vale mais, é um ACHADO de modelo, \
+             não uma regressão de código: revisar a direção pinada, não forçá-la de volta.");
     }
 
     // ─── Ciclo 6 (task 2): sensibilidade ao diâmetro de hélice ─────────────

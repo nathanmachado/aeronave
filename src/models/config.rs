@@ -585,6 +585,16 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.wing.cm_flap_delta
         )));
     }
+    // Ciclo 8 (task 1): ΔCD0 do flap cheio — Raymer cap. 12/Hoerner, faixa
+    // típica de flap slotted moderado.
+    require_finite("wing.cd0_flap_delta", cfg.wing.cd0_flap_delta)?;
+    if cfg.wing.cd0_flap_delta <= 0.005 || cfg.wing.cd0_flap_delta >= 0.05 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.cd0_flap_delta deve estar em (0.005, 0.05) \
+             (valor: {})",
+            cfg.wing.cd0_flap_delta
+        )));
+    }
 
     // [fuselage]
     require_positive("fuselage.length_m", cfg.fuselage.length_m)?;
@@ -1481,6 +1491,7 @@ mod tests {
             le_root_x_m = 2.5
             cm_ac = -0.008
             cm_flap_delta = -0.30
+            cd0_flap_delta = 0.015
             [fuselage]
             length_m = 7.5
             cabin_width_m = 1.1
@@ -2022,6 +2033,29 @@ mod tests {
         let toml = aircraft_toml_valido().replace("cm_flap_delta = -0.30", "cm_flap_delta = 0.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("wing.cm_flap_delta"), "{err}");
+    }
+
+    // ─── [wing] cd0_flap_delta (ciclo 8, task 1) ─────────────────────────────
+
+    #[test]
+    fn rejeita_cd0_flap_delta_fora_da_faixa_acima() {
+        let toml = aircraft_toml_valido().replace("cd0_flap_delta = 0.015", "cd0_flap_delta = 0.10");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.cd0_flap_delta"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cd0_flap_delta_fora_da_faixa_abaixo() {
+        let toml = aircraft_toml_valido().replace("cd0_flap_delta = 0.015", "cd0_flap_delta = 0.001");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.cd0_flap_delta"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_cd0_flap_delta_nao_finito() {
+        let toml = aircraft_toml_valido().replace("cd0_flap_delta = 0.015", "cd0_flap_delta = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
     }
 
     // ─── [stability] cl_h_stall_limit / trim_margin / cl_ground_rotation /

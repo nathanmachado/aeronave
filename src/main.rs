@@ -742,8 +742,13 @@ fn main() {
          hardware: itens configurados não pesados — validar na balança)".into());
     fidelity.insert("performance".into(),
         "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de \
-         decolagem (cl_max_to) interpolado sem incremento de arrasto de flap na polar — viés \
-         otimista em frações altas de flap".into());
+         decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na \
+         polar (ciclo 8, task 1: cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta, semi-\
+         empírico Raymer cap. 12/Hoerner) no segmento de SUBIDA da decolagem e no gradiente CS \
+         23.65; a rolagem de solo de decolagem (método energético de Raymer) e a aproximação de \
+         pouso (ângulo fixo, não L/D) não consomem a polar, por construção — sem incremento de \
+         arrasto ali; Vy/teto de serviço seguem em configuração limpa (híbrido pré-existente, \
+         fora de escopo)".into());
     fidelity.insert("vn_diagram".into(),
         "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)".into());
     fidelity.insert("structure".into(),

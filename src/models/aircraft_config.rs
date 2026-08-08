@@ -101,6 +101,32 @@ pub struct WingCfg {
     /// rotação usa `stability.to_flap_fraction · cm_flap_delta`, flap de
     /// decolagem parcial).
     pub cm_flap_delta: f64,
+    /// ΔCD₀ do flap CHEIO (configuração de POUSO, adimensional, positivo) —
+    /// incremento de arrasto parasita por deployment do flap (fenda/batente,
+    /// separação de escoamento sobre a superfície defletida), semi-empírico
+    /// (Raymer cap. 12 / Hoerner "Fluid-Dynamic Drag"), faixa típica de flap
+    /// slotted moderado (ciclo 8, task 1 — fecha a lacuna declarada desde o
+    /// ciclo 7: "não existe modelo de flap na polar deste crate").
+    ///
+    /// Consumido por `agents::performance::excess_power_kw` (parâmetro
+    /// `cd0_extra`), via `WingSpec::cd0_flap_to_extra` = `to_flap_fraction ·
+    /// cd0_flap_delta` — a MESMA fração parcial que já governa `cl_max_to`
+    /// (`StabilityCfg::to_flap_fraction`) e `cm_flap_delta` na rotação, agora
+    /// também o arrasto: um único dial de deployment para os três efeitos do
+    /// flap PARCIAL de decolagem.
+    ///
+    /// O delta CHEIO (pouso) NÃO tem, hoje, um call site que o consuma —
+    /// auditoria de `agents::performance` (ciclo 8, task 1): a rolagem de
+    /// solo de decolagem é o método ENERGÉTICO de Raymer (sem termo de
+    /// arrasto, por construção); a rolagem de pouso é dominada por frenagem
+    /// (sem polar); e a aproximação de pouso (`landing_distance_50ft_m`) usa
+    /// um ângulo FIXO (`[performance].approach_angle_deg`), não uma razão
+    /// L/D — nenhuma delas tem onde receber um incremento de CD0. Ver
+    /// docstring de `takeoff_ground_roll_m`/`landing_distance_50ft_m` para o
+    /// detalhe de cada segmento.
+    ///
+    /// Faixa validada (0.005, 0.05) — `models::config::validate_aircraft`.
+    pub cd0_flap_delta: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -594,6 +620,10 @@ pub mod test_fixtures {
                 // fixture (task trim-authority).
                 cm_ac: -0.010,
                 cm_flap_delta: -0.28,
+                // Distinto do baseline real (0.015) — mesma justificativa de
+                // "nenhum destes números coincide com o baseline real" usada
+                // nas demais seções desta fixture (ciclo 8, task 1).
+                cd0_flap_delta: 0.020,
             },
             fuselage: FuselageCfg {
                 length_m: 8.0,

@@ -95,6 +95,21 @@ pub struct WingSpec {
     /// lenta demais (q_r −24%) e o limite dianteiro de rotação explodia:
     /// artefato de modelagem, não física.
     pub cl_max_to: f64,
+    /// ΔCD0 do flap PARCIAL de decolagem — DERIVADO (ciclo 8, task 1) pela
+    /// MESMA interpolação de deployment de `cl_max_to`:
+    ///
+    ///   `cd0_flap_to_extra = to_flap_fraction · cd0_flap_delta`
+    ///
+    /// Consumido por `agents::performance::excess_power_kw` (parâmetro
+    /// `cd0_extra`) no segmento de SUBIDA da decolagem
+    /// (`takeoff_distance_50ft_m`) e no gradiente CS 23.65 em configuração
+    /// de decolagem (`best_climb_angle_ms`) — fecha a lacuna declarada desde
+    /// o ciclo 7 ("não existe modelo de flap na polar deste crate"). Não há
+    /// um campo `cd0_flap_ldg_extra` equivalente para o pouso: auditoria de
+    /// call sites (ciclo 8, task 1) não encontrou nenhum segmento de pouso
+    /// que consuma a polar de arrasto (rolagem é frenagem pura; aproximação
+    /// usa ângulo FIXO, não L/D) — ver docstring de `WingCfg::cd0_flap_delta`.
+    pub cd0_flap_to_extra: f64,
     /// VS0 — velocidade de stall com flap (configuração de pouso), km/h.
     pub stall_speed_flaps_kmh: f64,
     /// VS1 — velocidade de stall em configuração limpa, km/h.

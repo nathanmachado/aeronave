@@ -45,6 +45,17 @@ le_root_x_m = 2.90          # única fonte da posição do bordo de ataque
 # antes de congelar (mesma classe de parâmetro semi-empírico que cm_ac).
 cm_ac = -0.008
 cm_flap_delta = -0.30
+# ΔCD0 do flap CHEIO (pouso) — ciclo 8, task 1: fecha a lacuna declarada
+# desde o ciclo 7 ("não existe modelo de flap na polar deste crate"). 0.015
+# é o valor central de um flap SLOTTED moderado (Raymer cap. 12 / Hoerner
+# "Fluid-Dynamic Drag" — faixa típica de incremento parasita por deployment
+# de flap com fenda simples, corda ~30%, sem grande translação tipo Fowler).
+# Consumido por agents::performance::excess_power_kw via a fração PARCIAL de
+# decolagem (WingSpec::cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta),
+# mesma fração que já governa cl_max_to/cm_flap_delta na rotação — não há
+# call site de pouso que consuma o delta CHEIO (auditoria de
+# agents::performance, ver docstring de WingCfg::cd0_flap_delta).
+cd0_flap_delta = 0.015
 
 [fuselage]
 length_m = 8.2

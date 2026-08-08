@@ -882,8 +882,10 @@ mod tests {
     /// ⟹ `q_r` menor ⟹ menos momento nariz-acima disponível na rotação ⟹
     /// limite dianteiro de rotação SOBE (x_cg_rot maior, mais atrás,
     /// ESTRITAMENTE). Vem acompanhado, na mesma direção, do ΔCm de flap
-    /// (mais nariz-abaixo com fração maior). O ganho de decolagem está em
-    /// `performance::tests::mais_flap_de_decolagem_encurta_a_decolagem`.
+    /// (mais nariz-abaixo com fração maior). O ganho (líquido, desde o
+    /// ciclo 8 task 1 — a polar agora cobra arrasto de flap) de decolagem
+    /// está em
+    /// `performance::tests::mais_flap_de_decolagem_trade_off_liquido_na_decolagem_sobre_15m`.
     #[test]
     fn mais_flap_de_decolagem_sobe_o_limite_de_rotacao() {
         use crate::agents::aerodynamics::AerodynamicsAgent;

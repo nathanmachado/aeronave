@@ -29,6 +29,11 @@ pub struct AircraftState {
     /// a config, e é ele quem deriva `WingSpec::cl_max_to` a partir dela
     /// (ciclo 7, task 1).
     pub to_flap_fraction: f64,
+    /// ΔCD0 do flap CHEIO (pouso) — eco de `[wing].cd0_flap_delta` (ciclo 8,
+    /// task 1). Vive aqui pela mesma razão de `to_flap_fraction`: o
+    /// `AerodynamicsAgent` recebe o ESTADO, não a config, e é ele quem
+    /// deriva `WingSpec::cd0_flap_to_extra` a partir dela.
+    pub cd0_flap_delta: f64,
     pub cd0_wing: f64,
     pub cd0_fuselage: f64,
     /// CD0 da empenagem — task refino-ciclo2 (1b): deixou de ser um eco
@@ -93,6 +98,7 @@ impl AircraftState {
             cl_max_clean: cfg.wing.cl_max_clean,
             cl_max_flaps: cfg.wing.cl_max_flaps,
             to_flap_fraction: cfg.stability.to_flap_fraction,
+            cd0_flap_delta: cfg.wing.cd0_flap_delta,
             cd0_wing: cfg.wing.cd0_wing,
             cd0_fuselage: cfg.fuselage.cd0,
             cd0_empennage,

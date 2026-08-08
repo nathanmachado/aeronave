@@ -163,6 +163,13 @@ impl AerodynamicsAgent {
         let cl_max_to = state.cl_max_clean
             + state.to_flap_fraction * (state.cl_max_flaps - state.cl_max_clean);
 
+        // ΔCD0 de DECOLAGEM (ciclo 8, task 1 — ver `WingSpec::
+        // cd0_flap_to_extra`): MESMA fração parcial de `cl_max_to` acima,
+        // aplicada ao delta de arrasto de flap CHEIO (`[wing].
+        // cd0_flap_delta`) — fecha a lacuna "não existe modelo de flap na
+        // polar" declarada desde o ciclo 7.
+        let cd0_flap_to_extra = state.to_flap_fraction * state.cd0_flap_delta;
+
         // Velocidades de stall ao nível do mar (condição mais crítica).
         // VS0 — configuração com flap/pouso (CL_max maior → V_stall MENOR).
         let v_stall_flaps_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, state.cl_max_flaps);
@@ -183,6 +190,7 @@ impl AerodynamicsAgent {
             cl_max:                 state.cl_max_flaps,
             cl_max_clean:           state.cl_max_clean,
             cl_max_to,
+            cd0_flap_to_extra,
             stall_speed_flaps_kmh:  v_stall_flaps_ms * 3.6,
             stall_speed_clean_kmh:  v_stall_clean_ms * 3.6,
             ld_ratio_cruise:  ld,
@@ -260,6 +268,28 @@ mod tests {
         assert!(wing.cl_max_to > cfg.wing.cl_max_clean && wing.cl_max_to < cfg.wing.cl_max_flaps,
             "cl_max_to {:.4} deveria ficar ESTRITAMENTE entre limpo ({:.4}) e pouso ({:.4})",
             wing.cl_max_to, cfg.wing.cl_max_clean, cfg.wing.cl_max_flaps);
+    }
+
+    /// Ciclo 8 (task 1): `cd0_flap_to_extra` é o produto direto de
+    /// `to_flap_fraction · cd0_flap_delta` — MESMA fração parcial que
+    /// `cl_max_to` usa, agora aplicada ao arrasto. Hand-check contra a
+    /// fórmula fechada, e ESTRITAMENTE positivo/menor que o delta cheio para
+    /// uma fração em (0,1).
+    #[test]
+    fn cd0_flap_to_extra_e_a_fracao_parcial_do_delta_cheio() {
+        let cfg = config_teste();
+        let state = AircraftState::from_config(&cfg);
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing = AerodynamicsAgent::run(&state, &req);
+
+        let esperado = cfg.stability.to_flap_fraction * cfg.wing.cd0_flap_delta;
+        println!("cd0_flap_to_extra = {:.6} (esperado {esperado:.6}); fração={:.2} delta_cheio={:.4}",
+                 wing.cd0_flap_to_extra, cfg.stability.to_flap_fraction, cfg.wing.cd0_flap_delta);
+        assert!((wing.cd0_flap_to_extra - esperado).abs() < 1e-12,
+            "cd0_flap_to_extra {:.12} deveria ser {esperado:.12}", wing.cd0_flap_to_extra);
+        assert!(wing.cd0_flap_to_extra > 0.0 && wing.cd0_flap_to_extra < cfg.wing.cd0_flap_delta,
+            "cd0_flap_to_extra {:.4} deveria ficar ESTRITAMENTE entre 0 e o delta cheio ({:.4})",
+            wing.cd0_flap_to_extra, cfg.wing.cd0_flap_delta);
     }
 
     #[test]

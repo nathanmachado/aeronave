@@ -1116,15 +1116,49 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //                                       na grama, tira o pouso de 605 m
     //                                       para 557 m e fecha a violação
     //                                       do check #24)
+    // Ciclo 8 (task 1, 2026-08-08): arrasto de flap na polar
+    // (`cd0_flap_delta=0.015` no baseline) + gradiente CS 23.65 honesto
+    // (`best_climb_angle_ms` passa a usar `cl_max_to` — flap PARCIAL de
+    // decolagem, 1,6775 — em vez de `cl_max` de POUSO, 2,1, como referência
+    // de estol de Vx; e soma `cd0_flap_to_extra` ao excesso de potência).
+    // Dois efeitos, ambos esperados pelo design (ver
+    // docs/superpowers/specs/2026-08-08-ciclo8-flap-e-solo-design.md §2):
+    //   (i)  referência de estol de Vx sobe (V_s_to > V_s0, CLmax menor) ⟹
+    //        Vx SOBE bastante (Vx ∝ V_s de referência);
+    //   (ii) a polar de subida agora cobra `cd0_flap_to_extra` (arrasto de
+    //        flap parcial) ⟹ menos excesso de potência relativo ⟹
+    //        gradiente CAI, mesmo com Vx maior.
+    // O piso de 8,3% da CS 23.65 continua com folga confortável (~5,6 p.p.).
+    // to_50ft_paved_m/to_50ft_grass_m sobem por poucos % (o segmento de
+    // SUBIDA fica mais longo com o gradiente menor — rolagem/rotação
+    // INTOCADAS, ver auditoria em `agents::performance::
+    // takeoff_ground_roll_m`). vy_kmh/best_glide_kmh/glide_ratio/ldg_50ft_m
+    // ficam INALTERADOS — nenhum consome `cl_max_to`/`cd0_flap_to_extra`
+    // (Vy e o planeio seguem em configuração limpa/híbrida pré-existente;
+    // o pouso não tem call site que consuma a polar, ver auditoria em
+    // `agents::performance::landing_distance_50ft_m`). Valores MEDIDOS
+    // old→new:
+    //   vx_kmh:             108.609445 → 121.519501  (+11,89%, efeito (i))
+    //   vy_kmh:             147.915721 → 147.915721  (inalterado)
+    //   best_glide_kmh:     173.266373 → 173.266373  (inalterado)
+    //   glide_ratio:         15.921177 →  15.921177  (inalterado)
+    //   climb_gradient_pct:  15.129850 →  13.896713  (-8,15%, efeito (ii) —
+    //                                       piso CS 23.65 8,3% ainda
+    //                                       folgado, margem ~5,6 p.p.)
+    //   to_50ft_paved_m:    416.222778 → 420.466819  (+1,02%)
+    //   to_50ft_grass_m:    469.331958 → 473.575998  (+0,90%)
+    //   ldg_50ft_m:         502.482013 → 502.482013  (inalterado — auditoria
+    //                                       confirma: pouso não consome a
+    //                                       polar de arrasto)
     // TOLERÂNCIAS INALTERADAS (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             108.609445, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             121.519501, 0.01),
         ("vy_kmh",              perf.vy_kmh,             147.915721, 0.01),
         ("best_glide_kmh",      perf.best_glide_kmh,     173.266373, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  15.129850, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    416.222778, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    469.331958, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  13.896713, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.466819, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.575998, 0.01),
         ("ldg_50ft_m",          perf.ldg_50ft_m,         502.482013, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
@@ -1135,7 +1169,9 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     }
 
     // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
-    // real passa com folga confortável (~13.8%, mais de 5 p.p. acima do piso).
+    // real passa com folga confortável (~13.9% pós-ciclo-8/task-1, gradiente
+    // honesto — ver tabela old→new acima; era ~15.1% no híbrido pré-task,
+    // mais de 5 p.p. acima do piso mesmo depois da correção).
     assert!(perf.climb_gradient_pct >= 8.3,
         "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
 
