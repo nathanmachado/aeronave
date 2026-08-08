@@ -211,6 +211,7 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_mass_per_area_migration(toml_str)?;
     check_mass_main_leg_migration(toml_str)?;
     check_mass_nose_migration(toml_str)?;
+    check_shaft_height_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -408,6 +409,32 @@ fn check_mass_nose_migration(toml_str: &str) -> Result<(), ConfigError> {
              [mass_model].landing_load_factor_ult/nose_strut_length_m/composite_factor_gear — \
              remova esta chave. Ver docs/aircraft_spec.schema.md e \
              config/aircraft/baseline_4seat.toml para valores de referência"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 5, task 1): `[propeller].shaft_height_m` foi
+/// REMOVIDO — o datum absoluto era o motivo da folga de hélice ficar
+/// "congelada" quando o trem mudava independentemente (campanha E9: o trem
+/// encurtou 13 cm e `shaft_height_m` continuou fixo, dessincronizando a
+/// folga reportada — exatamente a classe de falha que os ciclos recentes
+/// eliminaram nos demais datums). Substituído por
+/// `[propeller].prop_axis_above_cg_m` (offset vertical FIXO da célula entre
+/// o eixo da hélice e o CG): a altura do eixo ao solo agora DERIVA de
+/// `gear.h_cg_ground_m + propeller.prop_axis_above_cg_m`
+/// (`agents::propeller::PropellerAgent::run`).
+fn check_shaft_height_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("propeller").and_then(|p| p.get("shaft_height_m")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [propeller].shaft_height_m foi removido — a \
+             altura do eixo ao solo agora DERIVA do trem (shaft_height = gear.h_cg_ground_m + \
+             propeller.prop_axis_above_cg_m) para que encurtar o trem consuma folga de hélice \
+             automaticamente — use [propeller].prop_axis_above_cg_m. Ver \
+             docs/aircraft_spec.schema.md e config/aircraft/baseline_4seat.toml para valores de \
+             referência"
                 .to_string(),
         ));
     }
@@ -650,7 +677,17 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         )));
     }
     // Task 4.5: altura do eixo, limites de Mach de ponta e folga mínima de solo.
-    require_positive("propeller.shaft_height_m", cfg.propeller.shaft_height_m)?;
+    // Ciclo 5 (task 1): shaft_height_m virou datum derivado — o campo de
+    // config é o offset (pode ser negativo, eixo abaixo do CG), não a altura
+    // absoluta, por isso NÃO usa `require_positive`.
+    require_finite("propeller.prop_axis_above_cg_m", cfg.propeller.prop_axis_above_cg_m)?;
+    if cfg.propeller.prop_axis_above_cg_m <= -0.3 || cfg.propeller.prop_axis_above_cg_m >= 0.8 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.prop_axis_above_cg_m deve estar em \
+             (-0.3, 0.8) (valor: {})",
+            cfg.propeller.prop_axis_above_cg_m
+        )));
+    }
     require_finite("propeller.tip_mach_max_static", cfg.propeller.tip_mach_max_static)?;
     if cfg.propeller.tip_mach_max_static <= 0.5 || cfg.propeller.tip_mach_max_static >= 1.0 {
         return Err(ConfigError::Validation(format!(
@@ -1392,7 +1429,7 @@ mod tests {
             blades = 2
             psru_ratio = 1.5
             psru_efficiency = 0.95
-            shaft_height_m = 1.20
+            prop_axis_above_cg_m = 0.20
             tip_mach_max_static = 0.85
             tip_mach_max_cruise = 0.80
             ground_clearance_min_m = 0.23
@@ -1561,10 +1598,19 @@ mod tests {
     }
 
     #[test]
-    fn rejeita_shaft_height_m_nao_positivo() {
-        let toml = aircraft_toml_valido().replace("shaft_height_m = 1.20", "shaft_height_m = 0.0");
+    fn rejeita_prop_axis_above_cg_m_acima_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("prop_axis_above_cg_m = 0.20", "prop_axis_above_cg_m = 1.0");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("propeller.shaft_height_m"), "{err}");
+        assert!(err.to_string().contains("propeller.prop_axis_above_cg_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_prop_axis_above_cg_m_abaixo_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("prop_axis_above_cg_m = 0.20", "prop_axis_above_cg_m = -0.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.prop_axis_above_cg_m"), "{err}");
     }
 
     #[test]
@@ -2166,6 +2212,17 @@ mod tests {
         assert!(err.to_string().contains("mass_nose_kg"), "{err}");
         assert!(err.to_string().contains("agents::mass_model"), "{err}");
         assert!(err.to_string().contains("nose_gear_mass_raymer_kg"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_config_antiga_com_shaft_height_m_com_erro_de_migracao_claro() {
+        let toml = aircraft_toml_valido().replace(
+            "psru_efficiency = 0.95\n",
+            "psru_efficiency = 0.95\n            shaft_height_m = 1.20\n",
+        );
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("shaft_height_m"), "{err}");
+        assert!(err.to_string().contains("prop_axis_above_cg_m"), "{err}");
     }
 
     #[test]

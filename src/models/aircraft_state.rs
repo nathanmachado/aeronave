@@ -110,7 +110,9 @@ impl AircraftState {
             prop_diameter_m: cfg.propeller.diameter_m.unwrap_or_else(|| {
                 crate::agents::propeller::round_down_cm(
                     crate::agents::propeller::diameter_max_by_clearance_m(
-                        cfg.propeller.shaft_height_m,
+                        // Ciclo 5 (task 1): shaft_height agora DERIVA do trem —
+                        // ver `agents::propeller::PropellerAgent::run`.
+                        cfg.gear.h_cg_ground_m + cfg.propeller.prop_axis_above_cg_m,
                         cfg.propeller.ground_clearance_min_m,
                     ) - 0.02,
                 )

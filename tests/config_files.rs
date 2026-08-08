@@ -39,7 +39,9 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.wing.le_root_x_m, 2.90);
     assert_eq!(cfg.propeller.psru_ratio, 1.867);
     assert_eq!(cfg.propeller.diameter_m, Some(1.95));
-    assert_eq!(cfg.propeller.shaft_height_m, 1.25);
+    // Ciclo 5 (task 1): shaft_height_m virou datum derivado — pin o offset
+    // fixo (0.20 = 1.25 − h_cg_ground_m(1.05), shaft derivado idêntico).
+    assert_eq!(cfg.propeller.prop_axis_above_cg_m, 0.20);
     assert_eq!(cfg.propeller.tip_mach_max_static, 0.85);
     assert_eq!(cfg.propeller.tip_mach_max_cruise, 0.80);
     assert_eq!(cfg.propeller.ground_clearance_min_m, 0.23);

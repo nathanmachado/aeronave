@@ -100,6 +100,11 @@ impl PropellerAgent {
         req: &Requirements,
     ) -> PropellerSpec {
         let pcfg = &cfg.propeller;
+        // Ciclo 5 (task 1): datum recoplado — a altura do eixo ao solo DERIVA
+        // do trem (não é mais um valor absoluto independente). Encurtar
+        // `gear.h_cg_ground_m` consome folga de hélice na mesma medida (ver
+        // `encurtar_o_trem_reduz_a_folga_na_mesma_medida` nos testes abaixo).
+        let shaft_height_m = cfg.gear.h_cg_ground_m + pcfg.prop_axis_above_cg_m;
 
         // ── Condição ESTÁTICA (rpm nominal do motor, V=0, no aeródromo) ────
         let n_static_rpm = rpm_static(engine.rpm_rated, prop_spec.psru_ratio);
@@ -117,7 +122,7 @@ impl PropellerAgent {
 
         // Diâmetro máximo que respeita AMBOS os limites de Mach.
         let d_max_mach = d_max_mach_static.min(d_max_mach_cruise);
-        let d_max_clearance = diameter_max_by_clearance_m(pcfg.shaft_height_m, pcfg.ground_clearance_min_m);
+        let d_max_clearance = diameter_max_by_clearance_m(shaft_height_m, pcfg.ground_clearance_min_m);
 
         let (diameter_m, source) = match pcfg.diameter_m {
             Some(d) => (d, "config".to_string()),
@@ -129,7 +134,7 @@ impl PropellerAgent {
 
         let tip_mach_static = mach_tip(diameter_m, n_static_rpm, 0.0, a_static);
         let tip_mach_cruise_helical = mach_tip(diameter_m, n_cruise_rpm, v_cruise_ms, a_cruise);
-        let ground_clearance_m = pcfg.shaft_height_m - diameter_m / 2.0;
+        let ground_clearance_m = shaft_height_m - diameter_m / 2.0;
 
         PropellerSpec {
             diameter_m,
@@ -243,7 +248,10 @@ mod tests {
         let mut cfg = config_teste();
         cfg.propeller.diameter_m = Some(1.95);
         cfg.propeller.psru_ratio = 1.867;
-        cfg.propeller.shaft_height_m = 1.25;
+        // shaft_height derivado = h_cg_ground_m(1.05) + prop_axis_above_cg_m(0.20)
+        // = 1.25 (idêntico ao antigo shaft_height_m=1.25 do hand-check).
+        cfg.gear.h_cg_ground_m = 1.05;
+        cfg.propeller.prop_axis_above_cg_m = 0.20;
         cfg.propeller.tip_mach_max_static = 0.85;
         cfg.propeller.tip_mach_max_cruise = 0.80;
         cfg.propeller.ground_clearance_min_m = 0.23;
@@ -360,7 +368,7 @@ mod tests {
         let prop_spec = prop_spec_teste(1.0, 2_000.0);
 
         let spec = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
-        let bootstrap = bootstrap_diameter_m(cfg.propeller.shaft_height_m, cfg.propeller.ground_clearance_min_m);
+        let bootstrap = bootstrap_diameter_m(cfg.gear.h_cg_ground_m + cfg.propeller.prop_axis_above_cg_m, cfg.propeller.ground_clearance_min_m);
         println!(
             "mach governa: D_autoritativo={:.4} D_provisorio={:.4} (Δ={:.4})",
             spec.diameter_m, bootstrap, (spec.diameter_m - bootstrap).abs()
@@ -399,7 +407,7 @@ mod tests {
         let prop_spec = prop_spec_teste(cfg.propeller.psru_ratio, 1_200.0);
 
         let spec = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
-        let bootstrap = bootstrap_diameter_m(cfg.propeller.shaft_height_m, cfg.propeller.ground_clearance_min_m);
+        let bootstrap = bootstrap_diameter_m(cfg.gear.h_cg_ground_m + cfg.propeller.prop_axis_above_cg_m, cfg.propeller.ground_clearance_min_m);
         println!(
             "folga governa: D_autoritativo={:.4} D_provisorio={:.4}",
             spec.diameter_m, bootstrap
@@ -438,19 +446,48 @@ mod tests {
         let req = requisitos_teste();
         let prop_spec = prop_spec_teste(2.0, 1_200.0);
 
+        // Isola o efeito de altura do eixo via `prop_axis_above_cg_m` (offset
+        // fixo), mantendo `gear.h_cg_ground_m` da fixture igual nos dois —
+        // shaft_height_baixo = 1.03+0.07=1.10, shaft_height_alto = 1.03+0.27=1.30.
         let mut cfg_baixo = config_teste();
         cfg_baixo.propeller.diameter_m = Some(1.90);
-        cfg_baixo.propeller.shaft_height_m = 1.10;
+        cfg_baixo.propeller.prop_axis_above_cg_m = 0.07;
 
         let mut cfg_alto = config_teste();
         cfg_alto.propeller.diameter_m = Some(1.90);
-        cfg_alto.propeller.shaft_height_m = 1.30;
+        cfg_alto.propeller.prop_axis_above_cg_m = 0.27;
 
         let spec_baixo = PropellerAgent::run(&cfg_baixo, &engine, &prop_spec, &req);
         let spec_alto = PropellerAgent::run(&cfg_alto, &engine, &prop_spec, &req);
 
         assert!(spec_alto.ground_clearance_m > spec_baixo.ground_clearance_m,
             "folga com eixo mais alto ({:.3}) deveria exceder a de eixo mais baixo ({:.3})",
+            spec_alto.ground_clearance_m, spec_baixo.ground_clearance_m);
+    }
+
+    /// Property do ACOPLAMENTO (o motivo do ciclo 5): encurtar o trem reduz a
+    /// folga de hélice NA MESMA MEDIDA — o datum recoplado garante que
+    /// `h_cg_ground_m` e a folga andam juntos. A campanha E9 encurtou o trem
+    /// 13 cm e o datum absoluto antigo (`shaft_height_m`) manteve a folga
+    /// reportada parada; esta é a falha que motivou o ciclo 5.
+    #[test]
+    fn encurtar_o_trem_reduz_a_folga_na_mesma_medida() {
+        let engine = engine_teste();
+        let req = requisitos_teste();
+        let prop_spec = prop_spec_teste(2.0, 1_200.0);
+
+        let mut cfg = config_teste();
+        // Fixa o diâmetro para isolar o efeito da altura do eixo (senão a
+        // derivação re-escolheria D quando `diameter_m` está omitido) —
+        // mesma técnica de `folga_de_solo_cresce_com_altura_do_eixo` acima.
+        cfg.propeller.diameter_m = Some(1.90);
+
+        let spec_alto = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
+        cfg.gear.h_cg_ground_m -= 0.10;
+        let spec_baixo = PropellerAgent::run(&cfg, &engine, &prop_spec, &req);
+
+        assert!((((spec_alto.ground_clearance_m - spec_baixo.ground_clearance_m) - 0.10).abs()) < 1e-9,
+            "folga deveria cair EXATAMENTE 0,10 m: {:.4} → {:.4}",
             spec_alto.ground_clearance_m, spec_baixo.ground_clearance_m);
     }
 

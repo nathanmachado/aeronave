@@ -664,7 +664,9 @@ pub struct PropellerSpec {
     /// Mach de ponta de pá em CRUZEIRO (composição helicoidal: velocidade
     /// tangencial da ponta + velocidade de avanço).
     pub tip_mach_cruise_helical: f64,
-    /// Folga entre a ponta da pá e o solo (m) — `shaft_height_m − diameter_m/2`.
+    /// Folga entre a ponta da pá e o solo (m) — `shaft_height − diameter_m/2`,
+    /// onde `shaft_height = gear.h_cg_ground_m + propeller.prop_axis_above_cg_m`
+    /// (datum derivado do trem — ciclo 5).
     pub ground_clearance_m: f64,
     /// Maior diâmetro (m) que respeita AMBOS os limites de Mach de ponta
     /// (estático e cruzeiro) — o menor dos dois máximos individuais.

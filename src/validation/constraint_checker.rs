@@ -777,15 +777,17 @@ mod tests {
     }
 
     /// Achado honesto da fixture sintética (mesma filosofia da fixture de
-    /// envelope de CG, Task 4.4): `config_teste()` usa `shaft_height_m=1.15`,
-    /// `diameter_m=Some(1.90)`, `ground_clearance_min_m=0.25` — folga real =
-    /// 1,15 − 0,95 = 0,20 m < 0,25 m, então a checagem de folga de solo falha
-    /// naturalmente (não precisa de override) para esta fixture.
+    /// envelope de CG, Task 4.4): `config_teste()` deriva shaft_height =
+    /// `h_cg_ground_m(1.03) + prop_axis_above_cg_m(0.12)` = 1.15 (idêntico ao
+    /// `shaft_height_m` pré-ciclo-5), `diameter_m=Some(1.90)`,
+    /// `ground_clearance_min_m=0.25` — folga real = 1,15 − 0,95 = 0,20 m <
+    /// 0,25 m, então a checagem de folga de solo falha naturalmente (não
+    /// precisa de override) para esta fixture.
     #[test]
     fn violacao_de_folga_de_solo_aparece_naturalmente_na_fixture_sintetica() {
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg, robustness) = setup();
         assert!(!propeller.ok_clearance,
-            "pré-condição do teste: fixture sintética (shaft_height_m=1.15, diameter=1.90, \
+            "pré-condição do teste: fixture sintética (shaft_height derivado=1.15, diameter=1.90, \
              ground_clearance_min_m=0.25) deveria falhar na folga de solo — obtido \
              ground_clearance_m={:.3}", propeller.ground_clearance_m);
 

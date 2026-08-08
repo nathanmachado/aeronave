@@ -193,9 +193,14 @@ pub struct PropellerCfg {
     pub blades: u32,
     pub psru_ratio: f64,
     pub psru_efficiency: f64,
-    /// Altura do eixo da hélice ao solo (m, trem estendido) — usada na
-    /// checagem de folga de solo (CS 23.925).
-    pub shaft_height_m: f64,
+    /// Offset vertical FIXO da célula entre o eixo da hélice e o CG (m) —
+    /// ciclo 5. A altura do eixo ao solo DERIVA do trem:
+    /// shaft_height = gear.h_cg_ground_m + prop_axis_above_cg_m — encurtar o
+    /// trem consome folga de hélice 1:1 automaticamente (a campanha E9
+    /// encurtou h_cg 13 cm e o datum absoluto antigo manteve a folga parada).
+    /// Valor do baseline derivado da geometria atual (1,25 − 1,05) — validar
+    /// no CAD (Fase 3). Pode ser negativo (eixo abaixo do CG).
+    pub prop_axis_above_cg_m: f64,
     /// Mach de ponta de pá máximo admissível em condição ESTÁTICA (rpm
     /// nominal do motor via PSRU, V=0) — tipicamente mais restritivo que o
     /// limite de cruzeiro por não ter o alívio da velocidade de avanço na
@@ -604,7 +609,7 @@ pub mod test_fixtures {
                 blades: 2,
                 psru_ratio: 2.0,
                 psru_efficiency: 0.965,
-                shaft_height_m: 1.15,
+                prop_axis_above_cg_m: 0.12,
                 tip_mach_max_static: 0.83,
                 tip_mach_max_cruise: 0.78,
                 ground_clearance_min_m: 0.25,

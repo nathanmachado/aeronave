@@ -88,10 +88,12 @@ diameter_m = 1.95
 blades = 2
 psru_ratio = 1.867
 psru_efficiency = 0.97
-# Altura do eixo da hélice ao solo (trem estendido, m) — baseline elevado a
-# partir da estimativa anterior (~1.20 m) para dar margem de folga de solo
-# (Task 4.5, decisão de projeto do controller).
-shaft_height_m = 1.25
+# Offset vertical FIXO da célula entre o eixo da hélice e o CG (m) — ciclo 5.
+# A altura do eixo ao solo agora DERIVA do trem: shaft_height =
+# gear.h_cg_ground_m + prop_axis_above_cg_m = 1.05 + 0.20 = 1.25 (idêntico ao
+# shaft_height_m anterior — encurtar o trem consome folga de hélice 1:1
+# automaticamente daqui em diante). Validar no CAD (Fase 3).
+prop_axis_above_cg_m = 0.20
 # Limites de Mach de ponta de pá (Task 4.5) — verificação de compressibilidade.
 tip_mach_max_static = 0.85
 tip_mach_max_cruise = 0.80
