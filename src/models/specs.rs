@@ -769,6 +769,30 @@ pub struct PropellerSpec {
     /// review do ciclo 8 (`docs/backlog.md`, item 1) previu. Ver o
     /// histórico completo old→new na docstring de `SCHEMA_VERSION`.
     ///
+    /// CAVEAT NOMEADO (achado de review desta revisão final, ciclo 9 — NÃO
+    /// corrigido, fora de escopo): o modelo pivota a célula sobre os MAINS
+    /// mas trata o trem PRINCIPAL como RÍGIDO e ESTENDIDO — qualquer
+    /// deflexão do amortecedor/pneu do principal (`gear.main_oleo_stroke_mm`
+    /// ≈ 212,4 mm no baseline real, antes de somar deflexão de pneu) não
+    /// entra na fórmula acima; na realidade, essa deflexão translada o
+    /// pivô (e a célula inteira) verticalmente ~1:1, ADITIVO ao termo já
+    /// amplificado do nariz. A ordem de grandeza (>200 mm) é MAIOR que a
+    /// margem de +0,0682 m encontrada pela célula recomendada da campanha
+    /// E11 (`prop_axis_above_cg_m` 0,32 + `x_nose_m` 1,20, ver
+    /// `docs/backlog.md`) — ou seja, este termo não modelado pode sozinho
+    /// consumir toda a margem ganha por uma eventual adoção da E11.
+    /// Condição COMPOSTA de CS 23.925 (mains E nariz colapsados
+    /// simultaneamente), não modelada por `fill_critical_clearance`.
+    /// Nota relacionada, sinal OPOSTO e pequeno: o disco da hélice também
+    /// não é modelado como INCLINADO junto com o pitch da célula — tratar
+    /// o disco como permanecendo vertical (ponta mais baixa sempre à
+    /// distância do raio abaixo do cubo) é CONSERVADOR em ≈+3,4 mm
+    /// (`raio × (1 − cos θ)`, θ ≈ 5,04° no baseline real) frente a uma
+    /// modelagem exata do disco tombado — o tombamento ERGUE o ponto mais
+    /// baixo varrido em relação ao cubo, então ignorá-lo empurra a folga
+    /// calculada para o lado SEGURO, ao contrário do gap dos mains acima.
+    /// Ver `docs/backlog.md` (item 6, condição composta CS 23.925).
+    ///
     /// PREENCHIDO EM DOIS PASSOS: `PropellerAgent::run` (este arquivo não
     /// tem acesso a `GearSpec`, e a hélice roda ANTES do trem de pouso no
     /// pipeline real — `main.rs`, "Agente 9" precede "Agente 6" na ordem de

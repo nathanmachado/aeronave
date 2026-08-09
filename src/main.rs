@@ -782,14 +782,22 @@ fn main() {
          sobre o trem principal (não mais uma translação vertical 1:1 do \
          nariz) — a hélice, à frente do trem de nariz, mergulha um braço \
          amplificado por um fator geométrico \
-         (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m− \
+         (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m−\
          gear.x_nose_m) sobre o curso do nariz/deflexão de pneu. Achado \
          honesto: no baseline real esse fator (≈1,466) vira a folga \
          crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m \
          (FAIL) — a simplificação antiga era OTIMISTA e mascarava este \
-         resultado, como o achado de review do ciclo 8 previu. Ver \
+         resultado, como o achado de review do ciclo 8 previu. CAVEAT \
+         NOMEADO (revisão final, ciclo 9, NÃO corrigido): a fórmula pivota \
+         sobre os MAINS mas trata o trem principal como RÍGIDO/estendido \
+         — deflexão do amortecedor/pneu principal (≈212,4 mm no baseline \
+         real) não entra na fórmula e translada o pivô ~1:1, ADITIVO ao \
+         termo já amplificado do nariz, ordem de grandeza MAIOR que a \
+         margem de +0,0682 m da célula recomendada pela campanha E11 — \
+         condição COMPOSTA de CS 23.925 não modelada. Ver \
          docstring de PropellerSpec::prop_clearance_critical_m e \
-         docs/backlog.md (item 1, RESOLVIDO ciclo 9). Requer mapa de \
+         docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, condição \
+         composta CS 23.925). Requer mapa de \
          desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \

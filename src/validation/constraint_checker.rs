@@ -557,8 +557,15 @@ impl ConstraintChecker {
         // estendidos, pneus cheios. CS 23.925 também exige folga positiva
         // na condição CRÍTICA: amortecedor TOTALMENTE COMPRIMIDO (batente)
         // + pneu MURCHO/estourado. Hélice TRATORA: é o trem de NARIZ que
-        // governa (fica sob o eixo da hélice, dianteiro), não o principal
-        // — daí `gear.nose_oleo_stroke_mm`, não `main_oleo_stroke_mm`. Lê
+        // governa o TERMO AMPLIFICADO (fica sob o eixo da hélice,
+        // dianteiro) — daí `gear.nose_oleo_stroke_mm` × `fator`, não
+        // `main_oleo_stroke_mm`, alimentando esse termo. Isso é verdade
+        // só para o termo amplificado: o trem PRINCIPAL é tratado como
+        // RÍGIDO/estendido pelo modelo (`fill_critical_clearance` nunca lê
+        // `main_oleo_stroke_mm`) — na condição crítica real, uma deflexão
+        // do principal translada o pivô ~1:1, ADITIVA a este termo, e não
+        // é modelada aqui (CAVEAT NOMEADO, ver `docs/backlog.md`, item 6:
+        // "condição composta CS 23.925"). Lê
         // `propeller.prop_clearance_critical_m` já PRECOMPUTADO (ver
         // `specs::PropellerSpec::fill_critical_clearance`, chamado em
         // `main.rs`/nas fixtures de teste logo após o trem de pouso) — os

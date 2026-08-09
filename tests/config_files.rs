@@ -50,6 +50,10 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     assert_eq!(cfg.propeller.tip_mach_max_static, 0.85);
     assert_eq!(cfg.propeller.tip_mach_max_cruise, 0.80);
     assert_eq!(cfg.propeller.ground_clearance_min_m, 0.23);
+    // Ciclo 9 (transferência de atitude do #25): campo NOVO, obrigatório,
+    // sem default — posição do plano da hélice (m do datum no nariz),
+    // alimenta o fator de amplificação do pivô sobre o trem principal.
+    assert_eq!(cfg.propeller.prop_plane_x_m, 0.20);
     // 260 L desde a correção pós-Task-3.1 (era 240 L; margem de 16,08 L
     // (~6,6%) sobre os 243,92 L exigidos pela missão no MTOW convergido
     // (~1.529,9 kg) — ver task-3.1-report.md).
