@@ -545,9 +545,22 @@ impl RobustnessAgent {
                 // (`gear_p_masstotal.nose_oleo_stroke_mm`, já produzido por
                 // `evaluate_world` acima). Mesmo padrão `nom_ok && !p_ok`
                 // dos gates de desempenho acima.
+                // Ciclo 9 (transferência de atitude do #25): a mesma fórmula
+                // fechada de `PropellerSpec::fill_critical_clearance` — não
+                // reaproveitada diretamente porque este bloco recalcula com
+                // `gear_p_masstotal.nose_oleo_stroke_mm` (perturbado), não o
+                // `gear` nominal que `propeller_nominal.
+                // prop_clearance_critical_m` já embute — mas o FATOR
+                // geométrico é invariante ao mundo (não depende de massa,
+                // só de `[gear].x_main_m`/`x_nose_m`/`[propeller].
+                // prop_plane_x_m`), então reusa `cfg_p` (idêntico a `cfg`
+                // nesses três campos — só os 5 fatores de composto de massa
+                // mudam entre os dois).
+                let fator = (cfg_p.gear.x_main_m - cfg_p.propeller.prop_plane_x_m)
+                    / (cfg_p.gear.x_main_m - cfg_p.gear.x_nose_m);
                 let folga_critica_p = propeller_nominal.ground_clearance_m
                     - (gear_p_masstotal.nose_oleo_stroke_mm / 1_000.0
-                       + cfg_p.gear.tire_deflation_delta_m);
+                       + cfg_p.gear.tire_deflation_delta_m) * fator;
                 let nom_ok = propeller_nominal.prop_clearance_critical_m > 0.0;
                 let p_ok = folga_critica_p > 0.0;
                 if nom_ok && !p_ok {
@@ -639,7 +652,7 @@ mod tests {
         // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem
         // #25) no MESMO caminho de `main.rs` — depois que `gear` existe.
         let mut propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
-        propeller.fill_critical_clearance(&gear, &cfg.gear);
+        propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
         Nominal { cfg, engine, req, state, wing, emp, masses, wb, gear, propeller, mission, perf }
     }
 

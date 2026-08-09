@@ -86,7 +86,7 @@ fn build_baseline_report() -> AircraftReport {
 
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
     // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.fill_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
 
     let electrical = ElectricalAgent::run(&cfg);
 
@@ -101,7 +101,7 @@ fn build_baseline_report() -> AircraftReport {
         req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
         propeller: &propeller, perf: &perf, mission, electrical: &electrical,
         gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
-        robustness: &robustness,
+        robustness: &robustness, prop_cfg: &cfg.propeller,
     });
     let all_ok = report.all_satisfied();
 
@@ -276,15 +276,21 @@ fn wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada() {
 /// formaliza os dois campos aditivos das Tasks 1/2 do mesmo ciclo, ver
 /// `docs/aircraft_spec.schema.md` §1): `propeller.prop_clearance_critical_m`
 /// (NOVO, ciclo 8 task 2 — folga ponta de pá ↔ solo na condição CRÍTICA de
-/// CS 23.925, checagem #25) está presente e numérico no JSON. Baseline real
-/// E10: ≈+0,033 m (PASS) — mesmo precedente de
-/// `wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada` acima, mas
-/// sem fórmula fechada independente aqui (o campo já depende de dois
-/// agentes distintos rodando em sequência — `PropellerAgent` +
-/// `LandingGearAgent`/`PropellerSpec::fill_critical_clearance` — reproduzir
-/// a fórmula neste teste duplicaria a lógica do pipeline sem adicionar
-/// cobertura; a fórmula fechada já é coberta por
+/// CS 23.925, checagem #25) está presente e numérico no JSON. Sem fórmula
+/// fechada independente aqui (o campo já depende de agentes distintos
+/// rodando em sequência — `PropellerAgent` + `LandingGearAgent`/
+/// `PropellerSpec::fill_critical_clearance` — reproduzir a fórmula neste
+/// teste duplicaria a lógica do pipeline sem adicionar cobertura; a fórmula
+/// fechada já é coberta por
 /// `models::specs::tests::fill_critical_clearance_bate_com_a_formula_fechada`).
+///
+/// ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — old→new):
+/// Baseline real E10 ≈+0,0325 m (PASS, simplificação 1:1) → **≈−0,06416 m
+/// (FAIL)** — a fórmula ganha o fator de amplificação do pivô sobre o trem
+/// principal (`(x_main−prop_plane_x_m)/(x_main−x_nose_m)` ≈ 1,46610 nesta
+/// geometria), física corrigida do achado de review do ciclo 8
+/// (`docs/backlog.md`, item 1). Nenhuma tolerância afrouxada — o pin
+/// (±0,001) é o mesmo padrão de antes, só o valor central mudou.
 #[test]
 fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado() {
     let report = build_baseline_report();
@@ -299,12 +305,13 @@ fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado()
     );
     let obtido = obtido.unwrap();
     assert!(
-        (obtido - 0.0325).abs() < 0.001,
-        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈0,033 m \
-         (baseline real E10, checagem #25 PASS)"
+        (obtido - (-0.06416)).abs() < 0.001,
+        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈−0,06416 m \
+         (baseline real E10 pós-ciclo-9, checagem #25 FAIL — old: ≈+0,0325 m PASS)"
     );
-    assert!(obtido > 0.0,
-        "baseline real deveria PASSAR a checagem #25 (folga crítica positiva)");
+    assert!(obtido < 0.0,
+        "campanha ciclo 9: baseline real deveria REPROVAR a checagem #25 (folga crítica \
+         negativa, achado honesto da transferência de atitude)");
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco

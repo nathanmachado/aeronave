@@ -521,7 +521,7 @@ fn main() {
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25,
     // CS 23.925) — só possível AGORA que `gear` existe (ver docstring de
     // `PropellerSpec::prop_clearance_critical_m`).
-    propeller.fill_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
     println!("  Folga crítica CS 23.925 (batente + pneu murcho): {:.3}m  |  {}",
              propeller.prop_clearance_critical_m,
              if propeller.prop_clearance_critical_m > 0.0 { "✓" } else { "✗" });
@@ -603,7 +603,7 @@ fn main() {
         req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
         propeller: &propeller, perf: &perf, mission, electrical: &electrical,
         gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
-        robustness: &robustness,
+        robustness: &robustness, prop_cfg: &cfg.propeller,
     });
     // Achado de review (ciclo 5): estes dois pisos agora são consumidos de
     // `validation::constraint_checker` (fonte única) em vez de literais
@@ -777,14 +777,20 @@ fn main() {
          totalmente estendido, aeronave nivelada — E folga em condição \
          CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no \
          batente + pneu murcho, checagem #25; ambas piso de projeto, não \
-         verificação regulatória direta. VIÉS OTIMISTA conhecido e não \
-         corrigido na folga crítica: o modelo trata o colapso do trem de \
-         nariz como translação vertical 1:1, quando a célula real pivota \
-         sobre o trem principal e a hélice mergulha um braço amplificado \
-         (≈1,4–1,55× o curso do nariz) — a folga crítica real pode ser \
-         negativa mesmo quando a checagem #25 passa; ver docstring de \
-         PropellerSpec::prop_clearance_critical_m e docs/backlog.md. \
-         Requer mapa de desempenho de hélice real do fabricante)".into());
+         verificação regulatória direta. Ciclo 9 (transferência de \
+         atitude do #25): a folga crítica agora modela o PIVÔ da célula \
+         sobre o trem principal (não mais uma translação vertical 1:1 do \
+         nariz) — a hélice, à frente do trem de nariz, mergulha um braço \
+         amplificado por um fator geométrico \
+         (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m− \
+         gear.x_nose_m) sobre o curso do nariz/deflexão de pneu. Achado \
+         honesto: no baseline real esse fator (≈1,466) vira a folga \
+         crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m \
+         (FAIL) — a simplificação antiga era OTIMISTA e mascarava este \
+         resultado, como o achado de review do ciclo 8 previu. Ver \
+         docstring de PropellerSpec::prop_clearance_critical_m e \
+         docs/backlog.md (item 1, RESOLVIDO ciclo 9). Requer mapa de \
+         desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \
          L/D constante em cruzeiro)".into());

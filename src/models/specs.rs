@@ -746,8 +746,28 @@ pub struct PropellerSpec {
     /// COMPRIMIDO (batente) + pneu MURCHO/estourado, não a condição
     /// estática de `ground_clearance_m`. Hélice TRATORA: o trem de NARIZ
     /// governa (fica sob o eixo da hélice), não o principal.
-    /// `ground_clearance_m − (gear.nose_oleo_stroke_mm/1000 +
-    /// gear_cfg.tire_deflation_delta_m)` — ver `fill_critical_clearance`.
+    ///
+    /// FÓRMULA (ciclo 9, transferência de atitude do #25 — old→new):
+    /// `ground_clearance_m − Δ_prop`, com `Δ_prop = (gear.nose_oleo_stroke_mm
+    /// /1000 + gear_cfg.tire_deflation_delta_m) × fator` e
+    /// `fator = (gear_cfg.x_main_m − prop_cfg.prop_plane_x_m)/(gear_cfg.
+    /// x_main_m − gear_cfg.x_nose_m)` — ver `fill_critical_clearance`.
+    /// ANTES do ciclo 9 (translação vertical 1:1, ciclo 8): `Δ_prop =
+    /// gear.nose_oleo_stroke_mm/1000 + gear_cfg.tire_deflation_delta_m`
+    /// (fator implícito = 1), como se o colapso do amortecedor/pneu de
+    /// nariz afundasse a célula INTEIRA rigidamente. FÍSICA CORRIGIDA: o
+    /// evento (batente do amortecedor de nariz + pneu murcho) PIVOTA a
+    /// aeronave sobre o trem PRINCIPAL, não a translada — a hélice, à
+    /// FRENTE do trem de nariz, mergulha um braço AMPLIFICADO pelo fator
+    /// acima (sempre > 1 quando `prop_plane_x_m < x_nose_m < x_main_m`,
+    /// invariante garantido pela validação composta de
+    /// `models::config::validate_aircraft_config`). No baseline E10 real
+    /// (`prop_plane_x_m` 0,20 m, `x_nose_m` 1,30 m, `x_main_m` 3,66 m):
+    /// fator ≈ 1,46610, `prop_clearance_critical_m` **+0,0325 m (PASS,
+    /// ciclo 8) → ≈ −0,06416 m (FAIL, ciclo 9)** — a simplificação 1:1 era
+    /// OTIMISTA e mascarava um FAIL real, exatamente como o achado de
+    /// review do ciclo 8 (`docs/backlog.md`, item 1) previu. Ver o
+    /// histórico completo old→new na docstring de `SCHEMA_VERSION`.
     ///
     /// PREENCHIDO EM DOIS PASSOS: `PropellerAgent::run` (este arquivo não
     /// tem acesso a `GearSpec`, e a hélice roda ANTES do trem de pouso no
@@ -762,35 +782,31 @@ pub struct PropellerSpec {
     /// logo após o trem de pouso — senão este campo fica preso no
     /// placeholder `0.0`, que a checagem #25 interpretaria como violação
     /// (`0.0 <= 0.0`).
-    ///
-    /// CAVEAT DE MODELAGEM (simplificação conhecida, achado de review do
-    /// ciclo 8, NÃO corrigida nesta revisão): a fórmula acima trata o
-    /// colapso do amortecedor/pneu como uma TRANSLAÇÃO VERTICAL 1:1 do
-    /// nariz — subtrai o curso do nariz direto da folga da hélice, como se
-    /// a célula inteira afundasse rigidamente. Na realidade a aeronave
-    /// PIVOTA sobre o trem PRINCIPAL nesse evento (amortecedor de nariz
-    /// batendo + pneu murcho), e a hélice — à FRENTE do trem de nariz —
-    /// mergulha um braço AMPLIFICADO, não o mesmo `Δ_nose`:
-    /// aproximadamente `Δ_nose · (x_main − x_prop)/(x_main − x_nose)` ≈
-    /// 1,4–1,55× o deslocamento vertical do nariz para esta geometria. Sob
-    /// essa transferência de atitude (não modelada aqui), a folga crítica
-    /// real do baseline E10 é plausivelmente NEGATIVA (≈ −0,05 a −0,08 m,
-    /// não os +0,0325 m que a checagem #25 publica/aprova hoje) — a
-    /// simplificação 1:1 é OTIMISTA e pode estar mascarando um FAIL real.
-    /// Ver `docs/backlog.md` (item "transferência de atitude do #25") —
-    /// nomeado como item de ciclo futuro, fora de escopo desta revisão.
     pub prop_clearance_critical_m: f64,
 }
 
 impl PropellerSpec {
     /// Preenche `prop_clearance_critical_m` — condição CRÍTICA de CS 23.925
     /// (ciclo 8, task 2): batente do amortecedor de nariz + pneu murcho,
-    /// hélice TRATORA (trem de NARIZ governa). Chamado DEPOIS que
-    /// `LandingGearAgent::run` produz `gear` — ver docstring do campo para
-    /// o porquê da ordem (a hélice roda antes do trem no pipeline real).
-    pub fn fill_critical_clearance(&mut self, gear: &GearSpec, gear_cfg: &crate::models::aircraft_config::GearCfg) {
-        self.prop_clearance_critical_m = self.ground_clearance_m
-            - (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m);
+    /// hélice TRATORA (trem de NARIZ governa), sob o pivô da célula sobre o
+    /// trem PRINCIPAL (ciclo 9, transferência de atitude do #25 — ver
+    /// docstring do campo `prop_clearance_critical_m` para a física e o
+    /// old→new completos). Chamado DEPOIS que `LandingGearAgent::run`
+    /// produz `gear` — ver docstring do campo para o porquê da ordem (a
+    /// hélice roda antes do trem no pipeline real). `prop_cfg` (NOVO,
+    /// ciclo 9) é `[propeller]` — só `prop_plane_x_m` é consumido aqui, o
+    /// resto do struct não participa da fórmula.
+    pub fn fill_critical_clearance(
+        &mut self,
+        gear: &GearSpec,
+        gear_cfg: &crate::models::aircraft_config::GearCfg,
+        prop_cfg: &crate::models::aircraft_config::PropellerCfg,
+    ) {
+        let fator = (gear_cfg.x_main_m - prop_cfg.prop_plane_x_m)
+            / (gear_cfg.x_main_m - gear_cfg.x_nose_m);
+        let delta_prop = (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m)
+            * fator;
+        self.prop_clearance_critical_m = self.ground_clearance_m - delta_prop;
     }
 }
 
@@ -1179,6 +1195,35 @@ pub struct ElectricalSpec {
 /// sem nenhum flip novo introduzido pelas Tasks 1-2. Ver
 /// `docs/aircraft_spec.schema.md` §1 e `tests/schema_v4.rs`/
 /// `tests/generic_engine.rs`.
+///
+/// ─── ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25) ─────────────
+///
+/// **CAVEAT NOMEADO acima RESOLVIDO** — não corrigido antes por instrução
+/// explícita do brief do ciclo 8 (item de ciclo futuro nomeado em
+/// `docs/backlog.md`, item 1). Campo novo `[propeller].prop_plane_x_m`
+/// (posição do plano da hélice, m do datum no nariz) alimenta o fator de
+/// amplificação do pivô descrito acima; `PropellerSpec::
+/// fill_critical_clearance` ganha um terceiro parâmetro (`prop_cfg:
+/// &PropellerCfg`) para lê-lo. Nenhuma tolerância de teste foi afrouxada —
+/// só a fórmula mudou, old→new (fator implícito 1 → fator explícito
+/// `(x_main−prop_plane_x_m)/(x_main−x_nose_m)`).
+///
+/// **ACHADO HONESTO**: no baseline E10 real (`prop_plane_x_m` 0,20 m,
+/// `x_nose_m` 1,30 m, `x_main_m` 3,66 m) o fator vale ≈1,46610 —
+/// `prop_clearance_critical_m` vai de **+0,0325 m (checagem #25 PASS) para
+/// ≈ −0,06416 m (checagem #25 FAIL)**. `validation_status` do baseline real
+/// vira `"FAIL"` com **exatamente 1 violação nomeada** (checagem #25,
+/// hélice em condição crítica) — a simplificação 1:1 do ciclo 8 realmente
+/// mascarava este achado, como o próprio caveat previu. Nenhuma outra
+/// checagem muda: tipback/tail-strike/carga de nariz/margem de
+/// combustível/pista/robustez continuam PASSANDO com os MESMOS números da
+/// campanha E10 (nenhum deles depende de `prop_clearance_critical_m`). O
+/// caminho PASS deste check continua coberto pelas fixtures sintéticas de
+/// `models::specs::tests`/`validation::constraint_checker::tests` (que
+/// mantêm folga crítica positiva por construção). Ver
+/// `docs/aircraft_spec.schema.md` §1, `docs/backlog.md` (item 1, marcado
+/// RESOLVIDO) e `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs`
+/// para os pins honestos completos.
 pub const SCHEMA_VERSION: &str = "5.1";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
@@ -1369,35 +1414,90 @@ mod tests {
         cfg
     }
 
-    /// Hand-check: folga estática 0,300 m, curso de nariz 120 mm (0,120 m),
-    /// pneu murcho 0,05 m ⟹ folga crítica = 0,300 − 0,120 − 0,05 = 0,130 m.
+    /// `PropellerCfg` sintético — só `prop_plane_x_m` importa para
+    /// `PropellerSpec::fill_critical_clearance` (ciclo 9); os demais campos
+    /// vêm intactos da fixture padrão (não usados pelo método sob teste).
+    fn prop_cfg_teste_com_prop_plane_x_m(prop_plane_x_m: f64) -> crate::models::aircraft_config::PropellerCfg {
+        let mut cfg = crate::models::aircraft_config::test_fixtures::config_teste().propeller;
+        cfg.prop_plane_x_m = prop_plane_x_m;
+        cfg
+    }
+
+    /// Hand-check congelado (ciclo 9, transferência de atitude do #25 —
+    /// RED-first, números do brief da task, ±0,001 no resultado final):
+    /// geometria do baseline E10 real (`x_nose_m` 1,30 m, `x_main_m`
+    /// 3,66 m, `prop_plane_x_m` 0,20 m) ⟹ fator = (3,66−0,20)/(3,66−1,30) =
+    /// 3,46/2,36 = 1,46610. Δ_prop = (0,12746 + 0,08) × 1,46610 = 0,30416
+    /// (curso de nariz 127,46 mm + pneu murcho 0,08 m — valores honestos do
+    /// pipeline real do baseline, não arredondados de propósito). Folga
+    /// crítica = 0,24000 − 0,30416 = **−0,06416 m** — SUBSTITUI o
+    /// hand-check antigo (fator implícito 1: 0,300 − 0,120 − 0,05 = 0,130),
+    /// que não testava a amplificação do pivô (old→new: o fator novo é a
+    /// mudança sob teste, não a magnitude bruta dos termos).
     #[test]
     fn fill_critical_clearance_bate_com_a_formula_fechada() {
-        let mut propeller = propeller_spec_teste(0.300);
+        let mut propeller = propeller_spec_teste(0.24000);
+        let gear = gear_spec_teste(127.46);
+        let mut gear_cfg = gear_cfg_teste_com_deflacao(0.08);
+        gear_cfg.x_nose_m = 1.30;
+        gear_cfg.x_main_m = 3.66;
+        let prop_cfg = prop_cfg_teste_com_prop_plane_x_m(0.20);
+
+        propeller.fill_critical_clearance(&gear, &gear_cfg, &prop_cfg);
+
+        assert!((propeller.prop_clearance_critical_m - (-0.06416)).abs() < 0.001,
+            "prop_clearance_critical_m = {:.6} (esperado ≈−0,06416 m, ±0,001 — fator ≈1,46610)",
+            propeller.prop_clearance_critical_m);
+    }
+
+    /// Property NOVA (ciclo 9, RED-first): quanto MENOR `prop_plane_x_m`
+    /// (hélice mais à frente do trem de nariz, braço maior até o pivô no
+    /// trem principal), MENOR a folga crítica resultante — o fator
+    /// `(x_main−prop_plane_x_m)/(x_main−x_nose_m)` CRESCE quando
+    /// `prop_plane_x_m` diminui (numerador cresce, denominador fixo),
+    /// amplificando `Δ_prop` e reduzindo `ground_clearance_m − Δ_prop`.
+    /// Estritamente monotônico (não só não-crescente): os dois valores de
+    /// `prop_plane_x_m` abaixo produzem fatores distintos por construção.
+    #[test]
+    fn folga_critica_diminui_quando_prop_plane_x_m_diminui() {
         let gear = gear_spec_teste(120.0);
         let gear_cfg = gear_cfg_teste_com_deflacao(0.05);
 
-        propeller.fill_critical_clearance(&gear, &gear_cfg);
+        let mut propeller_prop_plane_longe_do_nariz = propeller_spec_teste(0.300);
+        propeller_prop_plane_longe_do_nariz.fill_critical_clearance(
+            &gear, &gear_cfg, &prop_cfg_teste_com_prop_plane_x_m(0.30));
 
-        assert!((propeller.prop_clearance_critical_m - 0.130).abs() < 1e-9,
-            "prop_clearance_critical_m = {:.6} (esperado 0.130 exato)",
-            propeller.prop_clearance_critical_m);
+        let mut propeller_prop_plane_perto_do_nariz = propeller_spec_teste(0.300);
+        propeller_prop_plane_perto_do_nariz.fill_critical_clearance(
+            &gear, &gear_cfg, &prop_cfg_teste_com_prop_plane_x_m(0.10));
+
+        assert!(propeller_prop_plane_perto_do_nariz.prop_clearance_critical_m
+                < propeller_prop_plane_longe_do_nariz.prop_clearance_critical_m,
+            "folga crítica com prop_plane_x_m MENOR (0.10 ⟹ {:.4}) deveria ficar ABAIXO da folga \
+             com prop_plane_x_m MAIOR (0.30 ⟹ {:.4})",
+            propeller_prop_plane_perto_do_nariz.prop_clearance_critical_m,
+            propeller_prop_plane_longe_do_nariz.prop_clearance_critical_m);
     }
 
     /// Property (ciclo 8, task 2, RED-first): quanto MAIOR a deflexão do
     /// pneu configurada (`gear_cfg.tire_deflation_delta_m`), MENOR a folga
     /// crítica resultante — os dois termos subtraídos de `ground_clearance_m`
     /// são independentes, e este é estritamente monotônico decrescente no
-    /// segundo.
+    /// segundo. Ciclo 9: `prop_cfg` FIXO nos dois ramos (mesmo
+    /// `prop_plane_x_m`, isolando o efeito da deflação de pneu do efeito do
+    /// fator de braço, coberto separadamente acima).
     #[test]
     fn folga_critica_diminui_quando_deflacao_de_pneu_aumenta() {
+        let prop_cfg = crate::models::aircraft_config::test_fixtures::config_teste().propeller;
         let gear = gear_spec_teste(120.0);
 
         let mut propeller_pouca_deflacao = propeller_spec_teste(0.300);
-        propeller_pouca_deflacao.fill_critical_clearance(&gear, &gear_cfg_teste_com_deflacao(0.04));
+        propeller_pouca_deflacao.fill_critical_clearance(
+            &gear, &gear_cfg_teste_com_deflacao(0.04), &prop_cfg);
 
         let mut propeller_muita_deflacao = propeller_spec_teste(0.300);
-        propeller_muita_deflacao.fill_critical_clearance(&gear, &gear_cfg_teste_com_deflacao(0.10));
+        propeller_muita_deflacao.fill_critical_clearance(
+            &gear, &gear_cfg_teste_com_deflacao(0.10), &prop_cfg);
 
         assert!(propeller_muita_deflacao.prop_clearance_critical_m
                 < propeller_pouca_deflacao.prop_clearance_critical_m,

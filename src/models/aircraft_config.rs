@@ -239,6 +239,22 @@ pub struct PropellerCfg {
     /// ≥ 0,18 m (7 pol); o baseline usa 0,23 m (9 pol) como margem de
     /// projeto.
     pub ground_clearance_min_m: f64,
+    /// Posição longitudinal do PLANO DA HÉLICE (m do datum no nariz —
+    /// ciclo 9, transferência de atitude do #25). Hélice TRATORA: o
+    /// spinner fica À FRENTE do CG do motor (`[arms].engine_cg_m` = 0,65 m
+    /// no baseline), então `prop_plane_x_m` < `arms.engine_cg_m` < demais
+    /// braços. Único consumidor: `PropellerSpec::fill_critical_clearance`
+    /// — o fator de amplificação do pivô sobre o trem principal,
+    /// `(gear.x_main_m − prop_plane_x_m)/(gear.x_main_m − gear.x_nose_m)`,
+    /// que substitui a translação vertical 1:1 (achado de review, ciclo 8;
+    /// corrigido no ciclo 9 — ver docstring do campo
+    /// `PropellerSpec::prop_clearance_critical_m`). Validação COMPOSTA
+    /// (`models::config::validate_aircraft_config`): deve ficar
+    /// ESTRITAMENTE à frente do trem de nariz (`prop_plane_x_m <
+    /// gear.x_nose_m`) — a hélice tratora não pode ficar atrás do próprio
+    /// trem que ela sobrevoa. Valor do baseline (0,20 m) é uma ESTIMATIVA
+    /// de geometria — validar no CAD (Fase 3).
+    pub prop_plane_x_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -675,6 +691,24 @@ pub mod test_fixtures {
                 tip_mach_max_static: 0.83,
                 tip_mach_max_cruise: 0.78,
                 ground_clearance_min_m: 0.25,
+                // Distinto do baseline real (0.20, ciclo 9) — mesma
+                // justificativa de "nenhum destes números coincide com o
+                // baseline real" usada nas demais seções desta fixture. <
+                // x_nose_m (1.35) desta fixture, como a validação exige.
+                // Valor DELIBERADAMENTE perto de x_nose_m (fator de
+                // amplificação do pivô, `fill_critical_clearance`, próximo
+                // de 1×): esta fixture mantém `ground_clearance_m` = 0,20 m
+                // FIXO (`diameter_m`/`h_cg_ground_m`/`prop_axis_above_cg_m`
+                // acima são load-bearing para
+                // `violacao_de_folga_de_solo_aparece_naturalmente_na_
+                // fixture_sintetica`, checagem #10 — não mexer), então não
+                // sobra margem estática para um fator grande como o do
+                // baseline real (≈1,466, que FALHA #25) — ver
+                // `tire_deflation_delta_m` abaixo pelo mesmo motivo. A
+                // checagem #25 desta fixture continua PASSANDO por
+                // construção (ver `check_25_sem_violacao_na_fixture_
+                // padrao`).
+                prop_plane_x_m: 0.95,
             },
             fuel_system: FuelSystemCfg { capacity_l: 220.0 },
             gear: GearCfg {
@@ -697,7 +731,11 @@ pub mod test_fixtures {
                 // Distinto do baseline real (0.08, ciclo 8 task 2) — mesma
                 // justificativa de "nenhum destes números coincide com o
                 // baseline real" usada nas demais seções desta fixture.
-                tire_deflation_delta_m: 0.05,
+                // Ciclo 9: reduzido de 0.05 para 0.035 (ainda > 0.03, piso
+                // de validação) para preservar margem positiva de #25 sob
+                // o fator de amplificação novo — ver comentário de
+                // `propeller.prop_plane_x_m` acima.
+                tire_deflation_delta_m: 0.035,
             },
             arms: ArmsCfg {
                 engine_cg_m: 0.60,

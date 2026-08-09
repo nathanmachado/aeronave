@@ -757,6 +757,19 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.propeller.ground_clearance_min_m
         )));
     }
+    // Ciclo 9 (transferência de atitude do #25): posição longitudinal do
+    // plano da hélice — datum no nariz. Faixa (0.0, 1.0) m: ampla o
+    // bastante para qualquer célula desta classe, estreita o bastante para
+    // pegar um erro de unidade grosseiro (ex.: metros trocados por
+    // centímetros).
+    require_finite("propeller.prop_plane_x_m", cfg.propeller.prop_plane_x_m)?;
+    if cfg.propeller.prop_plane_x_m <= 0.0 || cfg.propeller.prop_plane_x_m >= 1.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.prop_plane_x_m deve estar em \
+             (0.0, 1.0) (valor: {})",
+            cfg.propeller.prop_plane_x_m
+        )));
+    }
 
     // [fuel_system]
     require_positive("fuel_system.capacity_l", cfg.fuel_system.capacity_l)?;
@@ -794,6 +807,21 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::Validation(format!(
             "configuração de aeronave inválida: gear.x_main_m ({}) deve ser maior que gear.x_nose_m ({})",
             cfg.gear.x_main_m, cfg.gear.x_nose_m
+        )));
+    }
+    // Composta trem×hélice (ciclo 9, transferência de atitude do #25):
+    // `PropellerSpec::fill_critical_clearance` deriva o fator de
+    // amplificação do pivô sobre o trem principal como
+    // `(x_main − prop_plane_x_m)/(x_main − x_nose_m)` — hélice TRATORA,
+    // então o plano da hélice precisa ficar ESTRITAMENTE à frente do trem
+    // de nariz (senão o numerador/denominador da fração deixam de
+    // representar "braço à frente do pivô", e o fator pode até inverter de
+    // sinal sem aviso).
+    if cfg.propeller.prop_plane_x_m >= cfg.gear.x_nose_m {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.prop_plane_x_m ({}) deve ser menor \
+             que gear.x_nose_m ({}) — a hélice tratora fica à FRENTE do trem de nariz, não atrás",
+            cfg.propeller.prop_plane_x_m, cfg.gear.x_nose_m
         )));
     }
     require_positive("gear.retraction_time_s", cfg.gear.retraction_time_s)?;
@@ -1528,6 +1556,7 @@ mod tests {
             tip_mach_max_static = 0.85
             tip_mach_max_cruise = 0.80
             ground_clearance_min_m = 0.23
+            prop_plane_x_m = 0.20
             [fuel_system]
             capacity_l = 200.0
             [gear]
@@ -1733,6 +1762,25 @@ mod tests {
         assert!(err.to_string().contains("propeller.ground_clearance_min_m"), "{err}");
     }
 
+    /// Ciclo 9 (transferência de atitude do #25): `prop_plane_x_m` fora da
+    /// faixa (0.0, 1.0) — teto.
+    #[test]
+    fn rejeita_prop_plane_x_m_acima_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("prop_plane_x_m = 0.20", "prop_plane_x_m = 1.5");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.prop_plane_x_m"), "{err}");
+    }
+
+    /// Idem, piso.
+    #[test]
+    fn rejeita_prop_plane_x_m_abaixo_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("prop_plane_x_m = 0.20", "prop_plane_x_m = -0.1");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.prop_plane_x_m"), "{err}");
+    }
+
     /// Achado de review (ciclo 5, Important 3): cada campo individual
     /// (`gear.h_cg_ground_m` positivo, `propeller.prop_axis_above_cg_m` em
     /// (-0.3, 0.8)) passa nas checagens isoladas, mas a SOMA dos dois — o
@@ -1862,6 +1910,24 @@ mod tests {
         let toml = aircraft_toml_valido().replace("x_main_m = 3.5", "x_main_m = 1.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("x_main_m"), "{err}");
+    }
+
+    /// Composta trem×hélice (ciclo 9, transferência de atitude do #25):
+    /// `prop_plane_x_m` precisa ficar ESTRITAMENTE à frente de
+    /// `gear.x_nose_m` — a hélice tratora não pode ficar atrás do próprio
+    /// trem de nariz que ela sobrevoa. Reduz `x_nose_m` (1.3 → 0.15, bem
+    /// abaixo de `prop_plane_x_m` = 0.20 do TOML válido) em vez de subir
+    /// `prop_plane_x_m` acima de 1.3 — a faixa individual de
+    /// `prop_plane_x_m` é (0.0, 1.0), então um valor >= 1.3 rejeitaria pela
+    /// checagem de FAIXA primeiro, não pela composta sob teste aqui.
+    #[test]
+    fn rejeita_prop_plane_x_m_maior_ou_igual_a_x_nose_m() {
+        let toml = aircraft_toml_valido()
+            .replace("x_nose_m = 1.3", "x_nose_m = 0.15");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("propeller.prop_plane_x_m")
+                && err.to_string().contains("gear.x_nose_m"),
+            "erro deveria citar os dois campos da composta: {err}");
     }
 
     #[test]

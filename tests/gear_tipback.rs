@@ -290,6 +290,17 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 /// `constraint_checker::tests::violacao_de_carga_de_nariz_aparece_quando_
 /// max_acima_do_teto`/`..._quando_min_abaixo_do_piso` (mais os dois
 /// negativos gêmeos) — a afirmação passa a ser verdadeira.
+///
+/// ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — O TESTE INVERTE
+/// DE NOVO, parcialmente): a checagem #25 (folga de hélice em condição
+/// crítica) volta a REPROVAR no baseline real — física corrigida, não
+/// regressão (fator de amplificação do pivô sobre o trem principal, ver
+/// `docs/backlog.md` item 1). O nome do teste ("sem_violacoes... ") fica
+/// tecnicamente impreciso mas NÃO é renomeado aqui — as asserções por check
+/// nomeado (tipback/tail-strike/carga de nariz/robustez) continuam todas
+/// verdadeiras, só o total deixa de ser zero. O caminho PASS de #25
+/// continua coberto por `constraint_checker::tests::check_25_sem_
+/// violacao_na_fixture_padrao` (fixture sintética).
 #[test]
 fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -311,7 +322,7 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let gear = gear_real();
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
     // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.fill_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
     // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
     // de `main.rs`, contra os limites NOMINAIS já calculados (`wb`/`gear`).
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
@@ -323,7 +334,7 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
         req: &req, wing, prop, mtow_kg: sized.state.mtow_kg, engine: &engine, wb,
         propeller: &propeller, perf: &perf, mission, electrical: &electrical,
         gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
-        robustness: &robustness,
+        robustness: &robustness, prop_cfg: &cfg.propeller,
     });
 
     assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
@@ -365,10 +376,25 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     assert!(robustez.is_empty(),
         "campanha E10: esperava ZERO violações de robustez (σ=15%) no baseline real — eram 2 \
          (Solo/2 pax) até o ciclo 7: {:?}", report.violations);
-    // E, de ponta a ponta, o baseline real não deve reportar NENHUMA
-    // violação de nenhum tipo — primeiro PASS completo do projeto.
-    assert!(report.violations.is_empty(),
-        "campanha E10: o baseline real deveria reportar ZERO violações: {:?}",
+    // ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — old→new): a
+    // afirmação abaixo ("o baseline real não deve reportar NENHUMA
+    // violação") era o PASS completo da campanha E10 — verdadeira até este
+    // ciclo. `PropellerSpec::fill_critical_clearance` ganha o fator de
+    // amplificação do pivô sobre o trem principal (não mais uma translação
+    // vertical 1:1 do nariz — ver docstring do campo e `docs/backlog.md`
+    // item 1, RESOLVIDO): no baseline real o fator (≈1,46610) vira a folga
+    // crítica de +0,0325 m para ≈−0,06416 m — checagem #25 REPROVA. Nenhuma
+    // OUTRA violação muda (tipback/tail-strike/carga de nariz/robustez
+    // continuam PASSANDO, verificado pelos asserts acima) — exatamente 1
+    // violação nomeada, a hélice.
+    assert_eq!(report.violations.len(), 1,
+        "ciclo 9: esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline real — \
+         obteve: {:?}", report.violations);
+    assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+        "a única violação esperada é a de folga crítica de hélice (checagem #25): {:?}",
+        report.violations);
+    assert!(report.violations.iter().any(|v| v.contains("-0.064")),
+        "violação de hélice deveria citar a folga crítica observada (≈−0,064 m): {:?}",
         report.violations);
 }
 
@@ -441,7 +467,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let gear = gear_real();
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
     // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.fill_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
         &cfg, &engine, &req, &sized.state, &sized.wing, &sized.emp, &sized.structural_masses,
         &sized.wb, &gear, &propeller, mission, &perf,
@@ -452,6 +478,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
         engine: &engine, wb: &sized.wb, propeller: &propeller, perf: &perf, mission,
         electrical: &electrical, gear: &gear, gear_cfg: &cfg.gear,
         fuel_capacity_l: cfg.fuel_system.capacity_l, robustness: &robustness,
+        prop_cfg: &cfg.propeller,
     });
 
     assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),

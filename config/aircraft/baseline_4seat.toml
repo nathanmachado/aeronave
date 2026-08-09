@@ -152,6 +152,11 @@ tip_mach_max_cruise = 0.80
 # (`[mass_model].main_strut_length_m`) e a compressão de projeto antes de
 # certificação.
 ground_clearance_min_m = 0.23
+# Posição longitudinal do plano da hélice (m do datum no nariz — ciclo 9,
+# transferência de atitude do #25). Hélice TRATORA: spinner à FRENTE do CG
+# do motor ([arms].engine_cg_m = 0.65 m). ESTIMATIVA de geometria — validar
+# no CAD (Fase 3).
+prop_plane_x_m = 0.20
 
 [fuel_system]
 # 260 L: dimensionado pela convergência de MTOW (Task 3.1) — no MTOW

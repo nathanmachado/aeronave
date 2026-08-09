@@ -1,7 +1,7 @@
 {
   "schema_version": "5.1",
   "revision": "5.1",
-  "validation_status": "PASS",
+  "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
     "area_m2": 14.2,
@@ -309,7 +309,7 @@
     "ok_mach_static": true,
     "ok_mach_cruise": true,
     "ok_clearance": true,
-    "prop_clearance_critical_m": 0.03254002243295617
+    "prop_clearance_critical_m": -0.06415742473812358
   },
   "mission": {
     "fuel_taxi_kg": 2.52,
@@ -424,7 +424,7 @@
     "landing_gear": "preliminary (dimensionamento estático de cargas; requer análise dinâmica de pouso/afundamento)",
     "mission": "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, L/D constante em cruzeiro)",
     "performance": "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na polar (ciclo 8, task 1: cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta, semi-empírico Raymer cap. 12/Hoerner) no segmento de SUBIDA da decolagem e no gradiente CS 23.65; a rolagem de solo de decolagem (método energético de Raymer) e a aproximação de pouso (ângulo fixo, não L/D) não consomem a polar, por construção — sem incremento de arrasto ali; Vy/teto de serviço seguem em configuração limpa (híbrido pré-existente, fora de escopo); gradiente CS 23.65 (climb_gradient_pct) AINDA tem um viés otimista REMANESCENTE (achado da revisão, pré-existente, não introduzido pelo ciclo 8): a busca devolve o piso da varredura (1,05·Vs, não um máximo interior — RC/V é monotonicamente decrescente na faixa modelada para esta célula), abaixo da velocidade de avaliação típica da CS 23.65 (≥1,2·Vs) — no baseline real o gradiente a 1,2·Vs seria ≈12,45%, não os ≈13,90% retornados (~1,45 p.p. de viés otimista); ver docstring de agents::performance::best_climb_angle_ms",
-    "propeller": "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — trem totalmente estendido, aeronave nivelada — E folga em condição CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no batente + pneu murcho, checagem #25; ambas piso de projeto, não verificação regulatória direta. VIÉS OTIMISTA conhecido e não corrigido na folga crítica: o modelo trata o colapso do trem de nariz como translação vertical 1:1, quando a célula real pivota sobre o trem principal e a hélice mergulha um braço amplificado (≈1,4–1,55× o curso do nariz) — a folga crítica real pode ser negativa mesmo quando a checagem #25 passa; ver docstring de PropellerSpec::prop_clearance_critical_m e docs/backlog.md. Requer mapa de desempenho de hélice real do fabricante)",
+    "propeller": "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — trem totalmente estendido, aeronave nivelada — E folga em condição CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no batente + pneu murcho, checagem #25; ambas piso de projeto, não verificação regulatória direta. Ciclo 9 (transferência de atitude do #25): a folga crítica agora modela o PIVÔ da célula sobre o trem principal (não mais uma translação vertical 1:1 do nariz) — a hélice, à frente do trem de nariz, mergulha um braço amplificado por um fator geométrico (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m− gear.x_nose_m) sobre o curso do nariz/deflexão de pneu. Achado honesto: no baseline real esse fator (≈1,466) vira a folga crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m (FAIL) — a simplificação antiga era OTIMISTA e mascarava este resultado, como o achado de review do ciclo 8 previu. Ver docstring de PropellerSpec::prop_clearance_critical_m e docs/backlog.md (item 1, RESOLVIDO ciclo 9). Requer mapa de desempenho de hélice real do fabricante)",
     "propulsion": "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)",
     "robustness": "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing completo com fatores ×(1+σ))",
     "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
@@ -434,7 +434,9 @@
     "weight": "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados não pesados — validar na balança)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
-  "violations": [],
+  "violations": [
+    "Hélice (condição crítica CS 23.925, pivô nos mains): folga estática 0.240 m − Δ_prop 0.304 m (fator 1.4661× sobre curso do nariz 0.127 m + pneu murcho 0.080 m) = -0.064 m ≤ 0"
+  ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
   ]

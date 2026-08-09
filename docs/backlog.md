@@ -7,21 +7,29 @@ existe para que esses itens não se percam entre ciclos; cada entrada tem
 uma linha de contexto e o ponteiro para onde o achado está documentado em
 detalhe.
 
-## 1. Transferência de atitude do #25 (folga crítica de hélice, CS 23.925)
+## 1. Transferência de atitude do #25 (folga crítica de hélice, CS 23.925) — RESOLVIDO ciclo 9
 
-`propeller.prop_clearance_critical_m` modela o colapso do amortecedor de
-nariz + pneu murcho como uma TRANSLAÇÃO VERTICAL 1:1 do nariz. Na
-realidade a célula PIVOTA sobre o trem PRINCIPAL nesse evento, e a hélice
-(à frente do trem de nariz) mergulha um braço AMPLIFICADO —
-`Δ_nose · (x_main − x_prop)/(x_main − x_nose)` ≈ 1,4–1,55× o deslocamento
-vertical do nariz para esta geometria, não 1:1. Sob a transferência de
-atitude correta, a folga crítica real do baseline E10 é plausivelmente
-**NEGATIVA** (≈ −0,05 a −0,08 m), não os +0,0325 m que a checagem #25
-aprova hoje — um provável **FAIL honesto** do E10 quando corrigido.
-Ponteiro: docstring de `PropellerSpec::prop_clearance_critical_m`
-(`src/models/specs.rs`), checagem #25 em
+**RESOLVIDO** (ciclo 9, 2026-08-09). `propeller.prop_clearance_critical_m`
+modelava o colapso do amortecedor de nariz + pneu murcho como uma
+TRANSLAÇÃO VERTICAL 1:1 do nariz. `PropellerSpec::fill_critical_clearance`
+agora modela o PIVÔ da célula sobre o trem PRINCIPAL: a hélice (à frente
+do trem de nariz) mergulha um braço AMPLIFICADO por `fator =
+(gear.x_main_m − propeller.prop_plane_x_m)/(gear.x_main_m −
+gear.x_nose_m)` — campo novo `[propeller].prop_plane_x_m` (posição do
+plano da hélice, m do datum no nariz; ESTIMATIVA de geometria, validar no
+CAD). Achado confirmado: no baseline E10 real, fator ≈ 1,46610,
+`prop_clearance_critical_m` vai de **+0,0325 m (PASS) para ≈−0,06416 m
+(FAIL)** — o provável FAIL honesto previsto aqui se concretizou. A
+checagem #25 REPROVA o baseline real desde este ciclo (1 violação nomeada,
+`validation_status: FAIL`) — decisão de projeto (mover a hélice/trem, ou
+aceitar a folga negativa até validação em CAD/ensaio) fica para revisão
+humana; este ciclo mede, não tuna. Ponteiro: docstring de
+`PropellerSpec::prop_clearance_critical_m` (`src/models/specs.rs`,
+histórico old→new completo), checagem #25 em
 `validation::constraint_checker::ConstraintChecker::verify`,
-`docs/aircraft_spec.schema.md` (bloco `propeller` e histórico v5.1 §3-§4).
+`docs/aircraft_spec.schema.md` (bloco `propeller` e histórico v5.1 §3-§4),
+`tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins
+honestos).
 
 ## 2. Gradiente CS 23.65 avaliado a 1,05·Vs, não ≥1,2·Vs
 

@@ -576,6 +576,27 @@ documentação a ser corrigido, não um comportamento aceitável.
       campanha E10 (v5.0), sem nenhum flip novo introduzido pelas
       Tasks 1-2 deste ciclo. Ver `aircraft_spec.json`, `tests/schema_v4.rs`
       e `tests/generic_engine.rs`.
+    - **ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25,
+      2026-08-09) — CAVEAT acima RESOLVIDO**: campo novo
+      `[propeller].prop_plane_x_m` (posição do plano da hélice, m do datum
+      no nariz — ESTIMATIVA, validar no CAD) alimenta o fator de
+      amplificação do pivô descrito no caveat.
+      `PropellerSpec::fill_critical_clearance` ganha um terceiro parâmetro
+      (`prop_cfg: &PropellerCfg`) para lê-lo — SCHEMA_VERSION permanece
+      `"5.1"` (nenhum campo do JSON de SAÍDA muda de nome/tipo; a mudança é
+      só na fórmula que preenche `propeller.prop_clearance_critical_m`,
+      mesmo campo já existente). **Achado confirmado**: no baseline E10
+      real, fator = (3,66−0,20)/(3,66−1,30) ≈ **1,46610**;
+      `prop_clearance_critical_m` vai de **+0,0325 m (PASS) para
+      ≈−0,06416 m (FAIL)** — exatamente a faixa que o caveat previu.
+      `validation_status` do baseline real vira **`"FAIL"`** com
+      **exatamente 1 violação nomeada** (checagem #25) —
+      tipback/tail-strike/carga de nariz/margem de combustível/pista/
+      robustez continuam PASSANDO com os MESMOS números da campanha E10
+      (nenhum deles depende de `prop_clearance_critical_m`). Ver
+      `docs/backlog.md` (item 1, marcado RESOLVIDO),
+      `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
+      pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -631,7 +652,7 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
 | `landing_gear` | preliminary (dimensionamento estático de cargas) | Análise dinâmica de pouso/afundamento |
-| `propeller` | semi-empirical (Mach de ponta; folga de solo ESTÁTICA e, desde o ciclo 8, folga em condição CRÍTICA de CS 23.925 — checagem #25 — mas com viés OTIMISTA conhecido: modela o colapso do trem de nariz como translação vertical 1:1, quando a célula real pivota sobre o trem principal e a hélice mergulha um braço amplificado ≈1,4–1,55×, ver `docs/backlog.md`) | Mapa de desempenho de hélice real do fabricante; reavaliar `prop_clearance_critical_m` sob transferência de atitude real (não translação 1:1) |
+| `propeller` | semi-empirical (Mach de ponta; folga de solo ESTÁTICA e, desde o ciclo 8, folga em condição CRÍTICA de CS 23.925 — checagem #25 — modelando desde o ciclo 9 o PIVÔ da célula sobre o trem principal (não mais uma translação vertical 1:1 do nariz), fator `(x_main−prop_plane_x_m)/(x_main−x_nose_m)`; achado honesto: no baseline real esse fator (≈1,466) reprova a checagem #25, ver `docs/backlog.md`) | Mapa de desempenho de hélice real do fabricante; validar `[propeller].prop_plane_x_m` no CAD (Fase 3) |
 | `mission` | computed (segmentos + equação de Breguet, L/D constante em cruzeiro) | — |
 | `electrical` | preliminary (soma de cargas nominais configuradas) | Análise transiente/térmica real |
 | `sizing` | computed (laço de convergência de ponto fixo) | — |
@@ -998,7 +1019,7 @@ dedução completa.
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
-| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio) — `ground_clearance_m − (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m)`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. Baseline real E10: ≈+0,033 m (PASS). **CAVEAT (achado de review, ciclo 8, não corrigido)**: a fórmula é uma TRANSLAÇÃO VERTICAL 1:1 do curso do nariz — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço amplificado ≈1,4–1,55× o curso do nariz; sob a transferência de atitude real a folga crítica do E10 é plausivelmente NEGATIVA (≈−0,05 a −0,08 m), não os +0,033 m publicados — ver `docs/backlog.md` ("transferência de atitude do #25") |
+| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio). Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. **FÓRMULA (ciclo 9, transferência de atitude do #25 — old→new)**: `ground_clearance_m − Δ_prop`, `Δ_prop = (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m) × fator`, `fator = ([gear].x_main_m − [propeller].prop_plane_x_m)/([gear].x_main_m − [gear].x_nose_m)`. ANTES do ciclo 9 (translação vertical 1:1, ciclo 8, CAVEAT agora RESOLVIDO): `Δ_prop = nose_oleo_stroke_mm/1000 + tire_deflation_delta_m` (fator implícito 1) — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço AMPLIFICADO pelo fator acima (sempre > 1, invariante garantido pela validação composta `prop_plane_x_m < x_nose_m`). Baseline real E10: **+0,033 m (PASS, ciclo 8) → ≈−0,06416 m (FAIL, ciclo 9)**, fator ≈1,46610 — a simplificação 1:1 realmente mascarava um FAIL honesto, como o achado de review do ciclo 8 previu. Ver `docs/backlog.md` ("transferência de atitude do #25", RESOLVIDO) |
 
 **Nota de consistência**: quando `source == "derivado"`, o diâmetro aqui
 (autoritativo) pode divergir do `propulsion.prop_diameter_m` (provisório,

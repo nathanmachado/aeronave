@@ -404,8 +404,35 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// O aviso elétrico de pico (1.260 W > alternador 900 W) PERMANECE — é
 /// aviso, não violação, e agora é coberto pelo banco de baterias de 53 kg
 /// que a própria E10 instalou (ver comentário do item de massa no TOML).
+///
+/// ─── ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25) — O TESTE
+/// INVERTE DE NOVO ───────────────────────────────────────────────────────
+///
+/// `PropellerSpec::fill_critical_clearance` corrige a simplificação
+/// conhecida (ciclo 8, `docs/backlog.md` item 1): o colapso do amortecedor
+/// de nariz + pneu murcho não translada a célula 1:1 — ela PIVOTA sobre o
+/// trem PRINCIPAL, e a hélice (à frente do trem de nariz) mergulha um
+/// braço amplificado por `fator =
+/// (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m−gear.x_nose_m)`.
+/// Campo novo `[propeller].prop_plane_x_m = 0,20` (posição do plano da
+/// hélice, m do datum no nariz — ESTIMATIVA, validar no CAD). No baseline
+/// real: fator = (3,66−0,20)/(3,66−1,30) ≈ **1,46610**; `prop_clearance_
+/// critical_m` vai de **+0,0325 m (PASS) para ≈−0,06416 m (FAIL)** —
+/// checagem #25 reprova. Física corrigida, NÃO uma regressão: a
+/// simplificação 1:1 do ciclo 8 subestimava o mergulho da hélice em
+/// ~47% e mascarava este achado, exatamente como o próprio caveat previu.
+///
+/// Nenhuma outra checagem muda — todos os achados honestos da E10 acima
+/// (carga de nariz, robustez, pista, tipback/tail-strike/margem de
+/// combustível) continuam com os MESMOS números, verificados pelos
+/// asserts abaixo. `validation_status` vira `"FAIL"` com **exatamente 1
+/// violação nomeada** (checagem #25, hélice) — o primeiro FAIL honesto
+/// desde a campanha E10, movido por física corrigida, não por dados de
+/// projeto. O caminho PASS de #25 continua coberto pela fixture sintética
+/// (`validation::constraint_checker::tests::check_25_sem_violacao_na_
+/// fixture_padrao`).
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_reporta_pass_sem_violacoes() {
+fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo9() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -432,22 +459,33 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_pass_sem_violacoes() {
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Campanha E10 (ver a ATUALIZAÇÃO na docstring): validation_status é
-    // PASS — primeiro PASS completo do projeto (24 checks + robustez a 3
-    // mundos), sem nenhuma violação.
-    assert!(json.contains("\"validation_status\": \"PASS\""),
-        "JSON de saída deveria reportar validation_status PASS (campanha E10 — ver comentário \
+    // Ciclo 9 (ver a ATUALIZAÇÃO na docstring): validation_status volta a
+    // FAIL — transferência de atitude do #25, física corrigida, não
+    // regressão de dados de projeto (todas as demais checagens da E10
+    // continuam PASSANDO, ver asserts abaixo).
+    assert!(json.contains("\"validation_status\": \"FAIL\""),
+        "JSON de saída deveria reportar validation_status FAIL (ciclo 9 — ver comentário \
          acima):\n{json}");
     let spec: serde_json::Value = serde_json::from_str(&json)
         .expect("saída deveria ser JSON válido");
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    // Contagem 4 → **0** (campanha E10). Assert de contagem PRIMEIRO, com
-    // a lista inteira na mensagem: qualquer violação nova aparece por
-    // nome no output do teste, sem precisar adivinhar qual foi.
-    assert!(violations.is_empty(),
-        "campanha E10: esperava ZERO violações no baseline real (eram 4 no ciclo 7): \
+    // Contagem 0 → **1** (ciclo 9, checagem #25 — folga crítica de hélice).
+    // Assert de contagem PRIMEIRO, com a lista inteira na mensagem:
+    // qualquer violação nova aparece por nome no output do teste, sem
+    // precisar adivinhar qual foi.
+    assert_eq!(violations.len(), 1,
+        "ciclo 9: esperava EXATAMENTE 1 violação no baseline real (checagem #25, hélice — era \
+         ZERO na campanha E10): {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+        "a única violação esperada é a de folga crítica de hélice (checagem #25): \
+         {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("-0.064")),
+        "violação de hélice deveria citar a folga crítica observada (≈−0,064 m): \
+         {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("1.4661")),
+        "violação de hélice deveria citar o fator de amplificação do pivô (≈1,4661×): \
          {violations:#?}");
     // Asserts NOMEADOS por violação fechada — redundantes com a contagem
     // acima de propósito: se um refactor um dia trocar o texto de uma
