@@ -1196,17 +1196,32 @@ pub struct ElectricalSpec {
 /// `docs/aircraft_spec.schema.md` §1 e `tests/schema_v4.rs`/
 /// `tests/generic_engine.rs`.
 ///
-/// ─── ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25) ─────────────
+/// v5.2 (Task 2, ciclo9-transferencia-atitude — bump **MINOR**, exceção
+/// registrada): nenhum campo do JSON de saída foi
+/// renomeado/removido/mudou de tipo/unidade — consumidores v5.1 continuam
+/// funcionando sem alteração (mesmo TIPO, mesmo nome, o parser não
+/// muda). O bump é sobre SEMÂNTICA: `propeller.prop_clearance_critical_m`
+/// MANTÉM o nome, mas a FÓRMULA que o preenche mudou (Task 1 do mesmo
+/// ciclo, `48a2ed4`) e o veredito honesto do baseline real virou de PASS
+/// para FAIL. Pela LETRA da política de `docs/aircraft_spec.schema.md` §1
+/// ("muda a semântica de um campo sem mudar seu nome" é gatilho de MAJOR),
+/// isto seria MAJOR — tratado como MINOR por decisão de projeto aprovada
+/// pelo usuário: é correção de um BUG de modelagem física (simplificação
+/// otimista → fórmula honesta), não mudança de CONTRATO de tipo/estrutura.
+/// Divergência entre a letra da política e esta decisão registrada
+/// explicitamente em `docs/aircraft_spec.schema.md` §1 ("Exceção
+/// registrada (v5.2)") — não escondida.
 ///
-/// **CAVEAT NOMEADO acima RESOLVIDO** — não corrigido antes por instrução
-/// explícita do brief do ciclo 8 (item de ciclo futuro nomeado em
-/// `docs/backlog.md`, item 1). Campo novo `[propeller].prop_plane_x_m`
-/// (posição do plano da hélice, m do datum no nariz) alimenta o fator de
-/// amplificação do pivô descrito acima; `PropellerSpec::
-/// fill_critical_clearance` ganha um terceiro parâmetro (`prop_cfg:
-/// &PropellerCfg`) para lê-lo. Nenhuma tolerância de teste foi afrouxada —
-/// só a fórmula mudou, old→new (fator implícito 1 → fator explícito
-/// `(x_main−prop_plane_x_m)/(x_main−x_nose_m)`).
+/// **CAVEAT NOMEADO na v5.1 acima RESOLVIDO** — não corrigido antes por
+/// instrução explícita do brief do ciclo 8 (item de ciclo futuro nomeado em
+/// `docs/backlog.md`, item 1). Campo de CONFIGURAÇÃO NOVO
+/// `[propeller].prop_plane_x_m` (posição do plano da hélice, m do datum no
+/// nariz — input, NÃO ecoado no JSON de saída, ver `PropellerSpec`)
+/// alimenta o fator de amplificação do pivô descrito acima;
+/// `PropellerSpec::fill_critical_clearance` ganha um terceiro parâmetro
+/// (`prop_cfg: &PropellerCfg`) para lê-lo. Nenhuma tolerância de teste foi
+/// afrouxada — só a fórmula mudou, old→new (fator implícito 1 → fator
+/// explícito `(x_main−prop_plane_x_m)/(x_main−x_nose_m)`).
 ///
 /// **ACHADO HONESTO**: no baseline E10 real (`prop_plane_x_m` 0,20 m,
 /// `x_nose_m` 1,30 m, `x_main_m` 3,66 m) o fator vale ≈1,46610 —
@@ -1224,7 +1239,7 @@ pub struct ElectricalSpec {
 /// `docs/aircraft_spec.schema.md` §1, `docs/backlog.md` (item 1, marcado
 /// RESOLVIDO) e `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs`
 /// para os pins honestos completos.
-pub const SCHEMA_VERSION: &str = "5.1";
+pub const SCHEMA_VERSION: &str = "5.2";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver

@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.1
+# `aircraft_spec.json` — contrato do schema v5.2
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -31,6 +31,16 @@ documentação a ser corrigido, não um comportamento aceitável.
     renomeia ou remove um campo existente, muda o TIPO ou a UNIDADE de um
     campo existente, ou muda a semântica de um campo sem mudar seu nome.
     Consumidores precisam ser atualizados antes de consumir a nova versão.
+  - **Exceção registrada (v5.2)**: `propeller.prop_clearance_critical_m`
+    mudou de fórmula (semântica) sem mudar nome/tipo/unidade — pela letra
+    da regra acima isso seria gatilho de MAJOR. Decisão de projeto
+    (aprovada pelo usuário, ciclo9-transferencia-atitude): tratado como
+    MINOR porque é uma correção de CORREÇÃO FÍSICA (bug de modelagem —
+    simplificação otimista virando fórmula honesta), não uma mudança de
+    CONTRATO — o TIPO/nome/unidade do campo no JSON são idênticos, e o
+    consumidor v5.1 que já lia esse campo numericamente continua lendo o
+    mesmo tipo, só com um valor mais correto. Registrado aqui para não
+    esconder a divergência entre esta política e a decisão real tomada.
 - Histórico: v3.x usava `revision` como string livre, sem os blocos
   `geometry`/`sizing`/`fidelity`/`warnings` (que existiam calculados
   internamente, mas não eram serializados) e sem política de bump
@@ -576,27 +586,31 @@ documentação a ser corrigido, não um comportamento aceitável.
       campanha E10 (v5.0), sem nenhum flip novo introduzido pelas
       Tasks 1-2 deste ciclo. Ver `aircraft_spec.json`, `tests/schema_v4.rs`
       e `tests/generic_engine.rs`.
-    - **ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25,
-      2026-08-09) — CAVEAT acima RESOLVIDO**: campo novo
-      `[propeller].prop_plane_x_m` (posição do plano da hélice, m do datum
-      no nariz — ESTIMATIVA, validar no CAD) alimenta o fator de
-      amplificação do pivô descrito no caveat.
-      `PropellerSpec::fill_critical_clearance` ganha um terceiro parâmetro
-      (`prop_cfg: &PropellerCfg`) para lê-lo — SCHEMA_VERSION permanece
-      `"5.1"` (nenhum campo do JSON de SAÍDA muda de nome/tipo; a mudança é
-      só na fórmula que preenche `propeller.prop_clearance_critical_m`,
-      mesmo campo já existente). **Achado confirmado**: no baseline E10
-      real, fator = (3,66−0,20)/(3,66−1,30) ≈ **1,46610**;
-      `prop_clearance_critical_m` vai de **+0,0325 m (PASS) para
-      ≈−0,06416 m (FAIL)** — exatamente a faixa que o caveat previu.
-      `validation_status` do baseline real vira **`"FAIL"`** com
-      **exatamente 1 violação nomeada** (checagem #25) —
-      tipback/tail-strike/carga de nariz/margem de combustível/pista/
-      robustez continuam PASSANDO com os MESMOS números da campanha E10
-      (nenhum deles depende de `prop_clearance_critical_m`). Ver
-      `docs/backlog.md` (item 1, marcado RESOLVIDO),
-      `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
-      pins honestos completos.
+- **v5.2** (Task 2, ciclo9-transferencia-atitude, 2026-08-09 — bump
+  **MINOR**): nenhum campo do JSON de saída foi renomeado/removido/mudou de
+  tipo — consumidores v5.1 continuam funcionando sem alteração. O bump é
+  sobre SEMÂNTICA: `propeller.prop_clearance_critical_m` **mantém o nome**,
+  mas a FÓRMULA que o preenche mudou (Task 1 do mesmo ciclo, `48a2ed4`) e o
+  veredito honesto do baseline real virou de PASS para FAIL — grande o
+  bastante para merecer o bump MINOR mesmo sem quebra de contrato
+  estrutural.
+  - **CAVEAT NOMEADO na v5.1 RESOLVIDO**: campo de CONFIGURAÇÃO NOVO
+    `[propeller].prop_plane_x_m` (posição do plano da hélice, m do datum no
+    nariz — ESTIMATIVA, validar no CAD; input, **não ecoado** no JSON de
+    saída) alimenta o fator de amplificação do pivô descrito no caveat.
+    `PropellerSpec::fill_critical_clearance` ganha um terceiro parâmetro
+    (`prop_cfg: &PropellerCfg`) para lê-lo.
+  - **Achado confirmado**: no baseline E10 real, fator =
+    (3,66−0,20)/(3,66−1,30) ≈ **1,46610**; `prop_clearance_critical_m` vai
+    de **+0,0325 m (PASS) para ≈−0,06416 m (FAIL)** — exatamente a faixa
+    que o caveat previu. `validation_status` do baseline real vira
+    **`"FAIL"`** com **exatamente 1 violação nomeada** (checagem #25) —
+    tipback/tail-strike/carga de nariz/margem de combustível/pista/
+    robustez continuam PASSANDO com os MESMOS números da campanha E10
+    (nenhum deles depende de `prop_clearance_critical_m`). Ver
+    `docs/backlog.md` (item 1, marcado RESOLVIDO),
+    `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
+    pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
