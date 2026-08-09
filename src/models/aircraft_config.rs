@@ -271,6 +271,26 @@ pub struct GearCfg {
     pub retractable: bool,
     /// Incremento de CD0 do trem FIXO (0 quando retrátil e recolhido).
     pub cd0_fixed_increment: f64,
+    /// Altura do CG ao solo (m) — CONTRATO (ciclo 10, task 1, deflexão
+    /// estática no #25): esta é a altura da aeronave CARREGADA, em atitude
+    /// ESTÁTICA de solo — trem PARCIALMENTE comprimido pelo peso da
+    /// aeronave (mains e nariz ambos em compressão típica de amortecedor
+    /// oleo-pneumático, não trem "totalmente estendido" sem carga). É por
+    /// isso que a checagem #25 (`specs::PropellerSpec::
+    /// fill_critical_clearance`, condição CRÍTICA de CS 23.925) NÃO soma
+    /// termo aditivo nenhum para os MAINS: eles já estão na deflexão
+    /// estática típica embutida neste valor, tanto na condição normal
+    /// quanto na condição crítica (só o trem CRÍTICO — o de NARIZ, hélice
+    /// TRATORA — colapsa até o batente nessa condição; CS 23.925 pela
+    /// letra pede o trem crítico no limite com os DEMAIS em deflexão
+    /// estática, não os três simultaneamente no batente). Pelo mesmo
+    /// motivo, o trem de NARIZ na condição crítica só percorre o curso
+    /// RESTANTE até o batente — `nose_oleo_stroke_mm × (1 −
+    /// [gear].static_sag_fraction)`, não o curso TOTAL — porque a fração
+    /// `static_sag_fraction` do curso já foi consumida pela compressão
+    /// estática que `h_cg_ground_m` já reflete. Ver docstring de
+    /// `static_sag_fraction` abaixo e `docs/backlog.md` (item 6, RESOLVIDO
+    /// ciclo 10).
     pub h_cg_ground_m: f64,
     pub x_nose_m: f64,
     pub x_main_m: f64,
@@ -328,6 +348,33 @@ pub struct GearCfg {
     /// frente, sobre o eixo de nariz). Ciclo 8, task 2. Faixa validada
     /// (0.03, 0.15).
     pub tire_deflation_delta_m: f64,
+    /// Fração do curso do amortecedor de NARIZ já consumida pela
+    /// compressão ESTÁTICA (aeronave carregada, parada no solo) — ciclo 10,
+    /// task 1 (CS 23.925 pela letra). Compressão estática típica de um
+    /// amortecedor oleo-pneumático é ~1/3 do curso total (baseline 0,33).
+    /// Consumida por `specs::PropellerSpec::fill_critical_clearance`: como
+    /// `[gear].h_cg_ground_m` já mede a aeronave em deflexão estática (ver
+    /// docstring desse campo), o trem de NARIZ na condição CRÍTICA de CS
+    /// 23.925 (batente do amortecedor) só percorre o curso RESTANTE —
+    /// `nose_oleo_stroke_mm × (1 − static_sag_fraction)` — não o curso
+    /// TOTAL. ANTES desta task (ciclo 9), a fórmula usava o curso TOTAL do
+    /// nariz, contando DUAS VEZES a compressão estática: uma vez
+    /// implicitamente (embutida em `h_cg_ground_m`, que já é a altura
+    /// CARREGADA) e outra vez explicitamente (o curso total do batente,
+    /// como se o amortecedor partisse ESTENDIDO em vez de já parcialmente
+    /// comprimido) — isso SUPERESTIMAVA `Δ_prop` e por isso SUBESTIMAVA
+    /// (deixava mais NEGATIVA) a folga crítica. A correção honesta
+    /// (RESOLVIDO nesta task) troca o curso total pelo curso RESTANTE, o
+    /// que reduz `Δ_prop` e AUMENTA a folga crítica calculada — mais
+    /// otimista, portanto ANTI-conservadora frente ao número antigo
+    /// (−0,0642 m → −0,0025 m no baseline E10), mas fisicamente CORRETA
+    /// pela letra da norma: não há dupla contagem da mesma compressão. Ver
+    /// `docs/backlog.md` (item 6, RESOLVIDO) e a docstring de
+    /// `PropellerSpec::prop_clearance_critical_m` para a física completa
+    /// old→new. Faixa validada (0.15, 0.55) — compressão estática
+    /// plausível de um amortecedor oleo-pneumático (nunca quase zero,
+    /// nunca quase o curso inteiro).
+    pub static_sag_fraction: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -740,6 +787,15 @@ pub mod test_fixtures {
                 // o fator de amplificação novo — ver comentário de
                 // `propeller.prop_plane_x_m` acima.
                 tire_deflation_delta_m: 0.035,
+                // Ciclo 10 (task 1, deflexão estática no #25): campo novo,
+                // DISTINTO do valor do baseline real (0.33) — mesma
+                // justificativa de "nenhum destes números coincide com o
+                // baseline real" usada nas demais seções desta fixture.
+                // Dentro da faixa validada (0.15, 0.55). O termo novo só
+                // ENCOLHE `Δ_prop` frente à fórmula antiga (curso restante
+                // < curso total), então não ameaça a margem positiva de
+                // #25 que esta fixture já preservava desde o ciclo 9.
+                static_sag_fraction: 0.40,
             },
             arms: ArmsCfg {
                 engine_cg_m: 0.60,

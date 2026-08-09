@@ -52,6 +52,19 @@
 //! combustível/robustez) permanecem INALTERADOS, ver
 //! `constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_
 //! real` abaixo.
+//!
+//! ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática, 2026-08-09 —
+//! old→new): `validation_status` PERMANECE `FAIL` (mesma 1 violação
+//! nomeada, checagem #25) — só o NÚMERO da violação muda. Campo novo
+//! `[gear].static_sag_fraction = 0,33` corrige uma dupla contagem da
+//! compressão estática do amortecedor de nariz (curso TOTAL → curso
+//! RESTANTE até o batente, já que `h_cg_ground_m` mede a aeronave
+//! CARREGADA — ver docstring de `GearCfg::static_sag_fraction`/
+//! `GearCfg::h_cg_ground_m`): `prop_clearance_critical_m`
+//! ≈−0,06416 m (ciclo 9) → ≈−0,00249 m (ciclo 10) — honestamente
+//! ANTI-conservador (folga MAIOR), fator (≈1,46610) inalterado. O caveat
+//! dos mains rígidos nomeado no ciclo 9 MORRE nesta task —
+//! `docs/backlog.md` (item 6, RESOLVIDO).
 
 use std::path::PathBuf;
 
@@ -401,14 +414,21 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // OUTRA violação muda (tipback/tail-strike/carga de nariz/robustez
     // continuam PASSANDO, verificado pelos asserts acima) — exatamente 1
     // violação nomeada, a hélice.
+    //
+    // ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática — old→new): MESMO
+    // veredito (checagem #25 continua REPROVANDO, exatamente 1 violação) —
+    // só o NÚMERO da folga crítica muda, ≈−0,06416 m → ≈−0,00249 m (curso
+    // RESTANTE do nariz, não curso total — `docs/backlog.md`, item 6,
+    // RESOLVIDO).
     assert_eq!(report.violations.len(), 1,
-        "ciclo 9: esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline real — \
+        "ciclo 10: esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline real — \
          obteve: {:?}", report.violations);
     assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
         "a única violação esperada é a de folga crítica de hélice (checagem #25): {:?}",
         report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("-0.064")),
-        "violação de hélice deveria citar a folga crítica observada (≈−0,064 m): {:?}",
+    assert!(report.violations.iter().any(|v| v.contains("-0.002")),
+        "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10): \
+         {:?}",
         report.violations);
 }
 

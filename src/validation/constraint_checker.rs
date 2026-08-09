@@ -559,17 +559,22 @@ impl ConstraintChecker {
         // + pneu MURCHO/estourado. Hélice TRATORA: é o trem de NARIZ que
         // governa o TERMO AMPLIFICADO (fica sob o eixo da hélice,
         // dianteiro) — daí `gear.nose_oleo_stroke_mm` × `fator`, não
-        // `main_oleo_stroke_mm`, alimentando esse termo. Isso é verdade
-        // só para o termo amplificado: o trem PRINCIPAL é tratado como
-        // RÍGIDO/estendido pelo modelo (`fill_critical_clearance` nunca lê
-        // `main_oleo_stroke_mm`) — na condição crítica real, uma deflexão
-        // do principal translada o pivô ~1:1, ADITIVA a este termo, e não
-        // é modelada aqui (CAVEAT NOMEADO, ver `docs/backlog.md`, item 6:
-        // "condição composta CS 23.925"). Lê
-        // `propeller.prop_clearance_critical_m` já PRECOMPUTADO (ver
-        // `specs::PropellerSpec::fill_critical_clearance`, chamado em
-        // `main.rs`/nas fixtures de teste logo após o trem de pouso) — os
-        // termos abaixo (`ground_clearance_m`/`nose_oleo_stroke_mm`/
+        // `main_oleo_stroke_mm`, alimentando esse termo. O trem PRINCIPAL
+        // NUNCA precisou de termo aditivo aqui — leitura da norma pela
+        // LETRA (ciclo 10, task 1): a condição crítica de CS 23.925 coloca
+        // só o trem CRÍTICO (nariz, hélice tratora) no batente; os DEMAIS
+        // (aqui, o principal) permanecem na deflexão ESTÁTICA normal, já
+        // embutida em `gear_cfg.h_cg_ground_m`/`propeller.ground_clearance_m`
+        // (a aeronave é sempre modelada CARREGADA — ver docstring de
+        // `GearCfg::h_cg_ground_m`). CAVEAT DOS MAINS RÍGIDOS do ciclo 9
+        // (deflexão do amortecedor/pneu principal precisaria entrar como
+        // termo aditivo, condição COMPOSTA de CS 23.925) MORREU nesta task
+        // — não faltava termo nenhum, ver `docs/backlog.md` (item 6,
+        // RESOLVIDO). Lê `propeller.prop_clearance_critical_m` já
+        // PRECOMPUTADO (ver `specs::PropellerSpec::fill_critical_clearance`,
+        // chamado em `main.rs`/nas fixtures de teste logo após o trem de
+        // pouso) — os termos abaixo (`ground_clearance_m`/
+        // `nose_oleo_stroke_mm`/`static_sag_fraction`/
         // `tire_deflation_delta_m`/`fator`) só narram a mensagem, não
         // recalculam o resultado (fonte única).
         //
@@ -578,7 +583,17 @@ impl ConstraintChecker {
         // vertical 1:1 do nariz) — a hélice, à frente do trem de nariz,
         // mergulha um braço amplificado por
         // `(x_main−prop_plane_x_m)/(x_main−x_nose_m)` sobre o curso do
-        // nariz/deflexão de pneu. Ver docstring de
+        // nariz/deflexão de pneu.
+        //
+        // Ciclo 10, task 1 (deflexão estática): o curso do nariz que entra
+        // no termo amplificado é o curso RESTANTE até o batente, não o
+        // curso TOTAL — `nose_oleo_stroke_mm × (1 − static_sag_fraction)`,
+        // porque o amortecedor de nariz também PARTE da deflexão estática
+        // (a mesma que `h_cg_ground_m` já modela para os mains), não
+        // estendido. A fórmula do ciclo 9 contava essa compressão estática
+        // do nariz DUAS VEZES; a correção reduz `Δ_prop` e AUMENTA a folga
+        // crítica (honestamente ANTI-conservadora frente ao número antigo,
+        // mas fiel à letra da norma). Ver docstring de
         // `PropellerSpec::prop_clearance_critical_m` para a física completa
         // e o old→new.
         //
@@ -597,24 +612,26 @@ impl ConstraintChecker {
         // pelo gate (fonte única preservada) — só valida a invariante.
         let fator = (gear_cfg.x_main_m - prop_cfg.prop_plane_x_m)
             / (gear_cfg.x_main_m - gear_cfg.x_nose_m);
-        let delta_prop = (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m)
-            * fator;
+        let curso_restante_nariz_m = (gear.nose_oleo_stroke_mm / 1_000.0)
+            * (1.0 - gear_cfg.static_sag_fraction);
+        let delta_prop = (curso_restante_nariz_m + gear_cfg.tire_deflation_delta_m) * fator;
         debug_assert!(
             (propeller.prop_clearance_critical_m - (propeller.ground_clearance_m - delta_prop))
                 .abs() < 1e-9,
             "propeller.prop_clearance_critical_m ({:.6}) não bate com a fórmula fechada \
-             ground_clearance_m − (nose_oleo_stroke_mm/1000 + tire_deflation_delta_m)×fator \
-             (fator={:.5}) ({:.6}) — `PropellerSpec::fill_critical_clearance` foi chamado?",
+             ground_clearance_m − (nose_oleo_stroke_mm/1000×(1−static_sag_fraction) + \
+             tire_deflation_delta_m)×fator (fator={:.5}) ({:.6}) — \
+             `PropellerSpec::fill_critical_clearance` foi chamado?",
             propeller.prop_clearance_critical_m, fator,
             propeller.ground_clearance_m - delta_prop
         );
         if propeller.prop_clearance_critical_m <= 0.0 {
             violations.push(format!(
                 "Hélice (condição crítica CS 23.925, pivô nos mains): folga estática {:.3} m − \
-                 Δ_prop {:.3} m (fator {:.4}× sobre curso do nariz {:.3} m + pneu murcho \
+                 Δ_prop {:.3} m (fator {:.4}× sobre curso RESTANTE do nariz {:.3} m + pneu murcho \
                  {:.3} m) = {:.3} m ≤ 0",
                 propeller.ground_clearance_m, delta_prop, fator,
-                gear.nose_oleo_stroke_mm / 1_000.0, gear_cfg.tire_deflation_delta_m,
+                curso_restante_nariz_m, gear_cfg.tire_deflation_delta_m,
                 propeller.prop_clearance_critical_m
             ));
         }
@@ -1896,24 +1913,28 @@ mod tests {
     /// `violacao_de_helice_aparece_quando_algum_ok_e_falso` acima, que
     /// sobrescreve `ok_mach_static`/`tip_mach_static` diretamente): a
     /// checagem lê o campo PRECOMPUTADO, não recalcula a partir de
-    /// `ground_clearance_m`/`nose_oleo_stroke_mm`/`tire_deflation_delta_m`/
-    /// `fator` — o `debug_assert!` novo do check #25 (achado de review,
-    /// ciclo 8; fórmula com fator desde o ciclo 9) exige que o campo bata
+    /// `ground_clearance_m`/`nose_oleo_stroke_mm`/`static_sag_fraction`/
+    /// `tire_deflation_delta_m`/`fator` — o `debug_assert!` novo do check
+    /// #25 (achado de review, ciclo 8; fórmula com fator desde o ciclo 9;
+    /// curso RESTANTE do nariz desde o ciclo 10) exige que o campo bata
     /// com a fórmula fechada desses termos (guarda contra
     /// `fill_critical_clearance` esquecido), então também sobrescrevemos
     /// `ground_clearance_m` para manter a fixture internamente consistente
-    /// — `nose_oleo_stroke_mm`/`tire_deflation_delta_m` (vindos de
-    /// `gear`/`gear_cfg` da fixture) e `fator` (de `gear_cfg`/`prop_cfg` da
-    /// fixture) continuam intocados, só narram a mensagem.
+    /// — `nose_oleo_stroke_mm`/`static_sag_fraction`/`tire_deflation_delta_m`
+    /// (vindos de `gear`/`gear_cfg` da fixture) e `fator` (de
+    /// `gear_cfg`/`prop_cfg` da fixture) continuam intocados, só narram a
+    /// mensagem.
     #[test]
     fn check_25_violacao_de_folga_critica_aparece_com_override_sintetico() {
         let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear,
              gear_cfg, prop_cfg, robustness) = setup();
         let fator = (gear_cfg.x_main_m - prop_cfg.prop_plane_x_m)
             / (gear_cfg.x_main_m - gear_cfg.x_nose_m);
+        let curso_restante_nariz_m = (gear.nose_oleo_stroke_mm / 1_000.0)
+            * (1.0 - gear_cfg.static_sag_fraction);
         let folga_critica_alvo = -0.012;
         propeller.ground_clearance_m = folga_critica_alvo
-            + (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m) * fator;
+            + (curso_restante_nariz_m + gear_cfg.tire_deflation_delta_m) * fator;
         propeller.prop_clearance_critical_m = folga_critica_alvo;
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
@@ -1929,8 +1950,8 @@ mod tests {
     /// Ramo PASS — a fixture sintética padrão (`config_teste()`, folga
     /// estática 0,200 m, curso de nariz do baseline sintético ≈127,46 mm,
     /// pneu murcho 0,035 m, fator ≈1,16667 — ver `fill_critical_clearance`)
-    /// já produz `prop_clearance_critical_m ≈ +0,0105 m > 0` NATURALMENTE
-    /// (não forçado) — mesmo espírito do achado natural de
+    /// já produz `prop_clearance_critical_m > 0` NATURALMENTE (não
+    /// forçado) — mesmo espírito do achado natural de
     /// `violacao_de_folga_de_solo_aparece_naturalmente_na_fixture_sintetica`
     /// acima, mas no sentido inverso (aqui a fixture passa, não falha).
     /// Ciclo 9 (old→new): margem antiga (fator implícito 1) era ≈+0,0225 m
@@ -1938,7 +1959,11 @@ mod tests {
     /// fixture foram ajustados para preservar uma margem POSITIVA sob o
     /// fator novo, sem tocar em `diameter_m`/`h_cg_ground_m`/
     /// `prop_axis_above_cg_m`/`x_main_m`/`x_nose_m` (load-bearing para
-    /// outros testes deste arquivo, ex. a checagem #10 acima).
+    /// outros testes deste arquivo, ex. a checagem #10 acima). Ciclo 10,
+    /// task 1: campo novo `static_sag_fraction` (0,40, DISTINTO do
+    /// baseline real) só ENCOLHE o termo do nariz (curso RESTANTE < curso
+    /// TOTAL) — a margem positiva desta fixture só cresce, não foi preciso
+    /// reajustar nenhum outro valor.
     #[test]
     fn check_25_sem_violacao_na_fixture_padrao() {
         let (req, wing, prop, engine, wb, propeller, perf, mission, electrical, gear, gear_cfg,
@@ -1968,9 +1993,11 @@ mod tests {
              gear_cfg, prop_cfg, robustness) = setup();
         let fator = (gear_cfg.x_main_m - prop_cfg.prop_plane_x_m)
             / (gear_cfg.x_main_m - gear_cfg.x_nose_m);
+        let curso_restante_nariz_m = (gear.nose_oleo_stroke_mm / 1_000.0)
+            * (1.0 - gear_cfg.static_sag_fraction);
         let folga_critica_alvo = 0.001;
         propeller.ground_clearance_m = folga_critica_alvo
-            + (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m) * fator;
+            + (curso_restante_nariz_m + gear_cfg.tire_deflation_delta_m) * fator;
         propeller.prop_clearance_critical_m = folga_critica_alvo;
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,

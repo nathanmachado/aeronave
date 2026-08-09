@@ -399,6 +399,9 @@ mod tests {
             // `ConstraintChecker`/`RobustnessAgent`, ciclo 8 task 2) —
             // presente aqui só porque é campo obrigatório de `GearCfg`.
             tire_deflation_delta_m: 0.05,
+            // Idem — não consumido por `LandingGearAgent` (ciclo 10, task
+            // 1), só presente porque é campo obrigatório de `GearCfg`.
+            static_sag_fraction: 0.33,
         }
     }
 

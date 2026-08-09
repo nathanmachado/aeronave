@@ -431,6 +431,25 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// projeto. O caminho PASS de #25 continua coberto pela fixture sintética
 /// (`validation::constraint_checker::tests::check_25_sem_violacao_na_
 /// fixture_padrao`).
+///
+/// ─── ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática) — MESMO VEREDITO,
+/// NÚMERO CORRIGIDO ─────────────────────────────────────────────────────
+///
+/// Campo novo `[gear].static_sag_fraction = 0,33` (fração do curso do
+/// nariz já consumida pela compressão ESTÁTICA — ver docstring de
+/// `GearCfg::static_sag_fraction`). CS 23.925 pela LETRA: só o trem
+/// CRÍTICO (nariz) vai ao batente; os mains ficam na deflexão estática já
+/// embutida em `h_cg_ground_m`, e o próprio nariz PARTE dessa mesma
+/// deflexão — na condição crítica ele só percorre o curso RESTANTE
+/// (`nose_oleo_stroke_mm × (1 − static_sag_fraction)`), não o curso TOTAL
+/// que o ciclo 9 usava (dupla contagem da compressão estática). `fator`
+/// permanece **1,46610** (não depende de `static_sag_fraction`);
+/// `prop_clearance_critical_m` vai de **≈−0,06416 m (ciclo 9) para
+/// ≈−0,00249 m (ciclo 10)** — honestamente ANTI-conservador (folga
+/// MAIOR), mas fiel à norma. `validation_status` PERMANECE `"FAIL"` com a
+/// MESMA 1 violação nomeada (checagem #25) — só o NÚMERO da violação
+/// muda, não o veredito. Ver `docs/backlog.md` (item 6, RESOLVIDO ciclo
+/// 10).
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo9() {
     let out_path = std::env::temp_dir().join(format!(
@@ -481,9 +500,10 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     assert!(violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
         "a única violação esperada é a de folga crítica de hélice (checagem #25): \
          {violations:#?}");
-    assert!(violations.iter().any(|v| v.contains("-0.064")),
-        "violação de hélice deveria citar a folga crítica observada (≈−0,064 m): \
-         {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("-0.002")),
+        "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10 — \
+         era ≈−0,064 m no ciclo 9, deflexão estática corrige dupla contagem do curso do \
+         nariz): {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("1.4661")),
         "violação de hélice deveria citar o fator de amplificação do pivô (≈1,4661×): \
          {violations:#?}");

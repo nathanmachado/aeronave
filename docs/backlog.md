@@ -82,36 +82,54 @@ Ponteiro: `agents::performance::takeoff_distance_50ft_m`
 (`src/agents/performance.rs`, ramo `if rc <= 0.0`), §5 de
 `docs/aircraft_spec.schema.md` (precedente de tratamento de infinito).
 
-## 6. Condição composta CS 23.925: deflexão dos mains no pivô
+## 6. Condição composta CS 23.925: deflexão dos mains no pivô — RESOLVIDO ciclo 10
 
-`PropellerSpec::fill_critical_clearance` (ciclo 9, transferência de
-atitude do #25) pivota a célula sobre o trem PRINCIPAL para amplificar o
-mergulho do plano da hélice, mas trata o próprio trem PRINCIPAL como
-RÍGIDO e TOTALMENTE ESTENDIDO — a fórmula só colapsa o trem de NARIZ
-(`gear.nose_oleo_stroke_mm` + `tire_deflation_delta_m`), nunca
-`gear.main_oleo_stroke_mm`. Na condição CRÍTICA real de CS 23.925, nada
-impede o amortecedor/pneu PRINCIPAL de estar simultaneamente comprimido
-(pouso duro nos três trens, por exemplo) — essa deflexão translada o
-próprio pivô (e a célula inteira) verticalmente ~1:1, ADITIVA ao termo já
-amplificado do nariz, não subtrativa nem cancelada por ele. No baseline
-real, `main_oleo_stroke_mm` ≈ 212,4 mm — mais que TRIPLO da margem de
-+0,0682 m (68,2 mm) encontrada pela célula recomendada da campanha E11
-(`prop_axis_above_cg_m` 0,32 + `x_nose_m` 1,20, `diameter_m` 1,76
-mantido — ver `task-3-report.md` da task de campanha E11 do ciclo 9,
-`.superpowers/sdd/2026-08-09-ciclo9-transferencia-atitude/`); ou seja,
-este termo não modelado pode sozinho
-consumir toda a margem ganha por uma eventual adoção da E11, e deve ser
-resolvido (ou pelo menos quantificado) ANTES dessa decisão de adoção.
-Nota relacionada, sinal OPOSTO e pequena: o disco da hélice também não é
+**RESOLVIDO** (ciclo 10, task 1, 2026-08-09). A preocupação nomeada no
+ciclo 9 — `PropellerSpec::fill_critical_clearance` pivota a célula sobre o
+trem PRINCIPAL para amplificar o mergulho do plano da hélice, mas
+tratando o próprio trem PRINCIPAL como RÍGIDO e TOTALMENTE ESTENDIDO, sem
+nenhum termo para a deflexão do amortecedor/pneu principal — partia de
+uma premissa INCORRETA sobre o que `[gear].h_cg_ground_m` representa.
+Lida com cuidado, essa altura SEMPRE foi a altura do CG com a aeronave
+CARREGADA, em deflexão ESTÁTICA (mains e nariz parcialmente comprimidos
+pelo peso da aeronave) — não "trem estendido sem carga". Como
+`h_cg_ground_m`/`propeller.ground_clearance_m` já embutem essa deflexão
+estática dos mains, a checagem #25 NUNCA precisou de um termo aditivo
+para eles: CS 23.925 pela LETRA exige apenas que o trem CRÍTICO (aqui, o
+de nariz — hélice TRATORA) atinja o batente nessa condição; os DEMAIS
+trens permanecem na deflexão estática normal, já modelada. Não havia
+condição COMPOSTA não-modelada — havia uma leitura imprecisa do
+significado de `h_cg_ground_m`.
+
+Pelo MESMO motivo, o amortecedor de NARIZ também PARTE da deflexão
+estática (não estendido) — na condição crítica ele só percorre o curso
+RESTANTE até o batente, não o curso TOTAL. A fórmula do ciclo 9 usava o
+curso total, contando a compressão estática do nariz DUAS VEZES (uma
+implícita em `h_cg_ground_m`, outra explícita no curso total do
+batente). Campo novo `[gear].static_sag_fraction` (0,33 no baseline —
+fração do curso já consumida pela compressão estática) corrige isso:
+`Δ_prop` usa `nose_oleo_stroke_mm × (1 − static_sag_fraction)`, não
+`nose_oleo_stroke_mm`. No baseline real, fator geométrico inalterado
+(≈1,46610 — não depende de `static_sag_fraction`);
+`prop_clearance_critical_m` vai de **≈−0,06416 m (ciclo 9) para
+≈−0,00249 m (ciclo 10)** — honestamente ANTI-conservador (a correção
+AUMENTA a folga calculada), mas fiel à letra da norma. `validation_status`
+do baseline real PERMANECE `"FAIL"` com a MESMA 1 violação nomeada
+(checagem #25) — só o NÚMERO da violação muda, não o veredito.
+
+Nota relacionada, sinal OPOSTO e pequena, NÃO resolvida por esta task
+(item independente, permanece nomeado): o disco da hélice também não é
 modelado como INCLINADO junto com o pitch da célula durante o evento —
 tratar o disco como permanecendo vertical (ponta mais baixa sempre à
 distância do raio abaixo do cubo) é CONSERVADOR em ≈+3,4 mm
 (`raio × (1 − cos θ)`, θ ≈ 5,04° no baseline real, raio 0,88 m) frente a
 uma modelagem exata do disco tombado — o tombamento ERGUE o ponto mais
 baixo varrido em relação ao cubo, então ignorá-lo empurra a folga
-calculada para o lado SEGURO (ao contrário do gap dos mains acima, que
-empurra para o lado OTIMISTA). Ponteiro: docstring de
-`PropellerSpec::prop_clearance_critical_m` (`src/models/specs.rs`),
+calculada para o lado SEGURO. Ponteiro: docstring de
+`PropellerSpec::prop_clearance_critical_m` e `GearCfg::h_cg_ground_m`/
+`GearCfg::static_sag_fraction` (`src/models/specs.rs`,
+`src/models/aircraft_config.rs`),
 `validation::constraint_checker::ConstraintChecker::verify` (checagem
 #25), `fidelity.propeller` (`src/main.rs`), `docs/aircraft_spec.schema.md`
-(bloco `propeller`, linha `prop_clearance_critical_m`).
+(bloco `propeller`, linha `prop_clearance_critical_m`), `tests/cli.rs`/
+`tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins honestos).

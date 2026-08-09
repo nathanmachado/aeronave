@@ -787,17 +787,26 @@ fn main() {
          honesto: no baseline real esse fator (≈1,466) vira a folga \
          crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m \
          (FAIL) — a simplificação antiga era OTIMISTA e mascarava este \
-         resultado, como o achado de review do ciclo 8 previu. CAVEAT \
-         NOMEADO (revisão final, ciclo 9, NÃO corrigido): a fórmula pivota \
-         sobre os MAINS mas trata o trem principal como RÍGIDO/estendido \
-         — deflexão do amortecedor/pneu principal (≈212,4 mm no baseline \
-         real) não entra na fórmula e translada o pivô ~1:1, ADITIVO ao \
-         termo já amplificado do nariz, ordem de grandeza MAIOR que a \
-         margem de +0,0682 m da célula recomendada pela campanha E11 — \
-         condição COMPOSTA de CS 23.925 não modelada. Ver \
+         resultado, como o achado de review do ciclo 8 previu. Ciclo 10 \
+         (task 1, deflexão estática — CS 23.925 pela LETRA): o CAVEAT dos \
+         mains rígidos nomeado no ciclo 9 (deflexão do amortecedor/pneu \
+         principal precisaria entrar como termo aditivo, condição \
+         COMPOSTA de CS 23.925) está RESOLVIDO — `[gear].h_cg_ground_m` \
+         sempre foi a altura da aeronave CARREGADA, em deflexão estática \
+         (não trem estendido sem carga), então os mains JÁ estão nessa \
+         deflexão dentro de `ground_clearance_m`; a norma, pela letra, só \
+         exige o trem CRÍTICO (nariz) no batente, os demais ficam na \
+         deflexão estática que já é modelada. Não faltava termo nenhum. \
+         Campo novo `[gear].static_sag_fraction` (0,33 no baseline) corrige \
+         a fórmula do nariz do curso TOTAL do batente para o curso \
+         RESTANTE (o amortecedor de nariz também parte da mesma deflexão \
+         estática, não estendido) — dupla contagem do ciclo 9 corrigida. \
+         Fator geométrico inalterado (≈1,466); folga crítica \
+         ≈−0,064 m (ciclo 9) → ≈−0,0025 m (ciclo 10) — MESMO veredito \
+         (checagem #25 continua FAIL), honestamente ANTI-conservador. Ver \
          docstring de PropellerSpec::prop_clearance_critical_m e \
-         docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, condição \
-         composta CS 23.925). Requer mapa de \
+         docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO \
+         ciclo 10). Requer mapa de \
          desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \

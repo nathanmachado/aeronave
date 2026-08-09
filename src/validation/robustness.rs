@@ -1141,11 +1141,13 @@ mod tests {
     /// ≈1.285 kg (nominal) para ≈1.363 kg (massa-total, σ=20%) e
     /// `nose_oleo_stroke_mm` NÃO SE MOVE um bit. Como a folga ESTÁTICA
     /// (`propeller.ground_clearance_m`), a deflexão de pneu
-    /// (`gear_cfg.tire_deflation_delta_m`) e, desde o ciclo 9, o `fator` de
-    /// amplificação do pivô (`(gear.x_main_m−propeller.prop_plane_x_m)/
-    /// (gear.x_main_m−gear.x_nose_m)` — geometria pura, nenhum dos três
-    /// campos responde a σ) também são invariantes à massa, os QUATRO
-    /// termos de `prop_clearance_critical_m` são invariantes ao mundo
+    /// (`gear_cfg.tire_deflation_delta_m`), a fração de sag estática
+    /// (`gear_cfg.static_sag_fraction`, ciclo 10) e, desde o ciclo 9, o
+    /// `fator` de amplificação do pivô (`(gear.x_main_m−
+    /// propeller.prop_plane_x_m)/(gear.x_main_m−gear.x_nose_m)` —
+    /// geometria/config pura, nenhum dos quatro campos responde a σ)
+    /// também são invariantes à massa, os CINCO termos de
+    /// `prop_clearance_critical_m` são invariantes ao mundo
     /// massa-total — o gate #25 (`RobustnessAgent::run`, ramo `Ok(sized_p)`) está
     /// corretamente FIADO (mesmo padrão `nom_ok && !p_ok` dos demais) mas
     /// é estruturalmente MORTO sob o modelo de trem atual: nenhuma config
@@ -1189,12 +1191,14 @@ mod tests {
              (cancelamento algébrico em min_oleo_stroke_m) — perturbado {:.6}mm vs \
              nominal {:.6}mm", gear_p.nose_oleo_stroke_mm, n.gear.nose_oleo_stroke_mm);
 
-        // Ciclo 9: os QUATRO termos de `prop_clearance_critical_m`
+        // Ciclo 9/10: os CINCO termos de `prop_clearance_critical_m`
         // (`ground_clearance_m`/`nose_oleo_stroke_mm`/
-        // `tire_deflation_delta_m`/`fator`) são invariantes ao mundo
-        // massa-total — `fator` é geometria pura (`[gear].x_main_m`/
-        // `x_nose_m`/`[propeller].prop_plane_x_m`, nenhum dos quais responde
-        // a σ). Verificação bit-exata, ponta a ponta, reaproveitando a MESMA
+        // `static_sag_fraction`/`tire_deflation_delta_m`/`fator`) são
+        // invariantes ao mundo massa-total — `fator` é geometria pura
+        // (`[gear].x_main_m`/`x_nose_m`/`[propeller].prop_plane_x_m`,
+        // nenhum dos quais responde a σ) e `static_sag_fraction` (ciclo 10)
+        // é config pura, idem. Verificação bit-exata, ponta a ponta,
+        // reaproveitando a MESMA
         // `fill_critical_clearance` que a produção usa (não uma
         // reimplementação paralela da fórmula) — prova a invariância citada
         // acima em vez de só inferi-la da ausência de flip.

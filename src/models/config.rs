@@ -879,6 +879,17 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.gear.tire_deflation_delta_m
         )));
     }
+    // Fração do curso do nariz consumida pela compressão ESTÁTICA (ciclo
+    // 10, task 1) — ver docstring de `GearCfg::static_sag_fraction`.
+    require_finite("gear.static_sag_fraction", cfg.gear.static_sag_fraction)?;
+    if cfg.gear.static_sag_fraction <= 0.15 || cfg.gear.static_sag_fraction >= 0.55 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: gear.static_sag_fraction deve estar em \
+             (0.15, 0.55) — compressão estática típica de amortecedor oleo-pneumático \
+             (valor: {})",
+            cfg.gear.static_sag_fraction
+        )));
+    }
 
     // [arms] — braços de momento: não-negativos e finitos.
     require_non_negative("arms.engine_cg_m", cfg.arms.engine_cg_m)?;
@@ -1572,6 +1583,7 @@ mod tests {
             tail_cone_x_m = 7.5
             tail_cone_height_m = 1.05
             tire_deflation_delta_m = 0.06
+            static_sag_fraction = 0.33
             [arms]
             engine_cg_m = 0.6
             avionics_m = 1.0
@@ -2244,6 +2256,25 @@ mod tests {
             .replace("tire_deflation_delta_m = 0.06", "tire_deflation_delta_m = 0.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("tire_deflation_delta_m"), "{err}");
+    }
+
+    // ─── [gear] static_sag_fraction (ciclo 10, task 1 — deflexão estática
+    // no #25, CS 23.925 pela letra) ─────────────────────────────────────
+
+    #[test]
+    fn rejeita_static_sag_fraction_fora_da_faixa_alta() {
+        let toml = aircraft_toml_valido()
+            .replace("static_sag_fraction = 0.33", "static_sag_fraction = 0.60");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("static_sag_fraction"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_static_sag_fraction_muito_baixo() {
+        let toml = aircraft_toml_valido()
+            .replace("static_sag_fraction = 0.33", "static_sag_fraction = 0.10");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("static_sag_fraction"), "{err}");
     }
 
     #[test]

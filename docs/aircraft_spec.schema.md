@@ -41,6 +41,15 @@ documentação a ser corrigido, não um comportamento aceitável.
     consumidor v5.1 que já lia esse campo numericamente continua lendo o
     mesmo tipo, só com um valor mais correto. Registrado aqui para não
     esconder a divergência entre esta política e a decisão real tomada.
+    **Mesma exceção reaplicada** (ciclo10-sag-e-linha-de-tracao, task 1,
+    2026-08-09, ainda dentro da v5.2 — bump formal fica para a Task 3 do
+    mesmo ciclo): a fórmula de `prop_clearance_critical_m` mudou DE NOVO
+    (curso TOTAL do amortecedor de nariz → curso RESTANTE até o batente,
+    corrigindo uma dupla contagem da compressão estática — ver §1 bloco
+    `propeller` e `docs/backlog.md` item 6, RESOLVIDO), pelo MESMO
+    raciocínio: correção física, não mudança de contrato. Baseline real
+    E10: **≈−0,06416 m (ciclo 9) → ≈−0,00249 m (ciclo 10)** — MESMO
+    veredito (checagem #25 continua FAIL), só o número muda.
 - Histórico: v3.x usava `revision` como string livre, sem os blocos
   `geometry`/`sizing`/`fidelity`/`warnings` (que existiam calculados
   internamente, mas não eram serializados) e sem política de bump
@@ -617,6 +626,28 @@ documentação a ser corrigido, não um comportamento aceitável.
     `docs/backlog.md` (item 1, marcado RESOLVIDO),
     `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
     pins honestos completos.
+  - **Task 1 de ciclo10-sag-e-linha-de-tracao (2026-08-09, ainda dentro da
+    v5.2 — bump formal fica para a Task 3 do mesmo ciclo)**: CAVEAT dos
+    mains rígidos nomeado logo acima **RESOLVIDO** — `[gear].
+    h_cg_ground_m` sempre foi a altura do CG com a aeronave CARREGADA, em
+    deflexão ESTÁTICA (não "trem estendido sem carga"), então os mains
+    JÁ estão nessa deflexão dentro de `ground_clearance_m`; CS 23.925 pela
+    LETRA só exige o trem CRÍTICO (nariz) no batente, não os mains
+    simultaneamente. Não havia condição composta não modelada. Campo de
+    CONFIGURAÇÃO NOVO `[gear].static_sag_fraction` (faixa (0,15, 0,55) m,
+    baseline 0,33) é campo NOVO **obrigatório**, SEM default — TOMLs
+    pré-task falham o parse (`missing field`). Corrige o curso do nariz
+    usado na fórmula de TOTAL para RESTANTE
+    (`nose_oleo_stroke_mm × (1 − static_sag_fraction)`), já que o
+    amortecedor de nariz também PARTE da deflexão estática — a fórmula
+    anterior contava essa compressão DUAS VEZES. Fator geométrico
+    inalterado (≈1,46610); `prop_clearance_critical_m` vai de
+    **≈−0,06416 m para ≈−0,00249 m** — MESMO veredito (`validation_status`
+    continua `"FAIL"`, mesma 1 violação nomeada), honestamente
+    ANTI-conservador (a correção AUMENTA a folga calculada), mas fiel à
+    letra da norma. Ver `docs/backlog.md` (item 6, RESOLVIDO),
+    `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
+    pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -1039,7 +1070,7 @@ dedução completa.
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
-| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio). Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. **FÓRMULA (ciclo 9, transferência de atitude do #25 — old→new)**: `ground_clearance_m − Δ_prop`, `Δ_prop = (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m) × fator`, `fator = ([gear].x_main_m − [propeller].prop_plane_x_m)/([gear].x_main_m − [gear].x_nose_m)`. ANTES do ciclo 9 (translação vertical 1:1, ciclo 8, CAVEAT agora RESOLVIDO): `Δ_prop = nose_oleo_stroke_mm/1000 + tire_deflation_delta_m` (fator implícito 1) — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço AMPLIFICADO pelo fator acima (sempre > 1, invariante garantido pela validação composta `prop_plane_x_m < x_nose_m`). Baseline real E10: **+0,033 m (PASS, ciclo 8) → ≈−0,06416 m (FAIL, ciclo 9)**, fator ≈1,46610 — a simplificação 1:1 realmente mascarava um FAIL honesto, como o achado de review do ciclo 8 previu. Ver `docs/backlog.md` ("transferência de atitude do #25", RESOLVIDO). **CAVEAT NOMEADO (achado de review desta revisão final, ciclo 9 — NÃO corrigido)**: a fórmula pivota sobre os MAINS mas trata o trem PRINCIPAL como RÍGIDO e ESTENDIDO — deflexão do amortecedor/pneu principal (`main_oleo_stroke_mm` ≈ 212,4 mm no baseline real) não entra na fórmula; na prática ela translada o pivô ~1:1, ADITIVO ao termo já amplificado do nariz, ordem de grandeza MAIOR que a margem de +0,0682 m da célula recomendada pela campanha E11. Condição COMPOSTA de CS 23.925 (mains e nariz colapsados simultaneamente), não modelada. Ver `docs/backlog.md` (item 6, "condição composta CS 23.925") |
+| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio). Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. **FÓRMULA (ciclo 10, task 1, deflexão estática — old→new)**: `ground_clearance_m − Δ_prop`, `Δ_prop = (landing_gear.nose_oleo_stroke_mm/1000 × (1 − [gear].static_sag_fraction) + [gear].tire_deflation_delta_m) × fator`, `fator = ([gear].x_main_m − [propeller].prop_plane_x_m)/([gear].x_main_m − [gear].x_nose_m)`. ANTES do ciclo 10 (ciclo 9, curso TOTAL do nariz não RESTANTE): `Δ_prop = (nose_oleo_stroke_mm/1000 + tire_deflation_delta_m) × fator` — contava a compressão estática do nariz DUAS VEZES (implícita em `[gear].h_cg_ground_m`, que já é a altura CARREGADA/em deflexão estática — ver docstring desse campo —, e explícita no curso TOTAL do batente). ANTES do ciclo 9 (translação vertical 1:1, ciclo 8, CAVEAT RESOLVIDO): `Δ_prop = nose_oleo_stroke_mm/1000 + tire_deflation_delta_m` (fator implícito 1) — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço AMPLIFICADO pelo fator acima (sempre > 1, invariante garantido pela validação composta `prop_plane_x_m < x_nose_m`). Baseline real E10: **+0,033 m (PASS, ciclo 8) → ≈−0,06416 m (FAIL, ciclo 9) → ≈−0,00249 m (FAIL, ciclo 10)** — MESMO veredito desde o ciclo 9 (checagem #25 continua reprovando), fator ≈1,46610 (inalterado desde o ciclo 9). Ver `docs/backlog.md` ("transferência de atitude do #25", RESOLVIDO; item 6, RESOLVIDO ciclo 10). **CAVEAT DOS MAINS RÍGIDOS do ciclo 9 — RESOLVIDO no ciclo 10**: a fórmula pivota sobre os MAINS, mas NUNCA precisou de termo aditivo para eles — CS 23.925 pela LETRA só exige o trem CRÍTICO (nariz) no batente, os DEMAIS (mains) permanecem na deflexão ESTÁTICA já embutida em `[gear].h_cg_ground_m`/`ground_clearance_m` (a aeronave é sempre modelada CARREGADA). Não havia condição COMPOSTA não modelada — havia uma leitura imprecisa do que `h_cg_ground_m` representa. Ver `docs/backlog.md` (item 6, RESOLVIDO). **Nota independente, sinal OPOSTO e pequena, NÃO resolvida**: o disco da hélice também não é modelado como INCLINADO junto com o pitch da célula — CONSERVADOR em ≈+3,4 mm, ver `docs/backlog.md` (item 6) |
 
 **Nota de consistência**: quando `source == "derivado"`, o diâmetro aqui
 (autoritativo) pode divergir do `propulsion.prop_diameter_m` (provisório,
