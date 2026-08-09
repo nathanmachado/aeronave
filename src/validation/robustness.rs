@@ -545,22 +545,23 @@ impl RobustnessAgent {
                 // (`gear_p_masstotal.nose_oleo_stroke_mm`, já produzido por
                 // `evaluate_world` acima). Mesmo padrão `nom_ok && !p_ok`
                 // dos gates de desempenho acima.
-                // Ciclo 9 (transferência de atitude do #25): a mesma fórmula
-                // fechada de `PropellerSpec::fill_critical_clearance` — não
-                // reaproveitada diretamente porque este bloco recalcula com
-                // `gear_p_masstotal.nose_oleo_stroke_mm` (perturbado), não o
-                // `gear` nominal que `propeller_nominal.
-                // prop_clearance_critical_m` já embute — mas o FATOR
-                // geométrico é invariante ao mundo (não depende de massa,
-                // só de `[gear].x_main_m`/`x_nose_m`/`[propeller].
-                // prop_plane_x_m`), então reusa `cfg_p` (idêntico a `cfg`
-                // nesses três campos — só os 5 fatores de composto de massa
-                // mudam entre os dois).
-                let fator = (cfg_p.gear.x_main_m - cfg_p.propeller.prop_plane_x_m)
-                    / (cfg_p.gear.x_main_m - cfg_p.gear.x_nose_m);
-                let folga_critica_p = propeller_nominal.ground_clearance_m
-                    - (gear_p_masstotal.nose_oleo_stroke_mm / 1_000.0
-                       + cfg_p.gear.tire_deflation_delta_m) * fator;
+                // Ciclo 9 (transferência de atitude do #25): reaproveita a
+                // fonte única de verdade, `PropellerSpec::
+                // fill_critical_clearance`, em vez de reimplementar a
+                // fórmula fechada aqui (achado de review — a versão
+                // anterior deste comentário justificava uma reimplementação
+                // manual alegando que o método não serviria para o mundo
+                // perturbado, mas `fill_critical_clearance` já recebe
+                // `gear`/`gear_cfg` como parâmetros justamente para isso;
+                // `gear_p_masstotal` É o `gear` perturbado que o método
+                // espera). `ground_clearance_m` (folga ESTÁTICA) continua
+                // herdado do `propeller_nominal` clonado — não recalculado
+                // para o mundo massa-total, pela mesma aproximação
+                // documentada acima (honesta só no modo `source = "config"`
+                // — ver parágrafo anterior).
+                let mut propeller_p = propeller_nominal.clone();
+                propeller_p.fill_critical_clearance(&gear_p_masstotal, &cfg_p.gear, &cfg_p.propeller);
+                let folga_critica_p = propeller_p.prop_clearance_critical_m;
                 let nom_ok = propeller_nominal.prop_clearance_critical_m > 0.0;
                 let p_ok = folga_critica_p > 0.0;
                 if nom_ok && !p_ok {
@@ -1139,11 +1140,13 @@ mod tests {
     /// invariância. Verificado numericamente abaixo: MTOW sobe de
     /// ≈1.285 kg (nominal) para ≈1.363 kg (massa-total, σ=20%) e
     /// `nose_oleo_stroke_mm` NÃO SE MOVE um bit. Como a folga ESTÁTICA
-    /// (`propeller.ground_clearance_m`) e a deflexão de pneu
-    /// (`gear_cfg.tire_deflation_delta_m`) também são invariantes à massa
-    /// (geometria/config puros), os TRÊS termos de
-    /// `prop_clearance_critical_m` são invariantes ao mundo massa-total —
-    /// o gate #25 (`RobustnessAgent::run`, ramo `Ok(sized_p)`) está
+    /// (`propeller.ground_clearance_m`), a deflexão de pneu
+    /// (`gear_cfg.tire_deflation_delta_m`) e, desde o ciclo 9, o `fator` de
+    /// amplificação do pivô (`(gear.x_main_m−propeller.prop_plane_x_m)/
+    /// (gear.x_main_m−gear.x_nose_m)` — geometria pura, nenhum dos três
+    /// campos responde a σ) também são invariantes à massa, os QUATRO
+    /// termos de `prop_clearance_critical_m` são invariantes ao mundo
+    /// massa-total — o gate #25 (`RobustnessAgent::run`, ramo `Ok(sized_p)`) está
     /// corretamente FIADO (mesmo padrão `nom_ok && !p_ok` dos demais) mas
     /// é estruturalmente MORTO sob o modelo de trem atual: nenhuma config
     /// pode fazê-lo flipar, porque o valor perturbado é sempre BIT-A-BIT
@@ -1185,6 +1188,22 @@ mod tests {
             "curso do amortecedor de nariz deveria ficar EXATAMENTE invariante ao MTOW \
              (cancelamento algébrico em min_oleo_stroke_m) — perturbado {:.6}mm vs \
              nominal {:.6}mm", gear_p.nose_oleo_stroke_mm, n.gear.nose_oleo_stroke_mm);
+
+        // Ciclo 9: os QUATRO termos de `prop_clearance_critical_m`
+        // (`ground_clearance_m`/`nose_oleo_stroke_mm`/
+        // `tire_deflation_delta_m`/`fator`) são invariantes ao mundo
+        // massa-total — `fator` é geometria pura (`[gear].x_main_m`/
+        // `x_nose_m`/`[propeller].prop_plane_x_m`, nenhum dos quais responde
+        // a σ). Verificação bit-exata, ponta a ponta, reaproveitando a MESMA
+        // `fill_critical_clearance` que a produção usa (não uma
+        // reimplementação paralela da fórmula) — prova a invariância citada
+        // acima em vez de só inferi-la da ausência de flip.
+        let mut propeller_p = n.propeller.clone();
+        propeller_p.fill_critical_clearance(&gear_p, &cfg_p.gear, &cfg_p.propeller);
+        assert_eq!(propeller_p.prop_clearance_critical_m, n.propeller.prop_clearance_critical_m,
+            "prop_clearance_critical_m deveria ficar EXATAMENTE invariante ao MTOW no mundo \
+             massa-total — perturbado {:.9} vs nominal {:.9}",
+            propeller_p.prop_clearance_critical_m, n.propeller.prop_clearance_critical_m);
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,

@@ -38,6 +38,20 @@
 //! (deixa de violar o teto de 25%), mín 15,86%→11,72%, margem de
 //! combustível 14,33%→9,14%. `validation_status` volta a `PASS` — agora com
 //! ZERO violações E zero flips de robustez (primeiro PASS completo).
+//!
+//! ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25, 2026-08-09 —
+//! old→new): o "PASS completo" acima NÃO sobrevive a este ciclo.
+//! `PropellerSpec::fill_critical_clearance` corrige a simplificação
+//! conhecida do ciclo 8 (translação vertical 1:1 do nariz — `docs/
+//! backlog.md` item 1) para o pivô real da célula sobre o trem principal;
+//! no baseline real o fator de amplificação resultante (≈1,46610) reprova
+//! a checagem #25 (folga crítica de hélice, CS 23.925): `prop_clearance_
+//! critical_m` +0,0325 m (PASS) → ≈−0,06416 m (FAIL). `validation_status`
+//! volta a `FAIL` com EXATAMENTE 1 violação nomeada — todos os outros pins
+//! deste arquivo (tipback/tail-strike/carga de nariz/margem de
+//! combustível/robustez) permanecem INALTERADOS, ver
+//! `constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_
+//! real` abaixo.
 
 use std::path::PathBuf;
 

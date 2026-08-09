@@ -1445,8 +1445,17 @@ mod tests {
 
         propeller.fill_critical_clearance(&gear, &gear_cfg, &prop_cfg);
 
-        assert!((propeller.prop_clearance_critical_m - (-0.06416)).abs() < 0.001,
-            "prop_clearance_critical_m = {:.6} (esperado ≈−0,06416 m, ±0,001 — fator ≈1,46610)",
+        // Pin EXATO (fórmula fechada dos literais acima, fator =
+        // (3.66−0.20)/(3.66−1.30) = 1.466101694915254...) — não ±0,001: uma
+        // tolerância larga deixaria passar um erro de ~1,5% no fator (ex.:
+        // fator errado por uma transposição x_main/x_nose) sem quebrar o
+        // teste. Mesmo padrão de precisão do hand-check original deste
+        // teste (pré-ciclo-9, fator implícito 1). ≈−0,06416 m no brief da
+        // task era a estimativa arredondada (±0,001) a verificar no run —
+        // confirmada aqui com 9 casas.
+        assert!((propeller.prop_clearance_critical_m - (-0.064157457627119)).abs() < 1e-9,
+            "prop_clearance_critical_m = {:.15} (esperado exatamente -0.064157457627119 — \
+             fator = 1.466101694915254...)",
             propeller.prop_clearance_critical_m);
     }
 

@@ -240,14 +240,18 @@ pub struct PropellerCfg {
     /// projeto.
     pub ground_clearance_min_m: f64,
     /// Posição longitudinal do PLANO DA HÉLICE (m do datum no nariz —
-    /// ciclo 9, transferência de atitude do #25). Hélice TRATORA: o
-    /// spinner fica À FRENTE do CG do motor (`[arms].engine_cg_m` = 0,65 m
-    /// no baseline), então `prop_plane_x_m` < `arms.engine_cg_m` < demais
-    /// braços. Único consumidor: `PropellerSpec::fill_critical_clearance`
-    /// — o fator de amplificação do pivô sobre o trem principal,
-    /// `(gear.x_main_m − prop_plane_x_m)/(gear.x_main_m − gear.x_nose_m)`,
-    /// que substitui a translação vertical 1:1 (achado de review, ciclo 8;
-    /// corrigido no ciclo 9 — ver docstring do campo
+    /// ciclo 9, transferência de atitude do #25). Hélice TRATORA: no
+    /// baseline REAL o spinner fica à frente do CG do motor
+    /// (`prop_plane_x_m` 0,20 m < `[arms].engine_cg_m` 0,65 m) — ordem
+    /// física esperada para esta geometria, mas NÃO imposta por validação
+    /// nenhuma (só a composta abaixo é checada; a fixture sintética de
+    /// teste, `test_fixtures::config_teste()`, deliberadamente NÃO segue
+    /// essa ordem — ver comentário no valor da fixture). Único consumidor:
+    /// `PropellerSpec::fill_critical_clearance` — o fator de amplificação
+    /// do pivô sobre o trem principal, `(gear.x_main_m −
+    /// prop_plane_x_m)/(gear.x_main_m − gear.x_nose_m)`, que substitui a
+    /// translação vertical 1:1 (achado de review, ciclo 8; corrigido no
+    /// ciclo 9 — ver docstring do campo
     /// `PropellerSpec::prop_clearance_critical_m`). Validação COMPOSTA
     /// (`models::config::validate_aircraft_config`): deve ficar
     /// ESTRITAMENTE à frente do trem de nariz (`prop_plane_x_m <
