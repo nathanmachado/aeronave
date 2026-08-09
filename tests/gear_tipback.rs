@@ -311,7 +311,7 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let gear = gear_real();
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
     // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.with_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear);
     // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
     // de `main.rs`, contra os limites NOMINAIS já calculados (`wb`/`gear`).
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
@@ -441,7 +441,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let gear = gear_real();
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
     // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.with_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear);
     let robustness = aeronave::validation::robustness::RobustnessAgent::run(
         &cfg, &engine, &req, &sized.state, &sized.wing, &sized.emp, &sized.structural_masses,
         &sized.wb, &gear, &propeller, mission, &perf,

@@ -45,8 +45,11 @@ le_root_x_m = 2.90          # única fonte da posição do bordo de ataque
 # antes de congelar (mesma classe de parâmetro semi-empírico que cm_ac).
 cm_ac = -0.008
 cm_flap_delta = -0.30
-# ΔCD0 do flap CHEIO (pouso) — ciclo 8, task 1: fecha a lacuna declarada
-# desde o ciclo 7 ("não existe modelo de flap na polar deste crate"). 0.015
+# ΔCD0 do flap CHEIO (pouso) — ciclo 8, task 1: fecha PARCIALMENTE a lacuna
+# declarada desde o ciclo 7 ("não existe modelo de flap na polar deste
+# crate") — só o segmento de SUBIDA da decolagem consome este delta; a
+# rolagem de solo (segmento dominante, método energético) e a aproximação
+# de pouso (ângulo fixo) seguem sem termo de arrasto de flap. 0.015
 # é o valor central de um flap SLOTTED moderado (Raymer cap. 12 / Hoerner
 # "Fluid-Dynamic Drag" — faixa típica de incremento parasita por deployment
 # de flap com fenda simples, corda ~30%, sem grande translação tipo Fowler).

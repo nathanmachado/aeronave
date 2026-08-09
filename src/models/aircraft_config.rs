@@ -302,7 +302,7 @@ pub struct GearCfg {
     /// — batente do amortecedor de nariz TOTALMENTE COMPRIMIDO + pneu
     /// MURCHO/estourado. Típica de um pneu 5.00-5 (deflexão de projeto
     /// total, não só a seção de borracha) — consumida por
-    /// `specs::PropellerSpec::with_critical_clearance` junto com
+    /// `specs::PropellerSpec::fill_critical_clearance` junto com
     /// `GearSpec::nose_oleo_stroke_mm` (hélice TRATORA: é o trem de NARIZ
     /// que governa a folga crítica, não o principal — a hélice fica à
     /// frente, sobre o eixo de nariz). Ciclo 8, task 2. Faixa validada

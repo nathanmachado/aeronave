@@ -525,11 +525,23 @@ impl RobustnessAgent {
                 // Checagem #25 no mundo massa-total (ciclo 8, task 2) —
                 // folga de hélice em condição CRÍTICA (CS 23.925): a folga
                 // ESTÁTICA (`propeller_nominal.ground_clearance_m`) é
-                // INVARIANTE à massa neste modelo (só depende de geometria
-                // de config — `h_cg_ground_m`/`prop_axis_above_cg_m`/
-                // `diameter_m`, nenhum dos quais responde a σ), então não
-                // precisa ser recalculada; só o curso do amortecedor de
-                // NARIZ cresce com o MTOW re-convergido
+                // INVARIANTE à massa neste modelo QUANDO `[propeller].
+                // diameter_m` está FIXO na config (`source = "config"` —
+                // `h_cg_ground_m`/`prop_axis_above_cg_m`/`diameter_m`
+                // nenhum dos quais responde a σ nesse modo). No modo
+                // DERIVADO (`source = "derivado"`, achado de review não
+                // corrigido aqui), o diâmetro é o menor entre os limites de
+                // Mach de cruzeiro/folga (`diameter_max_by_mach_cruise_m`,
+                // que consome `v_cruise_ms`) — e a velocidade de cruzeiro
+                // convergida pode responder ao MTOW re-sizado no mundo
+                // massa-total, então a invariância NÃO está garantida nesse
+                // modo — mesmo assim, este bloco usa o `ground_clearance_m`
+                // NOMINAL como aproximação (não recalcula `propeller` para
+                // o mundo massa-total), o que é honesto só no modo config;
+                // no modo derivado esta aproximação é uma simplificação
+                // adicional não corrigida aqui. Só o curso do amortecedor
+                // de NARIZ é de fato recalculado, crescendo com o MTOW
+                // re-convergido
                 // (`gear_p_masstotal.nose_oleo_stroke_mm`, já produzido por
                 // `evaluate_world` acima). Mesmo padrão `nom_ok && !p_ok`
                 // dos gates de desempenho acima.
@@ -627,7 +639,7 @@ mod tests {
         // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem
         // #25) no MESMO caminho de `main.rs` — depois que `gear` existe.
         let mut propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
-        propeller.with_critical_clearance(&gear, &cfg.gear);
+        propeller.fill_critical_clearance(&gear, &cfg.gear);
         Nominal { cfg, engine, req, state, wing, emp, masses, wb, gear, propeller, mission, perf }
     }
 

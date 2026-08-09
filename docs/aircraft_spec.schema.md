@@ -559,6 +559,18 @@ documentação a ser corrigido, não um comportamento aceitável.
       #25 **PASSA** (folga positiva). `trim.rotation_limit_pct_mac`
       recentrado em `8,533% ± 0,05%` (era `8,908% ± 1,5%` desde o ciclo
       7, dívida de cobertura reapertada nesta task).
+    - **CAVEAT NOMEADO** (achado de review desta revisão final, NÃO
+      corrigido — fora de escopo): `prop_clearance_critical_m` modela o
+      colapso do trem de nariz como TRANSLAÇÃO VERTICAL 1:1 — simplificação
+      OTIMISTA, pois a célula real PIVOTA sobre o trem PRINCIPAL nesse
+      evento, e a hélice (à frente do trem de nariz) mergulha um braço
+      amplificado por `(x_main − x_prop)/(x_main − x_nose)` ≈ 1,4–1,55×,
+      não 1:1. Sob a transferência de atitude correta, a folga crítica real
+      do E10 é plausivelmente **NEGATIVA** (≈ −0,05 a −0,08 m, não os
+      +0,0325 m acima) — a checagem #25 pode estar aprovando um FAIL
+      honesto. Ver docstring de `PropellerSpec::prop_clearance_critical_m`
+      e `docs/backlog.md` ("transferência de atitude do #25") — nomeado
+      como item de ciclo futuro.
     - `validation_status` do baseline real **PERMANECE `"PASS"`** com
       `violations` VAZIO e `robustness.flips` VAZIO — mesmo veredito da
       campanha E10 (v5.0), sem nenhum flip novo introduzido pelas
@@ -601,7 +613,10 @@ etc.). Cada valor começa com um destes três rótulos:
 
 **O time de CAD deve tratar todo bloco marcado `preliminary` como
 NÃO liberado para fabricação sem uma etapa de validação adicional** — a
-tabela abaixo lista o tipo de análise esperada por bloco.
+tabela abaixo lista o tipo de análise esperada por bloco. Simplificações
+de modelo conhecidas e conscientemente NÃO corrigidas (achados de review
+nomeados, não silenciados) estão consolidadas em `docs/backlog.md`, com
+ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 
 | Bloco | Fidelidade típica (Task 6.1) | Análise posterior recomendada se `preliminary` |
 |---|---|---|
@@ -616,7 +631,7 @@ tabela abaixo lista o tipo de análise esperada por bloco.
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
 | `landing_gear` | preliminary (dimensionamento estático de cargas) | Análise dinâmica de pouso/afundamento |
-| `propeller` | semi-empirical (Mach de ponta + folga de solo) | Mapa de desempenho de hélice real do fabricante |
+| `propeller` | semi-empirical (Mach de ponta; folga de solo ESTÁTICA e, desde o ciclo 8, folga em condição CRÍTICA de CS 23.925 — checagem #25 — mas com viés OTIMISTA conhecido: modela o colapso do trem de nariz como translação vertical 1:1, quando a célula real pivota sobre o trem principal e a hélice mergulha um braço amplificado ≈1,4–1,55×, ver `docs/backlog.md`) | Mapa de desempenho de hélice real do fabricante; reavaliar `prop_clearance_critical_m` sob transferência de atitude real (não translação 1:1) |
 | `mission` | computed (segmentos + equação de Breguet, L/D constante em cruzeiro) | — |
 | `electrical` | preliminary (soma de cargas nominais configuradas) | Análise transiente/térmica real |
 | `sizing` | computed (laço de convergência de ponto fixo) | — |
@@ -679,7 +694,7 @@ esperado na saída atual do pipeline**.
 | `cl_max` | f64 | — | CL_max com flap/slat em configuração de POUSO (flap cheio) — usado nas distâncias de POUSO e no VS0. **Desde a v5.0**: NÃO é mais o CL_max das distâncias de DECOLAGEM nem da Vr da rotação — ver `cl_max_to` abaixo |
 | `cl_max_clean` | f64 | — | CL_max em configuração limpa (cruzeiro) |
 | `cl_max_to` | f64 (**novo v5.0**) | — | CL_max em configuração de DECOLAGEM (flap PARCIAL) — DERIVADO por interpolação linear entre `cl_max_clean` e `cl_max_flaps` (não ecoado; `cl_max` é o valor de pouso) pela mesma `trim.to_flap_fraction`: `cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)`. Consumido pela Vr/VS0 da ROTAÇÃO (bloco `trim`) e pelas distâncias de DECOLAGEM (`performance.to_distance_paved_m`/`to_distance_grass_m`/`to_50ft_paved_m`/`to_50ft_grass_m`, calculadas internamente por `agents::performance::takeoff_distance_m`/`takeoff_distance_50ft_m`) — ver §1 (v5.0) para o motivo da mudança |
-| `cd0_flap_to_extra` | f64 (**novo, ciclo 8 task 1 — formalizado na v5.1**) | — | ΔCD0 do flap PARCIAL de decolagem = `to_flap_fraction · [wing].cd0_flap_delta` — mesma fração de `cl_max_to` acima, agora aplicada ao arrasto. Consumido por `agents::performance::excess_power_kw` no segmento de SUBIDA da decolagem (`to_50ft_paved_m`/`to_50ft_grass_m`) e no gradiente CS 23.65 (`performance.climb_gradient_pct`, avaliado em Vx). Fecha a lacuna "não existe modelo de flap na polar deste crate" declarada desde o ciclo 7 — ver `fidelity.performance` para o detalhe de quais segmentos consomem/não consomem a polar |
+| `cd0_flap_to_extra` | f64 (**novo, ciclo 8 task 1 — formalizado na v5.1**) | — | ΔCD0 do flap PARCIAL de decolagem = `to_flap_fraction · [wing].cd0_flap_delta` — mesma fração de `cl_max_to` acima, agora aplicada ao arrasto. Consumido por `agents::performance::excess_power_kw` no segmento de SUBIDA da decolagem (`to_50ft_paved_m`/`to_50ft_grass_m`) e no gradiente CS 23.65 (`performance.climb_gradient_pct`, avaliado em Vx). Fecha PARCIALMENTE a lacuna "não existe modelo de flap na polar deste crate" declarada desde o ciclo 7 — a rolagem de solo (segmento DOMINANTE da distância de decolagem, método energético de Raymer) e a aproximação de pouso (ângulo fixo) seguem sem nenhum termo de arrasto de flap, por construção; ver `fidelity.performance` para o detalhe de quais segmentos consomem/não consomem a polar |
 | `stall_speed_flaps_kmh` | f64 | km/h | VS0 — stall com flap |
 | `stall_speed_clean_kmh` | f64 | km/h | VS1 — stall configuração limpa |
 | `ld_ratio_cruise` | f64 | — | L/D em cruzeiro. **v4.4**: recalculado com `cd_cruise` já incluindo o arrasto de trim (ver acima) |
@@ -911,9 +926,9 @@ dedução completa.
 | `to_distance_paved_m` / `to_distance_grass_m` | f64 | m | Distância de decolagem (rolagem simples, pista pavimentada/grama) |
 | `landing_distance_m` | f64 | m | Distância de pouso (rolagem simples) |
 | `range_km` / `endurance_h` | f64 | km / h | **INFORMATIVO** — eco de `propulsion.range_km`/`endurance_h`; não é o gate do projeto |
-| `vx_kmh` / `vy_kmh` | f64 | km/h | Velocidade de melhor ângulo / melhor razão de subida |
+| `vx_kmh` / `vy_kmh` | f64 | km/h | Velocidade de melhor ângulo / melhor razão de subida. **Viés conhecido em `vx_kmh`** (achado de review, pré-existente, não corrigido): `best_climb_angle_ms` devolve o PISO da varredura de velocidade (1,05·V_s_to), não um máximo interior — para esta célula RC/V é monotonicamente decrescente na faixa modelada, então `vx_kmh` reporta esse piso, não o ótimo verdadeiro; ver `climb_gradient_pct` abaixo e a docstring de `agents::performance::best_climb_angle_ms` |
 | `best_glide_kmh` / `glide_ratio` | f64 | km/h / — | Velocidade e razão L/D de melhor planeio |
-| `climb_gradient_pct` | f64 | % | Gradiente de subida em Vx, solo, MTOW (CS 23.65 exige ≥ 8,3%) |
+| `climb_gradient_pct` | f64 | % | Gradiente de subida em Vx, solo, MTOW (CS 23.65 exige ≥ 8,3%). **Viés OTIMISTA remanescente** (achado de review, pré-existente ao ciclo 8, não corrigido): avaliado no piso da varredura de `vx_kmh` (1,05·V_s_to), abaixo da referência típica da norma (≥1,2·V_s); no baseline real E10 o gradiente reportado é 13,896713% a 1,05·Vs, mas seria ≈12,4486% a 1,2·Vs (~1,45 p.p. otimista) — item de ciclo futuro, ver `docs/backlog.md` |
 | `to_50ft_paved_m` / `to_50ft_grass_m` | f64 | m | Distância de decolagem sobre obstáculo de 15 m/50 ft |
 | `ldg_50ft_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft, pista PAVIMENTADA (`mu_brake_paved`) — **INFORMATIVO** desde a v4.8: não é o gate de pista |
 | `ldg_50ft_grass_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (`mu_brake_grass`) — sempre > `ldg_50ft_m`; é a grandeza gateada pela checagem #24 contra `runway_available_m` |
@@ -983,7 +998,7 @@ dedução completa.
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
-| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio) — `ground_clearance_m − (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m)`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::with_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. Baseline real E10: ≈+0,033 m (PASS) |
+| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio) — `ground_clearance_m − (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m)`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. Baseline real E10: ≈+0,033 m (PASS). **CAVEAT (achado de review, ciclo 8, não corrigido)**: a fórmula é uma TRANSLAÇÃO VERTICAL 1:1 do curso do nariz — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço amplificado ≈1,4–1,55× o curso do nariz; sob a transferência de atitude real a folga crítica do E10 é plausivelmente NEGATIVA (≈−0,05 a −0,08 m), não os +0,033 m publicados — ver `docs/backlog.md` ("transferência de atitude do #25") |
 
 **Nota de consistência**: quando `source == "derivado"`, o diâmetro aqui
 (autoritativo) pode divergir do `propulsion.prop_diameter_m` (provisório,

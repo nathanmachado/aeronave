@@ -521,7 +521,7 @@ fn main() {
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25,
     // CS 23.925) — só possível AGORA que `gear` existe (ver docstring de
     // `PropellerSpec::prop_clearance_critical_m`).
-    propeller.with_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear);
     println!("  Folga crítica CS 23.925 (batente + pneu murcho): {:.3}m  |  {}",
              propeller.prop_clearance_critical_m,
              if propeller.prop_clearance_critical_m > 0.0 { "✓" } else { "✗" });
@@ -773,11 +773,18 @@ fn main() {
         "preliminary (dimensionamento estático de cargas; requer análise \
          dinâmica de pouso/afundamento)".into());
     fidelity.insert("propeller".into(),
-        "semi-empirical (Mach de ponta + folga de solo ESTÁTICA, trem \
-         totalmente estendido, aeronave nivelada — não desconta compressão \
-         de amortecedor/pneu murcho, a condição efetivamente crítica do \
-         CS 23.925; piso de projeto, não verificação regulatória direta; \
-         requer mapa de desempenho de hélice real do fabricante)".into());
+        "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — trem \
+         totalmente estendido, aeronave nivelada — E folga em condição \
+         CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no \
+         batente + pneu murcho, checagem #25; ambas piso de projeto, não \
+         verificação regulatória direta. VIÉS OTIMISTA conhecido e não \
+         corrigido na folga crítica: o modelo trata o colapso do trem de \
+         nariz como translação vertical 1:1, quando a célula real pivota \
+         sobre o trem principal e a hélice mergulha um braço amplificado \
+         (≈1,4–1,55× o curso do nariz) — a folga crítica real pode ser \
+         negativa mesmo quando a checagem #25 passa; ver docstring de \
+         PropellerSpec::prop_clearance_critical_m e docs/backlog.md. \
+         Requer mapa de desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \
          L/D constante em cruzeiro)".into());

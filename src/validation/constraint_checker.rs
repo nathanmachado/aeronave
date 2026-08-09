@@ -554,11 +554,37 @@ impl ConstraintChecker {
         // governa (fica sob o eixo da hélice, dianteiro), não o principal
         // — daí `gear.nose_oleo_stroke_mm`, não `main_oleo_stroke_mm`. Lê
         // `propeller.prop_clearance_critical_m` já PRECOMPUTADO (ver
-        // `specs::PropellerSpec::with_critical_clearance`, chamado em
+        // `specs::PropellerSpec::fill_critical_clearance`, chamado em
         // `main.rs`/nas fixtures de teste logo após o trem de pouso) — os
         // três termos abaixo (`ground_clearance_m`/`nose_oleo_stroke_mm`/
         // `tire_deflation_delta_m`) só narram a mensagem, não recalculam o
         // resultado (fonte única).
+        //
+        // Guarda de build debug (achado de review, ciclo 8): se algum
+        // caminho novo esquecer de chamar `fill_critical_clearance` depois
+        // do trem de pouso, `prop_clearance_critical_m` fica preso no
+        // placeholder `0.0` (ver docstring do campo) — o que a checagem
+        // acima trataria como VIOLAÇÃO (`0.0 <= 0.0`), não como omissão
+        // silenciosa. Ainda assim, uma omissão pode por acaso produzir um
+        // `prop_clearance_critical_m` positivo herdado de um `PropellerSpec`
+        // reaproveitado de outra chamada — o `debug_assert!` abaixo fecha
+        // essa lacuna comparando o campo PRECOMPUTADO contra a mesma fórmula
+        // fechada que a mensagem já narra, para que a omissão GRITE em teste
+        // (`panic!` em debug) em vez de mascarar silenciosamente atrás de um
+        // valor coincidentemente plausível. Não recalcula o resultado usado
+        // pelo gate (fonte única preservada) — só valida a invariante.
+        debug_assert!(
+            (propeller.prop_clearance_critical_m
+                - (propeller.ground_clearance_m
+                   - (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m))
+            ).abs() < 1e-9,
+            "propeller.prop_clearance_critical_m ({:.6}) não bate com a fórmula fechada \
+             ground_clearance_m − (nose_oleo_stroke_mm/1000 + tire_deflation_delta_m) \
+             ({:.6}) — `PropellerSpec::fill_critical_clearance` foi chamado?",
+            propeller.prop_clearance_critical_m,
+            propeller.ground_clearance_m
+                - (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m)
+        );
         if propeller.prop_clearance_critical_m <= 0.0 {
             violations.push(format!(
                 "Hélice (condição crítica CS 23.925): folga estática {:.3} m − curso do nariz \
@@ -732,7 +758,7 @@ mod tests {
         let gear_cfg = cfg.gear.clone();
         // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (check
         // #25) no MESMO caminho de `main.rs` — depois que `gear` existe.
-        propeller.with_critical_clearance(&gear, &gear_cfg);
+        propeller.fill_critical_clearance(&gear, &gear_cfg);
         // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA
         // sequência de `main.rs` — os dois conjuntos adversariais avaliados
         // contra os limites NOMINAIS já calculados acima (`wb`/`gear`, já
@@ -1843,13 +1869,21 @@ mod tests {
     /// sobrescreve `ok_mach_static`/`tip_mach_static` diretamente): a
     /// checagem lê o campo PRECOMPUTADO, não recalcula a partir de
     /// `ground_clearance_m`/`nose_oleo_stroke_mm`/`tire_deflation_delta_m`
-    /// — por isso o override isolado (sem tocar nos três termos, que só
-    /// narram a mensagem) já é suficiente para exercitar o ramo de violação.
+    /// — o `debug_assert!` novo do check #25 (achado de review, ciclo 8)
+    /// exige que o campo bata com a fórmula fechada desses três termos
+    /// (guarda contra `fill_critical_clearance` esquecido), então também
+    /// sobrescrevemos `ground_clearance_m` para manter a fixture
+    /// internamente consistente — `nose_oleo_stroke_mm`/
+    /// `tire_deflation_delta_m` (vindos de `gear`/`gear_cfg` da fixture)
+    /// continuam intocados, só narram a mensagem.
     #[test]
     fn check_25_violacao_de_folga_critica_aparece_com_override_sintetico() {
         let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear,
              gear_cfg, robustness) = setup();
-        propeller.prop_clearance_critical_m = -0.012;
+        let folga_critica_alvo = -0.012;
+        propeller.ground_clearance_m = folga_critica_alvo
+            + (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m);
+        propeller.prop_clearance_critical_m = folga_critica_alvo;
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,
@@ -1863,7 +1897,7 @@ mod tests {
 
     /// Ramo PASS — a fixture sintética padrão (`config_teste()`, folga
     /// estática 0,200 m, curso de nariz do baseline sintético ≈127,46 mm,
-    /// pneu murcho 0,05 m — ver `with_critical_clearance`) já produz
+    /// pneu murcho 0,05 m — ver `fill_critical_clearance`) já produz
     /// `prop_clearance_critical_m ≈ +0,0225 m > 0` NATURALMENTE (não
     /// forçado) — mesmo espírito do achado natural de
     /// `violacao_de_folga_de_solo_aparece_naturalmente_na_fixture_sintetica`
@@ -1888,12 +1922,17 @@ mod tests {
 
     /// Ramo PASS explícito no limite: `prop_clearance_critical_m` positivo
     /// mas bem pequeno não deveria violar — só `<= 0.0` viola (semântica
-    /// consistente com os demais pisos/tetos deste arquivo).
+    /// consistente com os demais pisos/tetos deste arquivo). Também
+    /// sobrescreve `ground_clearance_m` para satisfazer o `debug_assert!`
+    /// novo do check #25 (ver docstring do teste de violação acima).
     #[test]
     fn check_25_sem_violacao_quando_folga_critica_positiva_forcada() {
         let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical, gear,
              gear_cfg, robustness) = setup();
-        propeller.prop_clearance_critical_m = 0.001;
+        let folga_critica_alvo = 0.001;
+        propeller.ground_clearance_m = folga_critica_alvo
+            + (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m);
+        propeller.prop_clearance_critical_m = folga_critica_alvo;
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear,

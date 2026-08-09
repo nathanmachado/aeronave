@@ -86,7 +86,7 @@ fn build_baseline_report() -> AircraftReport {
 
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
     // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.with_critical_clearance(&gear, &cfg.gear);
+    propeller.fill_critical_clearance(&gear, &cfg.gear);
 
     let electrical = ElectricalAgent::run(&cfg);
 
@@ -235,9 +235,9 @@ fn wing_cl_max_to_entre_clean_e_flaps_trim_to_flap_fraction_renomeado() {
     );
 }
 
-/// Ciclo 8 (task 1, arrasto de flap na polar — ainda dentro de v5.0, bump
-/// formal para v5.1 pendente de §3/§4 do mesmo ciclo, ver
-/// `docs/aircraft_spec.schema.md`): `wing.cd0_flap_to_extra` (NOVO) está
+/// Ciclo 8 (task 1, arrasto de flap na polar — introduzido ainda dentro de
+/// v5.0; o bump formal para v5.1 foi concluído na Task 3 do mesmo ciclo,
+/// ver `docs/aircraft_spec.schema.md`): `wing.cd0_flap_to_extra` (NOVO) está
 /// presente e numérico no JSON, e bate com a fórmula fechada
 /// `to_flap_fraction · cd0_flap_delta` — mesmo precedente de
 /// `wing_cl_max_to_entre_clean_e_flaps_trim_to_flap_fraction_renomeado`
@@ -281,10 +281,10 @@ fn wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada() {
 /// `wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada` acima, mas
 /// sem fórmula fechada independente aqui (o campo já depende de dois
 /// agentes distintos rodando em sequência — `PropellerAgent` +
-/// `LandingGearAgent`/`PropellerSpec::with_critical_clearance` — reproduzir
+/// `LandingGearAgent`/`PropellerSpec::fill_critical_clearance` — reproduzir
 /// a fórmula neste teste duplicaria a lógica do pipeline sem adicionar
 /// cobertura; a fórmula fechada já é coberta por
-/// `models::specs::tests::with_critical_clearance_bate_com_a_formula_fechada`).
+/// `models::specs::tests::fill_critical_clearance_bate_com_a_formula_fechada`).
 #[test]
 fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado() {
     let report = build_baseline_report();
