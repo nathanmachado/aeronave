@@ -1102,11 +1102,26 @@ mod tests {
 
     // ─── CICLO 10 (task 2): momento da LINHA DE TRAÇÃO na rotação ─────────
 
+    /// Braço de eixo ARBITRÁRIO usado pelos testes de sensibilidade abaixo
+    /// (hand-checks e properties de direção do termo `−T·z_eixo`) — NÃO é
+    /// uma grandeza de produção. O `z_eixo` de PRODUÇÃO é
+    /// `[propeller].prop_axis_above_cg_m` (≈0,20 m no baseline real, o
+    /// offset EIXO↔CG — ver `rotation_available_moment_nm`/erratum da spec
+    /// §2, ciclo 10 task 2). Este valor (1,12 m) é um resquício do braço
+    /// PRÉ-ERRATUM (que somava `h_cg_ground_m + prop_axis_above_cg_m`,
+    /// medindo do SOLO em vez do CG — a versão ERRADA, cancelada pelo termo
+    /// inercial de d'Alembert); mantido aqui como número de teste porque
+    /// mudar o literal moveria os pins numéricos dos hand-checks abaixo,
+    /// não porque ele significa algo em produção.
+    const Z_TESTE_ARBITRARIO_M: f64 = 1.12;
+
     /// Hand-check do termo NOVO com LITERAIS: o momento da linha de tração
     /// é EXATAMENTE `T·z_eixo`, subtraído do momento nariz-acima disponível.
     ///
-    ///   T = 4.000 N, z_eixo = 1,12 m (= h_cg_ground 0,92 + offset 0,20 do
-    ///   baseline E10) ⟹ M_T = 4.480,0 N·m, NARIZ-ABAIXO.
+    ///   T = 4.000 N, z_eixo = `Z_TESTE_ARBITRARIO_M` = 1,12 m (valor
+    ///   ARBITRÁRIO de sensibilidade, não o `prop_axis_above_cg_m` de
+    ///   produção — ver docstring da constante) ⟹ M_T = 4.480,0 N·m,
+    ///   NARIZ-ABAIXO.
     ///
     /// Verificado dos DOIS lados: (a) a diferença entre o momento com e sem
     /// tração é exatamente −4.480,0 N·m; (b) o deslocamento do limite
@@ -1122,7 +1137,7 @@ mod tests {
         let w_n = 1400.0 * G;
 
         let t_n = 4_000.0_f64;
-        let z_axis = 0.92 + 0.20; // = 1,12 m
+        let z_axis = Z_TESTE_ARBITRARIO_M;
         let m_t_esperado = 4_480.0_f64; // 4000 × 1,12
 
         let m_sem = rotation_available_moment_nm(
@@ -1156,11 +1171,12 @@ mod tests {
             x_com - x_sem);
     }
 
-    /// Property ESTRITA (a que a spec do ciclo 10 pede): eixo da hélice
-    /// MAIS ALTO (`z_eixo` maior — a alavanca que o candidato E11 quer
-    /// puxar, +12 cm) ⟹ mais binário nariz-abaixo da tração ⟹ limite
-    /// dianteiro de rotação RECUA. Se este teste falhar com o limite
-    /// AVANÇANDO, o sinal do termo está invertido.
+    /// Property ESTRITA (a que a spec do ciclo 10 pede): braço de eixo
+    /// MAIOR (`z_eixo` maior, `Z_TESTE_ARBITRARIO_M` + 12 cm — sensibilidade
+    /// sintética, não uma proposta de projeto real; ver docstring da
+    /// constante) ⟹ mais binário nariz-abaixo da tração ⟹ limite dianteiro
+    /// de rotação RECUA. Se este teste falhar com o limite AVANÇANDO, o
+    /// sinal do termo está invertido.
     #[test]
     fn eixo_mais_alto_recua_o_limite_de_rotacao() {
         let mac = 1.2463161361039574;
@@ -1176,11 +1192,11 @@ mod tests {
             -0.008, 0.35, -0.30, mac, 4_000.0, z,
         );
 
-        let x_baixo = x_para_z(1.12);          // baseline E10
-        let x_alto = x_para_z(1.12 + 0.12);    // candidato E11 (+12 cm)
+        let x_baixo = x_para_z(Z_TESTE_ARBITRARIO_M);          // braço arbitrário
+        let x_alto = x_para_z(Z_TESTE_ARBITRARIO_M + 0.12);    // + 12 cm, sensibilidade
         println!("x_cg_rot(z=1.12)={x_baixo:.6}m  x_cg_rot(z=1.24)={x_alto:.6}m");
         assert!(x_alto > x_baixo,
-            "eixo da hélice MAIS ALTO (z=1.24, {x_alto:.6}m) deveria RECUAR ESTRITAMENTE o \
+            "eixo MAIS ALTO (z=1.24, {x_alto:.6}m) deveria RECUAR ESTRITAMENTE o \
              limite dianteiro de rotação em relação ao eixo mais baixo (z=1.12, {x_baixo:.6}m) — \
              tração acima do pivô é nariz-ABAIXO e ATRAPALHA a rotação");
     }
@@ -1199,7 +1215,7 @@ mod tests {
 
         let x_para_t = |t: f64| rotation_fwd_limit_m(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, t, 1.12,
+            -0.008, 0.35, -0.30, mac, t, Z_TESTE_ARBITRARIO_M,
         );
 
         let x_t3000 = x_para_t(3_000.0);
@@ -1246,7 +1262,7 @@ mod tests {
 
         let x_para_w = |mass_kg: f64| rotation_fwd_limit_m(
             mass_kg * G, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5,
-            x_ac_wing, -0.008, 0.35, -0.30, mac, 4_000.0, 1.12,
+            x_ac_wing, -0.008, 0.35, -0.30, mac, 4_000.0, Z_TESTE_ARBITRARIO_M,
         );
 
         let x_leve = x_para_w(1193.4);
@@ -1270,10 +1286,12 @@ mod tests {
     /// `to_flap_fraction` 0,5) — e não mais o 1,72 de POUSO.
     ///
     /// Ciclo 10 (task 2): o balanço independente ganha o termo da LINHA DE
-    /// TRAÇÃO (`− T·z_eixo`, com T e z LITERAIS aqui — 4.200 N × 1,12 m),
-    /// escrito à mão do lado independente também. Continua sendo um caminho
-    /// TOTALMENTE separado da substituição algébrica `q_r(W) = 1,21·W/(S·
-    /// CL_max_TO)` usada dentro da função.
+    /// TRAÇÃO (`− T·z_eixo`, com T e z LITERAIS aqui — 4.200 N ×
+    /// `Z_TESTE_ARBITRARIO_M` = 1,12 m, braço ARBITRÁRIO de sensibilidade,
+    /// não o `prop_axis_above_cg_m` de produção — ver docstring da
+    /// constante), escrito à mão do lado independente também. Continua
+    /// sendo um caminho TOTALMENTE separado da substituição algébrica
+    /// `q_r(W) = 1,21·W/(S·CL_max_TO)` usada dentro da função.
     #[test]
     fn rotation_fwd_limit_m_bate_com_balanco_de_momentos_independente() {
         let mac = 1.2463161361039574;
@@ -1285,7 +1303,7 @@ mod tests {
         let x_main = 3.85;
 
         let t_rot = 4_200.0_f64;
-        let z_axis = 1.12_f64;
+        let z_axis = Z_TESTE_ARBITRARIO_M;
 
         let w_n = 12_000.0_f64;
         let vs0 = (2.0 * w_n / (RHO_SL * s_w * cl_max_to)).sqrt();
@@ -1874,12 +1892,22 @@ mod tests {
         // Campanha E10 (2026-08-08): a corda desta MUTAÇÃO passa de 0.28
         // para 0.26 — MESMO mecanismo do reajuste do ciclo 7, `cl_max_to`
         // de novo (mais o `Cm_TO`), NÃO o recuo de CG da bateria. Vale
-        // insistir porque é contraintuitivo: `rotation_fwd_limit_m` não
-        // recebe CG, massa nem `x_nose_m` — é invariante ao peso (prova
-        // algébrica na docstring da função, prova numérica em
-        // `rotation_limit_e_invariante_a_massas_diferentes`). Os ÚNICOS
-        // parâmetros de E10 que o alcançam são `cl_max_flaps` e
-        // `to_flap_fraction`, pelos dois termos que eles governam:
+        // insistir porque, NA ÉPOCA (pré-ciclo-10-task-2), era
+        // contraintuitivo: `rotation_fwd_limit_m` não recebia CG, massa nem
+        // `x_nose_m` — era invariante ao peso (prova algébrica na
+        // docstring da função à época, prova numérica no teste renomeado
+        // `rotation_limit_e_invariante_a_massas_diferentes_sem_tracao`, ver
+        // seu sufixo "_sem_tracao"). ATUALIZAÇÃO (ciclo 10, task 2 — LINHA
+        // DE TRAÇÃO): essa invariância MORREU para o modelo de produção — o
+        // momento da linha de tração (`−T(Vr(W))·prop_axis_above_cg_m`,
+        // braço pós-erratum d'Alembert) faz `rotation_fwd_limit_m`
+        // responder ao peso de cada cenário, e este teste chama
+        // `TrimAuthorityAgent::run` de verdade (não a função isolada com
+        // `T=0`), então o `rotation_limit_pct_mac` computado abaixo JÁ
+        // inclui esse termo. Os ÚNICOS parâmetros de E10 que alcançam os
+        // termos AERODINÂMICOS abaixo (o resto da análise desta mutação)
+        // continuam sendo `cl_max_flaps` e `to_flap_fraction`, pelos dois
+        // termos que eles governam:
         //   M/W ∝ (1/cl_max_to)·[A + B + Cm_TO·S_w·MAC]
         //   cl_max_to = cl_max_clean + to_flap_fraction·(cl_max_flaps − cl_max_clean)
         //   Cm_TO     = cm_ac + to_flap_fraction·cm_flap_delta
