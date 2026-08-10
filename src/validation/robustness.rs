@@ -1279,4 +1279,100 @@ mod tests {
              possível no mundo massa-total sob o modelo de trem atual, obteve: {:?}",
             out.flips);
     }
+
+    /// F1 (ciclo 10, FIX WAVE): fixture DIRECIONAL onde a régua do mundo
+    /// perturbado (`flip.limite`) diverge da régua nominal
+    /// (`flip.limite_nominal`) — o caso que justifica o campo
+    /// `RobustnessFlip::limite_nominal` mas que nenhum teste exercitava
+    /// até aqui (o único assert pré-existente, em
+    /// `constraint_checker::tests::check_19_transforma_flips_em_violacoes_nomeadas`,
+    /// injeta um `RobustnessFlip` sintético com `limite_nominal == limite`
+    /// — não prova que a REPROJEÇÃO da régua em `evaluate_world`
+    /// funciona).
+    ///
+    /// Mesma fixture de `envelope_no_mundo_massa_total_flipa_quando_marginal`
+    /// (`arms.pax_rear_m` 5.75→6.2, achado por sonda numérica): desloca o
+    /// cenário "4 pax sem bagagem" para DENTRO do envelope nominal
+    /// (cg≈34,97%, entre fwd≈34,10% e aft≈36,41%). Sob o conjunto
+    /// adversarial DIANTEIRO (`caso="dianteiro"`, as 7 massas estruturais
+    /// dianteiras ×(1+σ), as traseiras ×(1−σ)) o cenário some para
+    /// cg≈31,72% — à FRENTE do limite dianteiro nominal (34,10%), gerando
+    /// o flip. A régua contra a qual esse flip é medido (`fwd_limit_p_pct_mac`
+    /// em `evaluate_world`) NÃO é a nominal: o momento da linha de tração
+    /// faz `rotation_limit_pct_mac` responder ao peso dos cenários, e as
+    /// massas estruturais do mundo dianteiro mudam a massa de TODOS os
+    /// cenários (via OEW) — a régua recalculada sobe para ≈34,41%, ~0,32pp
+    /// ATRÁS da régua nominal (≈34,10%). Uma regressão que voltasse a
+    /// comparar contra `wb_nominal.spec.cg_limit_fwd_pct_mac` produziria o
+    /// MESMO flip (mesmo `valor`, mesmo `check`), só com `limite` errado —
+    /// por isso o teste reconstrói a régua do mundo independentemente (via
+    /// `WeightBalanceAgent`/`TrimAuthorityAgent` no MESMO conjunto
+    /// adversarial `m_fwd`, não uma cópia do número) e compara com
+    /// `flip.limite`, não só com um pin numérico solto.
+    #[test]
+    fn regua_do_mundo_dianteiro_diverge_da_nominal_no_flip_de_cenario() {
+        let mut cfg = config_teste();
+        cfg.arms.pax_rear_m = 6.2;
+        let n = nominal_pipeline(cfg);
+
+        let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")
+            .expect("fixture deveria ter o cenário '4 pax sem bagagem'");
+        assert!(sc_marginal.inside_envelope,
+            "pré-condição do teste: cenário '4 pax sem bagagem' deveria passar no envelope \
+             nominal (cg={:.3}%, fwd={:.3}%, aft={:.3}%)", sc_marginal.cg_pct_mac,
+            n.wb.spec.cg_limit_fwd_pct_mac, n.wb.spec.cg_limit_aft_pct_mac);
+
+        // Régua do mundo dianteiro, reconstruída INDEPENDENTEMENTE (mesmo
+        // caminho de `RobustnessAgent::run`/`evaluate_case`, não uma cópia
+        // do resultado): conjunto adversarial `m_fwd`, `WeightBalanceAgent`
+        // sobre ele, `TrimAuthorityAgent` sobre o `wb_p` resultante.
+        let sigma = n.cfg.mass_model.sigma_mass_fraction;
+        let (m_fwd, _m_aft) = adversarial_masses(&n.cfg, &n.engine, &n.masses, sigma);
+        let wb_p = WeightBalanceAgent::run(&n.state, &n.wing, &n.engine, &n.cfg, &n.req, &n.emp, &m_fwd);
+        let trim_p = crate::agents::trim_authority::TrimAuthorityAgent::run(
+            &n.cfg, &n.wing, &n.emp, &wb_p, &n.state, &n.engine, &n.req, 0.0,
+        );
+        let fwd_limit_p_esperado = trim_p.flare_limit_pct_mac.max(trim_p.rotation_limit_pct_mac);
+        println!("fwd_limit_p_esperado = {fwd_limit_p_esperado:.4}  fwd_nominal = {:.4}",
+            n.wb.spec.cg_limit_fwd_pct_mac);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.propeller, &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+
+        let flips_dianteiro: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Cenário '4 pax sem bagagem'" && f.caso == "dianteiro")
+            .collect();
+        assert_eq!(flips_dianteiro.len(), 1,
+            "esperava exatamente 1 flip Cenário '4 pax sem bagagem'/dianteiro: {:?}", out.flips);
+        let flip = flips_dianteiro[0];
+
+        assert!(flip.valor < flip.limite,
+            "cg sob o conjunto dianteiro ({:.3}%) deveria estar À FRENTE do limite dianteiro do \
+             mundo perturbado ({:.3}%) — é isso que caracteriza o flip", flip.valor, flip.limite);
+
+        // O CORAÇÃO do teste (F1): `limite` é a régua DO MUNDO perturbado,
+        // NÃO a nominal — as duas divergem, e por uma margem grande o
+        // bastante (>0.05pp) para não ser ruído de ponto flutuante.
+        assert!((flip.limite - flip.limite_nominal).abs() > 0.05,
+            "flip.limite ({:.4}) e flip.limite_nominal ({:.4}) deveriam DIVERGIR nesta fixture \
+             (a régua do mundo dianteiro recalculada != a régua nominal) — se convergiram, a \
+             fixture não exercita mais a reprojeção de `evaluate_world`",
+            flip.limite, flip.limite_nominal);
+
+        // `limite` bate com a régua reconstruída independentemente (o
+        // mundo, não a nominal).
+        assert!((flip.limite - fwd_limit_p_esperado).abs() < 1e-6,
+            "flip.limite ({:.6}) deveria bater com a régua do mundo dianteiro reconstruída \
+             independentemente ({:.6})", flip.limite, fwd_limit_p_esperado);
+
+        // `limite_nominal` bate com a régua NOMINAL (`wb_nominal.spec.
+        // cg_limit_fwd_pct_mac`, o parâmetro `wb_nominal` de `evaluate_world`)
+        // — não com a régua do mundo.
+        assert!((flip.limite_nominal - n.wb.spec.cg_limit_fwd_pct_mac).abs() < 1e-9,
+            "flip.limite_nominal ({:.6}) deveria bater com o limite dianteiro NOMINAL ({:.6})",
+            flip.limite_nominal, n.wb.spec.cg_limit_fwd_pct_mac);
+    }
 }
