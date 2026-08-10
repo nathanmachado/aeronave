@@ -61,8 +61,12 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     // Campanha E10 (2026-08-08): h_cg_ground_m 1.05 → 0.92 (trem curto,
     // tipback robusto) e x_nose_m 1.40 → 1.30 (dilui a carga de nariz, que
     // era 28,6% > teto de 25%). Ver comentários no TOML.
+    // Campanha E12 "nariz-only" (2026-08-10): x_nose_m 1.30 → 1.20 —
+    // adoção pós-ciclo-10 da metade barata da célula E11 (só o nariz, sem
+    // subir o eixo da hélice); primeiro PASS do baseline com o modelo
+    // completo. Ver comentário no TOML.
     assert_eq!(cfg.gear.h_cg_ground_m, 0.92);
-    assert_eq!(cfg.gear.x_nose_m, 1.30);
+    assert_eq!(cfg.gear.x_nose_m, 1.20);
     // Campanha E1–E6 (2026-08-05): 3.85 → 3.55 — trem principal recuado,
     // causa raiz do fechamento do envelope de CG (ver comentário no TOML).
     // Campanha E7 (2026-08-06): 3.55 → 3.66 — fecha o tipback do baseline

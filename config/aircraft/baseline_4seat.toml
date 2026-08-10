@@ -231,7 +231,28 @@ h_cg_ground_m = 0.92
 # dianteiro. Era 28.6% (violação do teto de 25%) no baseline E7; com esta
 # mudança + o recuo de CG da bateria de E10 cai para ≈22.8%, com folga
 # suficiente para sobreviver aos mundos adversariais de massa. Antigo: 1.40.
-x_nose_m = 1.30
+#
+# Campanha E12 "nariz-only" (2026-08-10), adoção pós-ciclo-10: 1.30 → 1.20 —
+# trem de nariz avançado mais 10 cm (mesma direção de E10 acima), MANTENDO
+# [propeller].prop_axis_above_cg_m = 0.20 (a metade barata da célula E11 do
+# ciclo 9 — a outra metade, subir o eixo da hélice para 0.32, NÃO é adotada
+# aqui). A célula E11 combinava as duas mudanças; a re-avaliação do ciclo 10
+# com o modelo completo (sag estático correto + momento de linha de tração)
+# mostrou que só avançar o nariz já fecha o envelope sozinho:
+# validation_status PASS, violations = [] — primeiro PASS do baseline com
+# o modelo completo (#25 incluído). Janela viável medida: x_nose ∈
+# (1,16075, 1,27550) m — folga física magra, ≤~11 mm
+# nas duas bordas; 1.20 escolhido por ficar longe da borda dianteira (que é
+# a mais apertada) sem se aproximar da traseira. Efeito no fator geométrico
+# do #25: (x_main−prop_plane_x_m)/(x_main−x_nose_m), com x_main=3.66 e
+# prop_plane_x_m=0.20 nesta célula (ver [propeller] acima), cai de ≈1,46610
+# para ≈1,40650 — folga ESTÁTICA (sem trem colapsado) inalterada, só o
+# fator de amplificação do mergulho do nariz muda. O limite de rotação
+# (%MAC) em si NÃO se move com x_nose (x_nose não entra na régua de
+# TrimAuthorityAgent) — o que se move é o CG dos cenários mais dianteiros
+# (braço da massa do trem de nariz), que AVANÇA um pouco e consome parte da
+# margem de rotação de cada cenário. Antigo: 1.30.
+x_nose_m = 1.20
 # Campanha E1–E6 (2026-08-05), mudança 1: 3.85 → 3.55 — CAUSA RAIZ do
 # envelope de CG vazio do baseline anterior (trem principal longe demais
 # atrás do CG útil desta célula, empurrando o limite de rotação para

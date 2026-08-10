@@ -303,6 +303,16 @@ fn wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada() {
 /// (checagem #25 continua FAIL), só o número muda, honestamente
 /// ANTI-conservador. `fator` (≈1,46610) inalterado. Ver
 /// `docs/backlog.md` (item 6, RESOLVIDO ciclo 10).
+///
+/// ATUALIZAÇÃO (campanha E12 "nariz-only", 2026-08-10, adoção pós-ciclo-10
+/// — old→new): `[gear].x_nose_m` 1,30→1,20 (metade barata da célula E11
+/// do ciclo 9 — só o nariz, `[propeller].prop_axis_above_cg_m` mantido em
+/// 0,20). O denominador do fator geométrico `(x_main−prop_plane_x_m)/
+/// (x_main−x_nose_m)` alonga, e o fator CAI de ≈1,46610 para ≈1,40650 —
+/// menos amplificação do mergulho do nariz. `prop_clearance_critical_m`
+/// **≈−0,00249 m (ciclo 10) → +0,007367 m (E12) — VIRA POSITIVO**: esta é
+/// a checagem #25 fechando, primeiro PASS do baseline com o modelo
+/// completo. Veredito muda: FAIL → PASS.
 #[test]
 fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado() {
     let report = build_baseline_report();
@@ -317,13 +327,13 @@ fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado()
     );
     let obtido = obtido.unwrap();
     assert!(
-        (obtido - (-0.00249)).abs() < 0.001,
-        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈−0,00249 m \
-         (baseline real E10 pós-ciclo-10, checagem #25 FAIL — old: ≈−0,06416 m ciclo 9)"
+        (obtido - 0.007367).abs() < 0.001,
+        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈+0,007367 m \
+         (baseline real pós-E12 nariz-only, checagem #25 PASS — old: ≈−0,00249 m ciclo 10)"
     );
-    assert!(obtido < 0.0,
-        "campanha ciclo 10: baseline real deveria continuar REPROVANDO a checagem #25 (folga \
-         crítica negativa, mesmo veredito do ciclo 9 — só o número da violação muda)");
+    assert!(obtido > 0.0,
+        "campanha E12 nariz-only: baseline real deveria APROVAR a checagem #25 (folga crítica \
+         positiva pela primeira vez com o modelo completo)");
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco

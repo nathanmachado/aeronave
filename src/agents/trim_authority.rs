@@ -1844,13 +1844,23 @@ mod tests {
         // trim já é download, o mesmo termo AUMENTARIA o arrasto.
         // TOLERÂNCIAS INALTERADAS (±1e-4 e ±1e-6). Valores do pipeline REAL
         // convergido: CL_h_trim 0,046201, ΔCD_trim 5,357e-5.
-        assert!((trim.cl_h_trim_cruise - 0.043152).abs() < 1e-4,
-            "cl_h_trim_cruise = {:.6} (esperado ≈0.043152 ±1e-4, pin pós-ciclo-10 task 2)",
+        //
+        // Campanha E12 "nariz-only" (2026-08-10), adoção pós-ciclo-10:
+        // `[gear].x_nose_m` 1,30→1,20 alonga o braço da massa do item
+        // `trem_nariz` (arm_ref="gear_nose") em relação ao datum — o item
+        // AVANÇA, o que avança um pouco o CG de meia-missão desta fixture:
+        // x̄_cg 36,2181%→**36,1300%** MAC. Novos pins (mesma fórmula,
+        // TOLERÂNCIAS INALTERADAS): CL_h_trim_cruise 0,043152→**0,042667**
+        // (−1,1%), ΔCD_trim 4,672e-5→**4,5675e-5** (−2,2%). `x_nose_m` não
+        // entra no `cm_thrust`/`cm_ac` diretamente — o efeito aqui é 100%
+        // via deslocamento de CG, mesma mecânica das campanhas anteriores.
+        assert!((trim.cl_h_trim_cruise - 0.042667).abs() < 1e-4,
+            "cl_h_trim_cruise = {:.6} (esperado ≈0.042667 ±1e-4, pin pós-E12 nariz-only)",
             trim.cl_h_trim_cruise);
-        assert!((trim.cd_trim - 4.672e-5).abs() < 1e-6,
-            "cd_trim = {:.8} (esperado ≈4.672e-5 ±1e-6, pin pós-ciclo-10 task 2)", trim.cd_trim);
+        assert!((trim.cd_trim - 4.5675e-5).abs() < 1e-6,
+            "cd_trim = {:.8} (esperado ≈4.5675e-5 ±1e-6, pin pós-E12 nariz-only)", trim.cd_trim);
         assert!(trim.cl_h_trim_cruise > 0.0,
-            "CG de referência atrás do CA (x̄≈36,2% > 25%) deveria produzir upload \
+            "CG de referência atrás do CA (x̄≈36,1% > 25%) deveria produzir upload \
              (CL_h_trim_cruise > 0) mesmo com o cm_thrust nariz-abaixo — obtido {:.6}",
             trim.cl_h_trim_cruise);
     }

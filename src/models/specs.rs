@@ -1592,8 +1592,15 @@ mod tests {
 
     /// Hand-check congelado (ciclo 10, task 1, deflexão estática no #25 —
     /// RED-first, números do brief da task, ±0,001 no resultado final):
-    /// geometria do baseline E10 real (`x_nose_m` 1,30 m, `x_main_m`
+    /// geometria do baseline E10 real À ÉPOCA (`x_nose_m` 1,30 m, `x_main_m`
     /// 3,66 m, `prop_plane_x_m` 0,20 m, `static_sag_fraction` 0,33) ⟹
+    /// campanha E12 "nariz-only" (2026-08-10) recuou `x_nose_m` para 1,20 no
+    /// baseline REAL (`config/aircraft/baseline_4seat.toml`) — este
+    /// hand-check FICA CONGELADO nos literais antigos de propósito (verifica
+    /// a FÓRMULA fechada, não o baseline atual; o baseline atual é coberto
+    /// por `tests/schema_v4.rs::propeller_prop_clearance_critical_m_
+    /// presente_e_numerico_proximo_do_esperado`), então NÃO muda com a
+    /// adoção de E12.
     /// fator = (3,66−0,20)/(3,66−1,30) = 3,46/2,36 = 1,46610 (INALTERADO
     /// frente ao ciclo 9 — não depende de `static_sag_fraction`). Curso
     /// RESTANTE do nariz = 0,12746 × (1 − 0,33) = 0,12746 × 0,67 =

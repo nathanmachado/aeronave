@@ -65,6 +65,19 @@
 //! ANTI-conservador (folga MAIOR), fator (≈1,46610) inalterado. O caveat
 //! dos mains rígidos nomeado no ciclo 9 MORRE nesta task —
 //! `docs/backlog.md` (item 6, RESOLVIDO).
+//!
+//! ATUALIZAÇÃO (campanha E12 "nariz-only", 2026-08-10, adoção pós-ciclo-10):
+//! `[gear].x_nose_m` 1,30→1,20 — metade barata da célula E11 do ciclo 9 (só
+//! o nariz, `[propeller].prop_axis_above_cg_m` mantido em 0,20). Fecha a
+//! última violação restante (checagem #25, hélice): `prop_clearance_
+//! critical_m` ≈−0,00249 m → **+0,007367 m**. `validation_status` volta a
+//! `PASS` — primeiro PASS do baseline com o MODELO COMPLETO (sag estático +
+//! linha de tração + transferência de atitude do #25, todos ativos).
+//! `rotation_limit_pct_mac` fica INALTERADO (13,354637% MAC — x_nose_m não
+//! entra na régua); o CG dos cenários avança um pouco (braço do item de
+//! massa `trem_nariz`), consumindo uma fração pequena da margem de rotação.
+//! Tipback/carga de nariz também se movem um pouco (ver testes abaixo);
+//! tail-strike e margem de combustível ficam INALTERADOS.
 
 use std::path::PathBuf;
 
@@ -152,8 +165,13 @@ fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     // nos DOIS mundos adversariais de ±15% de massa (0 flips, era o objetivo
     // de (a)); antes de E10 o tipback nominal era mais folgado mas os
     // cenários dianteiros flipavam sob σ.
-    assert!((gear.tipback_angle_deg - 16.7356).abs() < 0.05,
-        "θ tipback = {:.4}° — pin honesto esperado ≈16.7356° (tolerância ±0.05°)",
+    // Campanha E12 "nariz-only" (2026-08-10): `[gear].x_nose_m` 1,30→1,20
+    // avança o braço da massa `trem_nariz` (arm_ref="gear_nose"), o que
+    // avança um pouco o CG mais TRASEIRO real também — `(x_main − x_cg_
+    // aft)` alonga ligeiramente e o tipback SOBE: 16,7356°→**≈16,7940°**
+    // (old→new, tolerância INALTERADA). Segue acima do piso de 15°.
+    assert!((gear.tipback_angle_deg - 16.7940).abs() < 0.05,
+        "θ tipback = {:.4}° — pin honesto esperado ≈16.7940° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
     assert!(gear.tipback_angle_deg >= 15.0,
         "achado honesto esperado: θ={:.2}° deveria ficar NO piso de 15° ou acima \
@@ -242,8 +260,13 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // exigir que a carga fique ABAIXO do teto. O caminho de erro (carga de
     // nariz acima do teto) segue coberto por config sintética mutada — ver
     // `validation::constraint_checker::tests` (checagem #17) em `src/`.
-    assert!((gear.nose_load_max_pct - 22.7693).abs() < 0.1,
-        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈22.7693% (tolerância ±0.1%)",
+    // Campanha E12 "nariz-only" (2026-08-10): `[gear].x_nose_m` 1,30→1,20
+    // alonga ainda mais o braço `(x_main − x_nose)` no denominador da
+    // fração de carga de nariz — DILUI mais um pouco a carga MÁXIMA:
+    // 22,7693%→**≈21,8973%** (old→new, tolerância INALTERADA). Segue
+    // abaixo do teto de 25%, agora com mais folga.
+    assert!((gear.nose_load_max_pct - 21.8973).abs() < 0.1,
+        "nose_load_max_pct = {:.4}% — pin honesto esperado ≈21.8973% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
     assert!(gear.nose_load_max_pct <= 25.0,
         "campanha E10: nose_load_max_pct = {:.2}% deveria ficar NO teto de 25% ou abaixo \
@@ -266,8 +289,12 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // piso de 8%, mas com bem menos folga: é o extremo do envelope que E10
     // aperta (o outro extremo, o teto de 25%, é o que ela abre). O check #19
     // (robustez ±15% de massa) confirma 0 flips também neste extremo.
-    assert!((gear.nose_load_min_pct - 11.7219).abs() < 0.05,
-        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈11.7219% (tolerância ±0.05%)",
+    // Campanha E12 "nariz-only" (2026-08-10): mesmo alongamento do braço
+    // `(x_main − x_nose)` dilui também a carga MÍNIMA: 11,7219%→
+    // **≈11,2869%** (old→new, tolerância INALTERADA). Continua acima do
+    // piso de 8%.
+    assert!((gear.nose_load_min_pct - 11.2869).abs() < 0.05,
+        "nose_load_min_pct = {:.4}% — pin honesto esperado ≈11.2869% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
 }
@@ -328,6 +355,14 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 /// verdadeiras, só o total deixa de ser zero. O caminho PASS de #25
 /// continua coberto por `constraint_checker::tests::check_25_sem_
 /// violacao_na_fixture_padrao` (fixture sintética).
+///
+/// ATUALIZAÇÃO (campanha E12 "nariz-only", 2026-08-10, adoção pós-ciclo-10
+/// — O TESTE VOLTA A REPORTAR ZERO): `[gear].x_nose_m` 1,30→1,20 (metade
+/// barata da célula E11 do ciclo 9 — só o nariz, eixo da hélice mantido em
+/// 0,20) fecha a checagem #25 pela primeira vez com o modelo completo:
+/// `prop_clearance_critical_m` ≈−0,00249 m → **+0,007367 m**. O nome do
+/// teste volta a ser literalmente verdadeiro — zero violações de trem E
+/// zero de hélice.
 #[test]
 fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -445,16 +480,14 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // total PERMANECE 1 (a de hélice, INTOCADA pela task 2, mesmo número
     // ≈−0,0025 m). O limite dianteiro recua +4,82 pp mas não reabre nada —
     // ver `tests/cli.rs` para a narrativa completa.
-    assert_eq!(report.violations.len(), 1,
-        "ciclo 10 (task 2): esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline \
-         real — obteve: {:?}", report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
-        "a única violação esperada é a de folga crítica de hélice (checagem #25): {:?}",
-        report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("-0.002")),
-        "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10): \
-         {:?}",
-        report.violations);
+    //
+    // ATUALIZAÇÃO (campanha E12 "nariz-only", 2026-08-10 — old→new): a
+    // última violação restante (hélice, #25) FECHA — `x_nose_m` 1,30→1,20
+    // reduz o fator de amplificação do pivô (≈1,46610→≈1,40650) o
+    // suficiente para virar a folga crítica positiva. Contagem 1 → **0**.
+    assert_eq!(report.violations.len(), 0,
+        "campanha E12 nariz-only: esperava ZERO violações no baseline real (a última, hélice/\
+         #25, fecha com x_nose_m 1,30→1,20) — obteve: {:?}", report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de

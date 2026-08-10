@@ -275,7 +275,13 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // limpa (cd_cruise −0,06%), o MTOW convergido cai 0,17 kg e sobra
     // combustível: 7.232495587 → **7.2391022047 h** (old→new, +0,09%;
     // tolerância INALTERADA).
-    let endurance_pin_h = 7.2391022047;
+    // Campanha E12 "nariz-only" (2026-08-10): `x_nose_m` 1,30→1,20 não
+    // afeta massa nem eficiência propulsiva, só o MTOW convergido cai um
+    // fio (ver `golden_toyota_baseline_regressao_task_2_1`) ⟹ um fio menos
+    // arrasto ⟹ mais horas: 7,2391022047 → **7,2395373559 h** (old→new,
+    // +0,006%; tolerância INALTERADA, dentro de 1e-3 mesmo sem re-pinar,
+    // re-pinado por honestidade).
+    let endurance_pin_h = 7.2395373559;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -298,7 +304,11 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro — mesma
     // causa da autonomia acima): 2.025,098764 → **2.026,948617 km**
     // (old→new, +0,09%; tolerância INALTERADA).
-    let range_pin_km = 2_026.948617;
+    // Campanha E12 "nariz-only" (2026-08-10): mesma causa da autonomia
+    // acima (MTOW convergido cai um fio) ⟹ um fio mais alcance com o
+    // mesmo tanque cheio: 2.026,948617 → **2.027,070460 km** (old→new,
+    // +0,006%; tolerância INALTERADA).
+    let range_pin_km = 2_027.070460;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -802,7 +812,13 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // cruzeiro levemente mais limpa ⟹ MTOW convergido cai
     // 1.537,565047159 → **1.537,399821663 kg** (old→new, −0,17 kg,
     // −0,011%; tolerância INALTERADA, 0,5 kg).
-    let mtow_convergido_kg = 1_537.399821663;
+    // Campanha E12 "nariz-only" (2026-08-10): `[gear].x_nose_m` 1,30→1,20
+    // não afeta nenhum item de MASSA (só braços/momentos de trem e o CG) —
+    // o resíduo medido é puramente numérico, dentro do ruído do laço de
+    // convergência: 1.537,399821663 → **1.537,388949071 kg** (old→new,
+    // −0,0109 kg, −0,0007%; MUITO abaixo da tolerância de 0,5 kg, re-pinado
+    // mesmo assim por honestidade).
+    let mtow_convergido_kg = 1_537.388949071;
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
@@ -818,7 +834,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Ciclo 10, Task 2: 7.232495587 → **7.2391022047 h** (old→new,
     // +0,09% — ver `autonomia_e_alcance_informativos_tanque_cheio_no_
     // mtow_convergido` para a cadeia causal). Tolerância INALTERADA.
-    let endurance_h = 7.2391022047;
+    // Campanha E12 "nariz-only" (2026-08-10): MTOW convergido cai um fio
+    // (ver `mtow_convergido_kg` acima) ⟹ menos arrasto induzido ⟹ mais
+    // horas com o mesmo tanque (informativo): 7,2391022047 →
+    // **7,2395373559 h** (old→new, +0,006%). Tolerância INALTERADA (1e-5).
+    let endurance_h = 7.2395373559;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -835,7 +855,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Ciclo 10, Task 2: menos arrasto de trim ⟹ menos potência
     // requerida em cruzeiro ⟹ 32,353977572 → **32,324450378 L/h**
     // (old→new, −0,09%). Tolerância INALTERADA (5e-5).
-    let fc_lph = 32.324450378;
+    // Campanha E12 "nariz-only" (2026-08-10): MTOW convergido cai um fio
+    // ⟹ um fio menos potência requerida em cruzeiro: 32,324450378 →
+    // **32,322507433 L/h** (old→new, −0,006%). Tolerância INALTERADA
+    // (5e-5).
+    let fc_lph = 32.322507433;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -1506,7 +1530,11 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro): menos
     // arrasto de trim ⟹ menos combustível — 235,961035 →
     // **235,767522 L** (old→new, −0,08%). Tolerância INALTERADA (1e-2).
-    let necessario_pin_l = 235.767522;
+    // Campanha E12 "nariz-only" (2026-08-10): MTOW convergido (com este
+    // tanque de 240 L mutado) cai um fio ⟹ um fio menos combustível
+    // exigido — 235,767522 → **235,754810 L** (old→new, −0,005%).
+    // Tolerância INALTERADA (1e-2).
+    let necessario_pin_l = 235.754810;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
         "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E10 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
