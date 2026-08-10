@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.2
+# `aircraft_spec.json` — contrato do schema v5.3
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -684,6 +684,65 @@ documentação a ser corrigido, não um comportamento aceitável.
     letra da norma. Ver `docs/backlog.md` (item 6, RESOLVIDO),
     `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
     pins honestos completos.
+- **v5.3** (Task 3, ciclo10-sag-e-linha-de-tracao, 2026-08-09 — bump
+  **MINOR**, exceção registrada, mesmo padrão da v5.2): formaliza o bump
+  que as Tasks 1/2 do mesmo ciclo já haviam anunciado como "ainda dentro
+  da v5.2" (ver notas de exceção em §1 acima e o sub-item "Task 1 de
+  ciclo10..." logo acima, sob v5.2). Três mudanças de conteúdo, nenhuma
+  nova nesta task — só formalizadas e documentadas:
+  1. **`propeller.prop_clearance_critical_m` mudou de fórmula DE NOVO**
+     (Task 1, `6c34f8f` — já detalhado no sub-item "Task 1 de
+     ciclo10-sag-e-linha-de-tracao" sob v5.2 acima): curso do amortecedor
+     de nariz de TOTAL para RESTANTE, campo de CONFIGURAÇÃO NOVO
+     `[gear].static_sag_fraction`. Baseline real E10: **≈−0,06416 m →
+     ≈−0,00249 m** — MESMO veredito (checagem #25 continua `FAIL`).
+  2. **Física nova do momento da linha de tração** (Task 2, `79b2263` +
+     erratum `713e846` + `f9231ea`): o balanço de momentos da rotação
+     ganha o termo `−T(Vr)·prop_axis_above_cg_m` (braço sobre o CG — ver
+     ERRATUM da spec, `docs/superpowers/specs/
+     2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md` §2: a corrida de
+     decolagem é ACELERADA, o termo de d'Alembert cancela a porção
+     `h_cg`, termos de solo `μN·h_cg`/`D·(h_cg−h_D)` permanecem
+     DESPREZADOS e documentados, ≲2 pp, direção anti-conservadora); o trim
+     de cruzeiro ganha `cm_thrust = −T_cruzeiro·prop_axis_above_cg_m/
+     (q·S_w·MAC)` somado ao `cm_ac` (aproximação `z_D = 0` documentada,
+     conservadora em até ~50% no pior caso plausível). Nenhum campo novo
+     — `trim.rotation_limit_pct_mac`, `trim.cl_h_trim_cruise`,
+     `trim.cd_trim` e `weight.cg_limit_fwd_pct_mac` mantêm nome/tipo/
+     unidade, só o VALOR muda. **Mudança de contrato adicional**:
+     `trim.rotation_limit_pct_mac` deixa de ser invariante ao peso —
+     agora é a envoltória MÁXIMA sobre os cenários (ver §4, bloco
+     `trim`). Baseline real: `rotation_limit_pct_mac` **8,533% →
+     13,355% MAC** (+4,82 pp); `validation_status` continua `"FAIL"` com
+     a MESMA 1 violação (#25, inalterada por esta mudança) e ZERO flips
+     de robustez — o que encolhe é a FOLGA de rotação do cenário mais
+     apertado ("Solo (piloto)", de +21,6% para +10,5%; todos os cenários
+     permanecem positivos).
+  3. **Campo NOVO `robustness.flips[].limite_nominal`** (f64) — este SIM
+     genuinamente ADITIVO (ver tabela `RobustnessFlip` em §4 abaixo). O
+     limite NOMINAL do mesmo check, ao lado de `limite` (o limite
+     efetivamente aplicado ao mundo perturbado) — necessário porque a
+     mudança #2 acima fez o limite dianteiro de rotação deixar de ser
+     invariante à massa, então dois mundos adversariais podem ter
+     `limite` diferentes entre si e do nominal. `limite_nominal ==
+     limite` para checks de régua invariante (tipback, carga de nariz,
+     gates de desempenho/pista); `limite_nominal != limite` sinaliza "a
+     régua andou", não só o CG do mundo perturbado.
+  - Mesma exceção MINOR da v5.2 aplicada aos itens 1-2: correção de bug de
+    modelagem física (dupla contagem / termo de momento faltante), não
+    mudança de CONTRATO de tipo/estrutura — nome/tipo/unidade dos campos
+    afetados são idênticos aos da v5.2. Registrado aqui para não esconder
+    a divergência entre a letra da política (§1 acima) e a decisão real.
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON,
+    Task 1): `[gear].static_sag_fraction` (faixa (0,15, 0,55), baseline
+    0,33) é campo NOVO **obrigatório**, SEM default — TOMLs pré-5.3 sem
+    esse campo falham o parse (`missing field`), mesmo padrão sem erro de
+    migração dedicado das versões anteriores. Ver
+    `config/aircraft/baseline_4seat.toml` para o valor de referência.
+  - Nenhuma tolerância de teste foi afrouxada em nenhuma das três
+    mudanças — só pins re-centrados old→new com a MESMA tolerância. Ver
+    `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs`/
+    `tests/generic_engine.rs` para os pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -1252,7 +1311,8 @@ Sub-bloco `robustness.flips[]` (`RobustnessFlip`):
 | `check` | string | — | Nome do check que flipou — `"Cenário '<nome>'"` (envelope de CG), `"Tipback"`, `"Carga de nariz máx"` ou `"Carga de nariz mín"` |
 | `caso` | string | — | Qual conjunto adversarial derrubou o check: `"dianteiro"` \| `"traseiro"` |
 | `valor` | f64 | %MAC ou ° (conforme `check`) | Valor observado SOB perturbação |
-| `limite` | f64 | mesma unidade de `valor` | Limite NOMINAL violado |
+| `limite` | f64 | mesma unidade de `valor` | Limite EFETIVAMENTE aplicado ao mundo perturbado. Até a v5.2, sempre igual ao limite NOMINAL (todos os limites de CG eram invariantes à massa). Desde o ciclo 10 (task 2, momento da linha de tração) o limite dianteiro de rotação passou a depender do peso — para os dois casos direcionais de CG este campo é a régua do PRÓPRIO mundo perturbado, que pode diferir da régua nominal |
+| `limite_nominal` | f64 (**novo, v5.3**) | mesma unidade de `valor` | Limite NOMINAL do mesmo check — o que a régua valia ANTES da perturbação. Existe para separar as duas causas possíveis de um flip que `valor`/`limite` sozinhos confundem: **"o CG andou"** (`limite_nominal == limite`, o mundo perturbado moveu o CG do cenário através da MESMA régua) vs. **"a régua andou"** (`limite_nominal != limite`, possível desde que o limite dianteiro de rotação passou a responder à massa perturbada — ver item 2 da entrada v5.3 em §1). Para checks cuja régua é invariante à perturbação (tipback, carga de nariz, gates de desempenho/pista, dimensionamento, hélice), `limite_nominal` é IGUAL a `limite` por construção |
 
 Cada flip em `robustness.flips` gera exatamente uma entrada em
 `violations` (checagem #19 de `ConstraintChecker::verify`, ver §4

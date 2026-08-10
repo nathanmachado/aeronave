@@ -1312,7 +1312,76 @@ pub struct ElectricalSpec {
 /// `docs/aircraft_spec.schema.md` §1, `docs/backlog.md` (item 1, marcado
 /// RESOLVIDO) e `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs`
 /// para os pins honestos completos.
-pub const SCHEMA_VERSION: &str = "5.2";
+///
+/// v5.3 (Task 3, ciclo10-sag-e-linha-de-tracao — bump **MINOR**, exceção
+/// registrada, MESMO padrão da v5.2): formaliza o bump que as Tasks 1 e 2
+/// do mesmo ciclo já haviam anunciado como "ainda dentro da v5.2" (ver as
+/// duas notas de exceção acima, "segunda aplicação" e "terceira
+/// aplicação"). Nenhum campo do JSON de saída foi
+/// renomeado/removido/mudou de tipo/unidade nas Tasks 1-2 — consumidores
+/// v5.2 continuam funcionando sem alteração para esses dois pontos; só
+/// `RobustnessFlip` abaixo ganha um campo genuinamente NOVO (aditivo). Três
+/// mudanças de conteúdo, nenhuma nova nesta task — só formalizadas:
+///   1. **`propeller.prop_clearance_critical_m` mudou de fórmula DE NOVO**
+///      (Task 1, `6c34f8f`): o curso do amortecedor de nariz usado no
+///      cálculo deixa de ser o curso TOTAL do batente e passa a ser o curso
+///      RESTANTE até o batente — `Δ_prop = (nose_oleo_stroke_mm/1000 ×
+///      (1 − [gear].static_sag_fraction) + tire_deflation_delta_m) ×
+///      fator`. Corrige uma dupla contagem: a compressão estática do nariz
+///      já está embutida em `[gear].h_cg_ground_m` (a aeronave é sempre
+///      modelada CARREGADA), e a fórmula anterior (ciclo 9) somava essa
+///      mesma compressão de novo ao usar o curso TOTAL. Campo de
+///      CONFIGURAÇÃO NOVO `[gear].static_sag_fraction` (fração 0–1,
+///      baseline 0,33 — sem valor padrão implícito, TOMLs pré-5.3 sem esse
+///      campo falham o parse por campo ausente, mesmo padrão de migração
+///      sem erro dedicado já usado em `e_h`/`runway_available_m`). Mesma
+///      exceção MINOR da v5.2 aplicada de novo: é correção de bug de
+///      modelagem física (dupla contagem), não mudança de contrato — nome/
+///      tipo/unidade do campo JSON são idênticos. Baseline real E10:
+///      `prop_clearance_critical_m` **≈−0,06416 m → ≈−0,00249 m** — MESMO
+///      veredito (checagem #25 continua `FAIL`, por 2,5 mm em vez de 6,4
+///      cm).
+///   2. **Física nova do momento da linha de tração** (Task 2, `79b2263` +
+///      erratum `713e846` + `f9231ea`): o balanço de momentos da rotação
+///      (`agents::trim_authority::rotation_available_moment_nm`) ganha o
+///      termo `−T(Vr)·prop_axis_above_cg_m` (braço sobre o CG, não sobre o
+///      solo — ver erratum §2 de
+///      `docs/superpowers/specs/2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md`,
+///      termo de d'Alembert cancela a porção `h_cg` porque a corrida de
+///      decolagem é ACELERADA); o trim de cruzeiro
+///      (`agents::trim_authority::cl_h_trim_cruise`) ganha `cm_thrust =
+///      −T_cruzeiro·prop_axis_above_cg_m/(q·S_w·MAC)` somado ao `cm_ac`.
+///      Nenhum campo novo — `trim.rotation_limit_pct_mac`,
+///      `trim.cl_h_trim_cruise`, `trim.cd_trim` e
+///      `weight.cg_limit_fwd_pct_mac` MANTÊM nome/tipo/unidade, só o VALOR
+///      muda (e `rotation_limit_pct_mac` deixa de ser invariante ao peso —
+///      passa a ser a envoltória MÁXIMA sobre os cenários, ver
+///      `agents::trim_authority::rotation_fwd_limit_m`). Mesma exceção
+///      MINOR: correção física (termo de momento que faltava), não mudança
+///      de contrato. Baseline real: `rotation_limit_pct_mac` **8,533% →
+///      13,355% MAC** (+4,82 pp); `validation_status` continua `"FAIL"` com
+///      a MESMA 1 violação (#25, hélice, inalterada por esta mudança) e
+///      ZERO flips de robustez — o que encolhe é a FOLGA de rotação do
+///      cenário mais apertado ("Solo (piloto)", de +21,6% para +10,5%).
+///   3. **`RobustnessFlip` ganha `limite_nominal` (f64) — este SIM
+///      genuinamente ADITIVO** (Task 2, campo já serializado desde a v5.2
+///      mas com documentação de schema adiada para esta task): o limite
+///      NOMINAL do mesmo check, ao lado de `limite` (o limite efetivamente
+///      aplicado ao mundo perturbado). Necessário porque a mudança #2 acima
+///      fez o limite dianteiro de CG (rotação) deixar de ser invariante à
+///      massa — dois mundos adversariais diferentes agora podem ter
+///      `limite` diferentes entre si E diferentes do nominal.
+///      `limite_nominal == limite` para checks cuja régua é invariante à
+///      perturbação (tipback, carga de nariz, gates de desempenho/pista);
+///      `limite_nominal != limite` é o sinal de que "a régua andou" (não
+///      só o CG do mundo perturbado). Ver `docs/aircraft_spec.schema.md`
+///      §4.
+/// Nenhuma tolerância de teste foi afrouxada em nenhuma das três mudanças —
+/// só pins re-centrados old→new com a MESMA tolerância. Ver
+/// `docs/aircraft_spec.schema.md` §1/§4 e `tests/cli.rs`/
+/// `tests/gear_tipback.rs`/`tests/schema_v4.rs`/`tests/generic_engine.rs`
+/// para os pins honestos completos.
+pub const SCHEMA_VERSION: &str = "5.3";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
