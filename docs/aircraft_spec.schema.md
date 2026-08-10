@@ -802,7 +802,7 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | `mission` | computed (segmentos + equação de Breguet, L/D constante em cruzeiro) | — |
 | `electrical` | preliminary (soma de cargas nominais configuradas) | Análise transiente/térmica real |
 | `sizing` | computed (laço de convergência de ponto fixo) | — |
-| `robustness` | **v4.7**: computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing completo com fatores ×(1+σ)) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
+| `robustness` | **v4.7** (atualizado v5.3): computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope avaliados na régua do PRÓPRIO mundo perturbado desde o ciclo 10 task 2 — o limite dianteiro deixou de ser invariante a massa (linha de tração); `flips[].limite_nominal` carrega a régua nominal para contraste; caso massa-total: re-sizing completo com fatores ×(1+σ)) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
 
 O texto exato de cada entrada (em português, como gerado pelo pipeline)
 pode variar ligeiramente entre execuções — a tabela acima é a referência
