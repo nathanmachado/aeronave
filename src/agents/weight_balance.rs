@@ -486,12 +486,16 @@ impl WeightBalanceOutput {
     /// `inside_envelope` refletir o critério dianteiro antes desta chamada.
     ///
     /// `spec.cg_limit_fwd_pct_mac` recebe `max(trim.flare_limit_pct_mac,
-    /// trim.rotation_limit_pct_mac)` — desde o fix de revisão da task
-    /// trim-authority (cancelamento de peso na rotação, ver
-    /// `agents::trim_authority::rotation_fwd_limit_m`), OS DOIS são
-    /// números ÚNICOS (não variam por cenário) — este limite se aplica
-    /// IGUALMENTE a TODOS os cenários, iterados abaixo um a um por
-    /// clareza estrutural (não porque o valor mude entre eles).
+    /// trim.rotation_limit_pct_mac)` — os DOIS continuam sendo números
+    /// ÚNICOS aplicados IGUALMENTE a todos os cenários (iterados abaixo um
+    /// a um por clareza estrutural, não porque o valor mude entre eles),
+    /// mas pelo motivo NOVO desde o ciclo 10 (task 2): o limite de rotação
+    /// deixou de ser invariante ao peso (momento da linha de tração, ver
+    /// `agents::trim_authority::rotation_fwd_limit_m`) e passou a ser
+    /// avaliado no cenário MAIS LEVE — o mais restritivo. Ou seja, o
+    /// número único agora é uma envoltória CONSERVADORA, não uma
+    /// identidade algébrica. A margem exata por cenário (na CG e no peso
+    /// reais de cada um) continua em `TrimSpec::rotation_margin_per_scenario`.
     pub fn apply_trim(&mut self, trim: &crate::models::specs::TrimSpec) {
         let fwd_limit_pct = trim.flare_limit_pct_mac.max(trim.rotation_limit_pct_mac);
         self.spec.cg_limit_fwd_pct_mac = fwd_limit_pct;

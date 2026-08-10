@@ -56,7 +56,10 @@ fn build_baseline_report() -> AircraftReport {
     // task trim-authority: já aplicado a `sized.wb` por `size_aircraft`
     // (`WeightBalanceOutput::apply_trim`) — recalcula aqui só para popular
     // o bloco `trim` do relatório, mesma sequência de `main.rs`.
-    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb);
+    // Ciclo 10 (task 2): `state`/`engine`/`req` + `prop.thrust_cruise_n` —
+    // momento da linha de tração na rotação e no trim de cruzeiro.
+    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb, state, &engine, &req,
+                                       prop.thrust_cruise_n);
 
     let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
     let cs = ControlSurfacesAgent::run(wing, emp, &cfg);

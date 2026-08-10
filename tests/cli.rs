@@ -450,6 +450,39 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// MESMA 1 violação nomeada (checagem #25) — só o NÚMERO da violação
 /// muda, não o veredito. Ver `docs/backlog.md` (item 6, RESOLVIDO ciclo
 /// 10).
+///
+/// ─── ATUALIZAÇÃO (ciclo 10, task 2, LINHA DE TRAÇÃO) — O ENVELOPE DE CG
+/// REABRE ────────────────────────────────────────────────────────────────
+///
+/// O momento da linha de tração entra no balanço de rotação
+/// (`T(Vr)·z_eixo`, nariz-abaixo, `z_eixo` = altura do eixo da hélice
+/// sobre o SOLO = 0,92+0,20 = 1,12 m — ver `agents::trim_authority::
+/// rotation_available_moment_nm`). Efeito medido no baseline real:
+/// `rotation_limit_pct_mac` **8,533% → 35,532% MAC** (+27,0 pp), porque a
+/// tração a Vr do cenário mais leve vale ≈3,5 kN e o binário
+/// nariz-abaixo consome quase metade do momento nariz-acima disponível.
+/// O envelope continua FECHADO (35,5% < 43,5%), mas ficou estreito.
+///
+/// Consequência honesta e ESPERADA (o brief da task previu "reabertura de
+/// Solo/2pax = achado honesto a reportar"): a contagem de violações vai de
+/// **1 para 7**:
+///   - 3 cenários fora do envelope: 'Solo (piloto)' (17,9%), '2 pax
+///     dianteiros' (20,5%), '4 pax sem bagagem' (32,2%) — todos à FRENTE
+///     do novo limite dianteiro de 35,5%;
+///   - 3 flips de robustez (#19) nos três cenários que AINDA passam no
+///     nominal ('4 pax + bagagem' cheio/meia/vazio): sob ±15% de massa
+///     estrutural no pior mundo dianteiro eles caem para 36,50/35,27/34,14
+///     contra o limite de 37,42% daquele mundo (a régua de CG passou a ser
+///     a do PRÓPRIO mundo perturbado — ver `validation::robustness`);
+///   - 1 violação de hélice (#25), a MESMA do ciclo 9/10-task-1, com o
+///     MESMO número (−0,002 m) — a task 2 não a toca.
+///
+/// Isto NÃO é regressão de código nem afrouxamento de teste: é um termo de
+/// momento REAL que faltava no modelo, cobrado agora. A decisão de projeto
+/// (baixar o eixo da hélice, recuar o trem principal, limitar potência na
+/// rotação, ou aceitar restrição operacional de carga mínima) é HUMANA e
+/// está registrada no relatório da task 2 do ciclo 10. Este teste passa a
+/// GUARDAR esse conjunto de 7 violações, nomeadas uma a uma abaixo.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo9() {
     let out_path = std::env::temp_dir().join(format!(
@@ -494,12 +527,15 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     // Assert de contagem PRIMEIRO, com a lista inteira na mensagem:
     // qualquer violação nova aparece por nome no output do teste, sem
     // precisar adivinhar qual foi.
-    assert_eq!(violations.len(), 1,
-        "ciclo 9: esperava EXATAMENTE 1 violação no baseline real (checagem #25, hélice — era \
-         ZERO na campanha E10): {violations:#?}");
-    assert!(violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
-        "a única violação esperada é a de folga crítica de hélice (checagem #25): \
+    assert_eq!(violations.len(), 7,
+        "ciclo 10 (task 2, linha de tração): esperava EXATAMENTE 7 violações no baseline real \
+         — 3 cenários fora do envelope (Solo/2 pax/4 pax sem bagagem), 3 flips de robustez \
+         (#19) e 1 de hélice (#25). Eram 1 no ciclo 9/10-task-1 e ZERO na campanha E10; a \
+         reabertura é o custo físico da linha de tração alta, ver o comentário acima: \
          {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+        "a violação de folga crítica de hélice (checagem #25) deveria continuar presente, \
+         intocada pela task 2: {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("-0.002")),
         "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10 — \
          era ≈−0,064 m no ciclo 9, deflexão estática corrige dupla contagem do curso do \
@@ -518,9 +554,26 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     // (2/3) Robustez (#19): 2 flips → 0. Os cenários 'Solo (piloto)' e
     // '2 pax dianteiros' recuaram de 9,1%/12,5% para 17,9%/20,5% MAC e
     // agora sobrevivem a ±15% de massa estrutural nos dois mundos.
-    assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
-        "campanha E10: esperava ZERO violações de robustez (σ=15%) — eram 2 ('Solo (piloto)' e \
-         '2 pax dianteiros') no ciclo 7: {violations:#?}");
+    //
+    // Ciclo 10 (task 2): de ZERO para TRÊS flips, e em cenários DIFERENTES
+    // dos do ciclo 7. Os dois cenários leves que flipavam antes ('Solo',
+    // '2 pax') não podem mais flipar — já reprovam no NOMINAL (um flip
+    // exige "passava no nominal"), e por isso aparecem na lista como
+    // violação de ENVELOPE, não de robustez. Quem flipa agora são os três
+    // cenários "4 pax + bagagem" (cheio/meia/vazio), os únicos que ainda
+    // passam no nominal: sob ±15% de massa estrutural no pior mundo
+    // dianteiro eles caem para 36,50/35,27/34,14 %MAC contra o limite
+    // dianteiro de 37,42% DAQUELE mundo.
+    let flips_robustez: Vec<&String> = violations.iter()
+        .filter(|v| v.starts_with("Robustez:")).collect();
+    assert_eq!(flips_robustez.len(), 3,
+        "ciclo 10 (task 2): esperava EXATAMENTE 3 flips de robustez (σ=15%), nos três cenários \
+         '4 pax + bagagem' que ainda passam no nominal: {violations:#?}");
+    for cenario in ["4 pax + bagagem + cheio", "4 pax + bagagem + meia",
+                    "4 pax + bagagem vazio"] {
+        assert!(flips_robustez.iter().any(|v| v.contains(cenario)),
+            "esperava flip de robustez no cenário '{cenario}': {violations:#?}");
+    }
     // (4) Pouso na GRAMA sobre 15 m: 605,0 m → 556,7 m, dentro dos 600 m
     // da pista de fazenda, por `cl_max_flaps` 1,72→2,1 (flap SLOTTED:
     // VS0 113,3→103,4 km/h, distância ∝ V_ref²).
@@ -535,15 +588,23 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
         "decolagem na grama (≈473,6 m pós-ciclo-8, era ≈469,3 m pós-E10, ≈457,7 m antes) \
          deveria continuar dentro dos 600 m: {violations:#?}");
-    // Nenhum dos 6 cenários de carga fora do envelope admissível — nem os
-    // dianteiros (que E10 recuou) nem os traseiros (que E10 aproximou do
-    // limite: o pior, '4 pax + bagagem + cheio', vai a 38,8% MAC contra um
-    // limite traseiro de 43,5%).
-    for cenario in ["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem",
-                    "4 pax + bagagem + cheio", "4 pax + bagagem + meia",
+    // Envelope de CG por cenário (ciclo 10, task 2 — REABERTURA honesta):
+    // os TRÊS cenários mais leves/dianteiros saem do envelope (o limite
+    // dianteiro recuou de 8,5% para 35,5% MAC), os três de "4 pax +
+    // bagagem" continuam dentro. Guarda o PADRÃO, não só a contagem.
+    let fora_do_envelope: Vec<&String> = violations.iter()
+        .filter(|v| v.contains("fora do envelope de CG admissível")).collect();
+    assert_eq!(fora_do_envelope.len(), 3,
+        "ciclo 10 (task 2): esperava EXATAMENTE 3 cenários fora do envelope: {violations:#?}");
+    for cenario in ["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem"] {
+        assert!(fora_do_envelope.iter().any(|v| v.contains(cenario)),
+            "cenário leve '{cenario}' deveria estar FORA do envelope pós-ciclo-10 task 2 \
+             (limite dianteiro 35,5% MAC): {violations:#?}");
+    }
+    for cenario in ["4 pax + bagagem + cheio", "4 pax + bagagem + meia",
                     "4 pax + bagagem vazio"] {
-        assert!(!violations.iter().any(|v| v.contains(cenario)),
-            "cenário '{cenario}' deveria estar DENTRO do envelope: {violations:#?}");
+        assert!(!fora_do_envelope.iter().any(|v| v.contains(cenario)),
+            "cenário '{cenario}' deveria continuar DENTRO do envelope: {violations:#?}");
     }
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");

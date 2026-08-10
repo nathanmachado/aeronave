@@ -341,13 +341,12 @@ fn main() {
     println!("  Limite de FLARE (pouso, número único, independe do peso): {:.2}% MAC  |  \
               CL_h disp={:.3}",
              trim.flare_limit_pct_mac, trim.cl_h_available);
-    // Fix de revisão (FIX1): a rotação, apesar de fisicamente depender do
-    // peso, resulta INVARIANTE ao peso do cenário sob Vr=1.1·Vs0(W) — ver
-    // agents::trim_authority::rotation_fwd_limit_m — por isso também é um
-    // número ÚNICO, não mais "por cenário" como na primeira versão deste
-    // agente.
-    println!("  Limite de ROTAÇÃO (decolagem, número único — INVARIANTE ao peso do cenário sob \
-              Vr=1.1·Vs0(W), ver derivação no código): {:.2}% MAC",
+    // Ciclo 10 (task 2): a invariância ao peso do limite de rotação MORREU
+    // — o momento da linha de tração (T(Vr(W))·z_eixo) não é proporcional a
+    // W, ver agents::trim_authority::rotation_fwd_limit_m. O número ÚNICO
+    // reportado passa a ser o do cenário MAIS LEVE (o mais restritivo).
+    println!("  Limite de ROTAÇÃO (decolagem, número único avaliado no cenário MAIS LEVE — \
+              depende do peso desde a linha de tração, ver derivação no código): {:.2}% MAC",
              trim.rotation_limit_pct_mac);
     println!("  Manobra que GOVERNA o limite dianteiro: {}", trim.governing);
     println!("  Margem de autoridade de rotação por cenário (diagnóstico, na CG/peso REAIS de \

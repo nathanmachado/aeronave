@@ -232,8 +232,10 @@ impl ConstraintChecker {
         // `sm > 0.03` — agora TODO cenário de carga precisa ter o CG
         // dentro de [cg_limit_fwd_pct_mac (flare/rotação,
         // TrimAuthorityAgent — número ÚNICO, o MESMO para todos os
-        // cenários desde o fix de revisão do cancelamento de peso na
-        // rotação), cg_limit_aft_pct_mac (sm_min)], não apenas os
+        // cenários; desde o ciclo 10 task 2 é a ENVOLTÓRIA conservadora
+        // avaliada no cenário mais leve, não mais uma invariância
+        // algébrica — ver `agents::trim_authority::rotation_fwd_limit_m`),
+        // cg_limit_aft_pct_mac (sm_min)], não apenas os
         // extremos observados entre os cenários. `sc.inside_envelope` já
         // reflete o veredito por cenário (finalizado por
         // `WeightBalanceOutput::apply_trim`); `cg_limit_fwd_pct_mac`
@@ -700,7 +702,7 @@ mod tests {
     ///
     /// DOCSTRING CORRIGIDA (revisão final, campanha E10): a versão anterior
     /// desta nota dizia que esta função era "usada por
-    /// `envelope_de_cg_fechado_sem_violacao_no_baseline_real` ... para
+    /// `envelope_de_cg_do_baseline_real_reabre_nos_cenarios_leves` ... para
     /// exercitar o baseline real (config E TAMBÉM missão de
     /// `config/missions/default.toml`, não a fixture sintética mais leve
     /// `requisitos_teste()`)" — FALSO desde que esse teste passou a chamar
@@ -882,7 +884,7 @@ mod tests {
     }
 
     /// Fix de revisão (FIX4): o baseline real tem envelope de CG VAZIO —
-    /// o limite de rotação (invariante ao peso, ≈39,9% MAC) fica À FRENTE
+    /// o limite de rotação (à época invariante ao peso, ≈39,9% MAC) fica À FRENTE
     /// do limite traseiro de estabilidade (≈36,6% MAC), então os dois
     /// critérios físicos são mutuamente incompatíveis com esta
     /// Campanha E1–E6 (2026-08-05): o baseline real fecha o envelope de CG
@@ -946,7 +948,7 @@ mod tests {
     /// DEMAIS testes deste módulo (violações ISOLADAS, com campos
     /// sobrescritos à mão) continuam com `motor_generico_teste()` intocado.
     #[test]
-    fn envelope_de_cg_fechado_sem_violacao_no_baseline_real() {
+    fn envelope_de_cg_do_baseline_real_reabre_nos_cenarios_leves() {
         let toml = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
         ).expect("falha ao ler baseline_4seat.toml do disco");
@@ -989,10 +991,41 @@ mod tests {
         let violacoes_de_envelope: Vec<&String> = report.violations.iter()
             .filter(|v| v.contains("fora do envelope de CG admissível"))
             .collect();
-        assert!(violacoes_de_envelope.is_empty(),
-            "achado honesto (ciclo 5): com a fixture reconvergida, NÃO deveria haver nenhuma \
-             violação de envelope (a coincidência de fixture da campanha E7, SM≈4,97%, some com \
-             o MTOW real reconvergido — ver docstring): {:?}", report.violations);
+        println!("violações de envelope = {violacoes_de_envelope:?}");
+        // ─── ACHADO HONESTO (ciclo 10, task 2 — linha de tração) ──────────
+        //
+        // Até o ciclo 9 este bloco exigia ZERO violações de envelope. O
+        // momento da LINHA DE TRAÇÃO na rotação (ver `agents::trim_
+        // authority::rotation_fwd_limit_m`) recua o limite DIANTEIRO de
+        // 8,5% para ≈36,1% MAC nesta fixture (≈35,5% no pipeline real), e
+        // com isso os QUATRO cenários mais leves/dianteiros do baseline
+        // saem do envelope: "Solo (piloto)" (16,6%), "2 pax dianteiros"
+        // (19,4%), "4 pax sem bagagem" (30,8%) e "4 pax + bagagem vazio"
+        // (35,6%). Só os dois cenários de missão cheia/meia continuam
+        // dentro.
+        //
+        // Isto NÃO é mascarado: é uma REABERTURA real do envelope de CG do
+        // baseline, reportada como achado do ciclo 10 (task-2-report) para
+        // decisão humana — o modelo passou a cobrar um custo físico que
+        // antes simplesmente não existia no balanço. O teste guarda o
+        // PADRÃO medido (quais cenários caem, e que os de missão cheia NÃO
+        // caem), para que uma futura correção de projeto (eixo mais baixo,
+        // trem recuado, potência limitada na rotação) apareça como uma
+        // mudança DELIBERADA deste pin, e não silenciosamente.
+        let fora: Vec<String> = violacoes_de_envelope.iter()
+            .map(|v| v.split('\'').nth(1).unwrap_or("?").to_string())
+            .collect();
+        assert_eq!(
+            fora,
+            vec!["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem",
+                 "4 pax + bagagem vazio"],
+            "achado honesto (ciclo 10, task 2): com o momento da linha de tração, os quatro \
+             cenários mais leves/dianteiros saem do envelope e os dois de missão cheia/meia \
+             ficam. Obtido: {report:?}"
+        );
+        assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
+            "o envelope continua FECHADO (fwd ≈36,1% < aft ≈43,5%) — a reabertura do ciclo 10 \
+             é de CENÁRIOS fora do envelope, não de envelope vazio: {:?}", report.violations);
         let cheio = wb.scenarios.iter().find(|s| s.name == "4 pax + bagagem + cheio")
             .expect("cenário '4 pax + bagagem + cheio' deveria existir nos scenarios");
         // Pin de banda (achado de review, ciclo 5, Minor 6): `> 0.05` sozinho
@@ -1059,9 +1092,13 @@ mod tests {
         //
         // Campanha E10 (2026-08-08): 0.28→**0.26** (`cl_h_max_down_calc`
         // ≈0.800), pelo MESMO mecanismo do ciclo 7 — `cl_max_to` e `Cm_TO`,
-        // NÃO o recuo de CG da bateria: `rotation_fwd_limit_m` não recebe
-        // CG, massa nem `x_nose_m` (invariante ao peso, ver a docstring da
-        // função e `rotation_limit_e_invariante_a_massas_diferentes`). Com
+        // NÃO o recuo de CG da bateria: à época `rotation_fwd_limit_m`
+        // não recebia CG, massa nem `x_nose_m` (era invariante ao peso —
+        // invariância que MORREU no ciclo 10 task 2 com o momento da linha
+        // de tração; a função passou a receber `weight_n`, e o dial desta
+        // mutação continua valendo porque o achado que ele guarda —
+        // envelope VAZIO — ficou ainda mais folgado com o limite recuado).
+        // Com
         // o dial em 0.28 esta mutação passava a dar rot 36,09% < aft
         // 36,61%, ou seja, o envelope voltava a FECHAR e o achado sumia;
         // 0.26 dá rot 37,53%, restaurando-o com 0,91 pp de folga. Derivação

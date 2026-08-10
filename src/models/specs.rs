@@ -258,14 +258,14 @@ pub struct WeightSpec {
     /// trim-authority, vem do `TrimAuthorityAgent` (autoridade FÍSICA de
     /// profundor em flare + rotação de decolagem), não mais do proxy
     /// `stability.sm_max` (removido): `max(TrimSpec::flare_limit_pct_mac,
-    /// TrimSpec::rotation_limit_pct_mac)` — AMBOS são números ÚNICOS (não
-    /// variam por cenário; ver docstring de `TrimSpec::
-    /// rotation_limit_pct_mac` para a derivação de por que a rotação é
-    /// invariante ao peso sob a política `Vr=1,1·Vs0(W)` deste modelo), logo
-    /// este limite se aplica IGUALMENTE a todos os cenários — não é mais um
-    /// agregado de "pior caso" entre cenários distintos (fix de revisão:
-    /// antes da correção do cancelamento de peso, cada cenário tinha um
-    /// limite de rotação diferente e este campo era o máximo entre eles).
+    /// TrimSpec::rotation_limit_pct_mac)` — AMBOS são números ÚNICOS
+    /// aplicados IGUALMENTE a todos os cenários. A flare porque de fato
+    /// não depende do peso; a ROTAÇÃO, desde o ciclo 10 (task 2), porque é
+    /// avaliada no cenário MAIS LEVE (o mais restritivo) e usada como
+    /// envoltória conservadora — o momento da linha de tração matou a
+    /// invariância ao peso que valia até o ciclo 9 (ver docstring de
+    /// `TrimSpec::rotation_limit_pct_mac` e `agents::trim_authority::
+    /// rotation_fwd_limit_m`).
     /// PODE ficar À FRENTE de `cg_limit_aft_pct_mac` — ver essa doc-comment
     /// para o significado de ENVELOPE VAZIO nesse caso.
     pub cg_limit_fwd_pct_mac: f64,
@@ -309,23 +309,31 @@ pub struct StructuralMassesSpec {
 
 /// Margem de autoridade de ROTAÇÃO na CG e no peso REAIS de UM cenário do
 /// `WeightBalanceAgent` (task trim-authority, fix de revisão) — em
-/// contraste com `TrimSpec::rotation_limit_pct_mac` (o CG MÍNIMO admissível,
-/// invariante ao peso — ver sua docstring), esta margem varia por cenário
-/// porque é avaliada na CG e no `Vr(W)` REAIS de CADA cenário, não no
-/// limite. Ver `agents::trim_authority::rotation_available_moment_nm`.
+/// contraste com `TrimSpec::rotation_limit_pct_mac` (o CG MÍNIMO
+/// admissível, número ÚNICO avaliado no cenário mais leve — ver sua
+/// docstring), esta margem é avaliada na CG e no `Vr(W)` REAIS de CADA
+/// cenário, não no limite: é a checagem EXATA por cenário, enquanto o
+/// limite único é a envoltória conservadora. Desde o ciclo 10 (task 2)
+/// inclui também a tração `T(Vr(W))` do próprio cenário. Ver
+/// `agents::trim_authority::rotation_available_moment_nm`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioTrimLimit {
     /// Nome do cenário — mesmo `ScenarioResult::name` do `WeightBalanceAgent`.
     pub scenario: String,
     /// `(momento nariz-acima DISPONÍVEL − momento nariz-acima NECESSÁRIO) /
     /// NECESSÁRIO × 100`, avaliados na CG e no peso reais deste cenário
-    /// (`Vr(W)` desse peso — ao contrário de `TrimSpec::
-    /// rotation_limit_pct_mac`, aqui W NÃO cancela porque o momento
-    /// NECESSÁRIO, `W·(x_main−x_cg)`, usa a CG REAL do cenário, não a CG no
-    /// limite). Negativo = autoridade de profundor INSUFICIENTE para
-    /// rotacionar nesta CG/peso — quanto mais negativo, maior o déficit.
-    /// Zero exatamente na CG do limite (`rotation_limit_pct_mac`), para
-    /// qualquer peso (prova numérica em `agents::trim_authority::tests`).
+    /// (`Vr(W)` desse peso). Negativo = autoridade de profundor
+    /// INSUFICIENTE para rotacionar nesta CG/peso — quanto mais negativo,
+    /// maior o déficit. Zero exatamente na CG do limite avaliado NO PESO
+    /// DESTE cenário; desde o ciclo 10 (task 2) isso já NÃO coincide mais
+    /// com `rotation_limit_pct_mac` (que é avaliado no cenário mais leve),
+    /// exceto para o próprio cenário mais leve.
+    ///
+    /// ACHADO HONESTO (ciclo 10, task 2): com o momento da linha de tração
+    /// no balanço, os dois cenários mais LEVES do baseline real passam a
+    /// ter margem NEGATIVA (Solo ≈−41%, 2 pax ≈−29%) — a aeronave, neste
+    /// modelo, não tem autoridade de profundor para rotacionar leve com o
+    /// eixo da hélice a 1,12 m do solo. Decisão de projeto pendente.
     pub rotation_authority_margin_pct: f64,
 }
 
@@ -373,16 +381,19 @@ pub struct TrimSensitivity {
 /// ver `agents::trim_authority` para a dedução completa.
 ///
 /// **Ambos os limites (`flare_limit_pct_mac`/`rotation_limit_pct_mac`) são
-/// NÚMEROS ÚNICOS, não variam por cenário** — a rotação, apesar de
-/// fisicamente depender do peso (`W`), resulta INVARIANTE sob a política de
-/// velocidade `Vr=1,1·Vs0(W)` deste modelo: `q_r(W) ∝ W`, então TODOS os
-/// termos de momento em jogo são proporcionais a `W`, e `W` cancela
-/// exatamente na divisão que dá a posição do CG-limite — ver a derivação
-/// completa (em português) na docstring de
-/// `agents::trim_authority::rotation_fwd_limit_m`. `rotation_margin_per_scenario`
-/// carrega uma quantidade DIFERENTE (e que de fato varia por cenário): a
-/// margem de autoridade avaliada na CG/peso REAIS de cada cenário (ver
-/// `ScenarioTrimLimit`).
+/// NÚMEROS ÚNICOS** — mas por motivos DIFERENTES desde o ciclo 10 (task 2).
+/// A flare simplesmente não depende do peso. A rotação DEPENDIA e deixou de
+/// depender... e voltou a depender: até o ciclo 9 valia a prova de que `W`
+/// cancelava exatamente (`q_r(W) ∝ W`, todos os termos de momento
+/// proporcionais a `W`); o momento da LINHA DE TRAÇÃO (`T(Vr(W))·z_eixo`)
+/// entrou no balanço e NÃO escala com `W`, matando a prova. O número único
+/// reportado passou a ser o do cenário MAIS LEVE (o mais restritivo, porque
+/// `T/W` cresce quando o peso cai) — uma ENVOLTÓRIA conservadora, não uma
+/// identidade algébrica. Ver a re-derivação completa (em português) na
+/// docstring de `agents::trim_authority::rotation_fwd_limit_m`.
+/// `rotation_margin_per_scenario` carrega uma quantidade DIFERENTE (e
+/// exata por cenário): a margem de autoridade avaliada na CG/peso REAIS de
+/// cada cenário (ver `ScenarioTrimLimit`).
 ///
 /// `governing`: `"flare"` ou `"rotacao"` — qual dos dois limites ÚNICOS é
 /// maior (mais restritivo). ACHADO DE PROJETO honesto (baseline real): a
@@ -393,11 +404,14 @@ pub struct TrimSensitivity {
 pub struct TrimSpec {
     /// Limite dianteiro de flare (%MAC) — número único, independe do peso.
     pub flare_limit_pct_mac: f64,
-    /// Limite dianteiro de rotação (%MAC) — número único: apesar de
-    /// fisicamente depender do peso do cenário, é INVARIANTE sob a política
-    /// `Vr=1,1·Vs0(W)` (ver docstring da struct/`agents::trim_authority::
+    /// Limite dianteiro de rotação (%MAC) — número único avaliado no
+    /// cenário MAIS LEVE (o mais restritivo). Depende do peso desde o
+    /// ciclo 10 (task 2): o momento da linha de tração `T(Vr(W))·z_eixo`
+    /// não escala com `W` e matou a invariância que valia até o ciclo 9
+    /// (ver docstring da struct/`agents::trim_authority::
     /// rotation_fwd_limit_m`). Para a margem de autoridade REAL por
-    /// cenário (que de fato varia), ver `rotation_margin_per_scenario`.
+    /// cenário (exata, na CG/peso de cada um), ver
+    /// `rotation_margin_per_scenario`.
     pub rotation_limit_pct_mac: f64,
     /// Margem de autoridade de rotação avaliada na CG/peso reais de cada
     /// cenário do `WeightBalanceAgent` — ver `ScenarioTrimLimit`.

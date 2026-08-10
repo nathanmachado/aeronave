@@ -50,6 +50,20 @@ documentação a ser corrigido, não um comportamento aceitável.
     raciocínio: correção física, não mudança de contrato. Baseline real
     E10: **≈−0,06416 m (ciclo 9) → ≈−0,00249 m (ciclo 10)** — MESMO
     veredito (checagem #25 continua FAIL), só o número muda.
+    **Terceira aplicação da mesma exceção** (ciclo10-sag-e-linha-de-tracao,
+    task 2, 2026-08-09, ainda dentro da v5.2): o momento da LINHA DE TRAÇÃO
+    entra no balanço de rotação e no trim de cruzeiro. Nenhum campo novo,
+    nenhum rename, nenhuma mudança de tipo/unidade — mas a SEMÂNTICA de
+    `trim.rotation_limit_pct_mac` muda (deixa de ser invariante ao peso e
+    passa a ser a envoltória avaliada no cenário mais leve; ver §4) e os
+    VALORES de `trim.rotation_limit_pct_mac`, `trim.cl_h_trim_cruise`,
+    `trim.cd_trim`, `weight.cg_limit_fwd_pct_mac`, `weight.scenarios[].
+    inside_envelope` e `violations` mudam. Mesmo raciocínio das duas
+    anteriores: é CORREÇÃO FÍSICA (um termo de momento que faltava), não
+    mudança de contrato. Baseline real: `rotation_limit_pct_mac`
+    **8,533% → 35,532% MAC**, e `validation_status` continua `"FAIL"` mas
+    com **7** violações em vez de 1 (3 cenários fora do envelope + 3 flips
+    de robustez + a de hélice, inalterada).
 - Histórico: v3.x usava `revision` como string livre, sem os blocos
   `geometry`/`sizing`/`fidelity`/`warnings` (que existiam calculados
   internamente, mas não eram serializados) e sem política de bump
@@ -177,9 +191,20 @@ documentação a ser corrigido, não um comportamento aceitável.
     voo de cruzeiro, não um extremo — ver `agents::trim_authority::
     cl_h_trim_cruise`):
     ```
-    CL_h_trim = [cm_ac + CL_cruise·(x̄_cg−0,25)] / [η_h·(S_h/S_w)·(l_h/MAC+0,25−x̄_cg)]
-    ΔCD_trim = (CL_h_trim²/(π·ar_h·e_h))·(S_h/S_w)
+    CL_h_trim = [cm_ac + cm_thrust + CL_cruise·(x̄_cg−0,25)]
+                / [η_h·(S_h/S_w)·(l_h/MAC+0,25−x̄_cg)]
+    ΔCD_trim  = (CL_h_trim²/(π·ar_h·e_h))·(S_h/S_w)
     ```
+    O termo `cm_thrust` entrou no **ciclo 10 (task 2)** — momento da linha
+    de tração em torno do CG em voo:
+    ```
+    cm_thrust = − T_cruzeiro · [propeller].prop_axis_above_cg_m / (q·S_w·MAC)
+    ```
+    Braço sobre o **CG** (não sobre o solo, ao contrário da rotação — o
+    pivô é diferente). Sinal: eixo ACIMA do CG + tração para a frente ⟹
+    nariz-abaixo ⟹ `Cm` NEGATIVO, o que empurra `CL_h_trim` na direção
+    NEGATIVA (mais download / menos upload). No baseline real vale ≈−0,0054
+    contra um `cm_ac` de −0,008 — não é um termo desprezível.
     `cm_ac` é o coeficiente de momento do perfil ISOLADO (sem
     `cm_flap_delta` — cruzeiro é sem flap, ao contrário do balanço de
     flare/rotação). `e_h` é a eficiência de Oswald da empenagem horizontal
@@ -482,7 +507,7 @@ documentação a ser corrigido, não um comportamento aceitável.
   - **Achado honesto do baseline real** (consequência FÍSICA da Task 1 —
     rotação e distâncias de decolagem usando o CL_max de DECOLAGEM correto
     em vez do de POUSO): `trim.rotation_limit_pct_mac` (limite dianteiro de
-    rotação, número único invariante ao peso) recua de **12,995% para
+    rotação, número único então invariante ao peso) recua de **12,995% para
     8,908% MAC** — a Vr correta é MAIOR (menos CL_max disponível na
     rotação), logo há MAIS autoridade de profundor disponível; o modelo
     anterior era pessimista, não o contrário. O espelho honesto desse
@@ -927,21 +952,39 @@ neste modelo trapezoidal — nenhum campo adicional é necessário), `AR_h` é
 elevator_deflection_max_deg` convertido para radianos.
 
 **`flare_limit_pct_mac` e `rotation_limit_pct_mac` são NÚMEROS ÚNICOS,
-NÃO variam por cenário de carga.** Isto é um resultado NÃO ÓBVIO para a
-rotação especificamente: apesar do balanço de momentos físico depender do
-peso do cenário (`W`), sob a política de velocidade `Vr = 1,1·Vs0(W)`
-usada por este modelo, a pressão dinâmica de rotação `q_r(W)` é
-PROPORCIONAL a `W` — logo TODOS os termos de momento em jogo (download da
-empenagem, sustentação da asa, momento de perfil+flap) também são
-proporcionais a `W`, e o `W` CANCELA EXATAMENTE ao calcular a posição do
-CG-limite (`x_cg_rot = x_main − M_disponível(W)/W`). Ver a dedução
-completa (em português) na docstring de
+NÃO variam por cenário de carga** — mas por motivos diferentes.
+
+A **flare** simplesmente não depende do peso.
+
+A **rotação** dependia, deixou de depender (prova de cancelamento
+algébrico), e voltou a depender:
+
+- Até o ciclo 9 valia o resultado NÃO ÓBVIO de que `W` cancelava: sob a
+  política `Vr = 1,1·Vs0(W)`, a pressão dinâmica de rotação `q_r(W)` é
+  PROPORCIONAL a `W`, logo todos os termos de momento em jogo (download da
+  empenagem, sustentação da asa, momento de perfil+flap) também são, e o
+  `W` CANCELA EXATAMENTE em `x_cg_rot = x_main − M_disponível(W)/W`.
+- **Ciclo 10 (task 2)** acrescenta o momento da **linha de tração**:
+  `−T(Vr)·z_eixo` (nariz-abaixo), com `z_eixo = [gear].h_cg_ground_m +
+  [propeller].prop_axis_above_cg_m` (altura do eixo da hélice sobre o
+  SOLO — o pivô da rotação é o contato do trem principal). `T` é tração de
+  hélice a `Vr` e **não** escala com `W`: como `Vr ∝ √W` e a potência de
+  eixo é fixa, `T/W ∝ η(J)·W^(−3/2)`. O termo sobrevive à divisão por `W`
+  e a invariância morre:
+  `x_cg_rot(W) = x_main − k_aero + T(Vr(W))·z_eixo/W`.
+- Consequência falseável: **aeronave mais LEVE ⟹ limite mais RECUADO**.
+  O número único publicado neste JSON é portanto avaliado no **cenário
+  MAIS LEVE** (o mais restritivo) e usado como ENVOLTÓRIA conservadora
+  sobre todos os cenários — não é mais uma identidade algébrica. A
+  checagem exata por cenário continua em `rotation_margin_per_scenario`.
+
+Ver a re-derivação completa (em português) na docstring de
 `agents::trim_authority::rotation_fwd_limit_m`.
 
 | Campo | Tipo | Unidade | Descrição |
 |---|---|---|---|
 | `flare_limit_pct_mac` | f64 | %MAC | Limite dianteiro de flare — número único, independe do peso |
-| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único, INVARIANTE ao peso (ver acima) |
+| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único avaliado no cenário MAIS LEVE (envoltória conservadora; DEPENDE do peso desde o ciclo 10 task 2, momento da linha de tração — ver acima) |
 | `rotation_margin_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Diagnóstico informativo POR CENÁRIO — margem de autoridade de rotação avaliada na CG/peso REAIS de cada cenário (essa sim varia por cenário) — NÃO usado para calcular `rotation_limit_pct_mac`/`inside_envelope` |
 | `governing` | string (`"flare"` \| `"rotacao"`) | — | Qual dos dois limites ÚNICOS é maior (mais restritivo) |
 | `cl_h_available` | f64 | — | CL_h disponível — `-cl_h_max_down·(1−trim_margin)` |
