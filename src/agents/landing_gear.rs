@@ -40,7 +40,9 @@ pub const GEAR_RETRACTION_DELTA_H_M: f64 = 0.40;
 /// Critério: tan(φ) = h_cg / (b_track / 2) < tan(55°)
 /// → b_track > 2 × h_cg × tan(55°)
 ///
-/// h_cg: altura do CG acima do solo com trem estendido (m)
+/// h_cg: altura do CG acima do solo com a aeronave CARREGADA, em deflexão
+/// estática (não trem estendido sem carga — contrato de `[gear].
+/// h_cg_ground_m`, ver docstring do campo) (m)
 pub fn min_track_width_m(h_cg_m: f64) -> f64 {
     2.0 * h_cg_m * (55.0_f64.to_radians().tan())
 }
@@ -91,7 +93,9 @@ pub fn tipback_angle_deg(x_main_m: f64, x_cg_aft_m: f64, h_cg_m: f64) -> f64 {
 ///   folga = atan(tail_cone_height_m / (tail_cone_x_m − x_main_m))
 ///
 /// `tail_cone_height_m` já é tratado como a altura do FUNDO do cone ao solo
-/// em atitude ESTÁTICA (trem estendido, aeronave nivelada) — a aproximação
+/// em atitude ESTÁTICA (aeronave CARREGADA, em deflexão estática — mesmo
+/// contrato de `[gear].h_cg_ground_m`, não trem estendido sem carga) — a
+/// aproximação
 /// NÃO desconta a elevação adicional do cone conforme a aeronave gira em
 /// torno do eixo do trem principal durante a rotação (efeito de segunda
 /// ordem, pequeno para ângulos de rotação moderados — documentado, não
@@ -217,7 +221,8 @@ impl LandingGearAgent {
         let eta_oleo   = 0.75_f64;
         let psi        = 45.0_f64;
 
-        // Altura do CG acima do solo (trem estendido) — `[gear] h_cg_ground_m`
+        // Altura do CG acima do solo (aeronave CARREGADA, em deflexão
+        // estática — não trem estendido sem carga) — `[gear] h_cg_ground_m`
         let h_cg_ground = gear_cfg.h_cg_ground_m;
         let x_nose_m = gear_cfg.x_nose_m;
         let x_main_m = gear_cfg.x_main_m;
@@ -399,6 +404,9 @@ mod tests {
             // `ConstraintChecker`/`RobustnessAgent`, ciclo 8 task 2) —
             // presente aqui só porque é campo obrigatório de `GearCfg`.
             tire_deflation_delta_m: 0.05,
+            // Idem — não consumido por `LandingGearAgent` (ciclo 10, task
+            // 1), só presente porque é campo obrigatório de `GearCfg`.
+            static_sag_fraction: 0.33,
         }
     }
 

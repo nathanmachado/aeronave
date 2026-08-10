@@ -258,14 +258,14 @@ pub struct WeightSpec {
     /// trim-authority, vem do `TrimAuthorityAgent` (autoridade FÍSICA de
     /// profundor em flare + rotação de decolagem), não mais do proxy
     /// `stability.sm_max` (removido): `max(TrimSpec::flare_limit_pct_mac,
-    /// TrimSpec::rotation_limit_pct_mac)` — AMBOS são números ÚNICOS (não
-    /// variam por cenário; ver docstring de `TrimSpec::
-    /// rotation_limit_pct_mac` para a derivação de por que a rotação é
-    /// invariante ao peso sob a política `Vr=1,1·Vs0(W)` deste modelo), logo
-    /// este limite se aplica IGUALMENTE a todos os cenários — não é mais um
-    /// agregado de "pior caso" entre cenários distintos (fix de revisão:
-    /// antes da correção do cancelamento de peso, cada cenário tinha um
-    /// limite de rotação diferente e este campo era o máximo entre eles).
+    /// TrimSpec::rotation_limit_pct_mac)` — AMBOS são números ÚNICOS
+    /// aplicados IGUALMENTE a todos os cenários. A flare porque de fato
+    /// não depende do peso; a ROTAÇÃO, desde o ciclo 10 (task 2), porque é
+    /// avaliada no cenário MAIS LEVE (o mais restritivo) e usada como
+    /// envoltória conservadora — o momento da linha de tração matou a
+    /// invariância ao peso que valia até o ciclo 9 (ver docstring de
+    /// `TrimSpec::rotation_limit_pct_mac` e `agents::trim_authority::
+    /// rotation_fwd_limit_m`).
     /// PODE ficar À FRENTE de `cg_limit_aft_pct_mac` — ver essa doc-comment
     /// para o significado de ENVELOPE VAZIO nesse caso.
     pub cg_limit_fwd_pct_mac: f64,
@@ -309,23 +309,31 @@ pub struct StructuralMassesSpec {
 
 /// Margem de autoridade de ROTAÇÃO na CG e no peso REAIS de UM cenário do
 /// `WeightBalanceAgent` (task trim-authority, fix de revisão) — em
-/// contraste com `TrimSpec::rotation_limit_pct_mac` (o CG MÍNIMO admissível,
-/// invariante ao peso — ver sua docstring), esta margem varia por cenário
-/// porque é avaliada na CG e no `Vr(W)` REAIS de CADA cenário, não no
-/// limite. Ver `agents::trim_authority::rotation_available_moment_nm`.
+/// contraste com `TrimSpec::rotation_limit_pct_mac` (o CG MÍNIMO
+/// admissível, número ÚNICO avaliado no cenário mais leve — ver sua
+/// docstring), esta margem é avaliada na CG e no `Vr(W)` REAIS de CADA
+/// cenário, não no limite: é a checagem EXATA por cenário, enquanto o
+/// limite único é a envoltória conservadora. Desde o ciclo 10 (task 2)
+/// inclui também a tração `T(Vr(W))` do próprio cenário. Ver
+/// `agents::trim_authority::rotation_available_moment_nm`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioTrimLimit {
     /// Nome do cenário — mesmo `ScenarioResult::name` do `WeightBalanceAgent`.
     pub scenario: String,
     /// `(momento nariz-acima DISPONÍVEL − momento nariz-acima NECESSÁRIO) /
     /// NECESSÁRIO × 100`, avaliados na CG e no peso reais deste cenário
-    /// (`Vr(W)` desse peso — ao contrário de `TrimSpec::
-    /// rotation_limit_pct_mac`, aqui W NÃO cancela porque o momento
-    /// NECESSÁRIO, `W·(x_main−x_cg)`, usa a CG REAL do cenário, não a CG no
-    /// limite). Negativo = autoridade de profundor INSUFICIENTE para
-    /// rotacionar nesta CG/peso — quanto mais negativo, maior o déficit.
-    /// Zero exatamente na CG do limite (`rotation_limit_pct_mac`), para
-    /// qualquer peso (prova numérica em `agents::trim_authority::tests`).
+    /// (`Vr(W)` desse peso). Negativo = autoridade de profundor
+    /// INSUFICIENTE para rotacionar nesta CG/peso — quanto mais negativo,
+    /// maior o déficit. Zero exatamente na CG do limite avaliado NO PESO
+    /// DESTE cenário; desde o ciclo 10 (task 2) isso já NÃO coincide mais
+    /// com `rotation_limit_pct_mac` (o MÁXIMO sobre os cenários), exceto
+    /// para o cenário que produz esse máximo.
+    ///
+    /// CUSTO MEDIDO (ciclo 10, task 2): o momento da linha de tração come
+    /// uma fatia real destas margens no baseline — o cenário mais apertado,
+    /// "Solo (piloto)", cai de +21,6% para +10,5% — mas NENHUMA fica
+    /// negativa: a aeronave continua rotacionando em todos os cenários de
+    /// carga.
     pub rotation_authority_margin_pct: f64,
 }
 
@@ -373,16 +381,20 @@ pub struct TrimSensitivity {
 /// ver `agents::trim_authority` para a dedução completa.
 ///
 /// **Ambos os limites (`flare_limit_pct_mac`/`rotation_limit_pct_mac`) são
-/// NÚMEROS ÚNICOS, não variam por cenário** — a rotação, apesar de
-/// fisicamente depender do peso (`W`), resulta INVARIANTE sob a política de
-/// velocidade `Vr=1,1·Vs0(W)` deste modelo: `q_r(W) ∝ W`, então TODOS os
-/// termos de momento em jogo são proporcionais a `W`, e `W` cancela
-/// exatamente na divisão que dá a posição do CG-limite — ver a derivação
-/// completa (em português) na docstring de
-/// `agents::trim_authority::rotation_fwd_limit_m`. `rotation_margin_per_scenario`
-/// carrega uma quantidade DIFERENTE (e que de fato varia por cenário): a
-/// margem de autoridade avaliada na CG/peso REAIS de cada cenário (ver
-/// `ScenarioTrimLimit`).
+/// NÚMEROS ÚNICOS** — mas por motivos DIFERENTES desde o ciclo 10 (task 2).
+/// A flare simplesmente não depende do peso. A rotação DEPENDIA e deixou de
+/// depender... e voltou a depender: até o ciclo 9 valia a prova de que `W`
+/// cancelava exatamente (`q_r(W) ∝ W`, todos os termos de momento
+/// proporcionais a `W`); o momento da LINHA DE TRAÇÃO (`T(Vr(W))·z_eixo`)
+/// entrou no balanço e NÃO escala com `W`, matando a prova. O número único
+/// reportado passou a ser o MÁXIMO dos limites por cenário (que neste
+/// modelo cai no mais leve, porque `T/W` cresce quando o peso cai) — uma
+/// ENVOLTÓRIA conservadora, não uma identidade algébrica. Variação medida
+/// entre os extremos de peso do baseline real: 1,4621 pp de MAC. Ver a re-derivação completa (em português) na
+/// docstring de `agents::trim_authority::rotation_fwd_limit_m`.
+/// `rotation_margin_per_scenario` carrega uma quantidade DIFERENTE (e
+/// exata por cenário): a margem de autoridade avaliada na CG/peso REAIS de
+/// cada cenário (ver `ScenarioTrimLimit`).
 ///
 /// `governing`: `"flare"` ou `"rotacao"` — qual dos dois limites ÚNICOS é
 /// maior (mais restritivo). ACHADO DE PROJETO honesto (baseline real): a
@@ -393,11 +405,14 @@ pub struct TrimSensitivity {
 pub struct TrimSpec {
     /// Limite dianteiro de flare (%MAC) — número único, independe do peso.
     pub flare_limit_pct_mac: f64,
-    /// Limite dianteiro de rotação (%MAC) — número único: apesar de
-    /// fisicamente depender do peso do cenário, é INVARIANTE sob a política
-    /// `Vr=1,1·Vs0(W)` (ver docstring da struct/`agents::trim_authority::
+    /// Limite dianteiro de rotação (%MAC) — número único, MÁXIMO dos
+    /// limites por cenário (o mais restritivo). Depende do peso desde o
+    /// ciclo 10 (task 2): o momento da linha de tração `T(Vr(W))·z_eixo`
+    /// não escala com `W` e matou a invariância que valia até o ciclo 9
+    /// (ver docstring da struct/`agents::trim_authority::
     /// rotation_fwd_limit_m`). Para a margem de autoridade REAL por
-    /// cenário (que de fato varia), ver `rotation_margin_per_scenario`.
+    /// cenário (exata, na CG/peso de cada um), ver
+    /// `rotation_margin_per_scenario`.
     pub rotation_limit_pct_mac: f64,
     /// Margem de autoridade de rotação avaliada na CG/peso reais de cada
     /// cenário do `WeightBalanceAgent` — ver `ScenarioTrimLimit`.
@@ -685,7 +700,25 @@ pub struct RobustnessFlip {
     /// agora escolhe um par valor/limite finito e informativo para toda
     /// variante de erro (ver comentário no local da construção).
     pub valor: f64,
+    /// Limite EFETIVAMENTE aplicado ao mundo perturbado. Desde o ciclo 10
+    /// (task 2) isto é a régua DO PRÓPRIO mundo perturbado para os limites
+    /// de CG — antes era sempre a régua nominal, porque os limites eram
+    /// invariantes às massas (ver `validation::robustness`, docstring do
+    /// módulo).
     pub limite: f64,
+    /// Limite NOMINAL do mesmo check — o que a régua valia antes da
+    /// perturbação (ciclo 10, task 2). Existe para que o leitor consiga
+    /// separar as DUAS causas possíveis de um flip, que `valor`/`limite`
+    /// sozinhos confundem:
+    ///   - **"o CG andou"**: `limite_nominal == limite` e `valor` cruzou;
+    ///   - **"a régua andou"**: `limite != limite_nominal` — o mundo +σ
+    ///     tem um limite dianteiro próprio (a linha de tração fez o limite
+    ///     de rotação depender do peso, que responde às massas
+    ///     perturbadas).
+    /// Para os checks cuja régua É invariante à perturbação (tipback,
+    /// carga de nariz, gates de desempenho/pista), `limite_nominal` é
+    /// IGUAL a `limite` por construção.
+    pub limite_nominal: f64,
 }
 
 /// Análise de robustez à incerteza do modelo de massas (ciclo 4) —
@@ -747,51 +780,63 @@ pub struct PropellerSpec {
     /// estática de `ground_clearance_m`. Hélice TRATORA: o trem de NARIZ
     /// governa (fica sob o eixo da hélice), não o principal.
     ///
-    /// FÓRMULA (ciclo 9, transferência de atitude do #25 — old→new):
+    /// FÓRMULA (ciclo 10, task 1, deflexão estática — old→new):
     /// `ground_clearance_m − Δ_prop`, com `Δ_prop = (gear.nose_oleo_stroke_mm
-    /// /1000 + gear_cfg.tire_deflation_delta_m) × fator` e
+    /// /1000 × (1 − gear_cfg.static_sag_fraction) +
+    /// gear_cfg.tire_deflation_delta_m) × fator` e
     /// `fator = (gear_cfg.x_main_m − prop_cfg.prop_plane_x_m)/(gear_cfg.
     /// x_main_m − gear_cfg.x_nose_m)` — ver `fill_critical_clearance`.
-    /// ANTES do ciclo 9 (translação vertical 1:1, ciclo 8): `Δ_prop =
-    /// gear.nose_oleo_stroke_mm/1000 + gear_cfg.tire_deflation_delta_m`
-    /// (fator implícito = 1), como se o colapso do amortecedor/pneu de
-    /// nariz afundasse a célula INTEIRA rigidamente. FÍSICA CORRIGIDA: o
-    /// evento (batente do amortecedor de nariz + pneu murcho) PIVOTA a
-    /// aeronave sobre o trem PRINCIPAL, não a translada — a hélice, à
-    /// FRENTE do trem de nariz, mergulha um braço AMPLIFICADO pelo fator
-    /// acima (sempre > 1 quando `prop_plane_x_m < x_nose_m < x_main_m`,
-    /// invariante garantido pela validação composta de
-    /// `models::config::validate_aircraft_config`). No baseline E10 real
-    /// (`prop_plane_x_m` 0,20 m, `x_nose_m` 1,30 m, `x_main_m` 3,66 m):
-    /// fator ≈ 1,46610, `prop_clearance_critical_m` **+0,0325 m (PASS,
-    /// ciclo 8) → ≈ −0,06416 m (FAIL, ciclo 9)** — a simplificação 1:1 era
-    /// OTIMISTA e mascarava um FAIL real, exatamente como o achado de
-    /// review do ciclo 8 (`docs/backlog.md`, item 1) previu. Ver o
-    /// histórico completo old→new na docstring de `SCHEMA_VERSION`.
+    /// ANTES desta task (ciclo 9): `Δ_prop = (gear.nose_oleo_stroke_mm/1000
+    /// + gear_cfg.tire_deflation_delta_m) × fator` — o termo de nariz usava
+    /// o curso TOTAL do amortecedor, não o curso RESTANTE até o batente.
+    /// FÍSICA CORRIGIDA (CS 23.925 pela LETRA — leitura da norma, não uma
+    /// mudança de opinião): o caso crítico da norma coloca APENAS o trem
+    /// CRÍTICO (aqui, o de nariz — hélice TRATORA) no batente; os DEMAIS
+    /// trens (aqui, o principal) permanecem na deflexão ESTÁTICA normal.
+    /// `[gear].h_cg_ground_m` já é medido com a aeronave CARREGADA, em
+    /// deflexão estática (ver docstring desse campo) — os mains JÁ estão
+    /// nessa deflexão dentro de `h_cg_ground_m`/`ground_clearance_m`, daí
+    /// NUNCA precisarem de termo aditivo aqui (mata o caveat dos mains
+    /// rígidos abaixo). Pelo MESMO motivo, o amortecedor de NARIZ também
+    /// PARTE da deflexão estática, não estendido — na condição crítica ele
+    /// só percorre o curso RESTANTE até o batente
+    /// (`nose_oleo_stroke_mm × (1 − static_sag_fraction)`), não o curso
+    /// TOTAL. A fórmula do ciclo 9 contava a compressão estática do nariz
+    /// DUAS VEZES (implícita em `h_cg_ground_m`, explícita no curso total
+    /// do batente) — corrigir para o curso restante reduz `Δ_prop` e
+    /// AUMENTA a folga crítica: honestamente ANTI-conservadora frente ao
+    /// número antigo, mas fiel à letra da norma (sem dupla contagem). No
+    /// baseline E10 real (`static_sag_fraction` 0,33, mesmos `x_nose_m`
+    /// 1,30 m/`x_main_m` 3,66 m/`prop_plane_x_m` 0,20 m do ciclo 9): fator
+    /// ≈ 1,46610 (inalterado — não depende de `static_sag_fraction`),
+    /// `prop_clearance_critical_m` **≈ −0,06416 m (FAIL, ciclo 9) →
+    /// ≈ −0,00249 m (FAIL, ciclo 10)** — o veredito da checagem #25 NÃO
+    /// MUDA (continua FAIL), só o NÚMERO da violação. Ver o histórico
+    /// completo old→new na docstring de `SCHEMA_VERSION`.
     ///
-    /// CAVEAT NOMEADO (achado de review desta revisão final, ciclo 9 — NÃO
-    /// corrigido, fora de escopo): o modelo pivota a célula sobre os MAINS
-    /// mas trata o trem PRINCIPAL como RÍGIDO e ESTENDIDO — qualquer
-    /// deflexão do amortecedor/pneu do principal (`gear.main_oleo_stroke_mm`
-    /// ≈ 212,4 mm no baseline real, antes de somar deflexão de pneu) não
-    /// entra na fórmula acima; na realidade, essa deflexão translada o
-    /// pivô (e a célula inteira) verticalmente ~1:1, ADITIVO ao termo já
-    /// amplificado do nariz. A ordem de grandeza (>200 mm) é MAIOR que a
-    /// margem de +0,0682 m encontrada pela célula recomendada da campanha
-    /// E11 (`prop_axis_above_cg_m` 0,32 + `x_nose_m` 1,20, ver
-    /// `docs/backlog.md`) — ou seja, este termo não modelado pode sozinho
-    /// consumir toda a margem ganha por uma eventual adoção da E11.
-    /// Condição COMPOSTA de CS 23.925 (mains E nariz colapsados
-    /// simultaneamente), não modelada por `fill_critical_clearance`.
-    /// Nota relacionada, sinal OPOSTO e pequeno: o disco da hélice também
-    /// não é modelado como INCLINADO junto com o pitch da célula — tratar
-    /// o disco como permanecendo vertical (ponta mais baixa sempre à
-    /// distância do raio abaixo do cubo) é CONSERVADOR em ≈+3,4 mm
-    /// (`raio × (1 − cos θ)`, θ ≈ 5,04° no baseline real) frente a uma
-    /// modelagem exata do disco tombado — o tombamento ERGUE o ponto mais
-    /// baixo varrido em relação ao cubo, então ignorá-lo empurra a folga
-    /// calculada para o lado SEGURO, ao contrário do gap dos mains acima.
-    /// Ver `docs/backlog.md` (item 6, condição composta CS 23.925).
+    /// CAVEAT DOS MAINS RÍGIDOS (ciclo 9) — RESOLVIDO nesta task: a
+    /// preocupação nomeada no ciclo 9 (deflexão do amortecedor/pneu
+    /// PRINCIPAL, `gear.main_oleo_stroke_mm` ≈ 212,4 mm no baseline real,
+    /// não entrar na fórmula, sendo ADITIVA ao termo do nariz sob uma
+    /// condição COMPOSTA) partia da premissa de que o modelo tratava os
+    /// mains como "estendidos" — mas `h_cg_ground_m` NUNCA foi "trem
+    /// estendido"; é a altura CARREGADA (deflexão estática), como a
+    /// docstring desse campo agora documenta explicitamente. Lida pela
+    /// LETRA de CS 23.925, a condição crítica não exige os mains no
+    /// batente simultaneamente ao nariz — só o trem CRÍTICO vai ao
+    /// batente, os demais ficam na deflexão estática que `h_cg_ground_m`
+    /// já modela. Não há termo faltando: os mains nunca precisaram de um.
+    /// Ver `docs/backlog.md` (item 6, RESOLVIDO ciclo 10).
+    ///
+    /// Nota relacionada, sinal OPOSTO e pequeno, NÃO resolvida por esta
+    /// task (item independente): o disco da hélice também não é modelado
+    /// como INCLINADO junto com o pitch da célula — tratar o disco como
+    /// permanecendo vertical (ponta mais baixa sempre à distância do raio
+    /// abaixo do cubo) é CONSERVADOR em ≈+3,4 mm (`raio × (1 − cos θ)`,
+    /// θ ≈ 5,04° no baseline real) frente a uma modelagem exata do disco
+    /// tombado — o tombamento ERGUE o ponto mais baixo varrido em relação
+    /// ao cubo, então ignorá-lo empurra a folga calculada para o lado
+    /// SEGURO. Ver `docs/backlog.md` (item 6).
     ///
     /// PREENCHIDO EM DOIS PASSOS: `PropellerAgent::run` (este arquivo não
     /// tem acesso a `GearSpec`, e a hélice roda ANTES do trem de pouso no
@@ -813,13 +858,16 @@ impl PropellerSpec {
     /// Preenche `prop_clearance_critical_m` — condição CRÍTICA de CS 23.925
     /// (ciclo 8, task 2): batente do amortecedor de nariz + pneu murcho,
     /// hélice TRATORA (trem de NARIZ governa), sob o pivô da célula sobre o
-    /// trem PRINCIPAL (ciclo 9, transferência de atitude do #25 — ver
-    /// docstring do campo `prop_clearance_critical_m` para a física e o
-    /// old→new completos). Chamado DEPOIS que `LandingGearAgent::run`
+    /// trem PRINCIPAL (ciclo 9, transferência de atitude do #25), com o
+    /// curso do nariz medido a partir da deflexão ESTÁTICA já embutida em
+    /// `h_cg_ground_m` — curso RESTANTE, não curso total (ciclo 10, task 1
+    /// — ver docstring do campo `prop_clearance_critical_m` para a física e
+    /// o old→new completos). Chamado DEPOIS que `LandingGearAgent::run`
     /// produz `gear` — ver docstring do campo para o porquê da ordem (a
-    /// hélice roda antes do trem no pipeline real). `prop_cfg` (NOVO,
-    /// ciclo 9) é `[propeller]` — só `prop_plane_x_m` é consumido aqui, o
-    /// resto do struct não participa da fórmula.
+    /// hélice roda antes do trem no pipeline real). `prop_cfg` (ciclo 9) é
+    /// `[propeller]` — só `prop_plane_x_m` é consumido aqui; `gear_cfg`
+    /// (ciclo 10) também contribui `static_sag_fraction`, o resto do
+    /// struct não participa da fórmula.
     pub fn fill_critical_clearance(
         &mut self,
         gear: &GearSpec,
@@ -828,8 +876,9 @@ impl PropellerSpec {
     ) {
         let fator = (gear_cfg.x_main_m - prop_cfg.prop_plane_x_m)
             / (gear_cfg.x_main_m - gear_cfg.x_nose_m);
-        let delta_prop = (gear.nose_oleo_stroke_mm / 1_000.0 + gear_cfg.tire_deflation_delta_m)
-            * fator;
+        let curso_restante_nariz_m = (gear.nose_oleo_stroke_mm / 1_000.0)
+            * (1.0 - gear_cfg.static_sag_fraction);
+        let delta_prop = (curso_restante_nariz_m + gear_cfg.tire_deflation_delta_m) * fator;
         self.prop_clearance_critical_m = self.ground_clearance_m - delta_prop;
     }
 }
@@ -1263,7 +1312,77 @@ pub struct ElectricalSpec {
 /// `docs/aircraft_spec.schema.md` §1, `docs/backlog.md` (item 1, marcado
 /// RESOLVIDO) e `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs`
 /// para os pins honestos completos.
-pub const SCHEMA_VERSION: &str = "5.2";
+///
+/// v5.3 (Task 3, ciclo10-sag-e-linha-de-tracao — bump **MINOR**, exceção
+/// registrada, MESMO padrão da v5.2): formaliza o bump que as Tasks 1 e 2
+/// do mesmo ciclo já haviam anunciado como "ainda dentro da v5.2" (ver as
+/// duas notas de exceção acima, "segunda aplicação" e "terceira
+/// aplicação"). Nenhum campo do JSON de saída foi
+/// renomeado/removido/mudou de tipo/unidade nas Tasks 1-2 — consumidores
+/// v5.2 continuam funcionando sem alteração para esses dois pontos; só
+/// `RobustnessFlip` abaixo ganha um campo genuinamente NOVO (aditivo). Três
+/// mudanças de conteúdo, nenhuma nova nesta task — só formalizadas:
+///   1. **`propeller.prop_clearance_critical_m` mudou de fórmula DE NOVO**
+///      (Task 1, `6c34f8f`): o curso do amortecedor de nariz usado no
+///      cálculo deixa de ser o curso TOTAL do batente e passa a ser o curso
+///      RESTANTE até o batente — `Δ_prop = (nose_oleo_stroke_mm/1000 ×
+///      (1 − [gear].static_sag_fraction) + tire_deflation_delta_m) ×
+///      fator`. Corrige uma dupla contagem: a compressão estática do nariz
+///      já está embutida em `[gear].h_cg_ground_m` (a aeronave é sempre
+///      modelada CARREGADA), e a fórmula anterior (ciclo 9) somava essa
+///      mesma compressão de novo ao usar o curso TOTAL. Campo de
+///      CONFIGURAÇÃO NOVO `[gear].static_sag_fraction` (faixa validada
+///      (0,15, 0,55), baseline 0,33 — sem valor padrão implícito, TOMLs
+///      pré-5.3 sem esse campo falham o parse por campo ausente, mesmo
+///      padrão de migração sem erro dedicado já usado em `e_h`/
+///      `runway_available_m`). Mesma
+///      exceção MINOR da v5.2 aplicada de novo: é correção de bug de
+///      modelagem física (dupla contagem), não mudança de contrato — nome/
+///      tipo/unidade do campo JSON são idênticos. Baseline real E10:
+///      `prop_clearance_critical_m` **≈−0,06416 m → ≈−0,00249 m** — MESMO
+///      veredito (checagem #25 continua `FAIL`, por 2,5 mm em vez de 6,4
+///      cm).
+///   2. **Física nova do momento da linha de tração** (Task 2, `79b2263` +
+///      erratum `713e846` + `f9231ea`): o balanço de momentos da rotação
+///      (`agents::trim_authority::rotation_available_moment_nm`) ganha o
+///      termo `−T(Vr)·prop_axis_above_cg_m` (braço sobre o CG, não sobre o
+///      solo — ver erratum §2 de
+///      `docs/superpowers/specs/2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md`,
+///      termo de d'Alembert cancela a porção `h_cg` porque a corrida de
+///      decolagem é ACELERADA); o trim de cruzeiro
+///      (`agents::trim_authority::cl_h_trim_cruise`) ganha `cm_thrust =
+///      −T_cruzeiro·prop_axis_above_cg_m/(q·S_w·MAC)` somado ao `cm_ac`.
+///      Nenhum campo novo — `trim.rotation_limit_pct_mac`,
+///      `trim.cl_h_trim_cruise`, `trim.cd_trim` e
+///      `weight.cg_limit_fwd_pct_mac` MANTÊM nome/tipo/unidade, só o VALOR
+///      muda (e `rotation_limit_pct_mac` deixa de ser invariante ao peso —
+///      passa a ser a envoltória MÁXIMA sobre os cenários, ver
+///      `agents::trim_authority::rotation_fwd_limit_m`). Mesma exceção
+///      MINOR: correção física (termo de momento que faltava), não mudança
+///      de contrato. Baseline real: `rotation_limit_pct_mac` **8,533% →
+///      13,355% MAC** (+4,82 pp); `validation_status` continua `"FAIL"` com
+///      a MESMA 1 violação (#25, hélice, inalterada por esta mudança) e
+///      ZERO flips de robustez — o que encolhe é a FOLGA de rotação do
+///      cenário mais apertado ("Solo (piloto)", de +21,6% para +10,5%).
+///   3. **`RobustnessFlip` ganha `limite_nominal` (f64) — este SIM
+///      genuinamente ADITIVO** (Task 2, campo já serializado desde a v5.2
+///      mas com documentação de schema adiada para esta task): o limite
+///      NOMINAL do mesmo check, ao lado de `limite` (o limite efetivamente
+///      aplicado ao mundo perturbado). Necessário porque a mudança #2 acima
+///      fez o limite dianteiro de CG (rotação) deixar de ser invariante à
+///      massa — dois mundos adversariais diferentes agora podem ter
+///      `limite` diferentes entre si E diferentes do nominal.
+///      `limite_nominal == limite` para checks cuja régua é invariante à
+///      perturbação (tipback, carga de nariz, gates de desempenho/pista);
+///      `limite_nominal != limite` é o sinal de que "a régua andou" (não
+///      só o CG do mundo perturbado). Ver `docs/aircraft_spec.schema.md`
+///      §4.
+/// Nenhuma tolerância de teste foi afrouxada em nenhuma das três mudanças —
+/// só pins re-centrados old→new com a MESMA tolerância. Ver
+/// `docs/aircraft_spec.schema.md` §1/§4 e `tests/cli.rs`/
+/// `tests/gear_tipback.rs`/`tests/schema_v4.rs`/`tests/generic_engine.rs`
+/// para os pins honestos completos.
+pub const SCHEMA_VERSION: &str = "5.3";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -1453,6 +1572,15 @@ mod tests {
         cfg
     }
 
+    /// `GearCfg` sintético — só `static_sag_fraction` importa para a
+    /// property nova (ciclo 10, task 1); os demais campos vêm intactos da
+    /// fixture padrão (não usados pelo método sob teste).
+    fn gear_cfg_teste_com_sag(static_sag_fraction: f64) -> crate::models::aircraft_config::GearCfg {
+        let mut cfg = crate::models::aircraft_config::test_fixtures::config_teste().gear;
+        cfg.static_sag_fraction = static_sag_fraction;
+        cfg
+    }
+
     /// `PropellerCfg` sintético — só `prop_plane_x_m` importa para
     /// `PropellerSpec::fill_critical_clearance` (ciclo 9); os demais campos
     /// vêm intactos da fixture padrão (não usados pelo método sob teste).
@@ -1462,17 +1590,20 @@ mod tests {
         cfg
     }
 
-    /// Hand-check congelado (ciclo 9, transferência de atitude do #25 —
+    /// Hand-check congelado (ciclo 10, task 1, deflexão estática no #25 —
     /// RED-first, números do brief da task, ±0,001 no resultado final):
     /// geometria do baseline E10 real (`x_nose_m` 1,30 m, `x_main_m`
-    /// 3,66 m, `prop_plane_x_m` 0,20 m) ⟹ fator = (3,66−0,20)/(3,66−1,30) =
-    /// 3,46/2,36 = 1,46610. Δ_prop = (0,12746 + 0,08) × 1,46610 = 0,30416
-    /// (curso de nariz 127,46 mm + pneu murcho 0,08 m — valores honestos do
-    /// pipeline real do baseline, não arredondados de propósito). Folga
-    /// crítica = 0,24000 − 0,30416 = **−0,06416 m** — SUBSTITUI o
-    /// hand-check antigo (fator implícito 1: 0,300 − 0,120 − 0,05 = 0,130),
-    /// que não testava a amplificação do pivô (old→new: o fator novo é a
-    /// mudança sob teste, não a magnitude bruta dos termos).
+    /// 3,66 m, `prop_plane_x_m` 0,20 m, `static_sag_fraction` 0,33) ⟹
+    /// fator = (3,66−0,20)/(3,66−1,30) = 3,46/2,36 = 1,46610 (INALTERADO
+    /// frente ao ciclo 9 — não depende de `static_sag_fraction`). Curso
+    /// RESTANTE do nariz = 0,12746 × (1 − 0,33) = 0,12746 × 0,67 =
+    /// 0,0853982. Δ_prop = (0,0853982 + 0,08) × 1,46610 = 0,242491 (curso
+    /// restante + pneu murcho 0,08 m). Folga crítica = 0,24000 − 0,242491 =
+    /// **−0,00249 m** — SUBSTITUI o hand-check do ciclo 9 (curso TOTAL do
+    /// nariz, não restante: −0,06416 m). old→new: o corte de
+    /// `static_sag_fraction` é a mudança sob teste, não a magnitude bruta
+    /// dos outros termos — todos os demais literais (127,46 mm, 0,08 m,
+    /// geometria) são os MESMOS do hand-check do ciclo 9.
     #[test]
     fn fill_critical_clearance_bate_com_a_formula_fechada() {
         let mut propeller = propeller_spec_teste(0.24000);
@@ -1480,21 +1611,22 @@ mod tests {
         let mut gear_cfg = gear_cfg_teste_com_deflacao(0.08);
         gear_cfg.x_nose_m = 1.30;
         gear_cfg.x_main_m = 3.66;
+        gear_cfg.static_sag_fraction = 0.33;
         let prop_cfg = prop_cfg_teste_com_prop_plane_x_m(0.20);
 
         propeller.fill_critical_clearance(&gear, &gear_cfg, &prop_cfg);
 
         // Pin EXATO (fórmula fechada dos literais acima, fator =
-        // (3.66−0.20)/(3.66−1.30) = 1.466101694915254...) — não ±0,001: uma
-        // tolerância larga deixaria passar um erro de ~1,5% no fator (ex.:
-        // fator errado por uma transposição x_main/x_nose) sem quebrar o
-        // teste. Mesmo padrão de precisão do hand-check original deste
-        // teste (pré-ciclo-9, fator implícito 1). ≈−0,06416 m no brief da
-        // task era a estimativa arredondada (±0,001) a verificar no run —
-        // confirmada aqui com 9 casas.
-        assert!((propeller.prop_clearance_critical_m - (-0.064157457627119)).abs() < 1e-9,
-            "prop_clearance_critical_m = {:.15} (esperado exatamente -0.064157457627119 — \
-             fator = 1.466101694915254...)",
+        // (3.66−0.20)/(3.66−1.30) = 1.466101694915254..., curso restante =
+        // 0.12746 × 0.67 = 0.0853982 exato) — não ±0,001: uma tolerância
+        // larga deixaria passar um erro de ~1,5% no fator, ou um esquecimento
+        // do fator (1 − static_sag_fraction), sem quebrar o teste. Mesmo
+        // padrão de precisão do hand-check anterior (ciclo 9). ≈−0,00249 m
+        // no brief da task era a estimativa arredondada (±0,001) a
+        // verificar no run — confirmada aqui com 9 casas.
+        assert!((propeller.prop_clearance_critical_m - (-0.002490581355932)).abs() < 1e-9,
+            "prop_clearance_critical_m = {:.15} (esperado exatamente -0.002490581355932 — \
+             fator = 1.466101694915254..., curso restante = 0.0853982 m)",
             propeller.prop_clearance_critical_m);
     }
 
@@ -1553,5 +1685,37 @@ mod tests {
              deflação MENOR ({:.4})",
             propeller_muita_deflacao.prop_clearance_critical_m,
             propeller_pouca_deflacao.prop_clearance_critical_m);
+    }
+
+    /// Property NOVA (ciclo 10, task 1, RED-first): quanto MAIOR
+    /// `gear_cfg.static_sag_fraction`, MAIOR a folga crítica resultante —
+    /// o curso RESTANTE do nariz (`nose_oleo_stroke_mm × (1 −
+    /// static_sag_fraction)`) ENCOLHE quando `static_sag_fraction` cresce
+    /// (mais compressão estática já consumida ⟹ menos curso restando até
+    /// o batente), reduzindo `Δ_prop` e aumentando
+    /// `ground_clearance_m − Δ_prop`. Estritamente monotônico: os dois
+    /// valores de `static_sag_fraction` abaixo produzem cursos restantes
+    /// distintos por construção. `prop_cfg`/`tire_deflation_delta_m` FIXOS
+    /// nos dois ramos, isolando o efeito do sag do efeito do fator de
+    /// braço/deflação de pneu (cobertos separadamente acima).
+    #[test]
+    fn folga_critica_aumenta_quando_static_sag_fraction_aumenta() {
+        let prop_cfg = crate::models::aircraft_config::test_fixtures::config_teste().propeller;
+        let gear = gear_spec_teste(120.0);
+
+        let mut propeller_pouco_sag = propeller_spec_teste(0.300);
+        propeller_pouco_sag.fill_critical_clearance(
+            &gear, &gear_cfg_teste_com_sag(0.20), &prop_cfg);
+
+        let mut propeller_muito_sag = propeller_spec_teste(0.300);
+        propeller_muito_sag.fill_critical_clearance(
+            &gear, &gear_cfg_teste_com_sag(0.50), &prop_cfg);
+
+        assert!(propeller_muito_sag.prop_clearance_critical_m
+                > propeller_pouco_sag.prop_clearance_critical_m,
+            "folga crítica com static_sag_fraction MAIOR (0.50 ⟹ {:.4}) deveria ficar ACIMA da \
+             folga com static_sag_fraction MENOR (0.20 ⟹ {:.4})",
+            propeller_muito_sag.prop_clearance_critical_m,
+            propeller_pouco_sag.prop_clearance_critical_m);
     }
 }

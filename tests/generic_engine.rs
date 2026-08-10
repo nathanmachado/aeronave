@@ -268,7 +268,14 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // MTOW convergido (1.512,4→1.537,6 kg) — mais consumo/hora nas duas
     // frentes: 7.709253917 → **7.232495587 h** (old→new, −6,2%; tolerância
     // INALTERADA). Bate com o valor esperado no plano da campanha (~7,23 h).
-    let endurance_pin_h = 7.232495587;
+    // Ciclo 10, Task 2 (momento da linha de tração em CRUZEIRO): o
+    // `cm_thrust` nariz-abaixo reduz o upload de trim da empenagem
+    // (CL_h_trim 0,052544→0,046201) e, como ΔCD_trim ∝ CL_h², o arrasto de
+    // trim CAI (6,927e-5→5,357e-5) — a polar de cruzeiro fica um fio mais
+    // limpa (cd_cruise −0,06%), o MTOW convergido cai 0,17 kg e sobra
+    // combustível: 7.232495587 → **7.2391022047 h** (old→new, +0,09%;
+    // tolerância INALTERADA).
+    let endurance_pin_h = 7.2391022047;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -288,7 +295,10 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // −6,2%). Continua sendo um número INFORMATIVO (tanque cheio, consumo
     // constante); o gate real do projeto é `mission.block_time_h` ≥ 7,0 h,
     // que segue satisfeito com 7,06 h.
-    let range_pin_km = 2_025.098764;
+    // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro — mesma
+    // causa da autonomia acima): 2.025,098764 → **2.026,948617 km**
+    // (old→new, +0,09%; tolerância INALTERADA).
+    let range_pin_km = 2_026.948617;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -446,12 +456,17 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // fraction`=5% da CAPACIDADE, ≈9,14% nessa outra convenção — ver nota
     // de convenção abaixo), mas é a FOLGA QUE E10 MAIS CONSOME: passou de
     // ~9× o piso para ~2×.
-    let margem_pin_l = 23.755819;
+    // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro): menos
+    // arrasto de trim ⟹ menos combustível de missão (236,244→236,047 L)
+    // ⟹ margem SOBE: 23,755819 L (~10,0556%) → **23,952516 L
+    // (~10,1473%)** (old→new, +0,83%; tolerâncias INALTERADAS).
+    let margem_pin_l = 23.952516;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
         "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E10 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 10.0556).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-E10 ~10,0556%");
+    assert!((margem_pct - 10.1473).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-10 task 2 \
+         ~10,1473%");
     assert!(margem_l > 0.0,
         "achado central pós-E7: com endurance_min_h reduzido, a missão cabe no tanque de 260 L \
          com folga confortável (margem {margem_l:.2} L)");
@@ -783,7 +798,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // 1.512,442570 → **1.537,565047 kg** (old→new, +25,12 kg, +1,66% —
     // batendo com a expectativa da campanha, sem surpresa). Tolerância do
     // assert INALTERADA (0,5 kg).
-    let mtow_convergido_kg = 1_537.565047159;
+    // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro): polar de
+    // cruzeiro levemente mais limpa ⟹ MTOW convergido cai
+    // 1.537,565047159 → **1.537,399821663 kg** (old→new, −0,17 kg,
+    // −0,011%; tolerância INALTERADA, 0,5 kg).
+    let mtow_convergido_kg = 1_537.399821663;
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
@@ -796,7 +815,10 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // com o mesmo tanque: 7.7219126689 → **7.709253917 h** (old→new).
     // Campanha E10: hélice menor (η_p 81,0%→78,4%) + MTOW maior ⟹ mais
     // consumo/hora: 7.709253917 → **7.232495587 h** (old→new, −6,2%).
-    let endurance_h = 7.232495587;
+    // Ciclo 10, Task 2: 7.232495587 → **7.2391022047 h** (old→new,
+    // +0,09% — ver `autonomia_e_alcance_informativos_tanque_cheio_no_
+    // mtow_convergido` para a cadeia causal). Tolerância INALTERADA.
+    let endurance_h = 7.2391022047;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -810,7 +832,10 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Campanha E10: hélice Ø1,95→1,76 m derruba η_p (81,0%→78,4%) e o MTOW
     // maior eleva a potência requerida (114,3→119,2 kW) — o consumo sobe nas
     // duas frentes: 30.353131770 → **32.353977572 L/h** (old→new, +6,6%).
-    let fc_lph = 32.353977572;
+    // Ciclo 10, Task 2: menos arrasto de trim ⟹ menos potência
+    // requerida em cruzeiro ⟹ 32,353977572 → **32,324450378 L/h**
+    // (old→new, −0,09%). Tolerância INALTERADA (5e-5).
+    let fc_lph = 32.324450378;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -925,7 +950,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // kg (mais arrasto induzido): 302.073675 → **300.216508 km/h** (old→new,
     // -1,857 km/h, -0,61%; tolerância INALTERADA, 1e-3). Continua acima do
     // requisito de 280 km/h, com ~20 km/h de folga (era ~22).
-    let v_max_pos_task_5_2_kmh = 300.216508;
+    // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro): o `cm_thrust`
+    // nariz-abaixo reduz o upload de trim ⟹ menos ΔCD_trim ⟹ polar mais
+    // limpa: 300.216508 → **300.220427 km/h** (old→new, +0,004 km/h,
+    // +0,0013%; tolerância INALTERADA, 1e-3).
+    let v_max_pos_task_5_2_kmh = 300.220427;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-E10 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
@@ -1474,7 +1503,10 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // Campanha E10 (2026-08-08): 222,502043 → **235,961035 L** (old→new,
     // +6,05% — hélice menor + bateria de 53 kg; ver ATUALIZAÇÃO 5 acima).
     // Tolerância INALTERADA (1e-2).
-    let necessario_pin_l = 235.961035;
+    // Ciclo 10, Task 2 (linha de tração no trim de cruzeiro): menos
+    // arrasto de trim ⟹ menos combustível — 235,961035 →
+    // **235,767522 L** (old→new, −0,08%). Tolerância INALTERADA (1e-2).
+    let necessario_pin_l = 235.767522;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
         "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E10 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
@@ -1644,4 +1676,110 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);
+}
+
+// ─── Ciclo 10, Task 2: magnitude da morte da invariância a W ──────────────
+
+/// **A magnitude da morte da invariância ao peso, MEDIDA no pipeline real**
+/// (ciclo 10, task 2 — o teste que a docstring de
+/// `agents::trim_authority::rotation_fwd_limit_m` cita). Vive aqui, e não
+/// em `src/`, porque precisa do motor e da missão REAIS do projeto, que
+/// `src/` não pode nomear (ver
+/// `tests/acceptance.rs::src_nao_contem_nomes_de_motor_especificos`).
+///
+/// Roda o baseline real de ponta a ponta e mede a variação do limite
+/// dianteiro de rotação ENTRE OS EXTREMOS DE PESO dos cenários de carga,
+/// com a tração avaliada na `Vr(W)` de cada um.
+///
+/// Resultado MEDIDO: **≈1,4621 pp de MAC** entre o cenário mais leve
+/// (1.207,5 kg → 13,3546% MAC) e o mais pesado (1.557,5 kg → 11,8926%).
+/// É pequeno em valor absoluto, mas **não é ruído** — é ~29× a tolerância
+/// dos pins de `agents::trim_authority` (±0,05 pp), o que descarta
+/// tratá-lo como "quase-invariante" e manter a prova antiga de
+/// cancelamento com uma tolerância medida. Por isso a docstring de
+/// `rotation_fwd_limit_m` foi re-derivada e o limite único publicado virou
+/// o MÁXIMO sobre os cenários, não uma constante.
+///
+/// (Com o braço ERRADO sobre o solo, de uma versão intermediária desta
+/// task, esta mesma variação valia ≈8,2 pp — 5,6× maior, na mesma
+/// proporção do braço, `1,12/0,20`. O ERRATUM da spec §2 — termo inercial
+/// de d'Alembert cancelando a porção `h_cg` — a trouxe à ordem de grandeza
+/// certa.)
+///
+/// Também confirma o SENTIDO (mais leve ⟹ mais restritivo) sobre os pesos
+/// REAIS dos cenários, não sobre literais — o que
+/// `agents::trim_authority::tests::limite_de_rotacao_recua_com_peso_menor`
+/// já checa com `T` fixa, aqui com `T = T(Vr(W))` variando junto.
+#[test]
+fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
+    use aeronave::agents::trim_authority::{
+        rotation_fwd_limit_m, thrust_at_rotation_n,
+    };
+    use aeronave::agents::weight_balance::cg_pct_mac;
+
+    const G: f64 = 9.807;
+
+    let cfg = baseline_state();
+    let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let req = baseline_mission();
+    let sized = size_aircraft(&cfg, &engine, &req).expect("baseline real deveria convergir");
+
+    let wb = &sized.wb;
+    let wing = &sized.wing;
+    let emp = &sized.emp;
+    let mac = wb.mac_m;
+    let x_ac_wing = cfg.wing.le_root_x_m + 0.25 * mac;
+    let x_ac_tail = x_ac_wing + emp.arm_h_m;
+    // Braço = offset EIXO↔CG (o `h_cg` cancela contra o termo inercial da
+    // corrida acelerada — ver `agents::trim_authority::
+    // rotation_available_moment_nm`).
+    let z_axis = cfg.propeller.prop_axis_above_cg_m;
+
+    let limite_pct_para = |mass_kg: f64| -> f64 {
+        let w_n = mass_kg * G;
+        let t_rot = thrust_at_rotation_n(
+            w_n, wing.area_m2, wing.cl_max_to, &engine, &sized.state, req.isa_delta_c,
+            cfg.performance.static_thrust_factor,
+        );
+        let x = rotation_fwd_limit_m(
+            w_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
+            sized.trim.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail,
+            cfg.gear.x_main_m, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
+            cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac, t_rot, z_axis,
+        );
+        cg_pct_mac(x, wb.mac_le_x_m, mac)
+    };
+
+    let m_leve = wb.scenarios.iter().map(|s| s.total_mass_kg).fold(f64::INFINITY, f64::min);
+    let m_pesado = wb.scenarios.iter().map(|s| s.total_mass_kg).fold(f64::NEG_INFINITY, f64::max);
+    let pct_leve = limite_pct_para(m_leve);
+    let pct_pesado = limite_pct_para(m_pesado);
+    let variacao_pp = pct_leve - pct_pesado;
+    println!("faixa de pesos dos cenários: {m_leve:.1} kg .. {m_pesado:.1} kg");
+    println!("limite de rotação: leve={pct_leve:.4}% MAC  pesado={pct_pesado:.4}% MAC  \
+              variação={variacao_pp:.4} pp");
+
+    // SENTIDO: mais leve ⟹ mais restritivo (limite mais RECUADO).
+    assert!(variacao_pp > 0.0,
+        "o cenário mais LEVE ({m_leve:.1} kg, {pct_leve:.4}%) deveria ter o limite dianteiro \
+         MAIS RECUADO que o mais pesado ({m_pesado:.1} kg, {pct_pesado:.4}%)");
+
+    // MAGNITUDE pinada (medida): ≈1,4621 pp, folga de 2× — mesma disciplina
+    // dos demais pins de resíduo/variação deste repositório.
+    let variacao_pin_pp = 1.4621;
+    assert!((variacao_pp - variacao_pin_pp).abs() < 0.5 * variacao_pin_pp,
+        "variação medida = {variacao_pp:.4} pp divergiu do pin honesto ≈{variacao_pin_pp:.4} pp");
+
+    // NÃO é desprezível: guarda explícito contra a tentação de tratar o
+    // limite como "quase-invariante" e reviver a prova antiga.
+    assert!(variacao_pp > 0.5,
+        "a variação ({variacao_pp:.4} pp) deveria ser MUITO maior que a tolerância dos pins de \
+         `agents::trim_authority` (±0,05 pp) — se algum dia cair abaixo de 0,5 pp, a decisão de \
+         re-derivar a docstring precisa ser REAVALIADA, não herdada");
+
+    // E o limite PUBLICADO (máximo sobre os cenários) deve coincidir com o
+    // extremo mais restritivo medido aqui.
+    assert!((sized.trim.rotation_limit_pct_mac - pct_leve).abs() < 1e-9,
+        "o limite publicado ({:.6}%) deveria ser o MÁXIMO sobre os cenários, que neste modelo \
+         cai no mais leve ({pct_leve:.6}%)", sized.trim.rotation_limit_pct_mac);
 }

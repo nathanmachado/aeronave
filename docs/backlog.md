@@ -82,36 +82,102 @@ Ponteiro: `agents::performance::takeoff_distance_50ft_m`
 (`src/agents/performance.rs`, ramo `if rc <= 0.0`), §5 de
 `docs/aircraft_spec.schema.md` (precedente de tratamento de infinito).
 
-## 6. Condição composta CS 23.925: deflexão dos mains no pivô
+## 6. Condição composta CS 23.925: deflexão dos mains no pivô — RESOLVIDO ciclo 10
 
-`PropellerSpec::fill_critical_clearance` (ciclo 9, transferência de
-atitude do #25) pivota a célula sobre o trem PRINCIPAL para amplificar o
-mergulho do plano da hélice, mas trata o próprio trem PRINCIPAL como
-RÍGIDO e TOTALMENTE ESTENDIDO — a fórmula só colapsa o trem de NARIZ
-(`gear.nose_oleo_stroke_mm` + `tire_deflation_delta_m`), nunca
-`gear.main_oleo_stroke_mm`. Na condição CRÍTICA real de CS 23.925, nada
-impede o amortecedor/pneu PRINCIPAL de estar simultaneamente comprimido
-(pouso duro nos três trens, por exemplo) — essa deflexão translada o
-próprio pivô (e a célula inteira) verticalmente ~1:1, ADITIVA ao termo já
-amplificado do nariz, não subtrativa nem cancelada por ele. No baseline
-real, `main_oleo_stroke_mm` ≈ 212,4 mm — mais que TRIPLO da margem de
-+0,0682 m (68,2 mm) encontrada pela célula recomendada da campanha E11
-(`prop_axis_above_cg_m` 0,32 + `x_nose_m` 1,20, `diameter_m` 1,76
-mantido — ver `task-3-report.md` da task de campanha E11 do ciclo 9,
-`.superpowers/sdd/2026-08-09-ciclo9-transferencia-atitude/`); ou seja,
-este termo não modelado pode sozinho
-consumir toda a margem ganha por uma eventual adoção da E11, e deve ser
-resolvido (ou pelo menos quantificado) ANTES dessa decisão de adoção.
-Nota relacionada, sinal OPOSTO e pequena: o disco da hélice também não é
+**RESOLVIDO** (ciclo 10, task 1, 2026-08-09). A preocupação nomeada no
+ciclo 9 — `PropellerSpec::fill_critical_clearance` pivota a célula sobre o
+trem PRINCIPAL para amplificar o mergulho do plano da hélice, mas
+tratando o próprio trem PRINCIPAL como RÍGIDO e TOTALMENTE ESTENDIDO, sem
+nenhum termo para a deflexão do amortecedor/pneu principal — partia de
+uma premissa INCORRETA sobre o que `[gear].h_cg_ground_m` representa.
+Lida com cuidado, essa altura SEMPRE foi a altura do CG com a aeronave
+CARREGADA, em deflexão ESTÁTICA (mains e nariz parcialmente comprimidos
+pelo peso da aeronave) — não "trem estendido sem carga". Como
+`h_cg_ground_m`/`propeller.ground_clearance_m` já embutem essa deflexão
+estática dos mains, a checagem #25 NUNCA precisou de um termo aditivo
+para eles: CS 23.925 pela LETRA exige apenas que o trem CRÍTICO (aqui, o
+de nariz — hélice TRATORA) atinja o batente nessa condição; os DEMAIS
+trens permanecem na deflexão estática normal, já modelada. Não havia
+condição COMPOSTA não-modelada — havia uma leitura imprecisa do
+significado de `h_cg_ground_m`.
+
+Pelo MESMO motivo, o amortecedor de NARIZ também PARTE da deflexão
+estática (não estendido) — na condição crítica ele só percorre o curso
+RESTANTE até o batente, não o curso TOTAL. A fórmula do ciclo 9 usava o
+curso total, contando a compressão estática do nariz DUAS VEZES (uma
+implícita em `h_cg_ground_m`, outra explícita no curso total do
+batente). Campo novo `[gear].static_sag_fraction` (0,33 no baseline —
+fração do curso já consumida pela compressão estática) corrige isso:
+`Δ_prop` usa `nose_oleo_stroke_mm × (1 − static_sag_fraction)`, não
+`nose_oleo_stroke_mm`. No baseline real, fator geométrico inalterado
+(≈1,46610 — não depende de `static_sag_fraction`);
+`prop_clearance_critical_m` vai de **≈−0,06416 m (ciclo 9) para
+≈−0,00249 m (ciclo 10)** — honestamente ANTI-conservador (a correção
+AUMENTA a folga calculada), mas fiel à letra da norma. `validation_status`
+do baseline real PERMANECE `"FAIL"` com a MESMA 1 violação nomeada
+(checagem #25) — só o NÚMERO da violação muda, não o veredito.
+
+Nota relacionada, sinal OPOSTO e pequena, NÃO resolvida por esta task
+(item independente, permanece nomeado): o disco da hélice também não é
 modelado como INCLINADO junto com o pitch da célula durante o evento —
 tratar o disco como permanecendo vertical (ponta mais baixa sempre à
 distância do raio abaixo do cubo) é CONSERVADOR em ≈+3,4 mm
 (`raio × (1 − cos θ)`, θ ≈ 5,04° no baseline real, raio 0,88 m) frente a
 uma modelagem exata do disco tombado — o tombamento ERGUE o ponto mais
 baixo varrido em relação ao cubo, então ignorá-lo empurra a folga
-calculada para o lado SEGURO (ao contrário do gap dos mains acima, que
-empurra para o lado OTIMISTA). Ponteiro: docstring de
-`PropellerSpec::prop_clearance_critical_m` (`src/models/specs.rs`),
+calculada para o lado SEGURO. Ponteiro: docstring de
+`PropellerSpec::prop_clearance_critical_m` e `GearCfg::h_cg_ground_m`/
+`GearCfg::static_sag_fraction` (`src/models/specs.rs`,
+`src/models/aircraft_config.rs`),
 `validation::constraint_checker::ConstraintChecker::verify` (checagem
 #25), `fidelity.propeller` (`src/main.rs`), `docs/aircraft_spec.schema.md`
-(bloco `propeller`, linha `prop_clearance_critical_m`).
+(bloco `propeller`, linha `prop_clearance_critical_m`), `tests/cli.rs`/
+`tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins honestos).
+
+## 7. Textos pré-erratum sobre o momento da linha de tração ficaram desatualizados (ciclo 10, task 2)
+
+O erratum do ciclo 10 (task 2, commit `713e846`) corrigiu o braço do
+momento de rotação de "sobre o solo" (`h_cg_ground_m + prop_axis_above_cg_m`
+≈ 1,12 m) para "sobre o CG" (`prop_axis_above_cg_m` ≈ 0,20 m, ver §2 do
+erratum em
+`docs/superpowers/specs/2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md`).
+A correção do CÓDIGO de produção (`agents::trim_authority::
+rotation_available_moment_nm`/`rotation_fwd_limit_m`, chamados com
+`cfg.propeller.prop_axis_above_cg_m`) está certa e testada — mas três
+textos que descreviam o modelo ANTES do erratum não foram atualizados
+junto, e hoje contradizem o comportamento real:
+
+1. **`fidelity.trim` em `src/main.rs` (linha ~836)** diz *"rotação
+   desconsidera binário tração/arrasto/inércia (residual ≈
+   μ_roll·(W−L_g)·h_cg)"* — isso deixou de ser verdade na Task 2 do ciclo
+   10, que passou a incluir explicitamente o binário de TRAÇÃO no balanço
+   de rotação (`−T(Vr)·prop_axis_above_cg_m`). Só os termos de SOLO
+   (`μN·h_cg`, `D·(h_cg−h_D)`, ≲2 pp, ver erratum §2) continuam
+   desprezados — a string precisa ser reescrita para refletir isso, não
+   apagada por completo.
+2. **Docstring do hand-check `momento_da_linha_de_tracao_hand_check_com_literais`
+   em `src/agents/trim_authority.rs` (linha ~1108)** afirma *"z_eixo =
+   1,12 m (= h_cg_ground 0,92 + offset 0,20 do baseline E10)"* — essa
+   equivalência era verdadeira ANTES do erratum; hoje o `z_eixo` real do
+   baseline E10 é `prop_axis_above_cg_m` = 0,20 m sozinho, não 1,12 m. O
+   teste em si continua correto (é um hand-check de sensibilidade com um
+   literal arbitrário, `1,12` só precisa ser ALGUM número), mas o
+   comentário induz o leitor a pensar que 1,12 m é o braço usado em
+   produção hoje.
+3. **Docstring da property `eixo_mais_alto_recua_o_limite_de_rotacao`
+   (mesmo arquivo, linha ~1179-1180)** rotula os literais de teste
+   `z=1,12`/`z=1,24` como *"baseline E10"*/*"candidato E11 (+12 cm)"* —
+   mesma imprecisão: o E10 real usa `z=0,20`, o E11 usaria `z=0,32`. Achado
+   da revisão da Task 3 (ciclo10-sag-e-linha-de-tracao): como o termo
+   `T(Vr(W))·z_eixo` é AFIM (linear) em `z_eixo` com inclinação constante
+   `T(Vr(W))/W`, o `Δx` medido para `Δz=0,12` **não depende de onde `z`
+   começa** — então o teste segue válido numericamente mesmo com os
+   literais errados, mas o rótulo "baseline E10"/"candidato E11" no
+   comentário é enganoso.
+
+Nenhum destes três é um bug de física ou de teste — são textos/comentários
+que não acompanharam o erratum. Ponteiro: `src/main.rs` (`fidelity.insert("trim"...)`),
+`src/agents/trim_authority.rs` (`momento_da_linha_de_tracao_hand_check_com_literais`,
+`eixo_mais_alto_recua_o_limite_de_rotacao`),
+`.superpowers/sdd/2026-08-09-ciclo10-sag-e-linha-de-tracao/task-3-report.md`
+§3.3 (achado completo, com a verificação numérica da linearidade em `z`).

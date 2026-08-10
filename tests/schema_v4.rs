@@ -56,7 +56,10 @@ fn build_baseline_report() -> AircraftReport {
     // task trim-authority: já aplicado a `sized.wb` por `size_aircraft`
     // (`WeightBalanceOutput::apply_trim`) — recalcula aqui só para popular
     // o bloco `trim` do relatório, mesma sequência de `main.rs`.
-    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb);
+    // Ciclo 10 (task 2): `state`/`engine`/`req` + `prop.thrust_cruise_n` —
+    // momento da linha de tração na rotação e no trim de cruzeiro.
+    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb, state, &engine, &req,
+                                       prop.thrust_cruise_n);
 
     let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
     let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
@@ -170,7 +173,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "5.2");
+    assert_eq!(report.schema_version, "5.3");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -187,7 +190,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.2");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.3");
 }
 
 /// Schema 5.0 (Task 2, ciclo7-clmax-decolagem — bump MAJOR): `wing.cl_max_to`
@@ -291,6 +294,15 @@ fn wing_cd0_flap_to_extra_presente_e_bate_com_formula_fechada() {
 /// geometria), física corrigida do achado de review do ciclo 8
 /// (`docs/backlog.md`, item 1). Nenhuma tolerância afrouxada — o pin
 /// (±0,001) é o mesmo padrão de antes, só o valor central mudou.
+///
+/// ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática — old→new): campo
+/// novo `[gear].static_sag_fraction` corrige uma dupla contagem da
+/// compressão estática do nariz (curso TOTAL → curso RESTANTE, ver
+/// docstring de `GearCfg::static_sag_fraction`). Baseline real E10
+/// **≈−0,06416 m (ciclo 9) → ≈−0,00249 m (ciclo 10)** — MESMO veredito
+/// (checagem #25 continua FAIL), só o número muda, honestamente
+/// ANTI-conservador. `fator` (≈1,46610) inalterado. Ver
+/// `docs/backlog.md` (item 6, RESOLVIDO ciclo 10).
 #[test]
 fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado() {
     let report = build_baseline_report();
@@ -305,13 +317,13 @@ fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado()
     );
     let obtido = obtido.unwrap();
     assert!(
-        (obtido - (-0.06416)).abs() < 0.001,
-        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈−0,06416 m \
-         (baseline real E10 pós-ciclo-9, checagem #25 FAIL — old: ≈+0,0325 m PASS)"
+        (obtido - (-0.00249)).abs() < 0.001,
+        "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈−0,00249 m \
+         (baseline real E10 pós-ciclo-10, checagem #25 FAIL — old: ≈−0,06416 m ciclo 9)"
     );
     assert!(obtido < 0.0,
-        "campanha ciclo 9: baseline real deveria REPROVAR a checagem #25 (folga crítica \
-         negativa, achado honesto da transferência de atitude)");
+        "campanha ciclo 10: baseline real deveria continuar REPROVANDO a checagem #25 (folga \
+         crítica negativa, mesmo veredito do ciclo 9 — só o número da violação muda)");
 }
 
 /// Schema 4.6 (Task 4, ciclo4-fidelidade-massas — check #19): o bloco

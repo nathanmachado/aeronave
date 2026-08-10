@@ -29,18 +29,26 @@
 //! #19 — um `flip` gera uma violação nomeada) desde a Task 4 do ciclo
 //! (wiring, schema v4.6) — antes disso o módulo era isolado do pipeline.
 //!
-//! Os limites contra os quais os conjuntos perturbados são avaliados são
-//! os NOMINAIS (`wb_nominal.spec.cg_limit_{fwd,aft}_pct_mac`,
-//! `gear_cfg.tipback_min_deg`, os tetos/pisos de carga de nariz de
-//! `validation::constraint_checker`) — esses limites são derivados de
-//! geometria/margem de estabilidade/autoridade de profundor, não da massa
-//! estrutural em si (a massa entra no CG e nas cargas, não no limite),
-//! logo são invariantes à perturbação: reavaliá-los para cada conjunto
-//! adversarial recalcularia o MESMO número (o `TrimAuthorityAgent`
-//! dianteiro/`sm_min` traseiro não dependem de `StructuralMasses`) a um
-//! custo de mais uma chamada de agente — por isso as massas perturbadas
-//! são comparadas numericamente contra os limites NOMINAIS já calculados,
-//! sem re-rodar `TrimAuthorityAgent`.
+//! Os limites de tipback/carga de nariz contra os quais os conjuntos
+//! perturbados são avaliados são os NOMINAIS/de config
+//! (`gear_cfg.tipback_min_deg`, os tetos/pisos de carga de nariz de
+//! `validation::constraint_checker`) — derivados de geometria, não da
+//! massa estrutural, logo invariantes à perturbação.
+//!
+//! **Os limites de CG, não** (mudança do ciclo 10, task 2). Até o ciclo 9
+//! eles também eram tratados como invariantes, com a justificativa de que
+//! "o `TrimAuthorityAgent` dianteiro/`sm_min` traseiro não dependem de
+//! `StructuralMasses`" — verdade enquanto o limite de ROTAÇÃO era
+//! invariante ao peso. O momento da LINHA DE TRAÇÃO
+//! (`T(Vr(W))·z_eixo`, ver `agents::trim_authority::rotation_fwd_limit_m`)
+//! matou essa invariância: o limite dianteiro passou a depender do peso do
+//! cenário mais leve, que é função direta das massas estruturais
+//! perturbadas. Desde então CADA mundo é avaliado contra a SUA PRÓPRIA
+//! régua de CG (`TrimAuthorityAgent` re-rodado sobre o `wb` daquele mundo
+//! nos dois casos direcionais; `sized_p.wb.spec`, já finalizado por
+//! `apply_trim`, no caso massa-total) — o custo é uma chamada de agente a
+//! mais por mundo. A semântica do flip não mudou: "o NOMINAL passava e o
+//! mundo perturbado REPROVA".
 //!
 //! Ciclo 5 (spec robustez-total-e-solo) acrescenta um 3º caso, "massa-
 //! total": em vez de perturbar as 7 massas direcionalmente (±σ conforme o
@@ -71,7 +79,9 @@
 //! contra os MESMOS limites nominais, só a fonte do `wb`/gear perturbado
 //! muda por mundo (`WeightBalanceAgent::run` com massas ±σ para os
 //! direcionais; `sized_p.wb`/`sized_p.structural_masses` re-convergidos
-//! para o massa-total).
+//! para o massa-total; e, desde o ciclo 10 task 2, a régua de CG de cada
+//! mundo também vem do próprio mundo — ver o parágrafo sobre limites de CG
+//! acima).
 
 use crate::agents::landing_gear::LandingGearAgent;
 use crate::agents::mass_model::StructuralMasses;
@@ -193,6 +203,7 @@ pub fn adversarial_masses(
 /// checagem #25 (folga de hélice em condição CRÍTICA, CS 23.925) — o curso
 /// do amortecedor de nariz cresce com o MTOW re-convergido, ao contrário da
 /// folga ESTÁTICA (`propeller.ground_clearance_m`), invariante à massa.
+#[allow(clippy::too_many_arguments)]
 fn evaluate_world(
     cfg: &AircraftConfig,
     caso: &str,
@@ -201,6 +212,8 @@ fn evaluate_world(
     trem_nariz_kg_p: f64,
     wb_nominal: &WeightBalanceOutput,
     gear_nominal: &GearSpec,
+    fwd_limit_p_pct_mac: f64,
+    aft_limit_p_pct_mac: f64,
 ) -> ([f64; 2], Vec<RobustnessFlip>, GearSpec) {
     let mut flips = Vec::new();
 
@@ -209,19 +222,42 @@ fn evaluate_world(
         range[0] = range[0].min(sc_p.cg_pct_mac);
         range[1] = range[1].max(sc_p.cg_pct_mac);
 
-        let dentro_do_envelope_nominal = sc_p.cg_pct_mac >= wb_nominal.spec.cg_limit_fwd_pct_mac
-            && sc_p.cg_pct_mac <= wb_nominal.spec.cg_limit_aft_pct_mac;
-        if !dentro_do_envelope_nominal && sc_nom.inside_envelope {
-            let limite = if sc_p.cg_pct_mac < wb_nominal.spec.cg_limit_fwd_pct_mac {
-                wb_nominal.spec.cg_limit_fwd_pct_mac
+        // RÉGUA DO MUNDO PERTURBADO (ciclo 10, task 2 — reprojeção): até o
+        // ciclo 9 os dois lados da comparação usavam os limites NOMINAIS,
+        // justificado porque o limite dianteiro (`TrimAuthorityAgent`) não
+        // dependia das massas estruturais — a rotação era INVARIANTE ao
+        // peso e a flare não vê massa nenhuma. O momento da LINHA DE
+        // TRAÇÃO matou essa invariância (`T(Vr(W))·z_eixo` não escala com
+        // `W` — ver `agents::trim_authority::rotation_fwd_limit_m`): o
+        // limite dianteiro passou a depender do peso do cenário MAIS LEVE,
+        // que É função das massas estruturais perturbadas. Comparar o CG
+        // do mundo +σ contra a régua NOMINAL passou a ser desonesto (régua
+        // errada para aquele mundo), então cada mundo agora traz a SUA
+        // régua (`fwd_limit_p_pct_mac`/`aft_limit_p_pct_mac`, calculada
+        // pelo chamador com o `TrimAuthorityAgent` daquele mundo). A
+        // semântica de FLIP não muda: "o NOMINAL passava (`sc_nom.
+        // inside_envelope`, régua nominal) e o mundo perturbado REPROVA
+        // (régua do próprio mundo perturbado)". O limite TRASEIRO continua
+        // vindo de `sm_min`/NP e continua invariante às massas — passa a
+        // ser conduzido pelo mesmo caminho só por simetria.
+        let dentro_do_envelope_p = sc_p.cg_pct_mac >= fwd_limit_p_pct_mac
+            && sc_p.cg_pct_mac <= aft_limit_p_pct_mac;
+        if !dentro_do_envelope_p && sc_nom.inside_envelope {
+            // `limite_nominal` é o limite do MESMO LADO na régua NOMINAL —
+            // é a comparação que permite ao leitor separar "o CG andou" de
+            // "a régua andou" (ciclo 10, task 2; ver `RobustnessFlip`).
+            let cruzou_pela_frente = sc_p.cg_pct_mac < fwd_limit_p_pct_mac;
+            let (limite, limite_nominal) = if cruzou_pela_frente {
+                (fwd_limit_p_pct_mac, wb_nominal.spec.cg_limit_fwd_pct_mac)
             } else {
-                wb_nominal.spec.cg_limit_aft_pct_mac
+                (aft_limit_p_pct_mac, wb_nominal.spec.cg_limit_aft_pct_mac)
             };
             flips.push(RobustnessFlip {
                 check: format!("Cenário '{}'", sc_nom.name),
                 caso: caso.to_string(),
                 valor: sc_p.cg_pct_mac,
                 limite,
+                limite_nominal,
             });
         }
     }
@@ -241,6 +277,8 @@ fn evaluate_world(
             caso: caso.to_string(),
             valor: gear_p.tipback_angle_deg,
             limite: cfg.gear.tipback_min_deg,
+            // Régua de CONFIG, invariante à perturbação — ver `RobustnessFlip`.
+            limite_nominal: cfg.gear.tipback_min_deg,
         });
     }
     if gear_p.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT
@@ -251,6 +289,7 @@ fn evaluate_world(
             caso: caso.to_string(),
             valor: gear_p.nose_load_max_pct,
             limite: NOSE_LOAD_MAX_CEILING_PCT,
+            limite_nominal: NOSE_LOAD_MAX_CEILING_PCT, // teto fixo, invariante
         });
     }
     if gear_p.nose_load_min_pct < NOSE_LOAD_MIN_FLOOR_PCT
@@ -261,6 +300,7 @@ fn evaluate_world(
             caso: caso.to_string(),
             valor: gear_p.nose_load_min_pct,
             limite: NOSE_LOAD_MIN_FLOOR_PCT,
+            limite_nominal: NOSE_LOAD_MIN_FLOOR_PCT, // piso fixo, invariante
         });
     }
 
@@ -343,10 +383,24 @@ impl RobustnessAgent {
         // `evaluate_world` (compartilhada com o caso massa-total abaixo).
         let evaluate_case = |caso: &str, m_p: &StructuralMasses| -> ([f64; 2], Vec<RobustnessFlip>) {
             let wb_p = WeightBalanceAgent::run(state, wing, engine, cfg, req, emp, m_p);
+            // Régua DO MUNDO perturbado (ciclo 10, task 2 — ver o comentário
+            // de reprojeção em `evaluate_world`): o limite dianteiro deixou
+            // de ser invariante às massas estruturais (o momento da linha de
+            // tração faz o limite de rotação depender do peso do cenário
+            // mais leve), então cada caso direcional recalcula o SEU
+            // `TrimAuthorityAgent` sobre o seu próprio `wb_p`.
+            // `thrust_cruise_n = 0,0`: a tração de CRUZEIRO só alimenta
+            // `cl_h_trim_cruise`/`cd_trim` (descartados aqui) — NÃO entra em
+            // nenhum dos dois limites de CG, que é tudo que este bloco lê.
+            let trim_p = crate::agents::trim_authority::TrimAuthorityAgent::run(
+                cfg, wing, emp, &wb_p, state, engine, req, 0.0,
+            );
+            let fwd_p = trim_p.flare_limit_pct_mac.max(trim_p.rotation_limit_pct_mac);
+            let aft_p = wb_p.spec.cg_limit_aft_pct_mac;
             // `gear_p` descartado aqui (checagem #25 só se aplica ao caso
             // massa-total — ver docstring de `evaluate_world`).
             let (range, flips, _gear_p) = evaluate_world(cfg, caso, &wb_p, m_p.trem_principal_kg,
-                m_p.trem_nariz_kg, wb_nominal, gear_nominal);
+                m_p.trem_nariz_kg, wb_nominal, gear_nominal, fwd_p, aft_p);
             (range, flips)
         };
 
@@ -408,7 +462,10 @@ impl RobustnessAgent {
                     SizingError::MissaoInviavel(_) =>
                         (format!("Dimensionamento ({e})"), state.mtow_kg, cfg.sizing.mtow_max_kg),
                 };
-                flips.push(RobustnessFlip { check, caso: "massa-total".to_string(), valor, limite });
+                // Régua de config (`mtow_max_kg`/capacidade do tanque),
+                // invariante à perturbação ⟹ `limite_nominal == limite`.
+                flips.push(RobustnessFlip { check, caso: "massa-total".to_string(), valor, limite,
+                                            limite_nominal: limite });
             }
             Ok(sized_p) => {
                 mtow_masstotal_kg = sized_p.state.mtow_kg;
@@ -420,7 +477,8 @@ impl RobustnessAgent {
                     && margem_p < req.min_fuel_margin_fraction {
                     flips.push(RobustnessFlip { check: "Margem de combustível".into(),
                         caso: "massa-total".into(), valor: margem_p * 100.0,
-                        limite: req.min_fuel_margin_fraction * 100.0 });
+                        limite: req.min_fuel_margin_fraction * 100.0,
+                        limite_nominal: req.min_fuel_margin_fraction * 100.0 });
                 }
                 // VS0 (fórmula do check #2):
                 let vs0_lim = req.cruise_speed_min_kmh / 1.8;
@@ -428,7 +486,8 @@ impl RobustnessAgent {
                     && sized_p.wing.stall_speed_flaps_kmh > vs0_lim {
                     flips.push(RobustnessFlip { check: "VS0".into(),
                         caso: "massa-total".into(),
-                        valor: sized_p.wing.stall_speed_flaps_kmh, limite: vs0_lim });
+                        valor: sized_p.wing.stall_speed_flaps_kmh, limite: vs0_lim,
+                        limite_nominal: vs0_lim });
                 }
                 // desempenho no mundo +σ (mesmos gates do pipeline nominal).
                 // `&cfg_p.performance` (não `&cfg.performance` — achado de
@@ -467,7 +526,8 @@ impl RobustnessAgent {
                     let p_ok = if maior_melhor { p >= lim } else { p <= lim };
                     if nom_ok && !p_ok {
                         flips.push(RobustnessFlip { check: nome.into(),
-                            caso: "massa-total".into(), valor: p, limite: lim });
+                            caso: "massa-total".into(), valor: p, limite: lim,
+                            limite_nominal: lim });
                     }
                 }
 
@@ -482,30 +542,32 @@ impl RobustnessAgent {
                 // têm `cg_fwd_case_pct_mac`/`cg_aft_case_pct_mac`) —
                 // descartada aqui.
                 //
-                // PRÉ-CONDIÇÃO da comparação contra limites NOMINAIS (ver
-                // razão 2 da docstring de `evaluate_world`): o mundo +σ
-                // re-convergiu o pipeline inteiro, logo `sized_p.wb.spec`
-                // TEM limites de CG próprios — e eles precisam coincidir
-                // com os nominais, senão a régua do flip estaria se
-                // mexendo junto com o valor medido. Vale hoje porque a
-                // geometria da asa não responde ao MTOW; se um dia
-                // responder, este assert grita em vez de deixar a
-                // divergência passar silenciosa.
-                debug_assert!(
-                    (sized_p.wb.spec.cg_limit_fwd_pct_mac
-                        - wb_nominal.spec.cg_limit_fwd_pct_mac).abs() < 1e-9
-                    && (sized_p.wb.spec.cg_limit_aft_pct_mac
-                        - wb_nominal.spec.cg_limit_aft_pct_mac).abs() < 1e-9,
-                    "limites de CG do mundo massa-total divergiram dos nominais \
-                     (fwd {:.12}% vs {:.12}%, aft {:.12}% vs {:.12}% MAC) — o caso \
-                     massa-total compara o CG re-convergido contra a régua NOMINAL, \
-                     no MESMO frame de %MAC (fração da MAC medida a partir do bordo \
-                     de ataque da MAC), o que só é honesto enquanto os limites forem \
-                     invariantes ao MTOW. Se a geometria da asa passou a responder ao \
-                     MTOW, esta comparação precisa ser reprojetada, não silenciada.",
-                    sized_p.wb.spec.cg_limit_fwd_pct_mac, wb_nominal.spec.cg_limit_fwd_pct_mac,
-                    sized_p.wb.spec.cg_limit_aft_pct_mac, wb_nominal.spec.cg_limit_aft_pct_mac,
-                );
+                // RÉGUA REPROJETADA (ciclo 10, task 2) — aqui morava um
+                // `debug_assert!` que exigia que os limites de CG do mundo
+                // massa-total COINCIDISSEM com os nominais, porque a
+                // comparação de flip usava a régua NOMINAL contra o CG
+                // re-convergido. O texto do assert já antecipava este dia:
+                // "se [os limites deixarem de ser invariantes], esta
+                // comparação precisa ser REPROJETADA, não silenciada".
+                //
+                // O dia chegou: o momento da LINHA DE TRAÇÃO
+                // (`T(Vr(W))·z_eixo`, ver `agents::trim_authority::
+                // rotation_fwd_limit_m`) matou a invariância ao peso do
+                // limite de ROTAÇÃO, que agora depende do peso do cenário
+                // MAIS LEVE — e esse peso muda no mundo +σ. Medido no
+                // baseline real (σ=15%): fwd nominal ≈13,3546% vs fwd
+                // massa-total ≈13,0064% MAC — as duas réguas divergem (o
+                // mundo massa-total AVANÇA ligeiramente frente à nominal, um
+                // efeito pequeno mas MENSURÁVEL, não um artefato de
+                // arredondamento). O assert foi então SUBSTITUÍDO pela
+                // reprojeção que ele mesmo pedia: o mundo massa-total
+                // passou a ser avaliado contra a SUA PRÓPRIA régua
+                // (`sized_p.wb.spec`, já finalizada por `apply_trim` dentro
+                // de `size_aircraft`), exatamente como os dois casos
+                // direcionais passaram a usar a deles. A semântica de flip
+                // ("nominal passava, mundo perturbado reprova") fica
+                // intacta — só a régua do lado PERTURBADO deixou de ser
+                // emprestada do mundo nominal.
                 // `&cfg_p` (não `cfg` — mesmo ruling do ciclo 5, Minor 4,
                 // já aplicado ao `PerformanceAgent` acima): este bloco
                 // avalia o mundo +σ, e é a config DESSE mundo que deve
@@ -519,6 +581,8 @@ impl RobustnessAgent {
                     sized_p.structural_masses.trem_principal_kg,
                     sized_p.structural_masses.trem_nariz_kg,
                     wb_nominal, gear_nominal,
+                    sized_p.wb.spec.cg_limit_fwd_pct_mac,
+                    sized_p.wb.spec.cg_limit_aft_pct_mac,
                 );
                 flips.extend(flips_masstotal);
 
@@ -570,6 +634,7 @@ impl RobustnessAgent {
                         caso: "massa-total".to_string(),
                         valor: folga_critica_p,
                         limite: 0.0,
+                        limite_nominal: 0.0, // piso fixo (folga > 0), invariante
                     });
                 }
             }
@@ -1012,17 +1077,16 @@ mod tests {
 
     /// Envelope/nariz no mundo massa-total: fixture com `arms.pax_rear_m`
     /// deslocado (5.75→6.2, achado por sonda numérica) até o cenário "4 pax
-    /// sem bagagem" ficar bem DENTRO do envelope nominal (≈34,97% MAC,
-    /// entre `cg_limit_fwd_pct_mac`≈34,06% e `cg_limit_aft_pct_mac`
-    /// ≈36,41% — ambos INVARIANTES à massa, ver docstring do módulo) — o
-    /// mundo +σ re-convergido (MTOW maior desloca o CG desse cenário para
-    /// TRÁS, ≈37,35%) cruza o limite traseiro, gerando o flip nomeado
-    /// "Cenário '4 pax sem bagagem'" caso "massa-total". Fixture folgada
-    /// (`config_teste()` intacta, sem o ajuste de `pax_rear_m`): NENHUM
+    /// sem bagagem" ficar DENTRO do envelope nominal mas perto do limite
+    /// TRASEIRO — o mundo +σ re-convergido (MTOW maior desloca o CG desse
+    /// cenário para TRÁS, ≈37,35%) cruza esse limite, gerando o flip
+    /// nomeado "Cenário '4 pax sem bagagem'" caso "massa-total".
+    /// Fixture folgada (`config_teste()` intacta, sem o ajuste): NENHUM
     /// cenário passa no nominal (`inside_envelope` sempre `false` nessa
     /// fixture sintética — o envelope nominal nunca abraça a faixa de CG
     /// carregado dela, achado da sonda), logo nenhum flip de "Cenário" é
     /// sequer POSSÍVEL — confirmado abaixo, não só assumido.
+    ///
     #[test]
     fn envelope_no_mundo_massa_total_flipa_quando_marginal() {
         let mut cfg = config_teste();
@@ -1141,11 +1205,13 @@ mod tests {
     /// ≈1.285 kg (nominal) para ≈1.363 kg (massa-total, σ=20%) e
     /// `nose_oleo_stroke_mm` NÃO SE MOVE um bit. Como a folga ESTÁTICA
     /// (`propeller.ground_clearance_m`), a deflexão de pneu
-    /// (`gear_cfg.tire_deflation_delta_m`) e, desde o ciclo 9, o `fator` de
-    /// amplificação do pivô (`(gear.x_main_m−propeller.prop_plane_x_m)/
-    /// (gear.x_main_m−gear.x_nose_m)` — geometria pura, nenhum dos três
-    /// campos responde a σ) também são invariantes à massa, os QUATRO
-    /// termos de `prop_clearance_critical_m` são invariantes ao mundo
+    /// (`gear_cfg.tire_deflation_delta_m`), a fração de sag estática
+    /// (`gear_cfg.static_sag_fraction`, ciclo 10) e, desde o ciclo 9, o
+    /// `fator` de amplificação do pivô (`(gear.x_main_m−
+    /// propeller.prop_plane_x_m)/(gear.x_main_m−gear.x_nose_m)` —
+    /// geometria/config pura, nenhum dos quatro campos responde a σ)
+    /// também são invariantes à massa, os CINCO termos de
+    /// `prop_clearance_critical_m` são invariantes ao mundo
     /// massa-total — o gate #25 (`RobustnessAgent::run`, ramo `Ok(sized_p)`) está
     /// corretamente FIADO (mesmo padrão `nom_ok && !p_ok` dos demais) mas
     /// é estruturalmente MORTO sob o modelo de trem atual: nenhuma config
@@ -1189,12 +1255,14 @@ mod tests {
              (cancelamento algébrico em min_oleo_stroke_m) — perturbado {:.6}mm vs \
              nominal {:.6}mm", gear_p.nose_oleo_stroke_mm, n.gear.nose_oleo_stroke_mm);
 
-        // Ciclo 9: os QUATRO termos de `prop_clearance_critical_m`
+        // Ciclo 9/10: os CINCO termos de `prop_clearance_critical_m`
         // (`ground_clearance_m`/`nose_oleo_stroke_mm`/
-        // `tire_deflation_delta_m`/`fator`) são invariantes ao mundo
-        // massa-total — `fator` é geometria pura (`[gear].x_main_m`/
-        // `x_nose_m`/`[propeller].prop_plane_x_m`, nenhum dos quais responde
-        // a σ). Verificação bit-exata, ponta a ponta, reaproveitando a MESMA
+        // `static_sag_fraction`/`tire_deflation_delta_m`/`fator`) são
+        // invariantes ao mundo massa-total — `fator` é geometria pura
+        // (`[gear].x_main_m`/`x_nose_m`/`[propeller].prop_plane_x_m`,
+        // nenhum dos quais responde a σ) e `static_sag_fraction` (ciclo 10)
+        // é config pura, idem. Verificação bit-exata, ponta a ponta,
+        // reaproveitando a MESMA
         // `fill_critical_clearance` que a produção usa (não uma
         // reimplementação paralela da fórmula) — prova a invariância citada
         // acima em vez de só inferi-la da ausência de flip.
@@ -1213,5 +1281,101 @@ mod tests {
             "consequência do achado acima: nenhum flip de folga de hélice crítica é \
              possível no mundo massa-total sob o modelo de trem atual, obteve: {:?}",
             out.flips);
+    }
+
+    /// F1 (ciclo 10, FIX WAVE): fixture DIRECIONAL onde a régua do mundo
+    /// perturbado (`flip.limite`) diverge da régua nominal
+    /// (`flip.limite_nominal`) — o caso que justifica o campo
+    /// `RobustnessFlip::limite_nominal` mas que nenhum teste exercitava
+    /// até aqui (o único assert pré-existente, em
+    /// `constraint_checker::tests::check_19_transforma_flips_em_violacoes_nomeadas`,
+    /// injeta um `RobustnessFlip` sintético com `limite_nominal == limite`
+    /// — não prova que a REPROJEÇÃO da régua em `evaluate_world`
+    /// funciona).
+    ///
+    /// Mesma fixture de `envelope_no_mundo_massa_total_flipa_quando_marginal`
+    /// (`arms.pax_rear_m` 5.75→6.2, achado por sonda numérica): desloca o
+    /// cenário "4 pax sem bagagem" para DENTRO do envelope nominal
+    /// (cg≈34,97%, entre fwd≈34,10% e aft≈36,41%). Sob o conjunto
+    /// adversarial DIANTEIRO (`caso="dianteiro"`, as 7 massas estruturais
+    /// dianteiras ×(1+σ), as traseiras ×(1−σ)) o cenário some para
+    /// cg≈31,72% — à FRENTE do limite dianteiro nominal (34,10%), gerando
+    /// o flip. A régua contra a qual esse flip é medido (`fwd_limit_p_pct_mac`
+    /// em `evaluate_world`) NÃO é a nominal: o momento da linha de tração
+    /// faz `rotation_limit_pct_mac` responder ao peso dos cenários, e as
+    /// massas estruturais do mundo dianteiro mudam a massa de TODOS os
+    /// cenários (via OEW) — a régua recalculada sobe para ≈34,41%, ~0,32pp
+    /// ATRÁS da régua nominal (≈34,10%). Uma regressão que voltasse a
+    /// comparar contra `wb_nominal.spec.cg_limit_fwd_pct_mac` produziria o
+    /// MESMO flip (mesmo `valor`, mesmo `check`), só com `limite` errado —
+    /// por isso o teste reconstrói a régua do mundo independentemente (via
+    /// `WeightBalanceAgent`/`TrimAuthorityAgent` no MESMO conjunto
+    /// adversarial `m_fwd`, não uma cópia do número) e compara com
+    /// `flip.limite`, não só com um pin numérico solto.
+    #[test]
+    fn regua_do_mundo_dianteiro_diverge_da_nominal_no_flip_de_cenario() {
+        let mut cfg = config_teste();
+        cfg.arms.pax_rear_m = 6.2;
+        let n = nominal_pipeline(cfg);
+
+        let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")
+            .expect("fixture deveria ter o cenário '4 pax sem bagagem'");
+        assert!(sc_marginal.inside_envelope,
+            "pré-condição do teste: cenário '4 pax sem bagagem' deveria passar no envelope \
+             nominal (cg={:.3}%, fwd={:.3}%, aft={:.3}%)", sc_marginal.cg_pct_mac,
+            n.wb.spec.cg_limit_fwd_pct_mac, n.wb.spec.cg_limit_aft_pct_mac);
+
+        // Régua do mundo dianteiro, reconstruída INDEPENDENTEMENTE (mesmo
+        // caminho de `RobustnessAgent::run`/`evaluate_case`, não uma cópia
+        // do resultado): conjunto adversarial `m_fwd`, `WeightBalanceAgent`
+        // sobre ele, `TrimAuthorityAgent` sobre o `wb_p` resultante.
+        let sigma = n.cfg.mass_model.sigma_mass_fraction;
+        let (m_fwd, _m_aft) = adversarial_masses(&n.cfg, &n.engine, &n.masses, sigma);
+        let wb_p = WeightBalanceAgent::run(&n.state, &n.wing, &n.engine, &n.cfg, &n.req, &n.emp, &m_fwd);
+        let trim_p = crate::agents::trim_authority::TrimAuthorityAgent::run(
+            &n.cfg, &n.wing, &n.emp, &wb_p, &n.state, &n.engine, &n.req, 0.0,
+        );
+        let fwd_limit_p_esperado = trim_p.flare_limit_pct_mac.max(trim_p.rotation_limit_pct_mac);
+        println!("fwd_limit_p_esperado = {fwd_limit_p_esperado:.4}  fwd_nominal = {:.4}",
+            n.wb.spec.cg_limit_fwd_pct_mac);
+
+        let out = RobustnessAgent::run(
+            &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
+            &n.propeller, &n.mission, &n.perf,
+        );
+        println!("flips={:?}", out.flips);
+
+        let flips_dianteiro: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Cenário '4 pax sem bagagem'" && f.caso == "dianteiro")
+            .collect();
+        assert_eq!(flips_dianteiro.len(), 1,
+            "esperava exatamente 1 flip Cenário '4 pax sem bagagem'/dianteiro: {:?}", out.flips);
+        let flip = flips_dianteiro[0];
+
+        assert!(flip.valor < flip.limite,
+            "cg sob o conjunto dianteiro ({:.3}%) deveria estar À FRENTE do limite dianteiro do \
+             mundo perturbado ({:.3}%) — é isso que caracteriza o flip", flip.valor, flip.limite);
+
+        // O CORAÇÃO do teste (F1): `limite` é a régua DO MUNDO perturbado,
+        // NÃO a nominal — as duas divergem, e por uma margem grande o
+        // bastante (>0.05pp) para não ser ruído de ponto flutuante.
+        assert!((flip.limite - flip.limite_nominal).abs() > 0.05,
+            "flip.limite ({:.4}) e flip.limite_nominal ({:.4}) deveriam DIVERGIR nesta fixture \
+             (a régua do mundo dianteiro recalculada != a régua nominal) — se convergiram, a \
+             fixture não exercita mais a reprojeção de `evaluate_world`",
+            flip.limite, flip.limite_nominal);
+
+        // `limite` bate com a régua reconstruída independentemente (o
+        // mundo, não a nominal).
+        assert!((flip.limite - fwd_limit_p_esperado).abs() < 1e-6,
+            "flip.limite ({:.6}) deveria bater com a régua do mundo dianteiro reconstruída \
+             independentemente ({:.6})", flip.limite, fwd_limit_p_esperado);
+
+        // `limite_nominal` bate com a régua NOMINAL (`wb_nominal.spec.
+        // cg_limit_fwd_pct_mac`, o parâmetro `wb_nominal` de `evaluate_world`)
+        // — não com a régua do mundo.
+        assert!((flip.limite_nominal - n.wb.spec.cg_limit_fwd_pct_mac).abs() < 1e-9,
+            "flip.limite_nominal ({:.6}) deveria bater com o limite dianteiro NOMINAL ({:.6})",
+            flip.limite_nominal, n.wb.spec.cg_limit_fwd_pct_mac);
     }
 }

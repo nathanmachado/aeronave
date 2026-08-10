@@ -141,6 +141,18 @@ pub struct SizedAircraft {
     /// por nenhum agente a jusante (`wb.spec.mtow_kg`, no relatório final,
     /// é o valor JÁ CONVERGIDO desta última iteração, não lido daqui).
     pub mtow_envelope_iterations: Vec<f64>,
+    /// Trajetória da tração de cruzeiro (Ciclo 10, Task 2 — momento da
+    /// linha de tração no trim de cruzeiro) ao longo das iterações — o
+    /// valor USADO em CADA iteração é o da iteração ANTERIOR (lag-1, mesmo
+    /// padrão dos três lags acima): `cl_h_trim_cruise` precisa do
+    /// `cm_thrust = −T·z_cg/(q·S·MAC)`, mas o `PropulsionSpec` desta MESMA
+    /// iteração só existe DEPOIS que `cd_trim` já foi somado ao polar. O
+    /// seed da primeira entrada é **0,0 N** (tração nula — a 1ª iteração
+    /// roda com o modelo pré-ciclo-10). Diagnóstico/teste de estabilidade
+    /// do lag — não usado por nenhum agente a jusante (`TrimSpec::
+    /// cl_h_trim_cruise`, no relatório final, é recalculado com a tração
+    /// JÁ CONVERGIDA desta última iteração, não lida daqui).
+    pub thrust_cruise_iterations: Vec<f64>,
 }
 
 /// Erros do laço de convergência de MTOW.
@@ -306,6 +318,22 @@ pub(crate) fn size_aircraft_with_max_iters(
     let mut mtow_envelope_prev: f64 = cfg.sizing.mtow_initial_guess_kg;
     let mut mtow_envelope_iterations: Vec<f64> = Vec::new();
 
+    // Tração de cruzeiro (Ciclo 10, task 2 — momento da linha de tração no
+    // trim de cruzeiro): QUARTO uso do mesmo padrão lag-1 dos três acima.
+    // `cl_h_trim_cruise` ganhou a contribuição `cm_thrust = −T·z_cg/(q·S·MAC)`
+    // (ver `agents::trim_authority::cm_thrust_cruise`), que precisa de
+    // `PropulsionSpec::thrust_cruise_n` — mas `PropulsionAgent::run` desta
+    // MESMA iteração só roda DEPOIS (precisa do polar já com `cd_trim`
+    // somado, que é justamente o que este bloco produz). Dependência
+    // circular resolvida pelo lag-1, como as outras três: seed **0,0 N**
+    // (tração nula na primeira iteração — deliberadamente simples e
+    // não-físico, exatamente como o seed 0,0 do CG lag-1 acima; equivale a
+    // rodar a 1ª iteração com o modelo pré-ciclo-10), atualizado ao final
+    // de CADA iteração com a tração real que acabou de ser calculada. Ver
+    // `thrust_cruise_iterations` no `SizedAircraft` devolvido.
+    let mut thrust_cruise_prev: f64 = 0.0;
+    let mut thrust_cruise_iterations: Vec<f64> = Vec::new();
+
     for _ in 0..max_iters {
         iterations.push(mtow);
 
@@ -347,17 +375,34 @@ pub(crate) fn size_aircraft_with_max_iters(
         );
         let l_h_over_mac_trim = emp.arm_h_m / mac_trim;
         let s_ratio_trim = emp.s_horizontal_m2 / wing.area_m2;
+        // Momento da linha de tração (Ciclo 10, task 2) — usa a tração
+        // lag-1 (`thrust_cruise_prev`, ver comentário no topo do laço).
+        let q_cruise_trim = crate::agents::aerodynamics::dynamic_pressure(
+            crate::models::atmosphere::Isa::density_kgm3(
+                req.cruise_altitude_m, req.isa_delta_c,
+            ),
+            req.cruise_speed_min_kmh / 3.6,
+        );
+        let cm_thrust_trim = crate::agents::trim_authority::cm_thrust_cruise(
+            thrust_cruise_prev, cfg.propeller.prop_axis_above_cg_m, q_cruise_trim,
+            wing.area_m2, mac_trim,
+        );
         let cl_h_trim = crate::agents::trim_authority::cl_h_trim_cruise(
             cfg.wing.cm_ac, wing.cl_cruise, x_cg_trim_ref_prev, emp.eta_h,
-            s_ratio_trim, l_h_over_mac_trim,
+            s_ratio_trim, l_h_over_mac_trim, cm_thrust_trim,
         );
         let cd_trim = crate::agents::trim_authority::cd_trim_cruise(
             cl_h_trim, emp.ar_h, cfg.empennage.e_h, s_ratio_trim,
         );
         crate::agents::aerodynamics::apply_cruise_trim_drag(&mut wing, cd_trim);
         cl_h_trim_iterations.push(cl_h_trim);
+        thrust_cruise_iterations.push(thrust_cruise_prev);
 
         let prop = PropulsionAgent::run(&state, req, &wing, engine);
+
+        // Atualiza o lag-1 da tração de cruzeiro (Ciclo 10, task 2) para a
+        // PRÓXIMA iteração — `prop` desta iteração já rodou.
+        thrust_cruise_prev = prop.thrust_cruise_n;
 
         // Combustível exigido pela MISSÃO (Task 5.1: análise por segmentos
         // — táxi, subida integrada, cruzeiro Breguet, descida e reserva —
@@ -457,7 +502,15 @@ pub(crate) fn size_aircraft_with_max_iters(
             // TRASEIRO (sm_min). Ver docstring de `WeightBalanceOutput::
             // apply_trim` para a dependência circular resolvida em duas
             // fases.
-            let trim = TrimAuthorityAgent::run(cfg, &wing, &emp, &wb);
+            // Ciclo 10 (task 2): a tração de cruzeiro passada aqui é a da
+            // MESMA iteração (`prop` já rodou acima) — SEM lag, ao
+            // contrário do `cm_thrust` usado dentro do laço para somar
+            // `cd_trim` ao polar ANTES de `PropulsionAgent`. Mesma
+            // assimetria (e mesma justificativa) do CG de referência, ver
+            // docstring de `TrimSpec::cl_h_trim_cruise`.
+            let trim = TrimAuthorityAgent::run(
+                cfg, &wing, &emp, &wb, &state, engine, req, prop.thrust_cruise_n,
+            );
             wb.apply_trim(&trim);
 
             return Ok(SizedAircraft {
@@ -476,6 +529,7 @@ pub(crate) fn size_aircraft_with_max_iters(
                 vn,
                 n_design_iterations,
                 mtow_envelope_iterations,
+                thrust_cruise_iterations,
             });
         }
 
@@ -788,6 +842,82 @@ mod tests {
         assert!((d - d_pin).abs() < d_pin,
             "residual do lag de envelope = {d:e} divergiu do pin honesto ≈{d_pin:e} — \
              histórico completo: {env:?}");
+    }
+
+    // ─── Tração de cruzeiro — estabilidade do lag-1 (Ciclo 10, Task 2) ────
+
+    /// QUARTO lag do laço (`thrust_cruise_iterations`), mesmo padrão e
+    /// mesma disciplina de teste dos três anteriores: testa o campo REAL
+    /// populado por `size_aircraft` (nunca uma réplica manual do corpo do
+    /// laço), confirma o SEED documentado e mede a convergência.
+    ///
+    /// Seed **0,0 N** (tração nula na 1ª iteração — `cm_thrust` nulo, ou
+    /// seja, a 1ª iteração roda com o modelo pré-ciclo-10), igual em
+    /// espírito ao seed 0,0 do CG lag-1. O transiente do seed é ENORME
+    /// (0 → ~1,2 kN de uma iteração para a outra), então a contração só
+    /// começa depois dele — a checagem estrita de deltas decrescentes
+    /// começa em i=2, como em `cl_h_trim_iterations_do_campo_real_converge_
+    /// geometricamente`.
+    ///
+    /// Pin honesto do resíduo MEDIDO na fixture sintética no ponto em que
+    /// a produção retorna (critério de MTOW, `CONVERGENCE_TOL_KG=0,5 kg`,
+    /// deliberadamente frouxo e sem relação com a precisão deste lag), com
+    /// folga de 2× — mesma disciplina dos outros três pins de resíduo.
+    #[test]
+    fn thrust_cruise_iterations_do_campo_real_converge() {
+        let sized = size_aircraft(&config_teste(), &engine_teste(), &requisitos_teste())
+            .expect("baseline sintético deveria convergir");
+        let h = &sized.thrust_cruise_iterations;
+        println!("thrust_cruise_iterations = {h:?}");
+        assert!(h.len() >= 4,
+            "esperava pelo menos 4 iterações para caracterizar a contração (obtido {})", h.len());
+        assert_eq!(h[0], 0.0, "seed do lag da tração de cruzeiro deveria ser 0,0 N");
+        // A partir da 2ª entrada o lag já carrega tração REAL (positiva).
+        for (i, t) in h.iter().enumerate().skip(1) {
+            assert!(t.is_finite() && *t > 0.0,
+                "thrust_cruise_iterations[{i}] = {t} deveria ser finito e positivo");
+        }
+
+        let deltas: Vec<f64> = (1..h.len()).map(|i| (h[i] - h[i - 1]).abs()).collect();
+        println!("deltas (tração de cruzeiro) = {deltas:?}");
+        for i in 2..deltas.len() {
+            assert!(deltas[i] < deltas[i - 1],
+                "delta[{i}]={:.3e} deveria ser ESTRITAMENTE menor que delta[{}]={:.3e} — \
+                 contração quebrada; histórico completo: {h:?}",
+                deltas[i], i - 1, deltas[i - 1]);
+        }
+
+        let delta_final = deltas[deltas.len() - 1];
+        println!("delta_final (tração de cruzeiro) = {delta_final:.6e} N");
+        // Pin honesto do resíduo MEDIDO (fixture sintética): 0,2095327 N,
+        // com folga de 2× — mesma disciplina dos outros três pins de
+        // resíduo deste módulo. É o maior dos quatro lags em valor
+        // ABSOLUTO, mas o menor em valor RELATIVO (0,21 N sobre ~1.011 N =
+        // 2,1e-4): a tração de cruzeiro é praticamente uma função direta do
+        // MTOW (T = D em regime permanente), então ela só para de andar
+        // quando o MTOW para — e o critério de parada do laço é justamente
+        // o MTOW, com `CONVERGENCE_TOL_KG=0,5 kg` de folga.
+        let delta_final_pin = 0.2095327;
+        assert!((delta_final - delta_final_pin).abs() < delta_final_pin,
+            "resíduo do lag da tração de cruzeiro = {delta_final:.7} N divergiu do pin honesto \
+             ≈{delta_final_pin:.7} N; histórico: {h:?}");
+        // Guard secundário de ORDEM DE GRANDEZA (~5× o pin): o transiente
+        // do seed vale ~1,07e3 N, então um lag acidentalmente desligado ou
+        // congelado no seed produziria um delta dessa ordem, não ~1 N.
+        assert!(delta_final < 1.0,
+            "resíduo do lag da tração de cruzeiro = {delta_final:.6e} N deveria estar bem \
+             abaixo de 1,0 N (o transiente do seed vale ~1,07e3 N); histórico: {h:?}");
+        // E a última entrada deve bater com a tração convergida devolvida
+        // em `SizedAircraft::prop` a menos de UM passo do lag — prova de
+        // que o histórico registra a ENTRADA de cada iteração (mesmo
+        // contrato de `n_design_iterations`/`mtow_envelope_iterations`).
+        let erro_vs_convergido = (h[h.len() - 1] - sized.prop.thrust_cruise_n).abs();
+        println!("última entrada do lag = {:.6} N  vs prop convergida = {:.6} N (Δ={:.3e})",
+                 h[h.len() - 1], sized.prop.thrust_cruise_n, erro_vs_convergido);
+        assert!(erro_vs_convergido < 1.0,
+            "a última entrada do lag ({:.6} N) deveria estar a menos de 1,0 N da tração \
+             convergida ({:.6} N) — um passo do lag vale ~0,21 N aqui",
+            h[h.len() - 1], sized.prop.thrust_cruise_n);
     }
 
     #[test]

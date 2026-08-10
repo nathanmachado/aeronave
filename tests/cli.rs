@@ -431,6 +431,50 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// projeto. O caminho PASS de #25 continua coberto pela fixture sintética
 /// (`validation::constraint_checker::tests::check_25_sem_violacao_na_
 /// fixture_padrao`).
+///
+/// ─── ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática) — MESMO VEREDITO,
+/// NÚMERO CORRIGIDO ─────────────────────────────────────────────────────
+///
+/// Campo novo `[gear].static_sag_fraction = 0,33` (fração do curso do
+/// nariz já consumida pela compressão ESTÁTICA — ver docstring de
+/// `GearCfg::static_sag_fraction`). CS 23.925 pela LETRA: só o trem
+/// CRÍTICO (nariz) vai ao batente; os mains ficam na deflexão estática já
+/// embutida em `h_cg_ground_m`, e o próprio nariz PARTE dessa mesma
+/// deflexão — na condição crítica ele só percorre o curso RESTANTE
+/// (`nose_oleo_stroke_mm × (1 − static_sag_fraction)`), não o curso TOTAL
+/// que o ciclo 9 usava (dupla contagem da compressão estática). `fator`
+/// permanece **1,46610** (não depende de `static_sag_fraction`);
+/// `prop_clearance_critical_m` vai de **≈−0,06416 m (ciclo 9) para
+/// ≈−0,00249 m (ciclo 10)** — honestamente ANTI-conservador (folga
+/// MAIOR), mas fiel à norma. `validation_status` PERMANECE `"FAIL"` com a
+/// MESMA 1 violação nomeada (checagem #25) — só o NÚMERO da violação
+/// muda, não o veredito. Ver `docs/backlog.md` (item 6, RESOLVIDO ciclo
+/// 10).
+///
+/// ─── ATUALIZAÇÃO (ciclo 10, task 2, LINHA DE TRAÇÃO) — MESMO VEREDITO,
+/// MENOS FOLGA ─────────────────────────────────────────────────────────
+///
+/// O momento da linha de tração entra no balanço de rotação
+/// (`−T(Vr)·z_eixo`, nariz-abaixo). `z_eixo` é o offset EIXO↔CG
+/// (`[propeller].prop_axis_above_cg_m` = 0,20 m), **não** a altura sobre o
+/// solo: na corrida ACELERADA o termo inercial de d'Alembert cancela a
+/// porção `h_cg` do braço (derivação em `agents::trim_authority::
+/// rotation_available_moment_nm`; ERRATUM da spec §2).
+///
+/// Efeito medido no baseline real: `rotation_limit_pct_mac` **8,533% →
+/// 13,355% MAC** (+4,82 pp) — a tração a Vr do cenário mais leve vale
+/// ≈3,5 kN e o binário nariz-abaixo consome ~18% do momento nariz-acima
+/// disponível. O envelope continua FECHADO (13,4% < 43,5%) e o CG mais
+/// dianteiro do baseline (17,9% MAC) continua ATRÁS do limite, com 4,5 pp
+/// de folga (eram 9,3 pp).
+///
+/// **Veredito INALTERADO**: `validation_status` continua `"FAIL"` com
+/// EXATAMENTE 1 violação nomeada — a de hélice (#25), com o MESMO número
+/// (−0,002 m), que a task 2 não toca. ZERO flips de robustez, ZERO
+/// cenários fora do envelope. O que mudou é a FOLGA: as margens de
+/// autoridade de rotação caem (o cenário mais apertado, "Solo (piloto)",
+/// de +21,6% para +10,5%). Custo honesto de um termo de momento que
+/// faltava, agora cobrado.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo9() {
     let out_path = std::env::temp_dir().join(format!(
@@ -476,14 +520,16 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     // qualquer violação nova aparece por nome no output do teste, sem
     // precisar adivinhar qual foi.
     assert_eq!(violations.len(), 1,
-        "ciclo 9: esperava EXATAMENTE 1 violação no baseline real (checagem #25, hélice — era \
-         ZERO na campanha E10): {violations:#?}");
+        "ciclo 10 (task 2): esperava EXATAMENTE 1 violação no baseline real (checagem #25, \
+         hélice) — o recuo do limite de rotação pela linha de tração (+4,82 pp) NÃO reabre \
+         nenhum cenário; ver o comentário acima: {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
-        "a única violação esperada é a de folga crítica de hélice (checagem #25): \
-         {violations:#?}");
-    assert!(violations.iter().any(|v| v.contains("-0.064")),
-        "violação de hélice deveria citar a folga crítica observada (≈−0,064 m): \
-         {violations:#?}");
+        "a única violação esperada é a de folga crítica de hélice (checagem #25), intocada \
+         pela task 2: {violations:#?}");
+    assert!(violations.iter().any(|v| v.contains("-0.002")),
+        "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10 — \
+         era ≈−0,064 m no ciclo 9, deflexão estática corrige dupla contagem do curso do \
+         nariz): {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("1.4661")),
         "violação de hélice deveria citar o fator de amplificação do pivô (≈1,4661×): \
          {violations:#?}");
@@ -498,9 +544,16 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     // (2/3) Robustez (#19): 2 flips → 0. Os cenários 'Solo (piloto)' e
     // '2 pax dianteiros' recuaram de 9,1%/12,5% para 17,9%/20,5% MAC e
     // agora sobrevivem a ±15% de massa estrutural nos dois mundos.
+    //
+    // Ciclo 10 (task 2): CONTINUA ZERO. O limite dianteiro recua +4,82 pp
+    // (linha de tração), mas os três cenários "4 pax + bagagem" mantêm
+    // folga suficiente sobre a régua do pior mundo dianteiro. (Uma versão
+    // intermediária desta task, com o braço ERRADO sobre o solo, gerava 3
+    // flips aqui — ver a ATUALIZAÇÃO na docstring.)
     assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
-        "campanha E10: esperava ZERO violações de robustez (σ=15%) — eram 2 ('Solo (piloto)' e \
-         '2 pax dianteiros') no ciclo 7: {violations:#?}");
+        "esperava ZERO violações de robustez (σ=15%) — eram 2 ('Solo (piloto)' e '2 pax \
+         dianteiros') no ciclo 7, ZERO desde a campanha E10 e ZERO ainda no ciclo 10 task 2: \
+         {violations:#?}");
     // (4) Pouso na GRAMA sobre 15 m: 605,0 m → 556,7 m, dentro dos 600 m
     // da pista de fazenda, por `cl_max_flaps` 1,72→2,1 (flap SLOTTED:
     // VS0 113,3→103,4 km/h, distância ∝ V_ref²).
@@ -515,10 +568,10 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_de_helice_ciclo
     assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
         "decolagem na grama (≈473,6 m pós-ciclo-8, era ≈469,3 m pós-E10, ≈457,7 m antes) \
          deveria continuar dentro dos 600 m: {violations:#?}");
-    // Nenhum dos 6 cenários de carga fora do envelope admissível — nem os
-    // dianteiros (que E10 recuou) nem os traseiros (que E10 aproximou do
-    // limite: o pior, '4 pax + bagagem + cheio', vai a 38,8% MAC contra um
-    // limite traseiro de 43,5%).
+    // Envelope de CG por cenário: NENHUM dos 6 cenários fora do envelope
+    // admissível. Ciclo 10 (task 2): o limite dianteiro sobe de 8,5% para
+    // 13,4% MAC e o CG mais dianteiro do baseline está em 17,9% — a folga
+    // cai de 9,3 pp para 4,5 pp, mas nenhum cenário cruza.
     for cenario in ["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem",
                     "4 pax + bagagem + cheio", "4 pax + bagagem + meia",
                     "4 pax + bagagem vazio"] {

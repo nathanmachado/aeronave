@@ -52,6 +52,19 @@
 //! combustível/robustez) permanecem INALTERADOS, ver
 //! `constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_
 //! real` abaixo.
+//!
+//! ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática, 2026-08-09 —
+//! old→new): `validation_status` PERMANECE `FAIL` (mesma 1 violação
+//! nomeada, checagem #25) — só o NÚMERO da violação muda. Campo novo
+//! `[gear].static_sag_fraction = 0,33` corrige uma dupla contagem da
+//! compressão estática do amortecedor de nariz (curso TOTAL → curso
+//! RESTANTE até o batente, já que `h_cg_ground_m` mede a aeronave
+//! CARREGADA — ver docstring de `GearCfg::static_sag_fraction`/
+//! `GearCfg::h_cg_ground_m`): `prop_clearance_critical_m`
+//! ≈−0,06416 m (ciclo 9) → ≈−0,00249 m (ciclo 10) — honestamente
+//! ANTI-conservador (folga MAIOR), fator (≈1,46610) inalterado. O caveat
+//! dos mains rígidos nomeado no ciclo 9 MORRE nesta task —
+//! `docs/backlog.md` (item 6, RESOLVIDO).
 
 use std::path::PathBuf;
 
@@ -385,11 +398,31 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // `carga_de_nariz_no_mundo_massa_total_flipa_quando_marginal`, …) e em
     // `constraint_checker::tests::check_19_transforma_flips_em_violacoes_
     // nomeadas`.
+    //
+    // ATUALIZAÇÃO (ciclo 10, task 2 — LINHA DE TRAÇÃO): o parágrafo acima
+    // fica HISTÓRICO num ponto: "o limite de rotação é invariante ao peso e
+    // ao CG (não recebe nenhum dos dois)" MORREU. O momento da linha de
+    // tração (`−T(Vr(W))·prop_axis_above_cg_m`, com o `h_cg` do braço
+    // cancelado pelo termo inercial de d'Alembert — ver
+    // `agents::trim_authority::rotation_available_moment_nm`) faz o limite
+    // depender do peso, e ele passa de 8,533% para **13,355% MAC** no
+    // baseline real (+4,82 pp). A contagem de flips, porém, CONTINUA ZERO:
+    // os cenários mantêm folga suficiente sobre a régua do pior mundo
+    // dianteiro. O que encolhe é a margem de autoridade de rotação (o
+    // cenário mais apertado, "Solo (piloto)", vai de +21,6% para +10,5%).
     let robustez: Vec<&String> = report.violations.iter()
         .filter(|v| v.starts_with("Robustez:")).collect();
     assert!(robustez.is_empty(),
-        "campanha E10: esperava ZERO violações de robustez (σ=15%) no baseline real — eram 2 \
-         (Solo/2 pax) até o ciclo 7: {:?}", report.violations);
+        "esperava ZERO violações de robustez (σ=15%) no baseline real — eram 2 (Solo/2 pax) \
+         até o ciclo 7, ZERO desde a campanha E10 e ZERO ainda no ciclo 10 task 2: {:?}",
+        report.violations);
+    // Envelope de CG por cenário: nenhum cenário fora. O recuo do limite
+    // dianteiro (+4,82 pp) não alcança o CG mais dianteiro (17,9% MAC).
+    let fora: Vec<&String> = report.violations.iter()
+        .filter(|v| v.contains("fora do envelope de CG admissível")).collect();
+    assert!(fora.is_empty(),
+        "ciclo 10 (task 2): nenhum cenário deveria sair do envelope de CG — o limite dianteiro \
+         vai a ≈13,4% MAC contra um CG mais dianteiro de 17,9%: {:?}", report.violations);
     // ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — old→new): a
     // afirmação abaixo ("o baseline real não deve reportar NENHUMA
     // violação") era o PASS completo da campanha E10 — verdadeira até este
@@ -401,14 +434,26 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // OUTRA violação muda (tipback/tail-strike/carga de nariz/robustez
     // continuam PASSANDO, verificado pelos asserts acima) — exatamente 1
     // violação nomeada, a hélice.
+    //
+    // ATUALIZAÇÃO (ciclo 10, task 1, deflexão estática — old→new): MESMO
+    // veredito (checagem #25 continua REPROVANDO, exatamente 1 violação) —
+    // só o NÚMERO da folga crítica muda, ≈−0,06416 m → ≈−0,00249 m (curso
+    // RESTANTE do nariz, não curso total — `docs/backlog.md`, item 6,
+    // RESOLVIDO).
+    //
+    // ATUALIZAÇÃO (ciclo 10, task 2, linha de tração — old→new): a contagem
+    // total PERMANECE 1 (a de hélice, INTOCADA pela task 2, mesmo número
+    // ≈−0,0025 m). O limite dianteiro recua +4,82 pp mas não reabre nada —
+    // ver `tests/cli.rs` para a narrativa completa.
     assert_eq!(report.violations.len(), 1,
-        "ciclo 9: esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline real — \
-         obteve: {:?}", report.violations);
+        "ciclo 10 (task 2): esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline \
+         real — obteve: {:?}", report.violations);
     assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
         "a única violação esperada é a de folga crítica de hélice (checagem #25): {:?}",
         report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("-0.064")),
-        "violação de hélice deveria citar a folga crítica observada (≈−0,064 m): {:?}",
+    assert!(report.violations.iter().any(|v| v.contains("-0.002")),
+        "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10): \
+         {:?}",
         report.violations);
 }
 

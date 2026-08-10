@@ -341,13 +341,12 @@ fn main() {
     println!("  Limite de FLARE (pouso, número único, independe do peso): {:.2}% MAC  |  \
               CL_h disp={:.3}",
              trim.flare_limit_pct_mac, trim.cl_h_available);
-    // Fix de revisão (FIX1): a rotação, apesar de fisicamente depender do
-    // peso, resulta INVARIANTE ao peso do cenário sob Vr=1.1·Vs0(W) — ver
-    // agents::trim_authority::rotation_fwd_limit_m — por isso também é um
-    // número ÚNICO, não mais "por cenário" como na primeira versão deste
-    // agente.
-    println!("  Limite de ROTAÇÃO (decolagem, número único — INVARIANTE ao peso do cenário sob \
-              Vr=1.1·Vs0(W), ver derivação no código): {:.2}% MAC",
+    // Ciclo 10 (task 2): a invariância ao peso do limite de rotação MORREU
+    // — o momento da linha de tração (T(Vr(W))·z_eixo) não é proporcional a
+    // W, ver agents::trim_authority::rotation_fwd_limit_m. O número ÚNICO
+    // reportado passa a ser o MÁXIMO dos limites por cenário.
+    println!("  Limite de ROTAÇÃO (decolagem, número único = MÁXIMO sobre os cenários — \
+              depende do peso desde a linha de tração, ver derivação no código): {:.2}% MAC",
              trim.rotation_limit_pct_mac);
     println!("  Manobra que GOVERNA o limite dianteiro: {}", trim.governing);
     println!("  Margem de autoridade de rotação por cenário (diagnóstico, na CG/peso REAIS de \
@@ -773,8 +772,9 @@ fn main() {
         "preliminary (dimensionamento estático de cargas; requer análise \
          dinâmica de pouso/afundamento)".into());
     fidelity.insert("propeller".into(),
-        "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — trem \
-         totalmente estendido, aeronave nivelada — E folga em condição \
+        "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — aeronave \
+         CARREGADA, em deflexão estática de trem (não trem totalmente \
+         estendido sem carga — CONTRATO de [gear].h_cg_ground_m) — E folga em condição \
          CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no \
          batente + pneu murcho, checagem #25; ambas piso de projeto, não \
          verificação regulatória direta. Ciclo 9 (transferência de \
@@ -787,17 +787,26 @@ fn main() {
          honesto: no baseline real esse fator (≈1,466) vira a folga \
          crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m \
          (FAIL) — a simplificação antiga era OTIMISTA e mascarava este \
-         resultado, como o achado de review do ciclo 8 previu. CAVEAT \
-         NOMEADO (revisão final, ciclo 9, NÃO corrigido): a fórmula pivota \
-         sobre os MAINS mas trata o trem principal como RÍGIDO/estendido \
-         — deflexão do amortecedor/pneu principal (≈212,4 mm no baseline \
-         real) não entra na fórmula e translada o pivô ~1:1, ADITIVO ao \
-         termo já amplificado do nariz, ordem de grandeza MAIOR que a \
-         margem de +0,0682 m da célula recomendada pela campanha E11 — \
-         condição COMPOSTA de CS 23.925 não modelada. Ver \
+         resultado, como o achado de review do ciclo 8 previu. Ciclo 10 \
+         (task 1, deflexão estática — CS 23.925 pela LETRA): o CAVEAT dos \
+         mains rígidos nomeado no ciclo 9 (deflexão do amortecedor/pneu \
+         principal precisaria entrar como termo aditivo, condição \
+         COMPOSTA de CS 23.925) está RESOLVIDO — `[gear].h_cg_ground_m` \
+         sempre foi a altura da aeronave CARREGADA, em deflexão estática \
+         (não trem estendido sem carga), então os mains JÁ estão nessa \
+         deflexão dentro de `ground_clearance_m`; a norma, pela letra, só \
+         exige o trem CRÍTICO (nariz) no batente, os demais ficam na \
+         deflexão estática que já é modelada. Não faltava termo nenhum. \
+         Campo novo `[gear].static_sag_fraction` (0,33 no baseline) corrige \
+         a fórmula do nariz do curso TOTAL do batente para o curso \
+         RESTANTE (o amortecedor de nariz também parte da mesma deflexão \
+         estática, não estendido) — dupla contagem do ciclo 9 corrigida. \
+         Fator geométrico inalterado (≈1,466); folga crítica \
+         ≈−0,064 m (ciclo 9) → ≈−0,0025 m (ciclo 10) — MESMO veredito \
+         (checagem #25 continua FAIL), honestamente ANTI-conservador. Ver \
          docstring de PropellerSpec::prop_clearance_critical_m e \
-         docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, condição \
-         composta CS 23.925). Requer mapa de \
+         docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO \
+         ciclo 10). Requer mapa de \
          desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \
@@ -809,8 +818,10 @@ fn main() {
         "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)".into());
     fidelity.insert("robustness".into(),
         "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; \
-         limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing \
-         completo com fatores ×(1+σ))".into());
+         limites de envelope avaliados na régua do PRÓPRIO mundo perturbado desde o \
+         ciclo 10 task 2 — o limite dianteiro deixou de ser invariante a massa (linha \
+         de tração); flips[].limite_nominal carrega a régua nominal para contraste; \
+         caso massa-total: re-sizing completo com fatores ×(1+σ))".into());
     // task refino-ciclo2: limite dianteiro físico do envelope de CG, agora
     // com a autoridade de profundor CALCULADA por geometria DATCOM/Nelson
     // (não mais um `cl_h_max_down` de config direto — ver
@@ -825,8 +836,12 @@ fn main() {
         "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
          cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a \
          elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver \
-         trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ \
-         μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)".into());
+         trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 \
+         task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — \
+         ver erratum da spec §2), mas ainda DESPREZA o binário de atrito de rolamento \
+         (μ_roll·N·h_cg) e de arrasto (D·(h_cg−h_D)); residual estimado ≲2 pp de %MAC, \
+         ANTI-conservador (subestima o limite dianteiro de rotação); validar em ensaio de voo \
+         antes de tratar como definitivo)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {

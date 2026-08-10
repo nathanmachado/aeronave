@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.2
+# `aircraft_spec.json` — contrato do schema v5.3
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -41,6 +41,32 @@ documentação a ser corrigido, não um comportamento aceitável.
     consumidor v5.1 que já lia esse campo numericamente continua lendo o
     mesmo tipo, só com um valor mais correto. Registrado aqui para não
     esconder a divergência entre esta política e a decisão real tomada.
+    **Mesma exceção reaplicada** (ciclo10-sag-e-linha-de-tracao, task 1,
+    2026-08-09, ainda dentro da v5.2 — bump formal fica para a Task 3 do
+    mesmo ciclo): a fórmula de `prop_clearance_critical_m` mudou DE NOVO
+    (curso TOTAL do amortecedor de nariz → curso RESTANTE até o batente,
+    corrigindo uma dupla contagem da compressão estática — ver §1 bloco
+    `propeller` e `docs/backlog.md` item 6, RESOLVIDO), pelo MESMO
+    raciocínio: correção física, não mudança de contrato. Baseline real
+    E10: **≈−0,06416 m (ciclo 9) → ≈−0,00249 m (ciclo 10)** — MESMO
+    veredito (checagem #25 continua FAIL), só o número muda.
+    **Terceira aplicação da mesma exceção** (ciclo10-sag-e-linha-de-tracao,
+    task 2, 2026-08-09, ainda dentro da v5.2): o momento da LINHA DE TRAÇÃO
+    entra no balanço de rotação e no trim de cruzeiro. Nenhum campo novo,
+    nenhum rename, nenhuma mudança de tipo/unidade — mas a SEMÂNTICA de
+    `trim.rotation_limit_pct_mac` muda (deixa de ser invariante ao peso e
+    passa a ser a envoltória avaliada no cenário mais leve; ver §4) e os
+    VALORES de `trim.rotation_limit_pct_mac`, `trim.cl_h_trim_cruise`,
+    `trim.cd_trim` e `weight.cg_limit_fwd_pct_mac` mudam. Mesmo raciocínio
+    das duas anteriores: é CORREÇÃO FÍSICA (um termo de momento que
+    faltava), não mudança de contrato. Baseline real:
+    `rotation_limit_pct_mac` **8,533% → 13,355% MAC** (+4,82 pp);
+    `validation_status` continua `"FAIL"` com a MESMA 1 violação (a de
+    hélice, #25, inalterada) e ZERO flips de robustez — o que encolhe é a
+    FOLGA (margem de rotação do cenário mais apertado, "Solo (piloto)",
+    de +21,6% para +10,5%). `robustness.flips[]` ganha o campo
+    `limite_nominal` (aditivo; ver §4) — o bump formal para 5.3 fica para
+    a Task 3 do ciclo.
 - Histórico: v3.x usava `revision` como string livre, sem os blocos
   `geometry`/`sizing`/`fidelity`/`warnings` (que existiam calculados
   internamente, mas não eram serializados) e sem política de bump
@@ -168,9 +194,28 @@ documentação a ser corrigido, não um comportamento aceitável.
     voo de cruzeiro, não um extremo — ver `agents::trim_authority::
     cl_h_trim_cruise`):
     ```
-    CL_h_trim = [cm_ac + CL_cruise·(x̄_cg−0,25)] / [η_h·(S_h/S_w)·(l_h/MAC+0,25−x̄_cg)]
-    ΔCD_trim = (CL_h_trim²/(π·ar_h·e_h))·(S_h/S_w)
+    CL_h_trim = [cm_ac + cm_thrust + CL_cruise·(x̄_cg−0,25)]
+                / [η_h·(S_h/S_w)·(l_h/MAC+0,25−x̄_cg)]
+    ΔCD_trim  = (CL_h_trim²/(π·ar_h·e_h))·(S_h/S_w)
     ```
+    O termo `cm_thrust` entrou no **ciclo 10 (task 2)** — momento da linha
+    de tração em torno do CG em voo:
+    ```
+    cm_thrust = − T_cruzeiro · [propeller].prop_axis_above_cg_m / (q·S_w·MAC)
+    ```
+    Braço sobre o **CG** (não sobre o solo, ao contrário da rotação — o
+    pivô é diferente). Sinal: eixo ACIMA do CG + tração para a frente ⟹
+    nariz-abaixo ⟹ `Cm` NEGATIVO, o que empurra `CL_h_trim` na direção
+    NEGATIVA (mais download / menos upload). No baseline real vale ≈−0,0054
+    contra um `cm_ac` de −0,008 — não é um termo desprezível.
+    **Aproximação documentada** (`z_D = 0`): em cruzeiro nivelado `T = D`,
+    horizontais e opostas, formando um binário de braço `(z_T − z_D)`. Este
+    modelo assume a resultante de ARRASTO passando pelo CG, o que deixa o
+    braço líquido igual a `prop_axis_above_cg_m`. Num centro de arrasto
+    tipicamente 0–0,10 m acima do CG, isso SUPERESTIMA o `cm_thrust`
+    nariz-abaixo em até ~50% no pior caso plausível — direção
+    CONSERVADORA para o trim. Refinar exigiria um campo de config novo
+    (`z_drag_above_cg_m`) sem base no CAD atual.
     `cm_ac` é o coeficiente de momento do perfil ISOLADO (sem
     `cm_flap_delta` — cruzeiro é sem flap, ao contrário do balanço de
     flare/rotação). `e_h` é a eficiência de Oswald da empenagem horizontal
@@ -473,7 +518,7 @@ documentação a ser corrigido, não um comportamento aceitável.
   - **Achado honesto do baseline real** (consequência FÍSICA da Task 1 —
     rotação e distâncias de decolagem usando o CL_max de DECOLAGEM correto
     em vez do de POUSO): `trim.rotation_limit_pct_mac` (limite dianteiro de
-    rotação, número único invariante ao peso) recua de **12,995% para
+    rotação, número único então invariante ao peso) recua de **12,995% para
     8,908% MAC** — a Vr correta é MAIOR (menos CL_max disponível na
     rotação), logo há MAIS autoridade de profundor disponível; o modelo
     anterior era pessimista, não o contrário. O espelho honesto desse
@@ -617,6 +662,87 @@ documentação a ser corrigido, não um comportamento aceitável.
     `docs/backlog.md` (item 1, marcado RESOLVIDO),
     `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
     pins honestos completos.
+  - **Task 1 de ciclo10-sag-e-linha-de-tracao (2026-08-09, ainda dentro da
+    v5.2 — bump formal fica para a Task 3 do mesmo ciclo)**: CAVEAT dos
+    mains rígidos nomeado logo acima **RESOLVIDO** — `[gear].
+    h_cg_ground_m` sempre foi a altura do CG com a aeronave CARREGADA, em
+    deflexão ESTÁTICA (não "trem estendido sem carga"), então os mains
+    JÁ estão nessa deflexão dentro de `ground_clearance_m`; CS 23.925 pela
+    LETRA só exige o trem CRÍTICO (nariz) no batente, não os mains
+    simultaneamente. Não havia condição composta não modelada. Campo de
+    CONFIGURAÇÃO NOVO `[gear].static_sag_fraction` (faixa (0,15, 0,55) m,
+    baseline 0,33) é campo NOVO **obrigatório**, SEM default — TOMLs
+    pré-task falham o parse (`missing field`). Corrige o curso do nariz
+    usado na fórmula de TOTAL para RESTANTE
+    (`nose_oleo_stroke_mm × (1 − static_sag_fraction)`), já que o
+    amortecedor de nariz também PARTE da deflexão estática — a fórmula
+    anterior contava essa compressão DUAS VEZES. Fator geométrico
+    inalterado (≈1,46610); `prop_clearance_critical_m` vai de
+    **≈−0,06416 m para ≈−0,00249 m** — MESMO veredito (`validation_status`
+    continua `"FAIL"`, mesma 1 violação nomeada), honestamente
+    ANTI-conservador (a correção AUMENTA a folga calculada), mas fiel à
+    letra da norma. Ver `docs/backlog.md` (item 6, RESOLVIDO),
+    `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` para os
+    pins honestos completos.
+- **v5.3** (Task 3, ciclo10-sag-e-linha-de-tracao, 2026-08-09 — bump
+  **MINOR**, exceção registrada, mesmo padrão da v5.2): formaliza o bump
+  que as Tasks 1/2 do mesmo ciclo já haviam anunciado como "ainda dentro
+  da v5.2" (ver notas de exceção em §1 acima e o sub-item "Task 1 de
+  ciclo10..." logo acima, sob v5.2). Três mudanças de conteúdo, nenhuma
+  nova nesta task — só formalizadas e documentadas:
+  1. **`propeller.prop_clearance_critical_m` mudou de fórmula DE NOVO**
+     (Task 1, `6c34f8f` — já detalhado no sub-item "Task 1 de
+     ciclo10-sag-e-linha-de-tracao" sob v5.2 acima): curso do amortecedor
+     de nariz de TOTAL para RESTANTE, campo de CONFIGURAÇÃO NOVO
+     `[gear].static_sag_fraction`. Baseline real E10: **≈−0,06416 m →
+     ≈−0,00249 m** — MESMO veredito (checagem #25 continua `FAIL`).
+  2. **Física nova do momento da linha de tração** (Task 2, `79b2263` +
+     erratum `713e846` + `f9231ea`): o balanço de momentos da rotação
+     ganha o termo `−T(Vr)·prop_axis_above_cg_m` (braço sobre o CG — ver
+     ERRATUM da spec, `docs/superpowers/specs/
+     2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md` §2: a corrida de
+     decolagem é ACELERADA, o termo de d'Alembert cancela a porção
+     `h_cg`, termos de solo `μN·h_cg`/`D·(h_cg−h_D)` permanecem
+     DESPREZADOS e documentados, ≲2 pp, direção anti-conservadora); o trim
+     de cruzeiro ganha `cm_thrust = −T_cruzeiro·prop_axis_above_cg_m/
+     (q·S_w·MAC)` somado ao `cm_ac` (aproximação `z_D = 0` documentada,
+     conservadora em até ~50% no pior caso plausível). Nenhum campo novo
+     — `trim.rotation_limit_pct_mac`, `trim.cl_h_trim_cruise`,
+     `trim.cd_trim` e `weight.cg_limit_fwd_pct_mac` mantêm nome/tipo/
+     unidade, só o VALOR muda. **Mudança de contrato adicional**:
+     `trim.rotation_limit_pct_mac` deixa de ser invariante ao peso —
+     agora é a envoltória MÁXIMA sobre os cenários (ver §4, bloco
+     `trim`). Baseline real: `rotation_limit_pct_mac` **8,533% →
+     13,355% MAC** (+4,82 pp); `validation_status` continua `"FAIL"` com
+     a MESMA 1 violação (#25, inalterada por esta mudança) e ZERO flips
+     de robustez — o que encolhe é a FOLGA de rotação do cenário mais
+     apertado ("Solo (piloto)", de +21,6% para +10,5%; todos os cenários
+     permanecem positivos).
+  3. **Campo NOVO `robustness.flips[].limite_nominal`** (f64) — este SIM
+     genuinamente ADITIVO (ver tabela `RobustnessFlip` em §4 abaixo). O
+     limite NOMINAL do mesmo check, ao lado de `limite` (o limite
+     efetivamente aplicado ao mundo perturbado) — necessário porque a
+     mudança #2 acima fez o limite dianteiro de rotação deixar de ser
+     invariante à massa, então dois mundos adversariais podem ter
+     `limite` diferentes entre si e do nominal. `limite_nominal ==
+     limite` para checks de régua invariante (tipback, carga de nariz,
+     gates de desempenho/pista); `limite_nominal != limite` sinaliza "a
+     régua andou", não só o CG do mundo perturbado.
+  - Mesma exceção MINOR da v5.2 aplicada aos itens 1-2: correção de bug de
+    modelagem física (dupla contagem / termo de momento faltante), não
+    mudança de CONTRATO de tipo/estrutura — nome/tipo/unidade dos campos
+    afetados são idênticos aos da v5.2. Registrado aqui para não esconder
+    a divergência entre a letra da política (§1 acima) e a decisão real.
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON,
+    Task 1): `[gear].static_sag_fraction` (faixa (0,15, 0,55), baseline
+    0,33) é campo NOVO **obrigatório**, SEM default — TOMLs pré-5.3 sem
+    esse campo falham o parse (`missing field`), mesmo padrão sem erro de
+    migração dedicado das versões anteriores. Ver
+    `config/aircraft/baseline_4seat.toml` para o valor de referência.
+  - Nenhuma tolerância de teste foi afrouxada em nenhuma das três
+    mudanças — só pins re-centrados old→new com a MESMA tolerância. Ver
+    `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs`/
+    `tests/generic_engine.rs` para os pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -667,7 +793,7 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
 | `weight` | **v4.5**: semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — as 7 massas estruturais (`weight.structural_masses`) vêm de equações semi-empíricas de componente, mas o hardware/instalação (aviônicos, bateria, cabos etc.) ainda é estimativa de catálogo/projeto, não massa medida; erros aqui se propagam para MTOW/estrutura/trem de pouso |
-| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação DESCONSIDERA o binário tração/arrasto/inércia, resíduo estimado ≈ μ_roll·(W−L_g)·h_cg) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
+| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação CONSIDERA o binário da linha de TRAÇÃO (braço `prop_axis_above_cg_m`, pós-cancelamento do termo inercial de d'Alembert — ciclo 10 task 2), mas ainda DESPREZA o binário de atrito de rolamento (`μ_roll·N·h_cg`) e de arrasto (`D·(h_cg−h_D)`) — residual estimado ≲2 pp de %MAC, ANTI-conservador (subestima o limite dianteiro de rotação)) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
 | `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); rolagem de solo (energético) e aproximação de pouso (ângulo fixo) seguem sem termo de arrasto por construção; `climb_gradient_pct` AINDA tem viés otimista remanescente (avaliado no piso da varredura, 1,05·Vs, abaixo do ≥1,2·Vs típico da CS 23.65 — achado da revisão, pré-existente) | Reavaliar a velocidade de referência de `best_climb_angle_ms` (item de ciclo futuro) |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
@@ -676,7 +802,7 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | `mission` | computed (segmentos + equação de Breguet, L/D constante em cruzeiro) | — |
 | `electrical` | preliminary (soma de cargas nominais configuradas) | Análise transiente/térmica real |
 | `sizing` | computed (laço de convergência de ponto fixo) | — |
-| `robustness` | **v4.7**: computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope nominais — invariantes a massa; caso massa-total: re-sizing completo com fatores ×(1+σ)) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
+| `robustness` | **v4.7** (atualizado v5.3): computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope avaliados na régua do PRÓPRIO mundo perturbado desde o ciclo 10 task 2 — o limite dianteiro deixou de ser invariante a massa (linha de tração); `flips[].limite_nominal` carrega a régua nominal para contraste; caso massa-total: re-sizing completo com fatores ×(1+σ)) | — (o próprio bloco É a análise posterior de sensibilidade das 7 massas estruturais `semi-empirical`/`preliminary`; nenhuma análise adicional recomendada) |
 
 O texto exato de cada entrada (em português, como gerado pelo pipeline)
 pode variar ligeiramente entre execuções — a tabela acima é a referência
@@ -896,21 +1022,46 @@ neste modelo trapezoidal — nenhum campo adicional é necessário), `AR_h` é
 elevator_deflection_max_deg` convertido para radianos.
 
 **`flare_limit_pct_mac` e `rotation_limit_pct_mac` são NÚMEROS ÚNICOS,
-NÃO variam por cenário de carga.** Isto é um resultado NÃO ÓBVIO para a
-rotação especificamente: apesar do balanço de momentos físico depender do
-peso do cenário (`W`), sob a política de velocidade `Vr = 1,1·Vs0(W)`
-usada por este modelo, a pressão dinâmica de rotação `q_r(W)` é
-PROPORCIONAL a `W` — logo TODOS os termos de momento em jogo (download da
-empenagem, sustentação da asa, momento de perfil+flap) também são
-proporcionais a `W`, e o `W` CANCELA EXATAMENTE ao calcular a posição do
-CG-limite (`x_cg_rot = x_main − M_disponível(W)/W`). Ver a dedução
-completa (em português) na docstring de
+NÃO variam por cenário de carga** — mas por motivos diferentes.
+
+A **flare** simplesmente não depende do peso.
+
+A **rotação** dependia, deixou de depender (prova de cancelamento
+algébrico), e voltou a depender:
+
+- Até o ciclo 9 valia o resultado NÃO ÓBVIO de que `W` cancelava: sob a
+  política `Vr = 1,1·Vs0(W)`, a pressão dinâmica de rotação `q_r(W)` é
+  PROPORCIONAL a `W`, logo todos os termos de momento em jogo (download da
+  empenagem, sustentação da asa, momento de perfil+flap) também são, e o
+  `W` CANCELA EXATAMENTE em `x_cg_rot = x_main − M_disponível(W)/W`.
+- **Ciclo 10 (task 2)** acrescenta o momento da **linha de tração**:
+  `−T(Vr)·z_eixo` (nariz-abaixo), com `z_eixo =
+  [propeller].prop_axis_above_cg_m` — o offset EIXO↔CG, **não** a altura
+  sobre o solo: a corrida de decolagem é ACELERADA, e o termo inercial de
+  d'Alembert (`+m·aₓ·h_cg`) cancela exatamente a porção `h_cg` do braço da
+  tração no somatório sobre o contato do trem principal (Gudmundsson/
+  Roskam carregam `T·(z_T−z_mg)` e `m·aₓ·(z_cg−z_mg)` juntos). Termos de
+  solo remanescentes (`μN·h_cg`, `D·(h_cg−h_D)`, ≲2 pp) são desprezados e
+  documentados no código. `T` é tração de
+  hélice a `Vr` e **não** escala com `W`: como `Vr ∝ √W` e a potência de
+  eixo é fixa, `T/W ∝ η(J)·W^(−3/2)`. O termo sobrevive à divisão por `W`
+  e a invariância morre:
+  `x_cg_rot(W) = x_main − k_aero + T(Vr(W))·z_eixo/W`.
+- Consequência falseável: **aeronave mais LEVE ⟹ limite mais RECUADO**.
+  Variação MEDIDA no baseline real entre os extremos de peso dos cenários:
+  **1,4621 pp de MAC**. O número único publicado neste JSON é portanto o
+  **MÁXIMO** dos limites por cenário (que neste modelo cai no mais leve),
+  usado como ENVOLTÓRIA conservadora — não é mais uma identidade
+  algébrica. A checagem exata por cenário continua em
+  `rotation_margin_per_scenario`.
+
+Ver a re-derivação completa (em português) na docstring de
 `agents::trim_authority::rotation_fwd_limit_m`.
 
 | Campo | Tipo | Unidade | Descrição |
 |---|---|---|---|
 | `flare_limit_pct_mac` | f64 | %MAC | Limite dianteiro de flare — número único, independe do peso |
-| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único, INVARIANTE ao peso (ver acima) |
+| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único, MÁXIMO dos limites por cenário (envoltória conservadora; DEPENDE do peso desde o ciclo 10 task 2, momento da linha de tração — ver acima) |
 | `rotation_margin_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Diagnóstico informativo POR CENÁRIO — margem de autoridade de rotação avaliada na CG/peso REAIS de cada cenário (essa sim varia por cenário) — NÃO usado para calcular `rotation_limit_pct_mac`/`inside_envelope` |
 | `governing` | string (`"flare"` \| `"rotacao"`) | — | Qual dos dois limites ÚNICOS é maior (mais restritivo) |
 | `cl_h_available` | f64 | — | CL_h disponível — `-cl_h_max_down·(1−trim_margin)` |
@@ -1039,7 +1190,7 @@ dedução completa.
 | `diameter_max_by_mach_m` | f64 | m | Maior diâmetro que respeita ambos os limites de Mach |
 | `diameter_max_by_clearance_m` | f64 | m | Maior diâmetro que respeita a folga mínima de solo |
 | `ok_mach_static` / `ok_mach_cruise` / `ok_clearance` | bool | — | Checagens individuais |
-| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, trem estendido/pneu cheio). Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. **FÓRMULA (ciclo 9, transferência de atitude do #25 — old→new)**: `ground_clearance_m − Δ_prop`, `Δ_prop = (landing_gear.nose_oleo_stroke_mm/1000 + [gear].tire_deflation_delta_m) × fator`, `fator = ([gear].x_main_m − [propeller].prop_plane_x_m)/([gear].x_main_m − [gear].x_nose_m)`. ANTES do ciclo 9 (translação vertical 1:1, ciclo 8, CAVEAT agora RESOLVIDO): `Δ_prop = nose_oleo_stroke_mm/1000 + tire_deflation_delta_m` (fator implícito 1) — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço AMPLIFICADO pelo fator acima (sempre > 1, invariante garantido pela validação composta `prop_plane_x_m < x_nose_m`). Baseline real E10: **+0,033 m (PASS, ciclo 8) → ≈−0,06416 m (FAIL, ciclo 9)**, fator ≈1,46610 — a simplificação 1:1 realmente mascarava um FAIL honesto, como o achado de review do ciclo 8 previu. Ver `docs/backlog.md` ("transferência de atitude do #25", RESOLVIDO). **CAVEAT NOMEADO (achado de review desta revisão final, ciclo 9 — NÃO corrigido)**: a fórmula pivota sobre os MAINS mas trata o trem PRINCIPAL como RÍGIDO e ESTENDIDO — deflexão do amortecedor/pneu principal (`main_oleo_stroke_mm` ≈ 212,4 mm no baseline real) não entra na fórmula; na prática ela translada o pivô ~1:1, ADITIVO ao termo já amplificado do nariz, ordem de grandeza MAIOR que a margem de +0,0682 m da célula recomendada pela campanha E11. Condição COMPOSTA de CS 23.925 (mains e nariz colapsados simultaneamente), não modelada. Ver `docs/backlog.md` (item 6, "condição composta CS 23.925") |
+| `prop_clearance_critical_m` | f64 (**novo, ciclo 8 task 2 — formalizado na v5.1**) | m | Folga ponta de pá ↔ solo na condição CRÍTICA de CS 23.925 (amortecedor do trem de NARIZ TOTALMENTE COMPRIMIDO/batente + pneu MURCHO), distinta de `ground_clearance_m` (folga ESTÁTICA, aeronave CARREGADA em deflexão estática — mains e nariz comprimidos pelo peso, pneu cheio — CONTRATO de `[gear].h_cg_ground_m`, não "trem estendido"). Na condição CRÍTICA, o trem de NARIZ some da deflexão estática e vai ao curso RESTANTE + pneu murcho; os mains permanecem na mesma deflexão estática de `ground_clearance_m`. Hélice TRATORA: o trem de NARIZ governa, não o principal. Preenchido em DOIS PASSOS pelo pipeline (`specs::PropellerSpec::fill_critical_clearance`, chamado DEPOIS do `LandingGearAgent` — a hélice roda antes do trem na ordem de execução real) — nunca `NaN`, placeholder `0.0` até essa chamada. **Checagem #25** de `ConstraintChecker::verify` reprova quando `<= 0.0`. **FÓRMULA (ciclo 10, task 1, deflexão estática — old→new)**: `ground_clearance_m − Δ_prop`, `Δ_prop = (landing_gear.nose_oleo_stroke_mm/1000 × (1 − [gear].static_sag_fraction) + [gear].tire_deflation_delta_m) × fator`, `fator = ([gear].x_main_m − [propeller].prop_plane_x_m)/([gear].x_main_m − [gear].x_nose_m)`. ANTES do ciclo 10 (ciclo 9, curso TOTAL do nariz não RESTANTE): `Δ_prop = (nose_oleo_stroke_mm/1000 + tire_deflation_delta_m) × fator` — contava a compressão estática do nariz DUAS VEZES (implícita em `[gear].h_cg_ground_m`, que já é a altura CARREGADA/em deflexão estática — ver docstring desse campo —, e explícita no curso TOTAL do batente). ANTES do ciclo 9 (translação vertical 1:1, ciclo 8, CAVEAT RESOLVIDO): `Δ_prop = nose_oleo_stroke_mm/1000 + tire_deflation_delta_m` (fator implícito 1) — simplificação otimista, pois a célula na realidade PIVOTA sobre o trem principal e a hélice (à frente do nariz) mergulha um braço AMPLIFICADO pelo fator acima (sempre > 1, invariante garantido pela validação composta `prop_plane_x_m < x_nose_m`). Baseline real E10: **+0,033 m (PASS, ciclo 8) → ≈−0,06416 m (FAIL, ciclo 9) → ≈−0,00249 m (FAIL, ciclo 10)** — MESMO veredito desde o ciclo 9 (checagem #25 continua reprovando), fator ≈1,46610 (inalterado desde o ciclo 9). Ver `docs/backlog.md` ("transferência de atitude do #25", RESOLVIDO; item 6, RESOLVIDO ciclo 10). **CAVEAT DOS MAINS RÍGIDOS do ciclo 9 — RESOLVIDO no ciclo 10**: a fórmula pivota sobre os MAINS, mas NUNCA precisou de termo aditivo para eles — CS 23.925 pela LETRA só exige o trem CRÍTICO (nariz) no batente, os DEMAIS (mains) permanecem na deflexão ESTÁTICA já embutida em `[gear].h_cg_ground_m`/`ground_clearance_m` (a aeronave é sempre modelada CARREGADA). Não havia condição COMPOSTA não modelada — havia uma leitura imprecisa do que `h_cg_ground_m` representa. Ver `docs/backlog.md` (item 6, RESOLVIDO). **Nota independente, sinal OPOSTO e pequena, NÃO resolvida**: o disco da hélice também não é modelado como INCLINADO junto com o pitch da célula — CONSERVADOR em ≈+3,4 mm, ver `docs/backlog.md` (item 6) |
 
 **Nota de consistência**: quando `source == "derivado"`, o diâmetro aqui
 (autoritativo) pode divergir do `propulsion.prop_diameter_m` (provisório,
@@ -1160,7 +1311,8 @@ Sub-bloco `robustness.flips[]` (`RobustnessFlip`):
 | `check` | string | — | Nome do check que flipou — `"Cenário '<nome>'"` (envelope de CG), `"Tipback"`, `"Carga de nariz máx"` ou `"Carga de nariz mín"` |
 | `caso` | string | — | Qual conjunto adversarial derrubou o check: `"dianteiro"` \| `"traseiro"` |
 | `valor` | f64 | %MAC ou ° (conforme `check`) | Valor observado SOB perturbação |
-| `limite` | f64 | mesma unidade de `valor` | Limite NOMINAL violado |
+| `limite` | f64 | mesma unidade de `valor` | Limite EFETIVAMENTE aplicado ao mundo perturbado. Até a v5.2, sempre igual ao limite NOMINAL (todos os limites de CG eram invariantes à massa). Desde o ciclo 10 (task 2, momento da linha de tração) o limite dianteiro de rotação passou a depender do peso — para os dois casos direcionais de CG este campo é a régua do PRÓPRIO mundo perturbado, que pode diferir da régua nominal |
+| `limite_nominal` | f64 (**novo, v5.3**) | mesma unidade de `valor` | Limite NOMINAL do mesmo check — o que a régua valia ANTES da perturbação. Existe para separar as duas causas possíveis de um flip que `valor`/`limite` sozinhos confundem: **"o CG andou"** (`limite_nominal == limite`, o mundo perturbado moveu o CG do cenário através da MESMA régua) vs. **"a régua andou"** (`limite_nominal != limite`, possível desde que o limite dianteiro de rotação passou a responder à massa perturbada — ver item 2 da entrada v5.3 em §1). Para checks cuja régua é invariante à perturbação (tipback, carga de nariz, gates de desempenho/pista, dimensionamento, hélice), `limite_nominal` é IGUAL a `limite` por construção |
 
 Cada flip em `robustness.flips` gera exatamente uma entrada em
 `violations` (checagem #19 de `ConstraintChecker::verify`, ver §4

@@ -37,3 +37,7 @@
 ## Fora de escopo
 
 - Dinâmica de bounce/absorção; interferência hélice-fluxo na empenagem; adoção E11 (decisão humana no fim).
+
+## ERRATUM (2026-08-09, revisão da Task 2)
+
+O §2 prescrevia `z_eixo = h_cg_ground_m + prop_axis_above_cg_m` (braço sobre o solo) para o momento de tração na rotação. **Errado**: momentos sobre o pivô nos mains durante a corrida ACELERADA exigem o termo inercial (d'Alembert, `−m·a·h_cg`), que cancela a porção `h_cg` do braço — o braço sobrevivente é **`prop_axis_above_cg_m`** (+ termos de solo pequenos `μN·h_cg` e `D·(h_cg−h_D)`, ≲2 pp, documentáveis como desprezados). Referência: balanço de rotação padrão (Gudmundsson/Roskam), que carrega `T·(z_T−z_mg)` E `m·aₓ·(z_cg−z_mg)` juntos. Efeito correto: ~6–9 pp de recuo (não ~28); sensibilidade do eixo +12 cm ≈ +0,5 pp (não +3). A intenção do §2 ("capturar o custo real da linha de tração") governa; o braço literal está corrigido pela implementação.
