@@ -333,7 +333,9 @@ pub struct GearCfg {
     /// Faixa validada (3.0, 12.0).
     pub tail_cone_x_m: f64,
     /// Altura do ponto mais baixo do cone de cauda ao solo, em atitude
-    /// ESTÁTICA (trem estendido, aeronave nivelada, m) — aproximação:
+    /// ESTÁTICA (aeronave CARREGADA, em deflexão estática — mesmo contrato
+    /// de `h_cg_ground_m` acima, não trem estendido sem carga, m) —
+    /// aproximação:
     /// tratada como a altura já disponível ao rotacionar (não subtrai raio
     /// de pneu/geometria do trem, ver docstring do agente). Faixa validada
     /// (0.3, 2.5).

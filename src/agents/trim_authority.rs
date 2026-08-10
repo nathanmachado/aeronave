@@ -603,10 +603,26 @@ pub fn rotation_fwd_limit_m(
 /// centímetros ACIMA do CG, tipicamente entre 0 e ~0,10 m: como o efeito é
 /// o braço LÍQUIDO `z_T − z_D`, esta aproximação SUPERESTIMA o `cm_thrust`
 /// nariz-abaixo em até ~50% do valor calculado no pior caso plausível
-/// (0,10 de 0,20 m). Direção do erro: CONSERVADORA para o trim (pede mais
-/// download de empenagem do que o necessário). Refinar exigiria um campo
-/// de config novo (`z_drag_above_cg_m`) sem base no CAD atual — registrado
-/// aqui como aproximação assumida, não como omissão.
+/// (0,10 de 0,20 m) — e por isso empurra `CL_h_trim` um pouco MAIS na
+/// direção negativa (mais download/menos upload) do que o `z_D` real
+/// produziria (ver "SINAL AUDITADO" acima).
+///
+/// Direção do erro em `cd_trim` — NÃO uniforme, depende do sinal de
+/// `CL_h_trim` (isto é, do CG), porque `cd_trim_cruise` só vê `CL_h_trim²`
+/// (a MAGNITUDE): empurrar sempre na direção negativa REDUZ `|CL_h_trim|`
+/// quando `CL_h_trim` já é positivo (upload, CG atrás do CA) e AUMENTA
+/// `|CL_h_trim|` quando já é negativo (download, CG à frente do CA). No CG
+/// entregue (baseline, upload — `CL_h_trim_cruise > 0`, ver
+/// `cl_h_trim_cruise_hand_check_baseline_meia_missao`), a aproximação
+/// SUBESTIMA `cd_trim` — é ANTI-conservadora (o `cm_thrust` real, com
+/// `z_D>0`, exigiria MENOS download do que o calculado, deixando
+/// `|CL_h_trim|` real MAIOR, logo `cd_trim` real MAIOR). Num CG dianteiro
+/// (download, `CL_h_trim < 0`, ver
+/// `cl_h_trim_cruise_hand_check_cg_dianteiro_e_negativo`), o mesmo
+/// deslocamento AUMENTA `|CL_h_trim|` — a aproximação SUPERESTIMA
+/// `cd_trim`, conservadora. Refinar exigiria um campo de config novo
+/// (`z_drag_above_cg_m`) sem base no CAD atual — registrado aqui como
+/// aproximação assumida, não como omissão.
 pub fn cm_thrust_cruise(
     thrust_n: f64,
     prop_axis_above_cg_m: f64,

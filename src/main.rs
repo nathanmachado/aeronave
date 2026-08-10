@@ -772,8 +772,9 @@ fn main() {
         "preliminary (dimensionamento estático de cargas; requer análise \
          dinâmica de pouso/afundamento)".into());
     fidelity.insert("propeller".into(),
-        "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — trem \
-         totalmente estendido, aeronave nivelada — E folga em condição \
+        "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — aeronave \
+         CARREGADA, em deflexão estática de trem (não trem totalmente \
+         estendido sem carga — CONTRATO de [gear].h_cg_ground_m) — E folga em condição \
          CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no \
          batente + pneu murcho, checagem #25; ambas piso de projeto, não \
          verificação regulatória direta. Ciclo 9 (transferência de \
@@ -833,8 +834,12 @@ fn main() {
         "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
          cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a \
          elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver \
-         trim.sensitivity; rotação desconsidera binário tração/arrasto/inércia (residual ≈ \
-         μ_roll·(W−L_g)·h_cg); validar em ensaio de voo antes de tratar como definitivo)".into());
+         trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 \
+         task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — \
+         ver erratum da spec §2), mas ainda DESPREZA o binário de atrito de rolamento \
+         (μ_roll·N·h_cg) e de arrasto (D·(h_cg−h_D)); residual estimado ≲2 pp de %MAC, \
+         ANTI-conservador (subestima o limite dianteiro de rotação); validar em ensaio de voo \
+         antes de tratar como definitivo)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {

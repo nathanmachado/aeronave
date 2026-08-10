@@ -220,6 +220,10 @@ cd0_fixed_increment = 0.008
 # (validation::robustness), não só no nominal. Encurtar o trem custa folga de
 # hélice 1:1 — pago com [propeller].diameter_m 1.95 → 1.76. Coerência
 # dimensional das pernas em [mass_model].*_strut_length_m. Antigo: 1.05.
+# CONTRATO (ciclo 10, task 1): esta é a altura do CG ao solo com a aeronave
+# CARREGADA, em deflexão ESTÁTICA de trem (mains e nariz comprimidos pelo
+# peso — não trem "totalmente estendido" sem carga). Ver docstring de
+# [gear].h_cg_ground_m em src/models/aircraft_config.rs.
 h_cg_ground_m = 0.92
 # Campanha E10 (2026-08-08): 1.40 → 1.30 — trem de nariz avançado 10 cm.
 # A carga de nariz é ~(x_cg − x_main)/(x_main − x_nose): afastar o nariz do

@@ -555,8 +555,11 @@ impl RobustnessAgent {
                 // rotation_fwd_limit_m`) matou a invariância ao peso do
                 // limite de ROTAÇÃO, que agora depende do peso do cenário
                 // MAIS LEVE — e esse peso muda no mundo +σ. Medido no
-                // baseline real: fwd nominal 35,53% vs fwd massa-total
-                // ≈35,9% MAC. O assert foi então SUBSTITUÍDO pela
+                // baseline real (σ=15%): fwd nominal ≈13,3546% vs fwd
+                // massa-total ≈13,0064% MAC — as duas réguas divergem (o
+                // mundo massa-total AVANÇA ligeiramente frente à nominal, um
+                // efeito pequeno mas MENSURÁVEL, não um artefato de
+                // arredondamento). O assert foi então SUBSTITUÍDO pela
                 // reprojeção que ele mesmo pedia: o mundo massa-total
                 // passou a ser avaliado contra a SUA PRÓPRIA régua
                 // (`sized_p.wb.spec`, já finalizada por `apply_trim` dentro

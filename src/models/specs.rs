@@ -810,7 +810,7 @@ pub struct PropellerSpec {
     /// 1,30 m/`x_main_m` 3,66 m/`prop_plane_x_m` 0,20 m do ciclo 9): fator
     /// ≈ 1,46610 (inalterado — não depende de `static_sag_fraction`),
     /// `prop_clearance_critical_m` **≈ −0,06416 m (FAIL, ciclo 9) →
-    /// ≈ −0,00246 m (FAIL, ciclo 10)** — o veredito da checagem #25 NÃO
+    /// ≈ −0,00249 m (FAIL, ciclo 10)** — o veredito da checagem #25 NÃO
     /// MUDA (continua FAIL), só o NÚMERO da violação. Ver o histórico
     /// completo old→new na docstring de `SCHEMA_VERSION`.
     ///
@@ -1331,10 +1331,11 @@ pub struct ElectricalSpec {
 ///      já está embutida em `[gear].h_cg_ground_m` (a aeronave é sempre
 ///      modelada CARREGADA), e a fórmula anterior (ciclo 9) somava essa
 ///      mesma compressão de novo ao usar o curso TOTAL. Campo de
-///      CONFIGURAÇÃO NOVO `[gear].static_sag_fraction` (fração 0–1,
-///      baseline 0,33 — sem valor padrão implícito, TOMLs pré-5.3 sem esse
-///      campo falham o parse por campo ausente, mesmo padrão de migração
-///      sem erro dedicado já usado em `e_h`/`runway_available_m`). Mesma
+///      CONFIGURAÇÃO NOVO `[gear].static_sag_fraction` (faixa validada
+///      (0,15, 0,55), baseline 0,33 — sem valor padrão implícito, TOMLs
+///      pré-5.3 sem esse campo falham o parse por campo ausente, mesmo
+///      padrão de migração sem erro dedicado já usado em `e_h`/
+///      `runway_available_m`). Mesma
 ///      exceção MINOR da v5.2 aplicada de novo: é correção de bug de
 ///      modelagem física (dupla contagem), não mudança de contrato — nome/
 ///      tipo/unidade do campo JSON são idênticos. Baseline real E10:
@@ -1595,10 +1596,10 @@ mod tests {
     /// 3,66 m, `prop_plane_x_m` 0,20 m, `static_sag_fraction` 0,33) ⟹
     /// fator = (3,66−0,20)/(3,66−1,30) = 3,46/2,36 = 1,46610 (INALTERADO
     /// frente ao ciclo 9 — não depende de `static_sag_fraction`). Curso
-    /// RESTANTE do nariz = 0,12746 × (1 − 0,33) = 0,12746 × 0,67 = 0,08540.
-    /// Δ_prop = (0,08540 + 0,08) × 1,46610 = 0,24246 (curso restante +
-    /// pneu murcho 0,08 m). Folga crítica = 0,24000 − 0,24246 =
-    /// **−0,00246 m** — SUBSTITUI o hand-check do ciclo 9 (curso TOTAL do
+    /// RESTANTE do nariz = 0,12746 × (1 − 0,33) = 0,12746 × 0,67 =
+    /// 0,0853982. Δ_prop = (0,0853982 + 0,08) × 1,46610 = 0,242491 (curso
+    /// restante + pneu murcho 0,08 m). Folga crítica = 0,24000 − 0,242491 =
+    /// **−0,00249 m** — SUBSTITUI o hand-check do ciclo 9 (curso TOTAL do
     /// nariz, não restante: −0,06416 m). old→new: o corte de
     /// `static_sag_fraction` é a mudança sob teste, não a magnitude bruta
     /// dos outros termos — todos os demais literais (127,46 mm, 0,08 m,
@@ -1617,15 +1618,15 @@ mod tests {
 
         // Pin EXATO (fórmula fechada dos literais acima, fator =
         // (3.66−0.20)/(3.66−1.30) = 1.466101694915254..., curso restante =
-        // 0.12746 × 0.67 = 0.0854082 exato) — não ±0,001: uma tolerância
+        // 0.12746 × 0.67 = 0.0853982 exato) — não ±0,001: uma tolerância
         // larga deixaria passar um erro de ~1,5% no fator, ou um esquecimento
         // do fator (1 − static_sag_fraction), sem quebrar o teste. Mesmo
-        // padrão de precisão do hand-check anterior (ciclo 9). ≈−0,00246 m
+        // padrão de precisão do hand-check anterior (ciclo 9). ≈−0,00249 m
         // no brief da task era a estimativa arredondada (±0,001) a
         // verificar no run — confirmada aqui com 9 casas.
         assert!((propeller.prop_clearance_critical_m - (-0.002490581355932)).abs() < 1e-9,
             "prop_clearance_critical_m = {:.15} (esperado exatamente -0.002490581355932 — \
-             fator = 1.466101694915254..., curso restante = 0.0854082 m)",
+             fator = 1.466101694915254..., curso restante = 0.0853982 m)",
             propeller.prop_clearance_critical_m);
     }
 
