@@ -108,7 +108,7 @@ fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     // piso solto não distingue "9,68% saudável" de "6% em deriva". Trocado
     // por uma BANDA `[9.2%, 10.2%)` centrada no medido, com largura 1,0 pp
     // (a mesma largura da banda irmã de `validation::constraint_checker::
-    // tests::envelope_de_cg_do_baseline_real_reabre_nos_cenarios_leves`), MAIS a
+    // tests::envelope_de_cg_fechado_sem_violacao_no_baseline_real`), MAIS a
     // amarra explícita ao requisito real logo abaixo. O resultado é mais
     // ESTRITO que o piso antigo em dois sentidos — pega deriva para cima
     // também, e passa a testar o requisito de projeto por nome — mas a

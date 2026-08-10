@@ -326,14 +326,14 @@ pub struct ScenarioTrimLimit {
     /// INSUFICIENTE para rotacionar nesta CG/peso — quanto mais negativo,
     /// maior o déficit. Zero exatamente na CG do limite avaliado NO PESO
     /// DESTE cenário; desde o ciclo 10 (task 2) isso já NÃO coincide mais
-    /// com `rotation_limit_pct_mac` (que é avaliado no cenário mais leve),
-    /// exceto para o próprio cenário mais leve.
+    /// com `rotation_limit_pct_mac` (o MÁXIMO sobre os cenários), exceto
+    /// para o cenário que produz esse máximo.
     ///
-    /// ACHADO HONESTO (ciclo 10, task 2): com o momento da linha de tração
-    /// no balanço, os dois cenários mais LEVES do baseline real passam a
-    /// ter margem NEGATIVA (Solo ≈−41%, 2 pax ≈−29%) — a aeronave, neste
-    /// modelo, não tem autoridade de profundor para rotacionar leve com o
-    /// eixo da hélice a 1,12 m do solo. Decisão de projeto pendente.
+    /// CUSTO MEDIDO (ciclo 10, task 2): o momento da linha de tração come
+    /// uma fatia real destas margens no baseline — o cenário mais apertado,
+    /// "Solo (piloto)", cai de +21,6% para +10,5% — mas NENHUMA fica
+    /// negativa: a aeronave continua rotacionando em todos os cenários de
+    /// carga.
     pub rotation_authority_margin_pct: f64,
 }
 
@@ -387,9 +387,10 @@ pub struct TrimSensitivity {
 /// cancelava exatamente (`q_r(W) ∝ W`, todos os termos de momento
 /// proporcionais a `W`); o momento da LINHA DE TRAÇÃO (`T(Vr(W))·z_eixo`)
 /// entrou no balanço e NÃO escala com `W`, matando a prova. O número único
-/// reportado passou a ser o do cenário MAIS LEVE (o mais restritivo, porque
-/// `T/W` cresce quando o peso cai) — uma ENVOLTÓRIA conservadora, não uma
-/// identidade algébrica. Ver a re-derivação completa (em português) na
+/// reportado passou a ser o MÁXIMO dos limites por cenário (que neste
+/// modelo cai no mais leve, porque `T/W` cresce quando o peso cai) — uma
+/// ENVOLTÓRIA conservadora, não uma identidade algébrica. Variação medida
+/// entre os extremos de peso do baseline real: 1,4621 pp de MAC. Ver a re-derivação completa (em português) na
 /// docstring de `agents::trim_authority::rotation_fwd_limit_m`.
 /// `rotation_margin_per_scenario` carrega uma quantidade DIFERENTE (e
 /// exata por cenário): a margem de autoridade avaliada na CG/peso REAIS de
@@ -404,8 +405,8 @@ pub struct TrimSensitivity {
 pub struct TrimSpec {
     /// Limite dianteiro de flare (%MAC) — número único, independe do peso.
     pub flare_limit_pct_mac: f64,
-    /// Limite dianteiro de rotação (%MAC) — número único avaliado no
-    /// cenário MAIS LEVE (o mais restritivo). Depende do peso desde o
+    /// Limite dianteiro de rotação (%MAC) — número único, MÁXIMO dos
+    /// limites por cenário (o mais restritivo). Depende do peso desde o
     /// ciclo 10 (task 2): o momento da linha de tração `T(Vr(W))·z_eixo`
     /// não escala com `W` e matou a invariância que valia até o ciclo 9
     /// (ver docstring da struct/`agents::trim_authority::
@@ -699,7 +700,25 @@ pub struct RobustnessFlip {
     /// agora escolhe um par valor/limite finito e informativo para toda
     /// variante de erro (ver comentário no local da construção).
     pub valor: f64,
+    /// Limite EFETIVAMENTE aplicado ao mundo perturbado. Desde o ciclo 10
+    /// (task 2) isto é a régua DO PRÓPRIO mundo perturbado para os limites
+    /// de CG — antes era sempre a régua nominal, porque os limites eram
+    /// invariantes às massas (ver `validation::robustness`, docstring do
+    /// módulo).
     pub limite: f64,
+    /// Limite NOMINAL do mesmo check — o que a régua valia antes da
+    /// perturbação (ciclo 10, task 2). Existe para que o leitor consiga
+    /// separar as DUAS causas possíveis de um flip, que `valor`/`limite`
+    /// sozinhos confundem:
+    ///   - **"o CG andou"**: `limite_nominal == limite` e `valor` cruzou;
+    ///   - **"a régua andou"**: `limite != limite_nominal` — o mundo +σ
+    ///     tem um limite dianteiro próprio (a linha de tração fez o limite
+    ///     de rotação depender do peso, que responde às massas
+    ///     perturbadas).
+    /// Para os checks cuja régua É invariante à perturbação (tipback,
+    /// carga de nariz, gates de desempenho/pista), `limite_nominal` é
+    /// IGUAL a `limite` por construção.
+    pub limite_nominal: f64,
 }
 
 /// Análise de robustez à incerteza do modelo de massas (ciclo 4) —

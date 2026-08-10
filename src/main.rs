@@ -344,8 +344,8 @@ fn main() {
     // Ciclo 10 (task 2): a invariância ao peso do limite de rotação MORREU
     // — o momento da linha de tração (T(Vr(W))·z_eixo) não é proporcional a
     // W, ver agents::trim_authority::rotation_fwd_limit_m. O número ÚNICO
-    // reportado passa a ser o do cenário MAIS LEVE (o mais restritivo).
-    println!("  Limite de ROTAÇÃO (decolagem, número único avaliado no cenário MAIS LEVE — \
+    // reportado passa a ser o MÁXIMO dos limites por cenário.
+    println!("  Limite de ROTAÇÃO (decolagem, número único = MÁXIMO sobre os cenários — \
               depende do peso desde a linha de tração, ver derivação no código): {:.2}% MAC",
              trim.rotation_limit_pct_mac);
     println!("  Manobra que GOVERNA o limite dianteiro: {}", trim.governing);

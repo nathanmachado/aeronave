@@ -243,16 +243,21 @@ fn evaluate_world(
         let dentro_do_envelope_p = sc_p.cg_pct_mac >= fwd_limit_p_pct_mac
             && sc_p.cg_pct_mac <= aft_limit_p_pct_mac;
         if !dentro_do_envelope_p && sc_nom.inside_envelope {
-            let limite = if sc_p.cg_pct_mac < fwd_limit_p_pct_mac {
-                fwd_limit_p_pct_mac
+            // `limite_nominal` é o limite do MESMO LADO na régua NOMINAL —
+            // é a comparação que permite ao leitor separar "o CG andou" de
+            // "a régua andou" (ciclo 10, task 2; ver `RobustnessFlip`).
+            let cruzou_pela_frente = sc_p.cg_pct_mac < fwd_limit_p_pct_mac;
+            let (limite, limite_nominal) = if cruzou_pela_frente {
+                (fwd_limit_p_pct_mac, wb_nominal.spec.cg_limit_fwd_pct_mac)
             } else {
-                aft_limit_p_pct_mac
+                (aft_limit_p_pct_mac, wb_nominal.spec.cg_limit_aft_pct_mac)
             };
             flips.push(RobustnessFlip {
                 check: format!("Cenário '{}'", sc_nom.name),
                 caso: caso.to_string(),
                 valor: sc_p.cg_pct_mac,
                 limite,
+                limite_nominal,
             });
         }
     }
@@ -272,6 +277,8 @@ fn evaluate_world(
             caso: caso.to_string(),
             valor: gear_p.tipback_angle_deg,
             limite: cfg.gear.tipback_min_deg,
+            // Régua de CONFIG, invariante à perturbação — ver `RobustnessFlip`.
+            limite_nominal: cfg.gear.tipback_min_deg,
         });
     }
     if gear_p.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT
@@ -282,6 +289,7 @@ fn evaluate_world(
             caso: caso.to_string(),
             valor: gear_p.nose_load_max_pct,
             limite: NOSE_LOAD_MAX_CEILING_PCT,
+            limite_nominal: NOSE_LOAD_MAX_CEILING_PCT, // teto fixo, invariante
         });
     }
     if gear_p.nose_load_min_pct < NOSE_LOAD_MIN_FLOOR_PCT
@@ -292,6 +300,7 @@ fn evaluate_world(
             caso: caso.to_string(),
             valor: gear_p.nose_load_min_pct,
             limite: NOSE_LOAD_MIN_FLOOR_PCT,
+            limite_nominal: NOSE_LOAD_MIN_FLOOR_PCT, // piso fixo, invariante
         });
     }
 
@@ -453,7 +462,10 @@ impl RobustnessAgent {
                     SizingError::MissaoInviavel(_) =>
                         (format!("Dimensionamento ({e})"), state.mtow_kg, cfg.sizing.mtow_max_kg),
                 };
-                flips.push(RobustnessFlip { check, caso: "massa-total".to_string(), valor, limite });
+                // Régua de config (`mtow_max_kg`/capacidade do tanque),
+                // invariante à perturbação ⟹ `limite_nominal == limite`.
+                flips.push(RobustnessFlip { check, caso: "massa-total".to_string(), valor, limite,
+                                            limite_nominal: limite });
             }
             Ok(sized_p) => {
                 mtow_masstotal_kg = sized_p.state.mtow_kg;
@@ -465,7 +477,8 @@ impl RobustnessAgent {
                     && margem_p < req.min_fuel_margin_fraction {
                     flips.push(RobustnessFlip { check: "Margem de combustível".into(),
                         caso: "massa-total".into(), valor: margem_p * 100.0,
-                        limite: req.min_fuel_margin_fraction * 100.0 });
+                        limite: req.min_fuel_margin_fraction * 100.0,
+                        limite_nominal: req.min_fuel_margin_fraction * 100.0 });
                 }
                 // VS0 (fórmula do check #2):
                 let vs0_lim = req.cruise_speed_min_kmh / 1.8;
@@ -473,7 +486,8 @@ impl RobustnessAgent {
                     && sized_p.wing.stall_speed_flaps_kmh > vs0_lim {
                     flips.push(RobustnessFlip { check: "VS0".into(),
                         caso: "massa-total".into(),
-                        valor: sized_p.wing.stall_speed_flaps_kmh, limite: vs0_lim });
+                        valor: sized_p.wing.stall_speed_flaps_kmh, limite: vs0_lim,
+                        limite_nominal: vs0_lim });
                 }
                 // desempenho no mundo +σ (mesmos gates do pipeline nominal).
                 // `&cfg_p.performance` (não `&cfg.performance` — achado de
@@ -512,7 +526,8 @@ impl RobustnessAgent {
                     let p_ok = if maior_melhor { p >= lim } else { p <= lim };
                     if nom_ok && !p_ok {
                         flips.push(RobustnessFlip { check: nome.into(),
-                            caso: "massa-total".into(), valor: p, limite: lim });
+                            caso: "massa-total".into(), valor: p, limite: lim,
+                            limite_nominal: lim });
                     }
                 }
 
@@ -616,6 +631,7 @@ impl RobustnessAgent {
                         caso: "massa-total".to_string(),
                         valor: folga_critica_p,
                         limite: 0.0,
+                        limite_nominal: 0.0, // piso fixo (folga > 0), invariante
                     });
                 }
             }
@@ -1057,38 +1073,21 @@ mod tests {
     }
 
     /// Envelope/nariz no mundo massa-total: fixture com `arms.pax_rear_m`
-    /// e `gear.x_main_m` deslocados (achado por sonda numérica) até o
-    /// cenário "4 pax sem bagagem" ficar DENTRO do envelope nominal mas
-    /// perto do limite TRASEIRO — o mundo +σ re-convergido (MTOW maior
-    /// desloca o CG desse cenário para TRÁS) cruza esse limite, gerando o
-    /// flip nomeado "Cenário '4 pax sem bagagem'" caso "massa-total".
-    /// Fixture folgada (`config_teste()` intacta, sem os ajustes): NENHUM
+    /// deslocado (5.75→6.2, achado por sonda numérica) até o cenário "4 pax
+    /// sem bagagem" ficar DENTRO do envelope nominal mas perto do limite
+    /// TRASEIRO — o mundo +σ re-convergido (MTOW maior desloca o CG desse
+    /// cenário para TRÁS, ≈37,35%) cruza esse limite, gerando o flip
+    /// nomeado "Cenário '4 pax sem bagagem'" caso "massa-total".
+    /// Fixture folgada (`config_teste()` intacta, sem o ajuste): NENHUM
     /// cenário passa no nominal (`inside_envelope` sempre `false` nessa
     /// fixture sintética — o envelope nominal nunca abraça a faixa de CG
     /// carregado dela, achado da sonda), logo nenhum flip de "Cenário" é
     /// sequer POSSÍVEL — confirmado abaixo, não só assumido.
     ///
-    /// **RE-SINTONIZADO (ciclo 10, task 2 — linha de tração)**: o dial
-    /// antigo era só `pax_rear_m` 5,75→6,2, que punha o cenário em ≈34,97%
-    /// MAC entre `fwd`≈34,06% e `aft`≈36,41%. Com o momento da linha de
-    /// tração na rotação, o limite DIANTEIRO desta fixture sintética recua
-    /// de ≈34,06% para ≈62,9% MAC (a fixture é leve e o eixo fica alto —
-    /// `T/W` a Vr é grande), o que deixa o envelope de CG dela VAZIO e
-    /// mata a pré-condição do teste: nenhum cenário passa no nominal.
-    /// Segundo dial acrescentado: `gear.x_main_m` 3,75→**3,10** m — o
-    /// trem mais à frente encurta o braço de peso em torno do pivô e
-    /// AVANÇA o limite de rotação (property `agents::trim_authority::
-    /// tests::rotation_limit_avanca_quando_x_main_diminui`), trazendo
-    /// `fwd` de volta a ≈28,7% MAC; e `pax_rear_m` reajustado 6,2→**6,45**
-    /// para recolocar o cenário perto do limite traseiro (≈34,7%, contra
-    /// `aft`≈36,41%). O que este teste GUARDA (flip de cenário no mundo
-    /// massa-total, cruzando o limite TRASEIRO) é exatamente o mesmo; só
-    /// os dials da fixture foram reajustados à física nova.
     #[test]
     fn envelope_no_mundo_massa_total_flipa_quando_marginal() {
         let mut cfg = config_teste();
-        cfg.arms.pax_rear_m = 6.45;
-        cfg.gear.x_main_m = 3.10;
+        cfg.arms.pax_rear_m = 6.2;
         let n = nominal_pipeline(cfg);
         let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")
             .expect("fixture deveria ter o cenário '4 pax sem bagagem'");

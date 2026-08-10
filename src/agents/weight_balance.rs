@@ -491,8 +491,8 @@ impl WeightBalanceOutput {
     /// a um por clareza estrutural, não porque o valor mude entre eles),
     /// mas pelo motivo NOVO desde o ciclo 10 (task 2): o limite de rotação
     /// deixou de ser invariante ao peso (momento da linha de tração, ver
-    /// `agents::trim_authority::rotation_fwd_limit_m`) e passou a ser
-    /// avaliado no cenário MAIS LEVE — o mais restritivo. Ou seja, o
+    /// `agents::trim_authority::rotation_fwd_limit_m`) e passou a ser o
+    /// MÁXIMO dos limites por cenário — o mais restritivo. Ou seja, o
     /// número único agora é uma envoltória CONSERVADORA, não uma
     /// identidade algébrica. A margem exata por cenário (na CG e no peso
     /// reais de cada um) continua em `TrimSpec::rotation_margin_per_scenario`.

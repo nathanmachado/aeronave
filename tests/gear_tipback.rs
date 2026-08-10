@@ -400,43 +400,29 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // nomeadas`.
     //
     // ATUALIZAÇÃO (ciclo 10, task 2 — LINHA DE TRAÇÃO): o parágrafo acima
-    // fica HISTÓRICO em dois pontos. (1) "o limite de rotação é invariante
-    // ao peso e ao CG (não recebe nenhum dos dois)" MORREU: o momento da
-    // linha de tração (`T(Vr(W))·z_eixo`) faz o limite depender do peso do
-    // cenário mais leve (re-derivação em `agents::trim_authority::
-    // rotation_fwd_limit_m`), e o limite passa de 8,533% para **35,532%
-    // MAC** no baseline real. (2) A contagem de flips vai de 0 para **3**,
-    // e em cenários DIFERENTES: 'Solo'/'2 pax' não podem mais flipar
-    // porque já reprovam no NOMINAL (aparecem como violação de ENVELOPE,
-    // asserida logo abaixo); quem flipa são os três "4 pax + bagagem"
-    // (cheio/meia/vazio), os únicos que ainda passam no nominal, caindo
-    // para 36,50/35,27/34,14 %MAC contra o limite de 37,42% do próprio
-    // mundo perturbado. Achado honesto, reportado no task-2-report do
-    // ciclo 10 — não mascarado aqui.
+    // fica HISTÓRICO num ponto: "o limite de rotação é invariante ao peso e
+    // ao CG (não recebe nenhum dos dois)" MORREU. O momento da linha de
+    // tração (`−T(Vr(W))·prop_axis_above_cg_m`, com o `h_cg` do braço
+    // cancelado pelo termo inercial de d'Alembert — ver
+    // `agents::trim_authority::rotation_available_moment_nm`) faz o limite
+    // depender do peso, e ele passa de 8,533% para **13,355% MAC** no
+    // baseline real (+4,82 pp). A contagem de flips, porém, CONTINUA ZERO:
+    // os cenários mantêm folga suficiente sobre a régua do pior mundo
+    // dianteiro. O que encolhe é a margem de autoridade de rotação (o
+    // cenário mais apertado, "Solo (piloto)", vai de +21,6% para +10,5%).
     let robustez: Vec<&String> = report.violations.iter()
         .filter(|v| v.starts_with("Robustez:")).collect();
-    assert_eq!(robustez.len(), 3,
-        "ciclo 10 (task 2): esperava EXATAMENTE 3 flips de robustez (σ=15%) no baseline real, \
-         nos três cenários '4 pax + bagagem' que ainda passam no nominal — eram 0 desde a \
-         campanha E10: {:?}", report.violations);
-    for cenario in ["4 pax + bagagem + cheio", "4 pax + bagagem + meia",
-                    "4 pax + bagagem vazio"] {
-        assert!(robustez.iter().any(|v| v.contains(cenario)),
-            "esperava flip de robustez no cenário '{cenario}': {:?}", report.violations);
-    }
-    // Envelope de CG por cenário (ciclo 10, task 2): os TRÊS cenários mais
-    // leves/dianteiros saem do envelope com o limite dianteiro em 35,5%
-    // MAC. Guarda o padrão medido.
+    assert!(robustez.is_empty(),
+        "esperava ZERO violações de robustez (σ=15%) no baseline real — eram 2 (Solo/2 pax) \
+         até o ciclo 7, ZERO desde a campanha E10 e ZERO ainda no ciclo 10 task 2: {:?}",
+        report.violations);
+    // Envelope de CG por cenário: nenhum cenário fora. O recuo do limite
+    // dianteiro (+4,82 pp) não alcança o CG mais dianteiro (17,9% MAC).
     let fora: Vec<&String> = report.violations.iter()
         .filter(|v| v.contains("fora do envelope de CG admissível")).collect();
-    assert_eq!(fora.len(), 3,
-        "ciclo 10 (task 2): esperava EXATAMENTE 3 cenários fora do envelope de CG: {:?}",
-        report.violations);
-    for cenario in ["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem"] {
-        assert!(fora.iter().any(|v| v.contains(cenario)),
-            "cenário leve '{cenario}' deveria estar FORA do envelope pós-ciclo-10 task 2: {:?}",
-            report.violations);
-    }
+    assert!(fora.is_empty(),
+        "ciclo 10 (task 2): nenhum cenário deveria sair do envelope de CG — o limite dianteiro \
+         vai a ≈13,4% MAC contra um CG mais dianteiro de 17,9%: {:?}", report.violations);
     // ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — old→new): a
     // afirmação abaixo ("o baseline real não deve reportar NENHUMA
     // violação") era o PASS completo da campanha E10 — verdadeira até este
@@ -456,15 +442,14 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // RESOLVIDO).
     //
     // ATUALIZAÇÃO (ciclo 10, task 2, linha de tração — old→new): a contagem
-    // total vai de 1 para **7** — as 3 de envelope + os 3 flips de robustez
-    // asseridos acima, mais a de hélice (INTOCADA pela task 2, mesmo número
-    // ≈−0,0025 m). Ver `tests/cli.rs` para a narrativa completa da
-    // reabertura e o task-2-report do ciclo 10 para a decisão de projeto.
-    assert_eq!(report.violations.len(), 7,
-        "ciclo 10 (task 2): esperava EXATAMENTE 7 violações no baseline real (3 de envelope + \
-         3 de robustez + 1 de hélice) — obteve: {:?}", report.violations);
+    // total PERMANECE 1 (a de hélice, INTOCADA pela task 2, mesmo número
+    // ≈−0,0025 m). O limite dianteiro recua +4,82 pp mas não reabre nada —
+    // ver `tests/cli.rs` para a narrativa completa.
+    assert_eq!(report.violations.len(), 1,
+        "ciclo 10 (task 2): esperava EXATAMENTE 1 violação (hélice, checagem #25) no baseline \
+         real — obteve: {:?}", report.violations);
     assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
-        "a violação de folga crítica de hélice (checagem #25) deveria continuar presente: {:?}",
+        "a única violação esperada é a de folga crítica de hélice (checagem #25): {:?}",
         report.violations);
     assert!(report.violations.iter().any(|v| v.contains("-0.002")),
         "violação de hélice deveria citar a folga crítica observada (≈−0,0025 m, ciclo 10): \

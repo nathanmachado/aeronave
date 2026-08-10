@@ -112,7 +112,7 @@
     "cg_mac_fwd_pct": 17.864287799748894,
     "cg_mac_aft_pct": 38.78340876779128,
     "static_margin_pct": 9.676627398954869,
-    "cg_limit_fwd_pct_mac": 35.53229184020471,
+    "cg_limit_fwd_pct_mac": 13.354637155252162,
     "cg_limit_aft_pct_mac": 43.460036166746164,
     "structural_masses": {
       "asa_kg": 149.6977561039546,
@@ -131,31 +131,31 @@
   },
   "trim": {
     "flare_limit_pct_mac": -8.818503827231059,
-    "rotation_limit_pct_mac": 35.53229184020471,
+    "rotation_limit_pct_mac": 13.354637155252162,
     "rotation_margin_per_scenario": [
       {
         "scenario": "Solo (piloto)",
-        "rotation_authority_margin_pct": -40.97838314877762
+        "rotation_authority_margin_pct": 10.459483230486741
       },
       {
         "scenario": "2 pax dianteiros",
-        "rotation_authority_margin_pct": -29.458506765985327
+        "rotation_authority_margin_pct": 18.899339073411696
       },
       {
         "scenario": "4 pax sem bagagem",
-        "rotation_authority_margin_pct": 11.762747885168533
+        "rotation_authority_margin_pct": 69.62120284707535
       },
       {
         "scenario": "4 pax + bagagem + cheio",
-        "rotation_authority_margin_pct": 51.53425224014788
+        "rotation_authority_margin_pct": 121.15007926329326
       },
       {
         "scenario": "4 pax + bagagem + meia",
-        "rotation_authority_margin_pct": 36.1291500485527
+        "rotation_authority_margin_pct": 109.96712407300248
       },
       {
         "scenario": "4 pax + bagagem vazio",
-        "rotation_authority_margin_pct": 22.93756189494918
+        "rotation_authority_margin_pct": 100.50945630453147
       }
     ],
     "governing": "rotacao",
@@ -413,26 +413,7 @@
       21.50456660606757,
       40.90631631400925
     ],
-    "flips": [
-      {
-        "check": "Cenário '4 pax + bagagem + cheio'",
-        "caso": "dianteiro",
-        "valor": 36.50173691278477,
-        "limite": 37.417704400480076
-      },
-      {
-        "check": "Cenário '4 pax + bagagem + meia'",
-        "caso": "dianteiro",
-        "valor": 35.27402485999648,
-        "limite": 37.417704400480076
-      },
-      {
-        "check": "Cenário '4 pax + bagagem vazio'",
-        "caso": "dianteiro",
-        "valor": 34.143899592572275,
-        "limite": 37.417704400480076
-      }
-    ],
+    "flips": [],
     "mtow_masstotal_kg": 1609.3680509863802
   },
   "fidelity": {
@@ -454,12 +435,6 @@
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
-    "Cenário 'Solo (piloto)': CG 17.9% MAC fora do envelope de CG admissível [35.5%–43.5%] (SM=0.306; x_cg=3.123m, limites em x: [3.343m, 3.442m])",
-    "Cenário '2 pax dianteiros': CG 20.5% MAC fora do envelope de CG admissível [35.5%–43.5%] (SM=0.280; x_cg=3.155m, limites em x: [3.343m, 3.442m])",
-    "Cenário '4 pax sem bagagem': CG 32.2% MAC fora do envelope de CG admissível [35.5%–43.5%] (SM=0.163; x_cg=3.301m, limites em x: [3.343m, 3.442m])",
-    "Robustez: Cenário '4 pax + bagagem + cheio' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 36.50 vs 37.42",
-    "Robustez: Cenário '4 pax + bagagem + meia' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 35.27 vs 37.42",
-    "Robustez: Cenário '4 pax + bagagem vazio' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 34.14 vs 37.42",
     "Hélice (condição crítica CS 23.925, pivô nos mains): folga estática 0.240 m − Δ_prop 0.242 m (fator 1.4661× sobre curso RESTANTE do nariz 0.085 m + pneu murcho 0.080 m) = -0.002 m ≤ 0"
   ],
   "warnings": [

@@ -151,7 +151,7 @@ pub(crate) mod test_fixtures {
     /// docstring de `constraint_checker::tests::setup_with_cfg_req_engine`
     /// para a sensibilidade medida):
     ///   - `validation::constraint_checker::tests::
-    ///     envelope_de_cg_do_baseline_real_reabre_nos_cenarios_leves`
+    ///     envelope_de_cg_fechado_sem_violacao_no_baseline_real`
     ///   - `agents::trim_authority::tests::
     ///     trim_authority_agent_run_hand_check_baseline_real`
     /// Antes desta constante, `195.0` estava hardcoded independentemente

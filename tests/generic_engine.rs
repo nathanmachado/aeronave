@@ -1677,3 +1677,109 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);
 }
+
+// ─── Ciclo 10, Task 2: magnitude da morte da invariância a W ──────────────
+
+/// **A magnitude da morte da invariância ao peso, MEDIDA no pipeline real**
+/// (ciclo 10, task 2 — o teste que a docstring de
+/// `agents::trim_authority::rotation_fwd_limit_m` cita). Vive aqui, e não
+/// em `src/`, porque precisa do motor e da missão REAIS do projeto, que
+/// `src/` não pode nomear (ver
+/// `tests/acceptance.rs::src_nao_contem_nomes_de_motor_especificos`).
+///
+/// Roda o baseline real de ponta a ponta e mede a variação do limite
+/// dianteiro de rotação ENTRE OS EXTREMOS DE PESO dos cenários de carga,
+/// com a tração avaliada na `Vr(W)` de cada um.
+///
+/// Resultado MEDIDO: **≈1,4621 pp de MAC** entre o cenário mais leve
+/// (1.207,5 kg → 13,3546% MAC) e o mais pesado (1.557,5 kg → 11,8926%).
+/// É pequeno em valor absoluto, mas **não é ruído** — é ~29× a tolerância
+/// dos pins de `agents::trim_authority` (±0,05 pp), o que descarta
+/// tratá-lo como "quase-invariante" e manter a prova antiga de
+/// cancelamento com uma tolerância medida. Por isso a docstring de
+/// `rotation_fwd_limit_m` foi re-derivada e o limite único publicado virou
+/// o MÁXIMO sobre os cenários, não uma constante.
+///
+/// (Com o braço ERRADO sobre o solo, de uma versão intermediária desta
+/// task, esta mesma variação valia ≈8,2 pp — 5,6× maior, na mesma
+/// proporção do braço, `1,12/0,20`. O ERRATUM da spec §2 — termo inercial
+/// de d'Alembert cancelando a porção `h_cg` — a trouxe à ordem de grandeza
+/// certa.)
+///
+/// Também confirma o SENTIDO (mais leve ⟹ mais restritivo) sobre os pesos
+/// REAIS dos cenários, não sobre literais — o que
+/// `agents::trim_authority::tests::limite_de_rotacao_recua_com_peso_menor`
+/// já checa com `T` fixa, aqui com `T = T(Vr(W))` variando junto.
+#[test]
+fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
+    use aeronave::agents::trim_authority::{
+        rotation_fwd_limit_m, thrust_at_rotation_n,
+    };
+    use aeronave::agents::weight_balance::cg_pct_mac;
+
+    const G: f64 = 9.807;
+
+    let cfg = baseline_state();
+    let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let req = baseline_mission();
+    let sized = size_aircraft(&cfg, &engine, &req).expect("baseline real deveria convergir");
+
+    let wb = &sized.wb;
+    let wing = &sized.wing;
+    let emp = &sized.emp;
+    let mac = wb.mac_m;
+    let x_ac_wing = cfg.wing.le_root_x_m + 0.25 * mac;
+    let x_ac_tail = x_ac_wing + emp.arm_h_m;
+    // Braço = offset EIXO↔CG (o `h_cg` cancela contra o termo inercial da
+    // corrida acelerada — ver `agents::trim_authority::
+    // rotation_available_moment_nm`).
+    let z_axis = cfg.propeller.prop_axis_above_cg_m;
+
+    let limite_pct_para = |mass_kg: f64| -> f64 {
+        let w_n = mass_kg * G;
+        let t_rot = thrust_at_rotation_n(
+            w_n, wing.area_m2, wing.cl_max_to, &engine, &sized.state, req.isa_delta_c,
+            cfg.performance.static_thrust_factor,
+        );
+        let x = rotation_fwd_limit_m(
+            w_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
+            sized.trim.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail,
+            cfg.gear.x_main_m, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
+            cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac, t_rot, z_axis,
+        );
+        cg_pct_mac(x, wb.mac_le_x_m, mac)
+    };
+
+    let m_leve = wb.scenarios.iter().map(|s| s.total_mass_kg).fold(f64::INFINITY, f64::min);
+    let m_pesado = wb.scenarios.iter().map(|s| s.total_mass_kg).fold(f64::NEG_INFINITY, f64::max);
+    let pct_leve = limite_pct_para(m_leve);
+    let pct_pesado = limite_pct_para(m_pesado);
+    let variacao_pp = pct_leve - pct_pesado;
+    println!("faixa de pesos dos cenários: {m_leve:.1} kg .. {m_pesado:.1} kg");
+    println!("limite de rotação: leve={pct_leve:.4}% MAC  pesado={pct_pesado:.4}% MAC  \
+              variação={variacao_pp:.4} pp");
+
+    // SENTIDO: mais leve ⟹ mais restritivo (limite mais RECUADO).
+    assert!(variacao_pp > 0.0,
+        "o cenário mais LEVE ({m_leve:.1} kg, {pct_leve:.4}%) deveria ter o limite dianteiro \
+         MAIS RECUADO que o mais pesado ({m_pesado:.1} kg, {pct_pesado:.4}%)");
+
+    // MAGNITUDE pinada (medida): ≈1,4621 pp, folga de 2× — mesma disciplina
+    // dos demais pins de resíduo/variação deste repositório.
+    let variacao_pin_pp = 1.4621;
+    assert!((variacao_pp - variacao_pin_pp).abs() < 0.5 * variacao_pin_pp,
+        "variação medida = {variacao_pp:.4} pp divergiu do pin honesto ≈{variacao_pin_pp:.4} pp");
+
+    // NÃO é desprezível: guarda explícito contra a tentação de tratar o
+    // limite como "quase-invariante" e reviver a prova antiga.
+    assert!(variacao_pp > 0.5,
+        "a variação ({variacao_pp:.4} pp) deveria ser MUITO maior que a tolerância dos pins de \
+         `agents::trim_authority` (±0,05 pp) — se algum dia cair abaixo de 0,5 pp, a decisão de \
+         re-derivar a docstring precisa ser REAVALIADA, não herdada");
+
+    // E o limite PUBLICADO (máximo sobre os cenários) deve coincidir com o
+    // extremo mais restritivo medido aqui.
+    assert!((sized.trim.rotation_limit_pct_mac - pct_leve).abs() < 1e-9,
+        "o limite publicado ({:.6}%) deveria ser o MÁXIMO sobre os cenários, que neste modelo \
+         cai no mais leve ({pct_leve:.6}%)", sized.trim.rotation_limit_pct_mac);
+}

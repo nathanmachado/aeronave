@@ -702,7 +702,7 @@ mod tests {
     ///
     /// DOCSTRING CORRIGIDA (revisão final, campanha E10): a versão anterior
     /// desta nota dizia que esta função era "usada por
-    /// `envelope_de_cg_do_baseline_real_reabre_nos_cenarios_leves` ... para
+    /// `envelope_de_cg_fechado_sem_violacao_no_baseline_real` ... para
     /// exercitar o baseline real (config E TAMBÉM missão de
     /// `config/missions/default.toml`, não a fixture sintética mais leve
     /// `requisitos_teste()`)" — FALSO desde que esse teste passou a chamar
@@ -948,7 +948,7 @@ mod tests {
     /// DEMAIS testes deste módulo (violações ISOLADAS, com campos
     /// sobrescritos à mão) continuam com `motor_generico_teste()` intocado.
     #[test]
-    fn envelope_de_cg_do_baseline_real_reabre_nos_cenarios_leves() {
+    fn envelope_de_cg_fechado_sem_violacao_no_baseline_real() {
         let toml = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/aircraft/baseline_4seat.toml"),
         ).expect("falha ao ler baseline_4seat.toml do disco");
@@ -992,40 +992,25 @@ mod tests {
             .filter(|v| v.contains("fora do envelope de CG admissível"))
             .collect();
         println!("violações de envelope = {violacoes_de_envelope:?}");
-        // ─── ACHADO HONESTO (ciclo 10, task 2 — linha de tração) ──────────
-        //
-        // Até o ciclo 9 este bloco exigia ZERO violações de envelope. O
-        // momento da LINHA DE TRAÇÃO na rotação (ver `agents::trim_
-        // authority::rotation_fwd_limit_m`) recua o limite DIANTEIRO de
-        // 8,5% para ≈36,1% MAC nesta fixture (≈35,5% no pipeline real), e
-        // com isso os QUATRO cenários mais leves/dianteiros do baseline
-        // saem do envelope: "Solo (piloto)" (16,6%), "2 pax dianteiros"
-        // (19,4%), "4 pax sem bagagem" (30,8%) e "4 pax + bagagem vazio"
-        // (35,6%). Só os dois cenários de missão cheia/meia continuam
-        // dentro.
-        //
-        // Isto NÃO é mascarado: é uma REABERTURA real do envelope de CG do
-        // baseline, reportada como achado do ciclo 10 (task-2-report) para
-        // decisão humana — o modelo passou a cobrar um custo físico que
-        // antes simplesmente não existia no balanço. O teste guarda o
-        // PADRÃO medido (quais cenários caem, e que os de missão cheia NÃO
-        // caem), para que uma futura correção de projeto (eixo mais baixo,
-        // trem recuado, potência limitada na rotação) apareça como uma
-        // mudança DELIBERADA deste pin, e não silenciosamente.
-        let fora: Vec<String> = violacoes_de_envelope.iter()
-            .map(|v| v.split('\'').nth(1).unwrap_or("?").to_string())
-            .collect();
-        assert_eq!(
-            fora,
-            vec!["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem",
-                 "4 pax + bagagem vazio"],
-            "achado honesto (ciclo 10, task 2): com o momento da linha de tração, os quatro \
-             cenários mais leves/dianteiros saem do envelope e os dois de missão cheia/meia \
-             ficam. Obtido: {report:?}"
-        );
+        // RE-CONFIRMADO (ciclo 10, task 2 — momento da linha de tração):
+        // ZERO violações de envelope CONTINUA sendo o veredito. O limite
+        // dianteiro de rotação recua de 8,533% para ≈13,4% MAC (o custo
+        // físico da linha de tração, `T(Vr)·prop_axis_above_cg_m`), mas o
+        // CG mais dianteiro do baseline está em 17,9% MAC — ainda 4,5 pp
+        // atrás do novo limite. Uma versão intermediária desta task usava o
+        // braço ERRADO (altura sobre o SOLO, 1,12 m em vez do offset
+        // eixo↔CG de 0,20 m, sem o cancelamento inercial de d'Alembert) e
+        // punha o limite em 35,5%, reabrindo 3 cenários; o ERRATUM da spec
+        // §2 corrigiu o braço e a reabertura desapareceu com ele. Ver
+        // `agents::trim_authority::rotation_available_moment_nm`.
+        assert!(violacoes_de_envelope.is_empty(),
+            "achado honesto (ciclo 5, RE-CONFIRMADO no ciclo 10 task 2): com a fixture \
+             reconvergida, NÃO deveria haver nenhuma violação de envelope — o recuo do limite \
+             de rotação pela linha de tração (≈+5 pp) não alcança o CG mais dianteiro: {:?}",
+            report.violations);
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
-            "o envelope continua FECHADO (fwd ≈36,1% < aft ≈43,5%) — a reabertura do ciclo 10 \
-             é de CENÁRIOS fora do envelope, não de envelope vazio: {:?}", report.violations);
+            "o envelope continua FECHADO (fwd ≈13,4% < aft ≈43,5%): {:?}", report.violations);
+
         let cheio = wb.scenarios.iter().find(|s| s.name == "4 pax + bagagem + cheio")
             .expect("cenário '4 pax + bagagem + cheio' deveria existir nos scenarios");
         // Pin de banda (achado de review, ciclo 5, Minor 6): `> 0.05` sozinho
@@ -1825,6 +1810,9 @@ mod tests {
                 caso: "traseiro".to_string(),
                 valor: 12.34,
                 limite: 15.0,
+                // Régua de config, invariante à perturbação (ciclo 10,
+                // task 2 — ver `RobustnessFlip::limite_nominal`).
+                limite_nominal: 15.0,
             }],
             ..robustness_nominal
         };
