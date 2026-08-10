@@ -133,3 +133,51 @@ calculada para o lado SEGURO. Ponteiro: docstring de
 #25), `fidelity.propeller` (`src/main.rs`), `docs/aircraft_spec.schema.md`
 (bloco `propeller`, linha `prop_clearance_critical_m`), `tests/cli.rs`/
 `tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins honestos).
+
+## 7. Textos pré-erratum sobre o momento da linha de tração ficaram desatualizados (ciclo 10, task 2)
+
+O erratum do ciclo 10 (task 2, commit `713e846`) corrigiu o braço do
+momento de rotação de "sobre o solo" (`h_cg_ground_m + prop_axis_above_cg_m`
+≈ 1,12 m) para "sobre o CG" (`prop_axis_above_cg_m` ≈ 0,20 m, ver §2 do
+erratum em
+`docs/superpowers/specs/2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md`).
+A correção do CÓDIGO de produção (`agents::trim_authority::
+rotation_available_moment_nm`/`rotation_fwd_limit_m`, chamados com
+`cfg.propeller.prop_axis_above_cg_m`) está certa e testada — mas três
+textos que descreviam o modelo ANTES do erratum não foram atualizados
+junto, e hoje contradizem o comportamento real:
+
+1. **`fidelity.trim` em `src/main.rs` (linha ~836)** diz *"rotação
+   desconsidera binário tração/arrasto/inércia (residual ≈
+   μ_roll·(W−L_g)·h_cg)"* — isso deixou de ser verdade na Task 2 do ciclo
+   10, que passou a incluir explicitamente o binário de TRAÇÃO no balanço
+   de rotação (`−T(Vr)·prop_axis_above_cg_m`). Só os termos de SOLO
+   (`μN·h_cg`, `D·(h_cg−h_D)`, ≲2 pp, ver erratum §2) continuam
+   desprezados — a string precisa ser reescrita para refletir isso, não
+   apagada por completo.
+2. **Docstring do hand-check `momento_da_linha_de_tracao_hand_check_com_literais`
+   em `src/agents/trim_authority.rs` (linha ~1108)** afirma *"z_eixo =
+   1,12 m (= h_cg_ground 0,92 + offset 0,20 do baseline E10)"* — essa
+   equivalência era verdadeira ANTES do erratum; hoje o `z_eixo` real do
+   baseline E10 é `prop_axis_above_cg_m` = 0,20 m sozinho, não 1,12 m. O
+   teste em si continua correto (é um hand-check de sensibilidade com um
+   literal arbitrário, `1,12` só precisa ser ALGUM número), mas o
+   comentário induz o leitor a pensar que 1,12 m é o braço usado em
+   produção hoje.
+3. **Docstring da property `eixo_mais_alto_recua_o_limite_de_rotacao`
+   (mesmo arquivo, linha ~1179-1180)** rotula os literais de teste
+   `z=1,12`/`z=1,24` como *"baseline E10"*/*"candidato E11 (+12 cm)"* —
+   mesma imprecisão: o E10 real usa `z=0,20`, o E11 usaria `z=0,32`. Achado
+   da revisão da Task 3 (ciclo10-sag-e-linha-de-tracao): como o termo
+   `T(Vr(W))·z_eixo` é AFIM (linear) em `z_eixo` com inclinação constante
+   `T(Vr(W))/W`, o `Δx` medido para `Δz=0,12` **não depende de onde `z`
+   começa** — então o teste segue válido numericamente mesmo com os
+   literais errados, mas o rótulo "baseline E10"/"candidato E11" no
+   comentário é enganoso.
+
+Nenhum destes três é um bug de física ou de teste — são textos/comentários
+que não acompanharam o erratum. Ponteiro: `src/main.rs` (`fidelity.insert("trim"...)`),
+`src/agents/trim_authority.rs` (`momento_da_linha_de_tracao_hand_check_com_literais`,
+`eixo_mais_alto_recua_o_limite_de_rotacao`),
+`.superpowers/sdd/2026-08-09-ciclo10-sag-e-linha-de-tracao/task-3-report.md`
+§3.3 (achado completo, com a verificação numérica da linearidade em `z`).
