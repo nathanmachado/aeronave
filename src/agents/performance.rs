@@ -927,12 +927,16 @@ mod tests {
 
     // ─── Ciclo 11 (task 1): gradiente CS 23.65 avaliado a 1,2·Vs_to ─────────
 
-    /// Property (não estrita — `<=`, não `<`): para esta célula/motor RC/V é
-    /// monotonicamente DECRESCENTE em `[1,05·V_s, 1,80·V_s]` (achado do
-    /// ciclo 8/backlog item 2), então subir o PISO da varredura nunca pode
-    /// AUMENTAR o gradiente encontrado — na pior hipótese (se o pico
-    /// deixasse de ser monotônico numa célula diferente) ficaria igual, só
-    /// não pode piorar na direção oposta. Usa `best_climb_angle_com_piso`
+    /// Property (ESTRITA — `<`, não `<=`; Fix wave ciclo 11, 2026-08-10):
+    /// para esta célula/motor RC/V é monotonicamente DECRESCENTE em
+    /// `[1,05·V_s, 1,80·V_s]` (achado do ciclo 8/backlog item 2), então
+    /// subir o PISO da varredura de 1,05·Vs para 1,20·Vs sempre DIMINUI o
+    /// gradiente encontrado. Valores medidos: 0,146417 (piso 1,05·Vs) vs
+    /// 0,128641 (piso 1,20·Vs) — folga grande o bastante para que `<`
+    /// estrito não seja frágil, e com ele a property passa a detectar
+    /// sozinha um mutante que ignore o parâmetro `piso` (com `<=`, um
+    /// mutante que sempre devolvesse `grad_120 == grad_105` passaria).
+    /// Usa `best_climb_angle_com_piso`
     /// (privada ao módulo, parâmetro de piso exposto só para teste) em vez
     /// de duplicar a varredura — decisão do implementador (task-1-brief.md):
     /// evita cópia da lógica de busca no teste.
