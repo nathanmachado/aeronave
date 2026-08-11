@@ -543,9 +543,14 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     //       missão para cima (1.512,4→1.537,6 kg), pedindo mais combustível.
     // Combustível de missão 222,7→236,2 L com o tanque inalterado em 260 L.
     // Continua acima do piso de 5%, com ~4,1 pp de folga (era ~9,3 pp).
-    assert!((fuel_margin_pct - 9.1369).abs() < 0.1,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-E10 \
-         ≈9.1369%");
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): a mudança em Vy
+    // afeta o segmento de subida (RC melhora), reduzindo o combustível de
+    // subida consumido e liberando mais volume para a reserva de segurança
+    // (cascata cascata de missão): 9.1369% → **9.3099%** (old→new, +0,173 pp,
+    // +1,89%; tolerância INALTERADA).
+    assert!((fuel_margin_pct - 9.3099).abs() < 0.1,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-11 task 2 \
+         ≈9.3099%");
     assert!(fuel_margin_pct >= 5.0,
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");
