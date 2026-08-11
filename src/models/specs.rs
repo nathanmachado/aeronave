@@ -5,7 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::agents::constraint_diagram::WingLoadingReport;
 
 /// (De)serialização de `StructuralSpec::fatigue_life_cycles` (Task 6.1,
-/// achado da própria checagem de round-trip deste schema).
+/// achado da própria checagem de round-trip deste schema). Fix wave ciclo 11
+/// (2026-08-10): reutilizado também por `PerformanceSpec::to_50ft_paved_m`/
+/// `to_50ft_grass_m` (ciclo 11 task 3, `docs/backlog.md` item 5) — mesmo
+/// problema de round-trip, gatilho físico diferente (obstáculo de 15 m
+/// inatingível, não limite de fadiga).
 ///
 /// `agents::structural::fatigue_life_cycles` retorna legitimamente
 /// `f64::INFINITY` quando a tensão equivalente fica abaixo do limite de

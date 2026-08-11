@@ -945,10 +945,15 @@ mod tests {
         let (grad_120, _vx_120) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
                                                               &engine, stf, 1.20);
         println!("gradiente(piso=1,05·Vs)={grad_105:.6}  gradiente(piso=1,20·Vs)={grad_120:.6}");
-        assert!(grad_120 <= grad_105,
-            "gradiente com piso de varredura MAIOR (1,20·Vs, {grad_120:.6}) não deveria ser maior \
-             que com piso menor (1,05·Vs, {grad_105:.6}) — RC/V é decrescente na faixa modelada \
-             para esta célula");
+        // Fix wave ciclo 11 (2026-08-10): `<` estrito, não `<=` — valores
+        // medidos (0,128641 vs 0,146417) têm folga enorme, sem risco de
+        // flakiness, e a desigualdade estrita detecta sozinha um mutante que
+        // ignore o parâmetro `piso` (`<=` passaria mesmo com grad_120 ==
+        // grad_105).
+        assert!(grad_120 < grad_105,
+            "gradiente com piso de varredura MAIOR (1,20·Vs, {grad_120:.6}) deveria ser \
+             ESTRITAMENTE menor que com piso menor (1,05·Vs, {grad_105:.6}) — RC/V é decrescente \
+             na faixa modelada para esta célula");
     }
 
     #[test]

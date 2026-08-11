@@ -31,26 +31,25 @@ histórico old→new completo), checagem #25 em
 `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins
 honestos).
 
-## 2. Gradiente CS 23.65 avaliado a 1,05·Vs, não ≥1,2·Vs — RESOLVIDO ciclo 11
+## 2. Gradiente CS 23.65 avaliado a 1,05·V_s_to, não ≥1,2·V_s_to — RESOLVIDO ciclo 11
 
 **RESOLVIDO** (ciclo 11, task 1, 2026-08-10). `agents::performance::
-best_climb_angle_ms` avaliava `vx_kmh` e `climb_gradient_pct` a 1,2·V_s_to
-— uma interpretação conservadora (acima do piso de 1,05·V_s) mas não a mais
-conservadora possível (CS 23.65 exige apenas ≥1,2·V_s em **cruzeiro sem
-peso**, não necessariamente no SOLO/MTOW de projeto — o baseline real
-decolava a 1,05·V_s_to conforme o projeto da asa, com arrasto extra de
-flap). Tarefa corrigiu a avaliação para 1,05·V_s_to per CS 23.65 §65(a)
-(velocidade mínima de subida segura = piso de 1,05·V_s_to). RC/V é
-monotonicamente decrescente na faixa — portanto `vx_kmh`/`climb_gradient_pct`
-reportam corretamente esse piso. Baseline real E10:
-`climb_gradient_pct` **13,896713% (1,2·Vs) → 12,451842% (1,05·Vs, honesto)**
-(-1,444871 pp, viés OTIMISTA removido); `vx_kmh` **121,519501 → 138,871480 km/h**
-(+16,8%, acompanha a descida de velocidade de referência). Gate PASSA
-(≥ 8,3%), folga intacta. Ponteiro: docstring de
-`agents::performance::best_climb_angle_ms` (`src/agents/performance.rs`),
-comentário datado "Campanha ciclo 11 (2026-08-10)" na atualização,
-`docs/aircraft_spec.schema.md` (campos `vx_kmh`/`climb_gradient_pct`),
-`tests/generic_engine.rs` (pins old→new).
+best_climb_angle_ms` varria `vx_kmh`/`climb_gradient_pct` a partir do piso
+1,05·V_s_to. Como RC/V é monotonicamente DECRESCENTE nessa faixa, a
+função sempre devolvia o próprio PISO da varredura — avaliar mais cedo
+(mais devagar) dá gradiente MAIOR, então 1,05·V_s_to era um viés
+OTIMISTA, não uma leitura conservadora da norma. Tarefa mudou o piso de
+1,05·V_s_to para 1,20·V_s_to, alinhando com a referência típica da CS
+23.65 (velocidade de subida ≥1,2·Vs1).
+
+Baseline real E10: `climb_gradient_pct` **13,896713% (1,05·Vs, otimista)
+→ 12,451842% (1,20·Vs, honesto)** (-1,444871 pp, viés OTIMISTA removido);
+`vx_kmh` **121,519501 → 138,871480 km/h** (**+14,28%**, razão exata
+1,20/1,05 = 1,142857 — acompanha a subida do piso de velocidade de
+referência). Gate PASSA (≥ 8,3%), folga intacta. Ponteiro: docstring de
+`agents::performance::best_climb_angle_com_piso`/`best_climb_angle_ms`
+(`src/agents/performance.rs`), `docs/aircraft_spec.schema.md` (campos
+`vx_kmh`/`climb_gradient_pct`), `tests/generic_engine.rs` (pins old→new).
 
 ## 3. Vy híbrido (CL de estol flapado + polar limpa) — RESOLVIDO ciclo 11
 
@@ -78,7 +77,19 @@ flap havia na decolagem/cruzeiro foi embutida na faixa. Nenhuma anotação
 de época justificava empiricamente [1,3;1,8]. Com a mudança para referência
 limpa e faixa [1,05;2,00], o pico interior reaparece na busca; com a guarda
 de argmax interior (testa se máximo está no interior da faixa, não no piso)
-fica seguro. Ponteiro: docstring de `agents::performance::climb_rate_ms`
+fica seguro.
+
+Registro do ARTEFATO pego pelo ERRATUM (para o registro ficar autocontido):
+durante a rodada 1 da task 2 (referência trocada para `cl_max_clean` mas
+ainda com a janela antiga [1,3;1,8]·Vs), o argmax caiu no PISO da janela,
+não em um máximo interior genuíno — `vy_kmh` chegou a **161,805734 km/h**,
+`rc_sl_ms` a **4,9533 m/s** e `service_ceiling_m` a **5100 m**, todos
+ARTEFATOS numéricos da janela de busca deslocada (não física real). A
+guarda de argmax interior detectou o piso como resultado e o ERRATUM
+ampliou a janela para [1,05;2,00]·Vs, restaurando o pico interior
+verdadeiro — valores finais (já reportados acima): `vy_kmh`
+**148,435393 km/h**, `rc_sl_ms` **4,999905 m/s**, `service_ceiling_m`
+**5200 m**. Ponteiro: docstring de `agents::performance::climb_rate_ms`
 (`src/agents/performance.rs`), comentário datado "Campanha ciclo 11
 (2026-08-10)", ERRATUM em
 `docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md` (§3

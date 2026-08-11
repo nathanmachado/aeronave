@@ -747,6 +747,10 @@ fn main() {
     fidelity.insert("weight".into(),
         "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; \
          hardware: itens configurados não pesados — validar na balança)".into());
+    // Fix wave ciclo 11 (2026-08-10): descrição de Vy/teto de serviço
+    // atualizada — o híbrido "CL de estol flapado + polar limpa" nomeado
+    // como pré-existente/fora de escopo foi RESOLVIDO pela task 2 deste
+    // ciclo (docs/backlog.md item 3).
     fidelity.insert("performance".into(),
         "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de \
          decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na \
@@ -754,12 +758,16 @@ fn main() {
          empírico Raymer cap. 12/Hoerner) no segmento de SUBIDA da decolagem e no gradiente CS \
          23.65; a rolagem de solo de decolagem (método energético de Raymer) e a aproximação de \
          pouso (ângulo fixo, não L/D) não consomem a polar, por construção — sem incremento de \
-         arrasto ali; Vy/teto de serviço seguem em configuração limpa (híbrido pré-existente, \
-         fora de escopo, ver docs/backlog.md item 3); gradiente CS 23.65 (climb_gradient_pct) \
-         avaliado no piso LEGAL da norma desde o ciclo 11, task 1 (1,2·Vs_to, não mais o piso da \
-         varredura em 1,05·Vs_to — fecha o viés otimista remanescente nomeado no ciclo 8, \
-         docs/backlog.md item 2); ver docstring de \
-         agents::performance::best_climb_angle_com_piso".into());
+         arrasto ali; Vy/teto de serviço (climb_rate_ms) usam referência de estol LIMPA \
+         (wing.cl_max_clean, não mais o CL_max flapado do ciclo 11 task 2, docs/backlog.md \
+         item 3) e polar limpa (cd0_extra = 0.0, config EN-ROUTE), com janela de busca do argmax \
+         de RC(V) em [1,05;2,00]·Vs e guarda de argmax estritamente interior (evita o artefato \
+         de piso da janela antiga [1,3;1,8]·Vs quando a referência de estol muda); gradiente CS \
+         23.65 (climb_gradient_pct) avaliado no piso LEGAL da norma desde o ciclo 11, task 1 \
+         (1,2·Vs_to, não mais o piso da varredura em 1,05·Vs_to — fecha o viés otimista \
+         remanescente nomeado no ciclo 8, docs/backlog.md item 2); ver docstring de \
+         agents::performance::best_climb_angle_com_piso e agents::performance::climb_rate_ms"
+            .into());
     fidelity.insert("vn_diagram".into(),
         "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)".into());
     fidelity.insert("structure".into(),
@@ -801,7 +809,11 @@ fn main() {
          estática, não estendido) — dupla contagem do ciclo 9 corrigida. \
          Fator geométrico inalterado (≈1,466); folga crítica \
          ≈−0,064 m (ciclo 9) → ≈−0,0025 m (ciclo 10) — MESMO veredito \
-         (checagem #25 continua FAIL), honestamente ANTI-conservador. Ver \
+         (checagem #25 continuou FAIL do ciclo 9 ao ciclo 10), honestamente \
+         ANTI-conservador. Fix wave ciclo 11 (2026-08-10): a checagem #25 \
+         ESTEVE FAIL do ciclo 9 ao ciclo 10 — desde o baseline E12 (trem de \
+         nariz recuado, x_nose_m 1,30→1,20) ela PASSA, com folga crítica \
+         +0,00737 m (`validation_status: PASS`, `violations: []`). Ver \
          docstring de PropellerSpec::prop_clearance_critical_m e \
          docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO \
          ciclo 10). Requer mapa de \
