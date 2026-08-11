@@ -10,9 +10,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && git rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR/..")
 cd "$REPO_ROOT"
 
-# Arquivo temporário para o JSON regenerado
+# Arquivos temporários
 TMPFILE=$(mktemp)
-trap "rm -f $TMPFILE" EXIT
+TEST_OUTPUT_FILE=$(mktemp)
+trap "rm -f $TMPFILE $TEST_OUTPUT_FILE" EXIT
 
 # Contadores e flags para o resumo final
 TESTES_PASSARAM=true
@@ -25,10 +26,10 @@ echo
 echo "SEÇÃO 1 — SUÍTE DE TESTES"
 echo "─────────────────────────"
 
-cargo test --release 2>&1 | tee /tmp/test_output.txt
+cargo test --release 2>&1 | tee "$TEST_OUTPUT_FILE"
 
 # Extrai todas as linhas "test result:" de cada target
-test_results=$(grep "test result:" /tmp/test_output.txt)
+test_results=$(grep "test result:" "$TEST_OUTPUT_FILE")
 total_passed=0
 
 if [ -n "$test_results" ]; then
@@ -58,10 +59,10 @@ else
 fi
 
 # Verifica se houve falhas
-if grep -q "test result:.*FAILED" /tmp/test_output.txt; then
+if grep -q "test result:.*FAILED" "$TEST_OUTPUT_FILE"; then
     echo
     echo "TESTES FALHADOS:"
-    grep "FAILED" /tmp/test_output.txt || true
+    grep "FAILED" "$TEST_OUTPUT_FILE" || true
     TESTES_PASSARAM=false
 fi
 
