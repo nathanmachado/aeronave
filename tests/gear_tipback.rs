@@ -543,14 +543,21 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     //       missão para cima (1.512,4→1.537,6 kg), pedindo mais combustível.
     // Combustível de missão 222,7→236,2 L com o tanque inalterado em 260 L.
     // Continua acima do piso de 5%, com ~4,1 pp de folga (era ~9,3 pp).
-    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): a mudança em Vy
-    // afeta o segmento de subida (RC melhora), reduzindo o combustível de
-    // subida consumido e liberando mais volume para a reserva de segurança
-    // (cascata cascata de missão): 9.1369% → **9.3099%** (old→new, +0,173 pp,
-    // +1,89%; tolerância INALTERADA).
-    assert!((fuel_margin_pct - 9.3099).abs() < 0.1,
-        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-11 task 2 \
-         ≈9.3099%");
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): a mudança
+    // em Vy afeta o segmento de subida (RC melhora, ARTEFATO — ver ERRATUM
+    // abaixo), reduzindo o combustível de subida consumido e liberando mais
+    // volume para a reserva de segurança (cascata de missão): 9.1369% →
+    // 9.3099% (old→new, +0,173 pp, +1,89%).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): a janela de varredura de
+    // `climb_rate_ms` perdia o pico real de RC com a referência de estol
+    // limpa (ver docstring de `agents::performance::climb_rate_ms`) —
+    // corrigida (`[1,05·Vs, 2,00·Vs]`, `steps` 50→100). Vy volta a
+    // ≈148 km/h, o segmento de subida volta perto do consumo pré-task-2:
+    // 9.3099% → **9.2175%** (old→new, −0,092 pp, −0,99%; ainda dentro da
+    // tolerância larga do assert, 0,1 pp, mas re-pinado por honestidade).
+    assert!((fuel_margin_pct - 9.2175).abs() < 0.1,
+        "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-erratum ciclo 11 §2 \
+         ≈9.2175%");
     assert!(fuel_margin_pct >= 5.0,
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");

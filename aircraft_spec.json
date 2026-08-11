@@ -11,15 +11,15 @@
     "thickness_ratio": 0.15,
     "oswald_efficiency": 0.7555832290782708,
     "cd0": 0.023504020056742125,
-    "cl_cruise": 0.36673300190173813,
-    "cd_cruise": 0.029200010564273876,
+    "cl_cruise": 0.3667806866640199,
+    "cd_cruise": 0.029201496298239628,
     "cl_max": 2.1,
     "cl_max_clean": 1.45,
     "cl_max_to": 1.6775,
     "cd0_flap_to_extra": 0.0052499999999999995,
-    "stall_speed_flaps_kmh": 103.4138380346862,
-    "stall_speed_clean_kmh": 124.45269419462174,
-    "ld_ratio_cruise": 12.559344836348616
+    "stall_speed_flaps_kmh": 103.42056105111811,
+    "stall_speed_clean_kmh": 124.46078496394205,
+    "ld_ratio_cruise": 12.560338789424664
   },
   "propulsion": {
     "engine_model": "Toyota 1GD-FTV 2.8 Turbo Diesel",
@@ -34,13 +34,13 @@
     "prop_diameter_m": 1.76,
     "fuel_type": "Diesel S-10",
     "fuel_capacity_l": 260.0,
-    "fc_cruise_lph": 32.31991201107241,
-    "bsfc_cruise_gkwh": 221.1653126848232,
-    "endurance_h": 7.240118720615157,
-    "range_km": 2027.233241772244,
+    "fc_cruise_lph": 32.3225038997723,
+    "bsfc_cruise_gkwh": 221.1717954871603,
+    "endurance_h": 7.239538147341625,
+    "range_km": 2027.070681255655,
     "prop_efficiency": 0.7838814965676598,
-    "thrust_cruise_n": 1200.0492197171625,
-    "p_req_cruise_kw": 119.07049974039128,
+    "thrust_cruise_n": 1200.1102797596711,
+    "p_req_cruise_kw": 119.07655820004128,
     "p_shaft_cruise_kw": 122.88722938820213,
     "cruise_feasible": true
   },
@@ -179,35 +179,35 @@
     "trim_margin": 0.1,
     "cl_ground_rotation": 0.5,
     "to_flap_fraction": 0.35,
-    "cl_h_trim_cruise": 0.04574484142326062,
-    "cd_trim": 0.00005250277459910696,
+    "cl_h_trim_cruise": 0.045752696793160186,
+    "cd_trim": 0.00005252080785111187,
     "cg_reference_scenario": "4 pax + bagagem + meia",
     "cg_reference_pct_mac": 37.687109320503446
   },
   "performance": {
-    "v_cruise_kmh": 300.2254721011248,
-    "v_stall_kmh": 103.4138380346862,
-    "rc_sl_ms": 4.9533461760703625,
-    "rc_cruise_alt_ms": 4.46341285613116,
-    "service_ceiling_m": 5100.0,
-    "to_distance_paved_m": 398.1230288310327,
-    "to_distance_grass_m": 477.7476345972392,
-    "landing_distance_m": 362.6332647769012,
-    "range_km": 2027.233241772244,
-    "endurance_h": 7.240118720615157,
-    "vx_kmh": 138.862358467157,
-    "vy_kmh": 161.80573355609272,
-    "best_glide_kmh": 173.24507418837572,
+    "v_cruise_kmh": 300.2206831479499,
+    "v_stall_kmh": 103.42056105111811,
+    "rc_sl_ms": 4.999904667293841,
+    "rc_cruise_alt_ms": 4.544519960916836,
+    "service_ceiling_m": 5200.0,
+    "to_distance_paved_m": 398.2276410494807,
+    "to_distance_grass_m": 477.8731692593768,
+    "landing_distance_m": 362.6566215019111,
+    "range_km": 2027.070681255655,
+    "endurance_h": 7.239538147341625,
+    "vx_kmh": 138.8714795598457,
+    "vy_kmh": 148.43539330199408,
+    "best_glide_kmh": 173.25645368960977,
     "glide_ratio": 15.921177186890732,
-    "climb_gradient_pct": 12.455553386151399,
-    "to_50ft_paved_m": 420.2642154836851,
-    "to_50ft_grass_m": 473.3472859944894,
-    "ldg_50ft_m": 502.43109494717817,
-    "ldg_50ft_grass_m": 556.6421832061453
+    "climb_gradient_pct": 12.451842484809621,
+    "to_50ft_paved_m": 420.3724511070893,
+    "to_50ft_grass_m": 473.46946991368674,
+    "ldg_50ft_m": 502.4582990603992,
+    "ldg_50ft_grass_m": 556.6771728943696
   },
   "vn_diagram": {
-    "va_kmh": 242.6029631944757,
-    "vb_kmh": 235.2322897759431,
+    "va_kmh": 242.61873500740694,
+    "vb_kmh": 235.24758241549247,
     "vc_kmh": 280.0,
     "vd_kmh": 350.0,
     "n_lim_pos": 3.8,
@@ -222,23 +222,23 @@
         0.0
       ],
       [
-        60.650740798618926,
-        0.23749999999999996
+        60.654683751851735,
+        0.2374999999999999
       ],
       [
-        121.30148159723785,
-        0.9499999999999998
+        121.30936750370347,
+        0.9499999999999996
       ],
       [
-        181.95222239585678,
-        2.1374999999999997
+        181.9640512555552,
+        2.1374999999999993
       ],
       [
-        242.6029631944757,
-        3.7999999999999994
+        242.61873500740694,
+        3.7999999999999985
       ],
       [
-        254.18266193145288,
+        254.19918654987288,
         4.171413491926393
       ],
       [
@@ -272,7 +272,7 @@
     "frame_spacing_mm": 300.0,
     "flutter_speed_kmh": 698.5006596309569,
     "design_dive_speed_kmh": 350.0,
-    "va_kmh": 242.6029631944757,
+    "va_kmh": 242.61873500740694,
     "fatigue_life_cycles": "infinita",
     "flutter_ok": true
   },
@@ -313,19 +313,19 @@
   },
   "mission": {
     "fuel_taxi_kg": 2.52,
-    "fuel_climb_kg": 4.986632763903637,
-    "fuel_cruise_kg": 171.6117267601084,
-    "fuel_descent_kg": 0.9426641003229453,
-    "fuel_reserve_kg": 18.006102362433502,
-    "fuel_total_kg": 198.0671259867685,
-    "fuel_total_l": 235.79419760329586,
-    "climb_time_min": 8.680246216818055,
-    "climb_distance_km": 24.82579544959015,
+    "fuel_climb_kg": 4.920083893203234,
+    "fuel_cruise_kg": 171.86178648472296,
+    "fuel_descent_kg": 0.942739697076692,
+    "fuel_reserve_kg": 18.02446100750029,
+    "fuel_total_kg": 198.26907108250316,
+    "fuel_total_l": 236.0346084315514,
+    "climb_time_min": 8.564000005190014,
+    "climb_distance_km": 22.16161742226535,
     "descent_distance_km": 48.61111111111111,
-    "cruise_distance_km": 1886.5630934392989,
-    "block_time_h": 7.056007215103193,
+    "cruise_distance_km": 1889.2272714666235,
+    "block_time_h": 7.063584699768885,
     "range_no_wind_km": 1960.0,
-    "breguet_range_full_tank_km": 2395.2715261336875
+    "breguet_range_full_tank_km": 2395.3943886731604
   },
   "electrical": {
     "bus_voltage_v": 28.0,
@@ -372,34 +372,34 @@
     ]
   },
   "sizing": {
-    "mtow_mission_kg": 1537.1870609081006,
+    "mtow_mission_kg": 1537.3890060038352,
     "mtow_envelope_kg": 1557.5199349213322,
     "iterations": [
       1461.0,
-      1487.4270762381293,
-      1509.6814270156601,
-      1522.2995997104758,
-      1529.1505216562764,
-      1532.8552605892132,
-      1534.8583680041281,
-      1535.9415910662299,
-      1536.5274315136653,
-      1536.8442919362628,
-      1537.1870609081006
+      1487.5026175748287,
+      1509.8024970557012,
+      1522.4508453749322,
+      1529.3210491654354,
+      1533.0382002389701,
+      1535.0488777640587,
+      1536.1368334039669,
+      1536.725391548541,
+      1537.0441213880576,
+      1537.3890060038352
     ],
     "converged": true,
-    "fuel_required_l": 235.79419760329586,
+    "fuel_required_l": 236.0346084315514,
     "fuel_capacity_l": 260.0,
-    "fuel_margin_l": 24.205802396704144,
-    "fuel_margin_pct": 9.309923998732362,
+    "fuel_margin_l": 23.96539156844861,
+    "fuel_margin_pct": 9.217458295557158,
     "constraints": {
       "ws_max_stall_n_m2": 2401.5489254686786,
       "v_stall_ref_ms": 43.20987654320987,
       "ws_optimal_cruise_n_m2": 2166.0826627226597,
-      "ws_actual_n_m2": 1061.6333455158976,
-      "pw_min_climb_w_n": 5.190866802793728,
-      "pw_actual_w_n": 9.56810210371721,
-      "recommended_wing_area_m2": 6.959657526355419,
+      "ws_actual_n_m2": 1061.772815625325,
+      "pw_min_climb_w_n": 5.191084603562674,
+      "pw_actual_w_n": 9.566845277183532,
+      "recommended_wing_area_m2": 6.960571838439602,
       "ws_chosen_n_m2": 2166.0826627226597
     }
   },
@@ -414,7 +414,7 @@
       40.83902033960156
     ],
     "flips": [],
-    "mtow_masstotal_kg": 1609.1023277667439
+    "mtow_masstotal_kg": 1609.350620833172
   },
   "fidelity": {
     "control_surfaces": "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de autoridade/eficiência de controle)",

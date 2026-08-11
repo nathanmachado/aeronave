@@ -288,10 +288,12 @@ impl MissionAgent {
             // de `climb_rate_ms`, mas PROVADAMENTE inerte neste caminho —
             // ele só afeta o ramo de tração ESTÁTICA (V<0,5 m/s) de
             // `thrust_available_n`, e `climb_rate_ms` varre exclusivamente
-            // V ∈ [1,3·Vs, 1,8·Vs], sempre ≫ 0,5 m/s para esta classe de
-            // aeronave. Qualquer valor produziria o mesmo resultado; `1.0`
-            // evita threading `PerformanceCfg` por uma assinatura que o
-            // controller fixou sem esse parâmetro.
+            // V ∈ [1,05·Vs, 2,00·Vs] (ERRATUM ciclo 11 §2, era
+            // [1,3·Vs, 1,8·Vs] — ver docstring de `climb_rate_ms`), sempre
+            // ≫ 0,5 m/s para esta classe de aeronave. Qualquer valor
+            // produziria o mesmo resultado; `1.0` evita threading
+            // `PerformanceCfg` por uma assinatura que o controller fixou
+            // sem esse parâmetro.
             let (rc_ms, vy_kmh) = climb_rate_ms(
                 mass_kg, alt_m, req.isa_delta_c, wing, state, engine, 1.0,
             );

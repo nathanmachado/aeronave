@@ -145,17 +145,44 @@ pub fn excess_power_kw(
 /// Razão de subida máxima (m/s) — varre velocidades para encontrar o pico
 /// RC = P_excess / W
 ///
-/// Nota de modelo (ciclo 8, task 1 → ciclo 11, task 2): CORRIGIDA (ciclo 11,
-/// task 2 — fecha backlog item 3). O histórico preexistente desde ciclo 8 era
-/// uma inconsistência — a referência de estol usava `wing.cl_max` (CL_max COM
-/// FLAP de pouso, `cl_max_flaps` — ver `WingSpec::cl_max`), não o CL_max
-/// limpo, enquanto `excess_power_kw` recebe `cd0_extra = 0.0` (configuração
-/// limpa). Vy é referência de razão de subida EN-ROUTE (teto de serviço,
-/// `service_ceiling_m`), não check de decolagem — não faz sentido misturar CL
-/// de estol flapado com arrasto limpo. CORRIGIDO (ciclo 11, task 2): a
-/// referência de estol passa a ser `wing.cl_max_clean` (1,45, piso limpo);
-/// o híbrido é resolvido — referência de estol e arrasto agora refletem a MESMA
-/// configuração EN-ROUTE (limpa). Razão de piso esperada: √(2,1/1,45)≈1,20344.
+/// Nota de modelo (ciclo 8, task 1 → ciclo 11, task 2 → ERRATUM ciclo 11,
+/// rodada 2). O histórico preexistente desde ciclo 8 era uma inconsistência
+/// — a referência de estol usava `wing.cl_max` (CL_max COM FLAP de pouso,
+/// `cl_max_flaps` — ver `WingSpec::cl_max`), não o CL_max limpo, enquanto
+/// `excess_power_kw` recebe `cd0_extra = 0.0` (configuração limpa). Vy é
+/// referência de razão de subida EN-ROUTE (teto de serviço,
+/// `service_ceiling_m`), não check de decolagem — não faz sentido misturar
+/// CL de estol flapado com arrasto limpo.
+///
+/// CICLO 11, TASK 2 (primeira tentativa, INCOMPLETA — ver ERRATUM):
+/// trocou a referência de estol para `wing.cl_max_clean` (1,45) mas manteve
+/// a janela de varredura `[1,30·Vs, 1,80·Vs]` sem revisá-la. Essa janela
+/// tinha sido calibrada (por observação, não por derivação) contra o Vs
+/// FLAPADO — com o Vs LIMPO (20,3% maior), a janela inteira desloca para
+/// velocidades maiores e PERDE o pico real de RC, que fica no baixo-médio da
+/// janela antiga. `climb_rate_ms` passou a devolver o PISO da janela nova,
+/// não o argmax de RC(V) — Vy 147,9→161,8 km/h, `rc_sl_ms` 5,0010→4,9533,
+/// `service_ceiling_m` 5200→5100 m eram ARTEFATOS DE BUSCA: RC(V) é
+/// IDÊNTICA antes e depois da troca de referência (CL_max não entra no
+/// cálculo de RC — só posiciona a janela). Verificado por sondagem numérica
+/// direta na revisão que escalou ao principal (ver ERRATUM,
+/// `docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md`).
+///
+/// CORRIGIDO (ERRATUM ciclo 11, rodada 2): a referência de estol limpa
+/// (`wing.cl_max_clean`) fica — essa parte estava certa. A janela de
+/// varredura muda de `[1,30·Vs, 1,80·Vs]` para **`[1,05·Vs, 2,00·Vs]`**
+/// (`steps` 50→100) — larga o bastante para conter o argmax real em vez de
+/// depender de uma heurística calibrada para outra referência de estol. Vy
+/// é, por definição, o argmax de RC(V); a janela é ferramenta de busca, não
+/// modelagem. Guarda de regressão: `climb_rate_search_window_kmh` expõe os
+/// limites da janela e o argmax para o teste
+/// `vy_argmax_e_estritamente_interior_a_janela_de_busca` (RED contra a
+/// janela antiga, ver `tests/generic_engine.rs`) — exige argmax
+/// ESTRITAMENTE INTERIOR no baseline real; argmax na fronteira de uma busca
+/// por ótimo é defeito de modelo, não resultado. Efeito líquido esperado:
+/// Vy/RC/teto voltam a ≈148 km/h / ≈5,001 m/s / 5200 m (o resultado
+/// honesto — Vy genuinamente não depende do CL_max de referência, só a
+/// janela de busca dependia, e agora é larga o bastante para não importar).
 pub fn climb_rate_ms(
     mass_kg: f64,
     altitude_m: f64,
@@ -165,16 +192,44 @@ pub fn climb_rate_ms(
     engine: &EngineSpec,
     static_thrust_factor: f64,
 ) -> (f64, f64) {
+    let r = climb_rate_search(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
+                               static_thrust_factor);
+    (r.best_rc_ms.max(0.0), r.best_v_ms * 3.6) // (RC em m/s, Vy em km/h)
+}
+
+/// Detalhe da busca de Vy — expõe a janela `[v_min, v_max]` e o argmax
+/// `best_v`, além do RC no argmax. Uso interno de `climb_rate_ms` (que
+/// descarta os limites) e, via `climb_rate_search_window_kmh` abaixo,
+/// da guarda de teste "argmax estritamente interior" (ERRATUM ciclo 11 §2).
+struct ClimbRateSearch {
+    best_rc_ms: f64,
+    best_v_ms: f64,
+    v_min_ms: f64,
+    v_max_ms: f64,
+}
+
+fn climb_rate_search(
+    mass_kg: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    static_thrust_factor: f64,
+) -> ClimbRateSearch {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     // RPM de subida: máximo contínuo do motor (uso prolongado, não redline).
     let engine_rpm_climb = engine.rpm_max_continuous;
 
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max_clean)).sqrt();
 
-    // Varre de 1.3·Vs até 1.8·Vs (faixa de Vy típica)
-    let v_min = 1.30 * v_stall;
-    let v_max = 1.80 * v_stall;
-    let steps = 50;
+    // Janela de busca do argmax de RC(V) — ERRATUM ciclo 11 §2: `[1,05·Vs,
+    // 2,00·Vs]` (era `[1,30·Vs, 1,80·Vs]`, calibrada para o Vs FLAPADO — ver
+    // docstring de `climb_rate_ms` para o histórico completo). Larga o
+    // bastante para conter o argmax real com a referência de estol LIMPA.
+    let v_min = 1.05 * v_stall;
+    let v_max = 2.00 * v_stall;
+    let steps = 100;
     let dv = (v_max - v_min) / steps as f64;
 
     let mut best_rc = f64::NEG_INFINITY;
@@ -182,10 +237,8 @@ pub fn climb_rate_ms(
 
     for i in 0..=steps {
         let v = v_min + i as f64 * dv;
-        // Auditoria (ciclo 8, task 1 → ciclo 11, task 2): Vy é referência
-        // EN-ROUTE (teto de serviço), configuração limpa — cd0_extra=0.0.
-        // Ciclo 11, task 2: referência de estol corrigida para `cl_max_clean`
-        // acima (resolveu o híbrido "CL flapado + CD0 limpo" do ciclo 8).
+        // Vy é referência EN-ROUTE (teto de serviço), configuração limpa —
+        // cd0_extra=0.0.
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
@@ -196,7 +249,28 @@ pub fn climb_rate_ms(
             best_v  = v;
         }
     }
-    (best_rc.max(0.0), best_v * 3.6) // (RC em m/s, Vy em km/h)
+    ClimbRateSearch { best_rc_ms: best_rc, best_v_ms: best_v, v_min_ms: v_min, v_max_ms: v_max }
+}
+
+/// Expõe a janela de busca de Vy e o argmax, todos em km/h, só para a guarda
+/// de teste "argmax estritamente interior" (ERRATUM ciclo 11 §2, ver
+/// docstring de `climb_rate_ms`). Não é consumida pelo pipeline de
+/// produção — devolve os mesmos números que `climb_rate_ms` mais os limites
+/// da janela que ele descarta.
+///
+/// Retorna `(best_v_kmh, v_min_kmh, v_max_kmh)`.
+pub fn climb_rate_search_window_kmh(
+    mass_kg: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    static_thrust_factor: f64,
+) -> (f64, f64, f64) {
+    let r = climb_rate_search(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
+                               static_thrust_factor);
+    (r.best_v_ms * 3.6, r.v_min_ms * 3.6, r.v_max_ms * 3.6)
 }
 
 /// Vx — velocidade de MELHOR ÂNGULO de subida (Task 4.7): maximiza o
@@ -778,7 +852,8 @@ mod tests {
         // "menor que o teto artificial de 8.000 m do laço de busca"). Sem
         // mudança na Task 4.7: `static_thrust_factor` só afeta o ramo
         // estático (V<0,5 m/s) de `thrust_available_n`, jamais atingido pela
-        // varredura de `climb_rate_ms` (sempre V ≥ 1,3·Vs).
+        // varredura de `climb_rate_ms` (sempre V ≥ 1,05·Vs — ERRATUM ciclo 11
+        // §2, era 1,3·Vs).
         assert!(ceiling > 7_000.0 && ceiling < 7_900.0,
             "Teto {ceiling:.0} m fora do intervalo esperado (7.000–7.900 m)");
     }
