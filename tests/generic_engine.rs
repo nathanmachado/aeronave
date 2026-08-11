@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use aeronave::agents::aerodynamics::AerodynamicsAgent;
 use aeronave::agents::empennage::EmpennageAgent;
-use aeronave::agents::performance::{max_level_speed_ms, PerformanceAgent};
+use aeronave::agents::performance::{max_level_speed_ms, climb_rate_search_window_kmh, PerformanceAgent};
 use aeronave::agents::propulsion::PropulsionAgent;
 use aeronave::agents::weight_balance::WeightBalanceAgent;
 use aeronave::models::aircraft_state::AircraftState;
@@ -281,7 +281,20 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // arrasto ⟹ mais horas: 7,2391022047 → **7,2395373559 h** (old→new,
     // +0,006%; tolerância INALTERADA, dentro de 1e-3 mesmo sem re-pinar,
     // re-pinado por honestidade).
-    let endurance_pin_h = 7.2395373559;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): referência
+    // de estol de Vy muda de cl_max (flapado, 2,1) para cl_max_clean (1,45),
+    // Vy sobe ~9,4 km/h (ARTEFATO — ver ERRATUM abaixo), performance em
+    // subida melhora, menos arrasto/consumo, autonomia sobe: 7.2395373559 →
+    // 7.240119 h (old→new, +0,008%; tolerância INALTERADA).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): a janela de varredura de
+    // `climb_rate_ms` perdeu o pico real de RC com a referência de estol
+    // limpa (ver docstring de `climb_rate_ms`/comentário de
+    // `golden_toyota_baseline_task_4_7_novos_campos_de_performance`) — Vy
+    // 161,8→148,4 km/h corrige o artefato. Efeito líquido ≈zero (volta
+    // perto do valor pré-task-2): 7.240119 → **7.239538 h** (old→new,
+    // −0,008%; ainda dentro da tolerância larga do assert, 1e-3, mas
+    // re-pinado por honestidade — mesmo padrão do comentário acima).
+    let endurance_pin_h = 7.239538;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -308,7 +321,16 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // acima (MTOW convergido cai um fio) ⟹ um fio mais alcance com o
     // mesmo tanque cheio: 2.026,948617 → **2.027,070460 km** (old→new,
     // +0,006%; tolerância INALTERADA).
-    let range_pin_km = 2_027.070460;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): mesma
+    // lógica da autonomia acima (performance melhora, menos consumo) —
+    // 2.027,070460 → 2.027,233242 km (old→new, +0,008%; ARTEFATO, ver
+    // ERRATUM abaixo).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida (ver comentário da autonomia acima) — Vy
+    // volta a ≈148 km/h, efeito líquido ≈zero (volta perto do valor
+    // pré-task-2): 2.027,233242 → **2.027,070681 km** (old→new, −0,008%;
+    // tolerância INALTERADA).
+    let range_pin_km = 2_027.070681;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -470,13 +492,22 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // arrasto de trim ⟹ menos combustível de missão (236,244→236,047 L)
     // ⟹ margem SOBE: 23,755819 L (~10,0556%) → **23,952516 L
     // (~10,1473%)** (old→new, +0,83%; tolerâncias INALTERADAS).
-    let margem_pin_l = 23.952516;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): performance
+    // em subida melhora (ARTEFATO — ver ERRATUM abaixo), consumo de cruzeiro
+    // cai, menos combustível de missão exigido ⟹ margem SOBE: 23.952516 L
+    // (~10,1473%) → 24,205802 L (~10,2656%) (old→new, +1,05%).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida (ver docstring de `climb_rate_ms`) — Vy
+    // volta a ≈148 km/h, efeito líquido ≈zero (volta perto do valor
+    // pré-task-2): 24,205802 L (~10,2656%) → **23,965392 L (~10,1533%)**
+    // (old→new, −0,99%; tolerâncias INALTERADAS).
+    let margem_pin_l = 23.965392;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
-        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E10 \
+        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-ciclo-11-erratum \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 10.1473).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-10 task 2 \
-         ~10,1473%");
+    assert!((margem_pct - 10.1533).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-11-erratum \
+         ~10,1533%");
     assert!(margem_l > 0.0,
         "achado central pós-E7: com endurance_min_h reduzido, a missão cabe no tanque de 260 L \
          com folga confortável (margem {margem_l:.2} L)");
@@ -815,10 +846,18 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Campanha E12 "nariz-only" (2026-08-10): `[gear].x_nose_m` 1,30→1,20
     // não afeta nenhum item de MASSA (só braços/momentos de trem e o CG) —
     // o resíduo medido é puramente numérico, dentro do ruído do laço de
-    // convergência: 1.537,399821663 → **1.537,388949071 kg** (old→new,
+    // convergência: 1.537,399821663 → 1.537,388949071 kg (old→new,
     // −0,0109 kg, −0,0007%; MUITO abaixo da tolerância de 0,5 kg, re-pinado
     // mesmo assim por honestidade).
-    let mtow_convergido_kg = 1_537.388949071;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): performance
+    // em subida melhora (ARTEFATO — ver ERRATUM abaixo) ⟹ MTOW convergido
+    // cai um fio: 1.537,388949071 → 1.537,4 kg aprox. (old→new).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida (ver docstring de `climb_rate_ms`) — Vy
+    // volta a ≈148 km/h, efeito líquido ≈zero (MTOW convergido volta
+    // praticamente ao valor pré-task-2): → **1.537,389006 kg** (MUITO
+    // abaixo da tolerância de 0,5 kg, re-pinado por honestidade).
+    let mtow_convergido_kg = 1_537.389006;
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
@@ -838,7 +877,15 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // (ver `mtow_convergido_kg` acima) ⟹ menos arrasto induzido ⟹ mais
     // horas com o mesmo tanque (informativo): 7,2391022047 →
     // **7,2395373559 h** (old→new, +0,006%). Tolerância INALTERADA (1e-5).
-    let endurance_h = 7.2395373559;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): referência
+    // de estol de Vy muda de cl_max (flapado) para cl_max_clean (limpo),
+    // performance em subida melhora (ARTEFATO — ver ERRATUM abaixo), menos
+    // consumo/hora: 7.2395373559 → 7.240119 h (old→new, +0,008%).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida — Vy volta a ≈148 km/h, efeito líquido
+    // ≈zero (volta perto do valor pré-task-2): 7.240119 → **7.239538 h**
+    // (old→new, −0,008%). Tolerância INALTERADA (1e-5).
+    let endurance_h = 7.239538;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -859,7 +906,15 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // ⟹ um fio menos potência requerida em cruzeiro: 32,324450378 →
     // **32,322507433 L/h** (old→new, −0,006%). Tolerância INALTERADA
     // (5e-5).
-    let fc_lph = 32.322507433;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): performance
+    // em subida melhora (ARTEFATO — ver ERRATUM abaixo), MTOW convergido cai
+    // um fio, menos potência requerida em cruzeiro ⟹ 32,322507433 →
+    // 32,319912 L/h (old→new, −0,008%).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida — efeito líquido ≈zero (volta perto do valor
+    // pré-task-2): 32,319912 → **32,322504 L/h** (old→new, +0,008%).
+    // Tolerância INALTERADA (5e-5).
+    let fc_lph = 32.322504;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -978,10 +1033,97 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // nariz-abaixo reduz o upload de trim ⟹ menos ΔCD_trim ⟹ polar mais
     // limpa: 300.216508 → **300.220427 km/h** (old→new, +0,004 km/h,
     // +0,0013%; tolerância INALTERADA, 1e-3).
-    let v_max_pos_task_5_2_kmh = 300.220427;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): performance
+    // em subida melhora (ARTEFATO — ver ERRATUM abaixo), MTOW convergido cai
+    // um fio, menos arrasto induzido ⟹ V_max sobe: 300.220427 → 300.225472
+    // km/h (old→new, +0,005 km/h, +0,0017%).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida — efeito líquido ≈zero (volta perto do
+    // valor pré-task-2): 300.225472 → **300.220683 km/h** (old→new,
+    // −0,005 km/h, −0,0016%; tolerância INALTERADA, 1e-3).
+    let v_max_pos_task_5_2_kmh = 300.220683;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-E10 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
+}
+
+// ─── ERRATUM ciclo 11 §2 (rodada 2): guarda falseável contra "janela perde o pico" ──
+//
+// A rodada 1 desta task (ciclo 11, task 2) trocou a referência de estol de
+// `climb_rate_ms` para `wing.cl_max_clean` mas manteve a janela de varredura
+// antiga `[1,30·Vs, 1,80·Vs]`. Como CL_max NÃO entra no cálculo de RC(V) — só
+// desloca a janela — a janela deslocou para fora do pico real de RC (que
+// continua em ≈148 km/h), e a função passou a devolver o PISO da janela
+// (artefato de busca: Vy 147,9→161,8 km/h, `rc_sl_ms` 5,0010→4,9533,
+// `service_ceiling_m` 5200→5100 m), não o argmax verdadeiro. Ver ERRATUM em
+// `docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md`.
+//
+// Esta guarda torna esse defeito FALSEÁVEL: exige que o argmax medido no
+// baseline real fique ESTRITAMENTE dentro da janela de busca
+// (`climb_rate_search_window_kmh`, `src/agents/performance.rs`), nunca na
+// fronteira — argmax na fronteira de uma busca por ótimo é sinal de que a
+// janela é estreita demais para o modelo, não um resultado válido.
+//
+// RED verificado manualmente: com a janela da rodada 1
+// (`[1,30·Vs_clean, 1,80·Vs_clean]`), o argmax medido cai EXATAMENTE no piso
+// (posição relativa 1,000 — ver `task-2-report.md`, Rodada 1, CONCERN 1: "NEW
+// | Cl_max 1.45 | Vs 124.47 | [161.81, 224.04] | Vy medido 161.81 | Posição
+// 1.000 (Piso exato)") — a mesma asserção usada abaixo teria falhado contra
+// aquele código. Com a janela corrigida `[1,05·Vs_clean, 2,00·Vs_clean]`
+// (ERRATUM §2, `steps` 50→100), o argmax fica estritamente interior — GREEN,
+// verificado no baseline real logo abaixo.
+//
+// Cobertura explícita dos DOIS pontos de atenção do erratum — verificados,
+// não só assumidos: (1) nível do mar/MTOW cheio (`rc_sl_ms`/`vy_kmh`,
+// condição de referência de `PerformanceAgent::run`) e (2) altitude de
+// CRUZEIRO da missão (`rc_cruise_alt`, massa parcialmente queimada) — e (3)
+// varredura completa de altitude 0–8.000 m em passos de 100 m, a MESMA
+// faixa/passo que `service_ceiling_m` varre internamente a cada altitude
+// candidata ao teto de serviço, reproduzindo exatamente a busca que a função
+// de produção faz lá dentro.
+#[test]
+fn vy_argmax_e_estritamente_interior_a_janela_de_busca() {
+    let cfg    = baseline_state();
+    let req    = baseline_mission();
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized  = size_aircraft(&cfg, &toyota, &req).unwrap();
+    let stf    = cfg.performance.static_thrust_factor;
+    let isa_delta_c = req.isa_delta_c;
+    let mtow_kg = sized.state.mtow_kg;
+
+    let assert_interior = |label: &str, best_v: f64, v_min: f64, v_max: f64| {
+        assert!(best_v > v_min && best_v < v_max,
+            "{label}: argmax de Vy ({best_v:.4} km/h) NÃO é estritamente interior à janela \
+             de busca [{v_min:.4}, {v_max:.4}] km/h — a janela perdeu o pico real de RC(V) \
+             (defeito de modelo, ver ERRATUM ciclo 11 §2)");
+    };
+
+    // (1) Nível do mar, MTOW cheio — condição de referência de `rc_sl_ms`/`vy_kmh`.
+    let (v, vmin, vmax) = climb_rate_search_window_kmh(mtow_kg, 0.0, isa_delta_c, &sized.wing,
+                                                          &sized.state, &toyota, stf);
+    assert_interior("nível do mar (MTOW cheio)", v, vmin, vmax);
+
+    // (2) Altitude de cruzeiro da missão, massa parcialmente queimada (~35%
+    // do combustível gasto — mesma condição de `rc_cruise_alt` em
+    // `PerformanceAgent::run`).
+    let fuel_density = toyota.fuel.density_kg_per_l;
+    let mass_mid = mtow_kg - (sized.prop.fuel_capacity_l * fuel_density * 0.35);
+    let (v, vmin, vmax) = climb_rate_search_window_kmh(mass_mid, req.cruise_altitude_m,
+                                                          isa_delta_c, &sized.wing, &sized.state,
+                                                          &toyota, stf);
+    assert_interior("altitude de cruzeiro da missão", v, vmin, vmax);
+
+    // (3) Varredura completa 0–8.000 m / passo 100 m — a mesma faixa que
+    // `service_ceiling_m` varre para achar RC = 0,5 m/s residual.
+    let mut alt = 0.0_f64;
+    loop {
+        let (v, vmin, vmax) = climb_rate_search_window_kmh(mass_mid, alt, isa_delta_c,
+                                                              &sized.wing, &sized.state, &toyota,
+                                                              stf);
+        assert_interior(&format!("teto de serviço, altitude {alt:.0} m"), v, vmin, vmax);
+        if alt > 8_000.0 { break; }
+        alt += 100.0;
+    }
 }
 
 // ─── TASK 4.7: Vx/Vy, planeio, gradiente CS 23.65, distâncias sobre 15m ────
@@ -1231,15 +1373,70 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //                                       confirma: pouso não consome a
     //                                       polar de arrasto)
     // TOLERÂNCIAS INALTERADAS (1%).
+    //
+    // Campanha ciclo 11 (2026-08-10), CS 23.65 a 1,2·Vs: `best_climb_angle_ms`
+    // passa a avaliar o gradiente no PISO da varredura em `1,20·V_s_to` (não
+    // mais `1,05·V_s_to`) — a referência típica da norma, fechando
+    // `docs/backlog.md` item 2 (RC/V é monotonicamente decrescente na faixa
+    // modelada para esta célula, ver docstring de `best_climb_angle_com_piso`,
+    // então subir o piso da varredura só pode reduzir o gradiente
+    // encontrado — a queda é o OBJETIVO da correção, não uma regressão).
+    // Hand-check congelado ANTES do run (±0,2 p.p., ver assert dedicado
+    // abaixo) bateu no valor medido (12,451844%, desvio de 0,0018 p.p.) —
+    // sem surpresa. Só `vx_kmh`/`climb_gradient_pct` se movem — nenhum outro
+    // pin desta tabela consome `best_climb_angle_ms`/o piso de varredura.
+    // Valores MEDIDOS old→new:
+    //   vx_kmh:             121.519501 → 138.871477  (+14,28%, ≈121,5×
+    //                                       (1,20/1,05)=138,88 — o argmax
+    //                                       continua no piso da varredura,
+    //                                       RC/V segue decrescente também em
+    //                                       [1,20·Vs, 1,80·Vs] para esta
+    //                                       célula, ver propriedade
+    //                                       `gradiente_com_piso_de_varredura_
+    //                                       maior_nao_aumenta`)
+    //   climb_gradient_pct:  13.896713 → 12.451844  (-10,40%; ~1,44 p.p. do
+    //                                       viés otimista remanescente
+    //                                       nomeado no ciclo 8 fecham aqui —
+    //                                       piso CS 23.65 8,3% ainda
+    //                                       folgado, margem ~4,15 p.p., não
+    //                                       mais ~5,6 p.p.)
+    // vy_kmh/best_glide_kmh/glide_ratio/to_50ft_paved_m/to_50ft_grass_m/
+    // ldg_50ft_m: variação de ponto flutuante < 0,1% face aos pins
+    // anteriores, dentro da tolerância de 1% já vigente — não consomem
+    // `best_climb_angle_ms`/o piso de varredura, pins mantidos.
+    //
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): a rodada 1 (comentário
+    // acima) trocou a referência de estol de `climb_rate_ms` para
+    // `cl_max_clean` mas manteve a janela de varredura antiga
+    // `[1,30·Vs, 1,80·Vs]` — como CL_max não entra no cálculo de RC(V), só
+    // desloca a janela, o pico real de RC (≈148 km/h) ficou fora da janela
+    // deslocada e a função devolveu o PISO (artefato de busca), não o
+    // argmax: vy_kmh 161.805734 era ERRADO. Corrigido: janela
+    // `[1,05·Vs_clean, 2,00·Vs_clean]`, `steps` 50→100 (ver
+    // `climb_rate_search_window_kmh`/`vy_argmax_e_estritamente_interior_a_
+    // janela_de_busca`, guarda que agora torna esse defeito falseável).
+    // Efeito: Vy volta a ≈148 km/h — quase o mesmo valor de ANTES da task 2
+    // (147.915721, quando a referência ainda era `cl_max` flapado), porque
+    // Vy genuinamente não depende do CL_max de referência: só a janela de
+    // busca dependia, e agora é larga o bastante para não importar. Valor
+    // MEDIDO old→new: vy_kmh 161.805734 → **148.435393** (a pequena
+    // diferença de ≈0,52 km/h/0,35% frente ao valor pré-task-2 é resolução
+    // de grade — `steps` 100 em vez de 50, janela mais larga). Nenhum outro
+    // pin desta tabela se move além da tolerância de 1% já vigente (vx_kmh/
+    // best_glide_kmh/glide_ratio/climb_gradient_pct/to_50ft_*/ldg_50ft_m
+    // não consomem `climb_rate_ms`/Vy).
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             121.519501, 0.01),
-        ("vy_kmh",              perf.vy_kmh,             147.915721, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     173.266373, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             138.862358, 0.01),
+        // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): 161.805734 (artefato
+        // de busca, ver comentário acima) → 148.435393 (argmax real,
+        // estritamente interior à janela corrigida).
+        ("vy_kmh",              perf.vy_kmh,             148.435393, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     173.245074, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  13.896713, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.466819, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.575998, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         502.482013, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  12.455553, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.264215, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.347286, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         502.431095, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1249,18 +1446,31 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     }
 
     // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
-    // real passa com folga confortável (~13.9% pós-ciclo-8/task-1, gradiente
-    // honesto — ver tabela old→new e decomposição acima; era ~15.1% no
-    // híbrido pré-task, mais de 5 p.p. acima do piso mesmo depois da
-    // correção). Essa folga em si segue OTIMISTA por um viés pré-existente,
-    // não introduzido por esta task: `best_climb_angle_ms` avalia no piso da
-    // varredura (1,05·V_s), abaixo da velocidade de avaliação típica da CS
-    // 23.65 (≥1,2·V_s); a 1,2·V_s_to o gradiente seria ≈12,45% — ainda acima
-    // do piso 8,3%, mas com margem menor (~4,15 p.p., não ~5,6 p.p.). Ver
-    // docstring de `best_climb_angle_ms` (nota de viés remanescente) e o
-    // report da task 1 do ciclo 8 (item nomeado para ciclo futuro).
+    // real passa com folga confortável.
+    // Ciclo 8 (task 1): ~13,9%, gradiente com CL_max/CD0 de decolagem
+    // consistentes (era ~15,1% no híbrido pré-task).
+    // Ciclo 11 (task 1, 2026-08-10, fecha `docs/backlog.md` item 2):
+    // `best_climb_angle_ms` passa a avaliar o gradiente no piso LEGAL da CS
+    // 23.65 (1,2·V_s_to), não mais no piso antigo da varredura (1,05·V_s_to)
+    // — o viés otimista remanescente nomeado no ciclo 8 fecha aqui. Gradiente
+    // real ~12,45% (ver tabela old→new acima) — segue acima do piso 8,3%,
+    // com margem menor (~4,15 p.p., não mais ~5,6 p.p.). Ver docstring de
+    // `best_climb_angle_com_piso` para o histórico completo.
     assert!(perf.climb_gradient_pct >= 8.3,
         "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
+
+    // Ciclo 11 (task 1, backlog item 2): hand-check CONGELADO ANTES do run —
+    // tolerância ±0,2 p.p. fixada antes de medir o pipeline real (docstring
+    // de `best_climb_angle_com_piso`/`docs/backlog.md` item 2 estimavam
+    // ≈12,4486% por extrapolação da tabela old→new do ciclo 8). Valor medido
+    // 12,451844%, desvio de 0,0018 p.p. do hand-check — sem surpresa,
+    // consistente com o pin acima.
+    let hand_check_esperado_pct = 12.45;
+    let hand_check_tol_pp = 0.2;
+    assert!((perf.climb_gradient_pct - hand_check_esperado_pct).abs() < hand_check_tol_pp,
+        "climb_gradient_pct = {:.6}% divergiu do hand-check congelado (ciclo 11, 1,2·Vs_to) de \
+         {hand_check_esperado_pct}% em mais de {hand_check_tol_pp} p.p.",
+        perf.climb_gradient_pct);
 
     // Tabela old→new (ver comentário acima) — `to_distance_*`/
     // `landing_distance_m` continuam "baseados em rolagem de solo"
@@ -1534,9 +1744,17 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // tanque de 240 L mutado) cai um fio ⟹ um fio menos combustível
     // exigido — 235,767522 → **235,754810 L** (old→new, −0,005%).
     // Tolerância INALTERADA (1e-2).
-    let necessario_pin_l = 235.754810;
+    // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo): performance
+    // em subida melhora (ARTEFATO — ver ERRATUM abaixo), consumo de
+    // cruzeiro cai, menos combustível de missão exigido — 235,754810 →
+    // 235,515548 L (old→new, −0,101%).
+    // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de varredura de
+    // `climb_rate_ms` corrigida — efeito líquido ≈zero (volta perto do
+    // valor pré-task-2): 235,515548 → **235,754050 L** (old→new, +0,101%).
+    // Tolerância INALTERADA (1e-2).
+    let necessario_pin_l = 235.754050;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E10 {necessario_pin_l:.6} L");
+        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-11 task 2 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
         "4ª reviravolta: a missão volta a exigir MENOS combustível do que os 240 L da mutação \
          sintética têm — {necessario_l:.2} L < {:.2} L", cfg.fuel_system.capacity_l);
@@ -1628,9 +1846,19 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // converge, então os intermediários que alimentam o
             // `CombustivelInsuficiente` não são um ponto fixo. Continua
             // MUITO acima dos 260 L (~35,3%): achado qualitativo inalterado.
-            let necessario_pin_l = 351.876358;
+            // Ciclo 11 (2026-08-10, task 2, rodada 1 — Vy com estol limpo):
+            // performance em subida melhora (ARTEFATO — ver ERRATUM abaixo),
+            // consumo de cruzeiro cai, menos combustível exigido —
+            // 351.876358 → 350.322695 L (old→new, −0,44%).
+            // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): janela de
+            // varredura de `climb_rate_ms` corrigida — efeito líquido
+            // ≈zero (volta perto do valor pré-task-2): 350.322695 →
+            // **351.868975 L** (old→new, +0,44%). Achado qualitativo
+            // inalterado: ainda muito acima dos 260 L, motor muito fraco
+            // demais para esta célula/missão.
+            let necessario_pin_l = 351.868975;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E7 \
+                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-11 task 2 \
                  {necessario_pin_l:.6} L");
         }
         other => panic!("esperava CombustivelInsuficiente para o Rotax, obtido: {other:?}"),

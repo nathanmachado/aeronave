@@ -145,18 +145,44 @@ pub fn excess_power_kw(
 /// Razão de subida máxima (m/s) — varre velocidades para encontrar o pico
 /// RC = P_excess / W
 ///
-/// Nota de modelo (pré-existente, não introduzida por esta função — ciclo 8,
-/// task 1: PERMANECE híbrida, fora de escopo desta task): a referência de
-/// estol usa `wing.cl_max`, que é o CL_max COM FLAP (`cl_max_flaps` — ver
-/// `WingSpec::cl_max`/`aerodynamics.rs`), não o CL_max limpo, enquanto
-/// `excess_power_kw` recebe `cd0_extra = 0.0` (configuração limpa) — Vy é
-/// usada como referência de razão de subida EN-ROUTE (teto de serviço,
-/// `service_ceiling_m`), não como check de decolagem, então não faz sentido
-/// somar arrasto de flap aqui. O híbrido "CL de estol flapado + arrasto
-/// limpo" que resulta é uma inconsistência conhecida, preexistente ao ciclo
-/// 8 — o gradiente CS 23.65 (que É um check de decolagem) foi corrigido
-/// separadamente em `best_climb_angle_ms` abaixo (ciclo futuro: reavaliar se
-/// Vy/`climb_rate_ms` deveria ter sua própria referência limpa consistente).
+/// Nota de modelo (ciclo 8, task 1 → ciclo 11, task 2 → ERRATUM ciclo 11,
+/// rodada 2). O histórico preexistente desde ciclo 8 era uma inconsistência
+/// — a referência de estol usava `wing.cl_max` (CL_max COM FLAP de pouso,
+/// `cl_max_flaps` — ver `WingSpec::cl_max`), não o CL_max limpo, enquanto
+/// `excess_power_kw` recebe `cd0_extra = 0.0` (configuração limpa). Vy é
+/// referência de razão de subida EN-ROUTE (teto de serviço,
+/// `service_ceiling_m`), não check de decolagem — não faz sentido misturar
+/// CL de estol flapado com arrasto limpo.
+///
+/// CICLO 11, TASK 2 (primeira tentativa, INCOMPLETA — ver ERRATUM):
+/// trocou a referência de estol para `wing.cl_max_clean` (1,45) mas manteve
+/// a janela de varredura `[1,30·Vs, 1,80·Vs]` sem revisá-la. Essa janela
+/// tinha sido calibrada (por observação, não por derivação) contra o Vs
+/// FLAPADO — com o Vs LIMPO (20,3% maior), a janela inteira desloca para
+/// velocidades maiores e PERDE o pico real de RC, que fica no baixo-médio da
+/// janela antiga. `climb_rate_ms` passou a devolver o PISO da janela nova,
+/// não o argmax de RC(V) — Vy 147,9→161,8 km/h, `rc_sl_ms` 5,0010→4,9533,
+/// `service_ceiling_m` 5200→5100 m eram ARTEFATOS DE BUSCA: RC(V) é
+/// IDÊNTICA antes e depois da troca de referência (CL_max não entra no
+/// cálculo de RC — só posiciona a janela). Verificado por sondagem numérica
+/// direta na revisão que escalou ao principal (ver ERRATUM,
+/// `docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md`).
+///
+/// CORRIGIDO (ERRATUM ciclo 11, rodada 2): a referência de estol limpa
+/// (`wing.cl_max_clean`) fica — essa parte estava certa. A janela de
+/// varredura muda de `[1,30·Vs, 1,80·Vs]` para **`[1,05·Vs, 2,00·Vs]`**
+/// (`steps` 50→100) — larga o bastante para conter o argmax real em vez de
+/// depender de uma heurística calibrada para outra referência de estol. Vy
+/// é, por definição, o argmax de RC(V); a janela é ferramenta de busca, não
+/// modelagem. Guarda de regressão: `climb_rate_search_window_kmh` expõe os
+/// limites da janela e o argmax para o teste
+/// `vy_argmax_e_estritamente_interior_a_janela_de_busca` (RED contra a
+/// janela antiga, ver `tests/generic_engine.rs`) — exige argmax
+/// ESTRITAMENTE INTERIOR no baseline real; argmax na fronteira de uma busca
+/// por ótimo é defeito de modelo, não resultado. Efeito líquido esperado:
+/// Vy/RC/teto voltam a ≈148 km/h / ≈5,001 m/s / 5200 m (o resultado
+/// honesto — Vy genuinamente não depende do CL_max de referência, só a
+/// janela de busca dependia, e agora é larga o bastante para não importar).
 pub fn climb_rate_ms(
     mass_kg: f64,
     altitude_m: f64,
@@ -166,16 +192,44 @@ pub fn climb_rate_ms(
     engine: &EngineSpec,
     static_thrust_factor: f64,
 ) -> (f64, f64) {
+    let r = climb_rate_search(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
+                               static_thrust_factor);
+    (r.best_rc_ms.max(0.0), r.best_v_ms * 3.6) // (RC em m/s, Vy em km/h)
+}
+
+/// Detalhe da busca de Vy — expõe a janela `[v_min, v_max]` e o argmax
+/// `best_v`, além do RC no argmax. Uso interno de `climb_rate_ms` (que
+/// descarta os limites) e, via `climb_rate_search_window_kmh` abaixo,
+/// da guarda de teste "argmax estritamente interior" (ERRATUM ciclo 11 §2).
+struct ClimbRateSearch {
+    best_rc_ms: f64,
+    best_v_ms: f64,
+    v_min_ms: f64,
+    v_max_ms: f64,
+}
+
+fn climb_rate_search(
+    mass_kg: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    static_thrust_factor: f64,
+) -> ClimbRateSearch {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     // RPM de subida: máximo contínuo do motor (uso prolongado, não redline).
     let engine_rpm_climb = engine.rpm_max_continuous;
 
-    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max_clean)).sqrt();
 
-    // Varre de 1.3·Vs até 1.8·Vs (faixa de Vy típica)
-    let v_min = 1.30 * v_stall;
-    let v_max = 1.80 * v_stall;
-    let steps = 50;
+    // Janela de busca do argmax de RC(V) — ERRATUM ciclo 11 §2: `[1,05·Vs,
+    // 2,00·Vs]` (era `[1,30·Vs, 1,80·Vs]`, calibrada para o Vs FLAPADO — ver
+    // docstring de `climb_rate_ms` para o histórico completo). Larga o
+    // bastante para conter o argmax real com a referência de estol LIMPA.
+    let v_min = 1.05 * v_stall;
+    let v_max = 2.00 * v_stall;
+    let steps = 100;
     let dv = (v_max - v_min) / steps as f64;
 
     let mut best_rc = f64::NEG_INFINITY;
@@ -183,9 +237,8 @@ pub fn climb_rate_ms(
 
     for i in 0..=steps {
         let v = v_min + i as f64 * dv;
-        // Auditoria (ciclo 8, task 1): Vy é referência EN-ROUTE (teto de
-        // serviço), configuração limpa — cd0_extra=0.0, NÃO tocar a
-        // referência de estol (wing.cl_max) acima, ver docstring da função.
+        // Vy é referência EN-ROUTE (teto de serviço), configuração limpa —
+        // cd0_extra=0.0.
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
@@ -196,7 +249,28 @@ pub fn climb_rate_ms(
             best_v  = v;
         }
     }
-    (best_rc.max(0.0), best_v * 3.6) // (RC em m/s, Vy em km/h)
+    ClimbRateSearch { best_rc_ms: best_rc, best_v_ms: best_v, v_min_ms: v_min, v_max_ms: v_max }
+}
+
+/// Expõe a janela de busca de Vy e o argmax, todos em km/h, só para a guarda
+/// de teste "argmax estritamente interior" (ERRATUM ciclo 11 §2, ver
+/// docstring de `climb_rate_ms`). Não é consumida pelo pipeline de
+/// produção — devolve os mesmos números que `climb_rate_ms` mais os limites
+/// da janela que ele descarta.
+///
+/// Retorna `(best_v_kmh, v_min_kmh, v_max_kmh)`.
+pub fn climb_rate_search_window_kmh(
+    mass_kg: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    static_thrust_factor: f64,
+) -> (f64, f64, f64) {
+    let r = climb_rate_search(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
+                               static_thrust_factor);
+    (r.best_v_ms * 3.6, r.v_min_ms * 3.6, r.v_max_ms * 3.6)
 }
 
 /// Vx — velocidade de MELHOR ÂNGULO de subida (Task 4.7): maximiza o
@@ -204,9 +278,7 @@ pub fn climb_rate_ms(
 /// absoluto (isso é Vy, ver `climb_rate_ms`). Fisicamente Vx < Vy sempre (a
 /// curva RC/V tem pico mais próximo do stall que a curva RC).
 ///
-/// Varredura de 1.05·Vs a 1.8·Vs — faixa inferior mais baixa que
-/// `climb_rate_ms` (1.3·Vs) para não truncar o pico de gradiente, que tende
-/// a ocorrer mais perto do stall.
+/// Varredura de 1.2·Vs a 1.8·Vs (ciclo 11, task 1 — ver histórico abaixo).
 ///
 /// Retorna `(gradiente_max, Vx_kmh)` — gradiente como FRAÇÃO adimensional
 /// (RC/V, não %); `PerformanceAgent::run` converte para `climb_gradient_pct`.
@@ -229,28 +301,29 @@ pub fn climb_rate_ms(
 /// referência), da tabela
 /// old→new (15,129850%→13,896713%, −1,233137 p.p.) em
 /// `tests/generic_engine.rs`, ~0,888 p.p. (≈72%) vêm do DESLOCAMENTO da
-/// referência de estol (V_s_to > V_s0, muda o ponto de avaliação — ver nota
-/// de viés remanescente abaixo) e só ~0,345 p.p. (≈28%) do arrasto de flap
-/// em si — ver pin `climb_gradient_pct` para a decomposição completa.
+/// referência de estol (V_s_to > V_s0, muda o ponto de avaliação) e só
+/// ~0,345 p.p. (≈28%) do arrasto de flap em si — ver pin
+/// `climb_gradient_pct` (ciclo 8) para a decomposição completa.
 ///
-/// AINDA NÃO CORRIGIDO (achado da revisão desta task — pré-existente, não
-/// introduzido aqui): CL_max de referência e CD0 agora são consistentes
-/// entre si (ambos refletem o flap PARCIAL de decolagem), mas a VELOCIDADE
-/// de avaliação continua sendo um viés otimista separado. A varredura cobre
-/// `[1,05·V_s, 1,80·V_s]`; para a célula/motor real, RC/V é monotonicamente
-/// DECRESCENTE em toda essa faixa (verificado — ver task-1-report.md), então
-/// esta função devolve, na prática, o LIMITE INFERIOR da varredura
-/// (`1,05·V_s`), não um máximo interior genuíno — "melhor ângulo de subida"
-/// é o nome da busca, não uma garantia de que o pico esteja dentro do
-/// intervalo modelado. A CS 23.65 avalia o gradiente a uma velocidade de
-/// referência tipicamente ≥1,2·V_s, mais alta que o piso de 1,05·V_s usado
-/// aqui: como RC/V CAI com V nesta faixa, avaliar mais cedo (1,05·V_s) é
-/// OTIMISTA. No baseline real, a 1,2·V_s_to o gradiente seria ≈12,45%, não
-/// os ≈13,90% retornados por esta função — ~1,45 p.p. de viés otimista
-/// REMANESCENTE, irmão do gap conhecido de `climb_rate_ms`/Vy (mesma família
-/// de limitação, função vizinha). Corrigir a velocidade de avaliação em si
-/// está FORA DE ESCOPO desta task — nomeado como item de ciclo futuro.
-pub fn best_climb_angle_ms(
+/// CORRIGIDO (ciclo 11, task 1 — fecha `docs/backlog.md` item 2): até este
+/// ciclo, a varredura cobria `[1,05·V_s, 1,80·V_s]`; para a célula/motor
+/// real, RC/V é monotonicamente DECRESCENTE em toda essa faixa (achado da
+/// revisão do ciclo 8), então a função devolvia, na prática, o LIMITE
+/// INFERIOR da varredura (`1,05·V_s`), não um máximo interior genuíno — o
+/// piso ficava ABAIXO da velocidade de avaliação típica da CS 23.65
+/// (≥1,2·V_s), um viés OTIMISTA (avaliar mais cedo, com RC/V decrescente,
+/// superestima o gradiente). O piso agora é `1,20·V_s_to`, delegado por
+/// `best_climb_angle_com_piso` (função privada abaixo, piso exposto como
+/// parâmetro só para permitir o teste de property
+/// `gradiente_com_piso_de_varredura_maior_nao_aumenta` sem duplicar a
+/// varredura). Valores MEDIDOS old→new no baseline real (piso
+/// 1,05→1,20·V_s_to, tabela completa em `tests/generic_engine.rs`):
+/// `climb_gradient_pct` 13,896713%→≈12,45% (queda esperada — RC/V decrescente
+/// ⟹ avaliar mais tarde reduz o gradiente, este É o objetivo da correção,
+/// não uma regressão); `vx_kmh` sobe proporcionalmente ao piso
+/// (121,519501×(1,20/1,05) ≈ 138,9 km/h). O gradiente segue acima do piso
+/// legal CS 23.65 (8,3%) — ver pin para a margem exata pós-correção.
+fn best_climb_angle_com_piso(
     mass_kg: f64,
     altitude_m: f64,
     isa_delta_c: f64,
@@ -258,6 +331,7 @@ pub fn best_climb_angle_ms(
     state: &AircraftState,
     engine: &EngineSpec,
     static_thrust_factor: f64,
+    piso: f64,
 ) -> (f64, f64) {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     let engine_rpm_climb = engine.rpm_max_continuous;
@@ -266,7 +340,7 @@ pub fn best_climb_angle_ms(
     // não mais `wing.cl_max` (pouso), ver docstring acima.
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
 
-    let v_min = 1.05 * v_stall;
+    let v_min = piso * v_stall;
     let v_max = 1.80 * v_stall;
     let steps = 80;
     let dv = (v_max - v_min) / steps as f64;
@@ -291,6 +365,22 @@ pub fn best_climb_angle_ms(
         }
     }
     (best_grad.max(0.0), best_v * 3.6) // (gradiente adimensional, Vx em km/h)
+}
+
+/// Gradiente CS 23.65 avaliado no piso legal da norma (≥1,2·Vs_to) — ver
+/// docstring de `best_climb_angle_com_piso` para o histórico completo
+/// (ciclo 11, task 1).
+pub fn best_climb_angle_ms(
+    mass_kg: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    static_thrust_factor: f64,
+) -> (f64, f64) {
+    best_climb_angle_com_piso(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
+                               static_thrust_factor, 1.20)
 }
 
 /// Teto de serviço: altitude onde RC = 0,5 m/s (padrão CS-23)
@@ -762,7 +852,8 @@ mod tests {
         // "menor que o teto artificial de 8.000 m do laço de busca"). Sem
         // mudança na Task 4.7: `static_thrust_factor` só afeta o ramo
         // estático (V<0,5 m/s) de `thrust_available_n`, jamais atingido pela
-        // varredura de `climb_rate_ms` (sempre V ≥ 1,3·Vs).
+        // varredura de `climb_rate_ms` (sempre V ≥ 1,05·Vs — ERRATUM ciclo 11
+        // §2, era 1,3·Vs).
         assert!(ceiling > 7_000.0 && ceiling < 7_900.0,
             "Teto {ceiling:.0} m fora do intervalo esperado (7.000–7.900 m)");
     }
@@ -832,6 +923,41 @@ mod tests {
         assert!(grad_alto < grad_baixo,
             "gradiente com cd0_flap_delta MAIOR (0.045, {grad_alto:.6}) deveria ser \
              ESTRITAMENTE menor que com delta menor (0.006, {grad_baixo:.6})");
+    }
+
+    // ─── Ciclo 11 (task 1): gradiente CS 23.65 avaliado a 1,2·Vs_to ─────────
+
+    /// Property (ESTRITA — `<`, não `<=`; Fix wave ciclo 11, 2026-08-10):
+    /// para esta célula/motor RC/V é monotonicamente DECRESCENTE em
+    /// `[1,05·V_s, 1,80·V_s]` (achado do ciclo 8/backlog item 2), então
+    /// subir o PISO da varredura de 1,05·Vs para 1,20·Vs sempre DIMINUI o
+    /// gradiente encontrado. Valores medidos: 0,146417 (piso 1,05·Vs) vs
+    /// 0,128641 (piso 1,20·Vs) — folga grande o bastante para que `<`
+    /// estrito não seja frágil, e com ele a property passa a detectar
+    /// sozinha um mutante que ignore o parâmetro `piso` (com `<=`, um
+    /// mutante que sempre devolvesse `grad_120 == grad_105` passaria).
+    /// Usa `best_climb_angle_com_piso`
+    /// (privada ao módulo, parâmetro de piso exposto só para teste) em vez
+    /// de duplicar a varredura — decisão do implementador (task-1-brief.md):
+    /// evita cópia da lógica de busca no teste.
+    #[test]
+    fn gradiente_com_piso_de_varredura_maior_nao_aumenta() {
+        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let stf = perf_cfg.static_thrust_factor;
+        let (grad_105, _vx_105) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
+                                                              &engine, stf, 1.05);
+        let (grad_120, _vx_120) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
+                                                              &engine, stf, 1.20);
+        println!("gradiente(piso=1,05·Vs)={grad_105:.6}  gradiente(piso=1,20·Vs)={grad_120:.6}");
+        // Fix wave ciclo 11 (2026-08-10): `<` estrito, não `<=` — valores
+        // medidos (0,128641 vs 0,146417) têm folga enorme, sem risco de
+        // flakiness, e a desigualdade estrita detecta sozinha um mutante que
+        // ignore o parâmetro `piso` (`<=` passaria mesmo com grad_120 ==
+        // grad_105).
+        assert!(grad_120 < grad_105,
+            "gradiente com piso de varredura MAIOR (1,20·Vs, {grad_120:.6}) deveria ser \
+             ESTRITAMENTE menor que com piso menor (1,05·Vs, {grad_105:.6}) — RC/V é decrescente \
+             na faixa modelada para esta célula");
     }
 
     #[test]
