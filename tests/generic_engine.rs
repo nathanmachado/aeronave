@@ -1231,12 +1231,43 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //                                       confirma: pouso não consome a
     //                                       polar de arrasto)
     // TOLERÂNCIAS INALTERADAS (1%).
+    //
+    // Campanha ciclo 11 (2026-08-10), CS 23.65 a 1,2·Vs: `best_climb_angle_ms`
+    // passa a avaliar o gradiente no PISO da varredura em `1,20·V_s_to` (não
+    // mais `1,05·V_s_to`) — a referência típica da norma, fechando
+    // `docs/backlog.md` item 2 (RC/V é monotonicamente decrescente na faixa
+    // modelada para esta célula, ver docstring de `best_climb_angle_com_piso`,
+    // então subir o piso da varredura só pode reduzir o gradiente
+    // encontrado — a queda é o OBJETIVO da correção, não uma regressão).
+    // Hand-check congelado ANTES do run (±0,2 p.p., ver assert dedicado
+    // abaixo) bateu no valor medido (12,451844%, desvio de 0,0018 p.p.) —
+    // sem surpresa. Só `vx_kmh`/`climb_gradient_pct` se movem — nenhum outro
+    // pin desta tabela consome `best_climb_angle_ms`/o piso de varredura.
+    // Valores MEDIDOS old→new:
+    //   vx_kmh:             121.519501 → 138.871477  (+14,28%, ≈121,5×
+    //                                       (1,20/1,05)=138,88 — o argmax
+    //                                       continua no piso da varredura,
+    //                                       RC/V segue decrescente também em
+    //                                       [1,20·Vs, 1,80·Vs] para esta
+    //                                       célula, ver propriedade
+    //                                       `gradiente_com_piso_de_varredura_
+    //                                       maior_nao_aumenta`)
+    //   climb_gradient_pct:  13.896713 → 12.451844  (-10,40%; ~1,44 p.p. do
+    //                                       viés otimista remanescente
+    //                                       nomeado no ciclo 8 fecham aqui —
+    //                                       piso CS 23.65 8,3% ainda
+    //                                       folgado, margem ~4,15 p.p., não
+    //                                       mais ~5,6 p.p.)
+    // vy_kmh/best_glide_kmh/glide_ratio/to_50ft_paved_m/to_50ft_grass_m/
+    // ldg_50ft_m: variação de ponto flutuante < 0,1% face aos pins
+    // anteriores, dentro da tolerância de 1% já vigente — não consomem
+    // `best_climb_angle_ms`/o piso de varredura, pins mantidos.
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             121.519501, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             138.871477, 0.01),
         ("vy_kmh",              perf.vy_kmh,             147.915721, 0.01),
         ("best_glide_kmh",      perf.best_glide_kmh,     173.266373, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  13.896713, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  12.451844, 0.01),
         ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.466819, 0.01),
         ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.575998, 0.01),
         ("ldg_50ft_m",          perf.ldg_50ft_m,         502.482013, 0.01),
@@ -1249,18 +1280,31 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     }
 
     // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
-    // real passa com folga confortável (~13.9% pós-ciclo-8/task-1, gradiente
-    // honesto — ver tabela old→new e decomposição acima; era ~15.1% no
-    // híbrido pré-task, mais de 5 p.p. acima do piso mesmo depois da
-    // correção). Essa folga em si segue OTIMISTA por um viés pré-existente,
-    // não introduzido por esta task: `best_climb_angle_ms` avalia no piso da
-    // varredura (1,05·V_s), abaixo da velocidade de avaliação típica da CS
-    // 23.65 (≥1,2·V_s); a 1,2·V_s_to o gradiente seria ≈12,45% — ainda acima
-    // do piso 8,3%, mas com margem menor (~4,15 p.p., não ~5,6 p.p.). Ver
-    // docstring de `best_climb_angle_ms` (nota de viés remanescente) e o
-    // report da task 1 do ciclo 8 (item nomeado para ciclo futuro).
+    // real passa com folga confortável.
+    // Ciclo 8 (task 1): ~13,9%, gradiente com CL_max/CD0 de decolagem
+    // consistentes (era ~15,1% no híbrido pré-task).
+    // Ciclo 11 (task 1, 2026-08-10, fecha `docs/backlog.md` item 2):
+    // `best_climb_angle_ms` passa a avaliar o gradiente no piso LEGAL da CS
+    // 23.65 (1,2·V_s_to), não mais no piso antigo da varredura (1,05·V_s_to)
+    // — o viés otimista remanescente nomeado no ciclo 8 fecha aqui. Gradiente
+    // real ~12,45% (ver tabela old→new acima) — segue acima do piso 8,3%,
+    // com margem menor (~4,15 p.p., não mais ~5,6 p.p.). Ver docstring de
+    // `best_climb_angle_com_piso` para o histórico completo.
     assert!(perf.climb_gradient_pct >= 8.3,
         "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
+
+    // Ciclo 11 (task 1, backlog item 2): hand-check CONGELADO ANTES do run —
+    // tolerância ±0,2 p.p. fixada antes de medir o pipeline real (docstring
+    // de `best_climb_angle_com_piso`/`docs/backlog.md` item 2 estimavam
+    // ≈12,4486% por extrapolação da tabela old→new do ciclo 8). Valor medido
+    // 12,451844%, desvio de 0,0018 p.p. do hand-check — sem surpresa,
+    // consistente com o pin acima.
+    let hand_check_esperado_pct = 12.45;
+    let hand_check_tol_pp = 0.2;
+    assert!((perf.climb_gradient_pct - hand_check_esperado_pct).abs() < hand_check_tol_pp,
+        "climb_gradient_pct = {:.6}% divergiu do hand-check congelado (ciclo 11, 1,2·Vs_to) de \
+         {hand_check_esperado_pct}% em mais de {hand_check_tol_pp} p.p.",
+        perf.climb_gradient_pct);
 
     // Tabela old→new (ver comentário acima) — `to_distance_*`/
     // `landing_distance_m` continuam "baseados em rolagem de solo"

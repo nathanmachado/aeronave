@@ -204,9 +204,7 @@ pub fn climb_rate_ms(
 /// absoluto (isso é Vy, ver `climb_rate_ms`). Fisicamente Vx < Vy sempre (a
 /// curva RC/V tem pico mais próximo do stall que a curva RC).
 ///
-/// Varredura de 1.05·Vs a 1.8·Vs — faixa inferior mais baixa que
-/// `climb_rate_ms` (1.3·Vs) para não truncar o pico de gradiente, que tende
-/// a ocorrer mais perto do stall.
+/// Varredura de 1.2·Vs a 1.8·Vs (ciclo 11, task 1 — ver histórico abaixo).
 ///
 /// Retorna `(gradiente_max, Vx_kmh)` — gradiente como FRAÇÃO adimensional
 /// (RC/V, não %); `PerformanceAgent::run` converte para `climb_gradient_pct`.
@@ -229,28 +227,29 @@ pub fn climb_rate_ms(
 /// referência), da tabela
 /// old→new (15,129850%→13,896713%, −1,233137 p.p.) em
 /// `tests/generic_engine.rs`, ~0,888 p.p. (≈72%) vêm do DESLOCAMENTO da
-/// referência de estol (V_s_to > V_s0, muda o ponto de avaliação — ver nota
-/// de viés remanescente abaixo) e só ~0,345 p.p. (≈28%) do arrasto de flap
-/// em si — ver pin `climb_gradient_pct` para a decomposição completa.
+/// referência de estol (V_s_to > V_s0, muda o ponto de avaliação) e só
+/// ~0,345 p.p. (≈28%) do arrasto de flap em si — ver pin
+/// `climb_gradient_pct` (ciclo 8) para a decomposição completa.
 ///
-/// AINDA NÃO CORRIGIDO (achado da revisão desta task — pré-existente, não
-/// introduzido aqui): CL_max de referência e CD0 agora são consistentes
-/// entre si (ambos refletem o flap PARCIAL de decolagem), mas a VELOCIDADE
-/// de avaliação continua sendo um viés otimista separado. A varredura cobre
-/// `[1,05·V_s, 1,80·V_s]`; para a célula/motor real, RC/V é monotonicamente
-/// DECRESCENTE em toda essa faixa (verificado — ver task-1-report.md), então
-/// esta função devolve, na prática, o LIMITE INFERIOR da varredura
-/// (`1,05·V_s`), não um máximo interior genuíno — "melhor ângulo de subida"
-/// é o nome da busca, não uma garantia de que o pico esteja dentro do
-/// intervalo modelado. A CS 23.65 avalia o gradiente a uma velocidade de
-/// referência tipicamente ≥1,2·V_s, mais alta que o piso de 1,05·V_s usado
-/// aqui: como RC/V CAI com V nesta faixa, avaliar mais cedo (1,05·V_s) é
-/// OTIMISTA. No baseline real, a 1,2·V_s_to o gradiente seria ≈12,45%, não
-/// os ≈13,90% retornados por esta função — ~1,45 p.p. de viés otimista
-/// REMANESCENTE, irmão do gap conhecido de `climb_rate_ms`/Vy (mesma família
-/// de limitação, função vizinha). Corrigir a velocidade de avaliação em si
-/// está FORA DE ESCOPO desta task — nomeado como item de ciclo futuro.
-pub fn best_climb_angle_ms(
+/// CORRIGIDO (ciclo 11, task 1 — fecha `docs/backlog.md` item 2): até este
+/// ciclo, a varredura cobria `[1,05·V_s, 1,80·V_s]`; para a célula/motor
+/// real, RC/V é monotonicamente DECRESCENTE em toda essa faixa (achado da
+/// revisão do ciclo 8), então a função devolvia, na prática, o LIMITE
+/// INFERIOR da varredura (`1,05·V_s`), não um máximo interior genuíno — o
+/// piso ficava ABAIXO da velocidade de avaliação típica da CS 23.65
+/// (≥1,2·V_s), um viés OTIMISTA (avaliar mais cedo, com RC/V decrescente,
+/// superestima o gradiente). O piso agora é `1,20·V_s_to`, delegado por
+/// `best_climb_angle_com_piso` (função privada abaixo, piso exposto como
+/// parâmetro só para permitir o teste de property
+/// `gradiente_com_piso_de_varredura_maior_nao_aumenta` sem duplicar a
+/// varredura). Valores MEDIDOS old→new no baseline real (piso
+/// 1,05→1,20·V_s_to, tabela completa em `tests/generic_engine.rs`):
+/// `climb_gradient_pct` 13,896713%→≈12,45% (queda esperada — RC/V decrescente
+/// ⟹ avaliar mais tarde reduz o gradiente, este É o objetivo da correção,
+/// não uma regressão); `vx_kmh` sobe proporcionalmente ao piso
+/// (121,519501×(1,20/1,05) ≈ 138,9 km/h). O gradiente segue acima do piso
+/// legal CS 23.65 (8,3%) — ver pin para a margem exata pós-correção.
+fn best_climb_angle_com_piso(
     mass_kg: f64,
     altitude_m: f64,
     isa_delta_c: f64,
@@ -258,6 +257,7 @@ pub fn best_climb_angle_ms(
     state: &AircraftState,
     engine: &EngineSpec,
     static_thrust_factor: f64,
+    piso: f64,
 ) -> (f64, f64) {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     let engine_rpm_climb = engine.rpm_max_continuous;
@@ -266,7 +266,7 @@ pub fn best_climb_angle_ms(
     // não mais `wing.cl_max` (pouso), ver docstring acima.
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
 
-    let v_min = 1.05 * v_stall;
+    let v_min = piso * v_stall;
     let v_max = 1.80 * v_stall;
     let steps = 80;
     let dv = (v_max - v_min) / steps as f64;
@@ -291,6 +291,22 @@ pub fn best_climb_angle_ms(
         }
     }
     (best_grad.max(0.0), best_v * 3.6) // (gradiente adimensional, Vx em km/h)
+}
+
+/// Gradiente CS 23.65 avaliado no piso legal da norma (≥1,2·Vs_to) — ver
+/// docstring de `best_climb_angle_com_piso` para o histórico completo
+/// (ciclo 11, task 1).
+pub fn best_climb_angle_ms(
+    mass_kg: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    static_thrust_factor: f64,
+) -> (f64, f64) {
+    best_climb_angle_com_piso(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
+                               static_thrust_factor, 1.20)
 }
 
 /// Teto de serviço: altitude onde RC = 0,5 m/s (padrão CS-23)
@@ -832,6 +848,32 @@ mod tests {
         assert!(grad_alto < grad_baixo,
             "gradiente com cd0_flap_delta MAIOR (0.045, {grad_alto:.6}) deveria ser \
              ESTRITAMENTE menor que com delta menor (0.006, {grad_baixo:.6})");
+    }
+
+    // ─── Ciclo 11 (task 1): gradiente CS 23.65 avaliado a 1,2·Vs_to ─────────
+
+    /// Property (não estrita — `<=`, não `<`): para esta célula/motor RC/V é
+    /// monotonicamente DECRESCENTE em `[1,05·V_s, 1,80·V_s]` (achado do
+    /// ciclo 8/backlog item 2), então subir o PISO da varredura nunca pode
+    /// AUMENTAR o gradiente encontrado — na pior hipótese (se o pico
+    /// deixasse de ser monotônico numa célula diferente) ficaria igual, só
+    /// não pode piorar na direção oposta. Usa `best_climb_angle_com_piso`
+    /// (privada ao módulo, parâmetro de piso exposto só para teste) em vez
+    /// de duplicar a varredura — decisão do implementador (task-1-brief.md):
+    /// evita cópia da lógica de busca no teste.
+    #[test]
+    fn gradiente_com_piso_de_varredura_maior_nao_aumenta() {
+        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let stf = perf_cfg.static_thrust_factor;
+        let (grad_105, _vx_105) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
+                                                              &engine, stf, 1.05);
+        let (grad_120, _vx_120) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
+                                                              &engine, stf, 1.20);
+        println!("gradiente(piso=1,05·Vs)={grad_105:.6}  gradiente(piso=1,20·Vs)={grad_120:.6}");
+        assert!(grad_120 <= grad_105,
+            "gradiente com piso de varredura MAIOR (1,20·Vs, {grad_120:.6}) não deveria ser maior \
+             que com piso menor (1,05·Vs, {grad_105:.6}) — RC/V é decrescente na faixa modelada \
+             para esta célula");
     }
 
     #[test]

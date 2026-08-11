@@ -755,13 +755,11 @@ fn main() {
          23.65; a rolagem de solo de decolagem (método energético de Raymer) e a aproximação de \
          pouso (ângulo fixo, não L/D) não consomem a polar, por construção — sem incremento de \
          arrasto ali; Vy/teto de serviço seguem em configuração limpa (híbrido pré-existente, \
-         fora de escopo); gradiente CS 23.65 (climb_gradient_pct) AINDA tem um viés otimista \
-         REMANESCENTE (achado da revisão, pré-existente, não introduzido pelo ciclo 8): a busca \
-         devolve o piso da varredura (1,05·Vs, não um máximo interior — RC/V é monotonicamente \
-         decrescente na faixa modelada para esta célula), abaixo da velocidade de avaliação \
-         típica da CS 23.65 (≥1,2·Vs) — no baseline real o gradiente a 1,2·Vs seria ≈12,45%, não \
-         os ≈13,90% retornados (~1,45 p.p. de viés otimista); ver docstring de \
-         agents::performance::best_climb_angle_ms".into());
+         fora de escopo, ver docs/backlog.md item 3); gradiente CS 23.65 (climb_gradient_pct) \
+         avaliado no piso LEGAL da norma desde o ciclo 11, task 1 (1,2·Vs_to, não mais o piso da \
+         varredura em 1,05·Vs_to — fecha o viés otimista remanescente nomeado no ciclo 8, \
+         docs/backlog.md item 2); ver docstring de \
+         agents::performance::best_climb_angle_com_piso".into());
     fidelity.insert("vn_diagram".into(),
         "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)".into());
     fidelity.insert("structure".into(),
