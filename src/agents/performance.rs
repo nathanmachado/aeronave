@@ -145,18 +145,17 @@ pub fn excess_power_kw(
 /// Razão de subida máxima (m/s) — varre velocidades para encontrar o pico
 /// RC = P_excess / W
 ///
-/// Nota de modelo (pré-existente, não introduzida por esta função — ciclo 8,
-/// task 1: PERMANECE híbrida, fora de escopo desta task): a referência de
-/// estol usa `wing.cl_max`, que é o CL_max COM FLAP (`cl_max_flaps` — ver
-/// `WingSpec::cl_max`/`aerodynamics.rs`), não o CL_max limpo, enquanto
-/// `excess_power_kw` recebe `cd0_extra = 0.0` (configuração limpa) — Vy é
-/// usada como referência de razão de subida EN-ROUTE (teto de serviço,
-/// `service_ceiling_m`), não como check de decolagem, então não faz sentido
-/// somar arrasto de flap aqui. O híbrido "CL de estol flapado + arrasto
-/// limpo" que resulta é uma inconsistência conhecida, preexistente ao ciclo
-/// 8 — o gradiente CS 23.65 (que É um check de decolagem) foi corrigido
-/// separadamente em `best_climb_angle_ms` abaixo (ciclo futuro: reavaliar se
-/// Vy/`climb_rate_ms` deveria ter sua própria referência limpa consistente).
+/// Nota de modelo (ciclo 8, task 1 → ciclo 11, task 2): CORRIGIDA (ciclo 11,
+/// task 2 — fecha backlog item 3). O histórico preexistente desde ciclo 8 era
+/// uma inconsistência — a referência de estol usava `wing.cl_max` (CL_max COM
+/// FLAP de pouso, `cl_max_flaps` — ver `WingSpec::cl_max`), não o CL_max
+/// limpo, enquanto `excess_power_kw` recebe `cd0_extra = 0.0` (configuração
+/// limpa). Vy é referência de razão de subida EN-ROUTE (teto de serviço,
+/// `service_ceiling_m`), não check de decolagem — não faz sentido misturar CL
+/// de estol flapado com arrasto limpo. CORRIGIDO (ciclo 11, task 2): a
+/// referência de estol passa a ser `wing.cl_max_clean` (1,45, piso limpo);
+/// o híbrido é resolvido — referência de estol e arrasto agora refletem a MESMA
+/// configuração EN-ROUTE (limpa). Razão de piso esperada: √(2,1/1,45)≈1,20344.
 pub fn climb_rate_ms(
     mass_kg: f64,
     altitude_m: f64,
@@ -170,7 +169,7 @@ pub fn climb_rate_ms(
     // RPM de subida: máximo contínuo do motor (uso prolongado, não redline).
     let engine_rpm_climb = engine.rpm_max_continuous;
 
-    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max_clean)).sqrt();
 
     // Varre de 1.3·Vs até 1.8·Vs (faixa de Vy típica)
     let v_min = 1.30 * v_stall;
@@ -183,9 +182,10 @@ pub fn climb_rate_ms(
 
     for i in 0..=steps {
         let v = v_min + i as f64 * dv;
-        // Auditoria (ciclo 8, task 1): Vy é referência EN-ROUTE (teto de
-        // serviço), configuração limpa — cd0_extra=0.0, NÃO tocar a
-        // referência de estol (wing.cl_max) acima, ver docstring da função.
+        // Auditoria (ciclo 8, task 1 → ciclo 11, task 2): Vy é referência
+        // EN-ROUTE (teto de serviço), configuração limpa — cd0_extra=0.0.
+        // Ciclo 11, task 2: referência de estol corrigida para `cl_max_clean`
+        // acima (resolveu o híbrido "CL flapado + CD0 limpo" do ciclo 8).
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,

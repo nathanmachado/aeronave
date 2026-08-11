@@ -281,7 +281,12 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // arrasto ⟹ mais horas: 7,2391022047 → **7,2395373559 h** (old→new,
     // +0,006%; tolerância INALTERADA, dentro de 1e-3 mesmo sem re-pinar,
     // re-pinado por honestidade).
-    let endurance_pin_h = 7.2395373559;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): referência de estol
+    // de Vy muda de cl_max (flapado, 2,1) para cl_max_clean (1,45), Vy sobe
+    // ~9,4 km/h, performance em subida melhora, menos arrasto/consumo,
+    // autonomia sobe: 7.2395373559 → **7.240119 h** (old→new, +0,008%;
+    // tolerância INALTERADA).
+    let endurance_pin_h = 7.240119;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -308,7 +313,10 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // acima (MTOW convergido cai um fio) ⟹ um fio mais alcance com o
     // mesmo tanque cheio: 2.026,948617 → **2.027,070460 km** (old→new,
     // +0,006%; tolerância INALTERADA).
-    let range_pin_km = 2_027.070460;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): mesma lógica da
+    // autonomia acima (performance melhora, menos consumo) — 2.027,070460
+    // → **2.027,233242 km** (old→new, +0,008%; tolerância INALTERADA).
+    let range_pin_km = 2_027.233242;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -470,13 +478,17 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // arrasto de trim ⟹ menos combustível de missão (236,244→236,047 L)
     // ⟹ margem SOBE: 23,755819 L (~10,0556%) → **23,952516 L
     // (~10,1473%)** (old→new, +0,83%; tolerâncias INALTERADAS).
-    let margem_pin_l = 23.952516;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): performance em
+    // subida melhora, consumo de cruzeiro cai, menos combustível de missão
+    // exigido ⟹ margem SOBE: 23.952516 L (~10,1473%) → **24,205802 L
+    // (~10,2656%)** (old→new, +1,05%; tolerâncias INALTERADAS).
+    let margem_pin_l = 24.205802;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
         "margem de combustível {margem_l:.4} L divergiu do valor medido pós-E10 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 10.1473).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-10 task 2 \
-         ~10,1473%");
+    assert!((margem_pct - 10.2656).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-11 task 2 \
+         ~10,2656%");
     assert!(margem_l > 0.0,
         "achado central pós-E7: com endurance_min_h reduzido, a missão cabe no tanque de 260 L \
          com folga confortável (margem {margem_l:.2} L)");
@@ -838,7 +850,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // (ver `mtow_convergido_kg` acima) ⟹ menos arrasto induzido ⟹ mais
     // horas com o mesmo tanque (informativo): 7,2391022047 →
     // **7,2395373559 h** (old→new, +0,006%). Tolerância INALTERADA (1e-5).
-    let endurance_h = 7.2395373559;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): referência de estol
+    // de Vy muda de cl_max (flapado) para cl_max_clean (limpo), performance em
+    // subida melhora, menos consumo/hora: 7.2395373559 → **7.240119 h**
+    // (old→new, +0,008%). Tolerância INALTERADA (1e-5).
+    let endurance_h = 7.240119;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -859,7 +875,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // ⟹ um fio menos potência requerida em cruzeiro: 32,324450378 →
     // **32,322507433 L/h** (old→new, −0,006%). Tolerância INALTERADA
     // (5e-5).
-    let fc_lph = 32.322507433;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): performance em
+    // subida melhora, MTOW convergido cai um fio, menos potência requerida
+    // em cruzeiro ⟹ 32,322507433 → **32,319912 L/h** (old→new, −0,008%).
+    // Tolerância INALTERADA (5e-5).
+    let fc_lph = 32.319912;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -978,7 +998,11 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // nariz-abaixo reduz o upload de trim ⟹ menos ΔCD_trim ⟹ polar mais
     // limpa: 300.216508 → **300.220427 km/h** (old→new, +0,004 km/h,
     // +0,0013%; tolerância INALTERADA, 1e-3).
-    let v_max_pos_task_5_2_kmh = 300.220427;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): performance em
+    // subida melhora, MTOW convergido cai um fio, menos arrasto induzido ⟹
+    // V_max sobe: 300.220427 → **300.225472 km/h** (old→new, +0,005 km/h,
+    // +0,0017%; tolerância INALTERADA, 1e-3).
+    let v_max_pos_task_5_2_kmh = 300.225472;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-E10 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
@@ -1263,14 +1287,15 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // anteriores, dentro da tolerância de 1% já vigente — não consomem
     // `best_climb_angle_ms`/o piso de varredura, pins mantidos.
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             138.871477, 0.01),
-        ("vy_kmh",              perf.vy_kmh,             147.915721, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     173.266373, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             138.862358, 0.01),
+        // Campanha ciclo 11 (2026-08-10), Vy com estol limpo: 161.805734 (era 147.915721)
+        ("vy_kmh",              perf.vy_kmh,             161.805734, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     173.245074, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  12.451844, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.466819, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.575998, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         502.482013, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,  12.455553, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.264215, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.347286, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         502.431095, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1578,9 +1603,13 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // tanque de 240 L mutado) cai um fio ⟹ um fio menos combustível
     // exigido — 235,767522 → **235,754810 L** (old→new, −0,005%).
     // Tolerância INALTERADA (1e-2).
-    let necessario_pin_l = 235.754810;
+    // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): performance em
+    // subida melhora, consumo de cruzeiro cai, menos combustível de missão
+    // exigido — 235,754810 → **235,515548 L** (old→new, −0,101%).
+    // Tolerância INALTERADA (1e-2).
+    let necessario_pin_l = 235.515548;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E10 {necessario_pin_l:.6} L");
+        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-11 task 2 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
         "4ª reviravolta: a missão volta a exigir MENOS combustível do que os 240 L da mutação \
          sintética têm — {necessario_l:.2} L < {:.2} L", cfg.fuel_system.capacity_l);
@@ -1672,9 +1701,14 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // converge, então os intermediários que alimentam o
             // `CombustivelInsuficiente` não são um ponto fixo. Continua
             // MUITO acima dos 260 L (~35,3%): achado qualitativo inalterado.
-            let necessario_pin_l = 351.876358;
+            // Ciclo 11 (2026-08-10, task 2 — Vy com estol limpo): performance
+            // em subida melhora, consumo de cruzeiro cai, menos combustível
+            // exigido — 351.876358 → **350.322695 L** (old→new, −0,44%).
+            // Achado qualitativo inalterado: ainda ~34,7% acima dos 260 L,
+            // motor muito fraco demais para esta célula/missão.
+            let necessario_pin_l = 350.322695;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-E7 \
+                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-11 task 2 \
                  {necessario_pin_l:.6} L");
         }
         other => panic!("esperava CombustivelInsuficiente para o Rotax, obtido: {other:?}"),
