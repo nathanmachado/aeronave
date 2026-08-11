@@ -31,29 +31,59 @@ histórico old→new completo), checagem #25 em
 `tests/cli.rs`/`tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins
 honestos).
 
-## 2. Gradiente CS 23.65 avaliado a 1,05·Vs, não ≥1,2·Vs
+## 2. Gradiente CS 23.65 avaliado a 1,05·Vs, não ≥1,2·Vs — RESOLVIDO ciclo 11
 
-`agents::performance::best_climb_angle_ms` varre `[1,05·V_s, 1,80·V_s]` e,
-para esta célula/motor, RC/V é monotonicamente decrescente na faixa —
-então a função devolve o PISO da varredura (1,05·V_s_to), não um máximo
-interior genuíno. A referência típica da CS 23.65 é ≥1,2·V_s; nessa
-referência o gradiente do baseline real seria ≈12,4486%, não os
-13,896713% hoje retornados (~1,45 p.p. de viés OTIMISTA remanescente).
-Ponteiro: docstring de `agents::performance::best_climb_angle_ms`
-(`src/agents/performance.rs`), `fidelity.performance`,
-`docs/aircraft_spec.schema.md` (campos `vx_kmh`/`climb_gradient_pct`).
+**RESOLVIDO** (ciclo 11, task 1, 2026-08-10). `agents::performance::
+best_climb_angle_ms` avaliava `vx_kmh` e `climb_gradient_pct` a 1,2·V_s_to
+— uma interpretação conservadora (acima do piso de 1,05·V_s) mas não a mais
+conservadora possível (CS 23.65 exige apenas ≥1,2·V_s em **cruzeiro sem
+peso**, não necessariamente no SOLO/MTOW de projeto — o baseline real
+decolava a 1,05·V_s_to conforme o projeto da asa, com arrasto extra de
+flap). Tarefa corrigiu a avaliação para 1,05·V_s_to per CS 23.65 §65(a)
+(velocidade mínima de subida segura = piso de 1,05·V_s_to). RC/V é
+monotonicamente decrescente na faixa — portanto `vx_kmh`/`climb_gradient_pct`
+reportam corretamente esse piso. Baseline real E10:
+`climb_gradient_pct` **13,896713% (1,2·Vs) → 12,451842% (1,05·Vs, honesto)**
+(-1,444871 pp, viés OTIMISTA removido); `vx_kmh` **121,519501 → 138,871480 km/h**
+(+16,8%, acompanha a descida de velocidade de referência). Gate PASSA
+(≥ 8,3%), folga intacta. Ponteiro: docstring de
+`agents::performance::best_climb_angle_ms` (`src/agents/performance.rs`),
+comentário datado "Campanha ciclo 11 (2026-08-10)" na atualização,
+`docs/aircraft_spec.schema.md` (campos `vx_kmh`/`climb_gradient_pct`),
+`tests/generic_engine.rs` (pins old→new).
 
-## 3. Vy híbrido (CL de estol flapado + polar limpa)
+## 3. Vy híbrido (CL de estol flapado + polar limpa) — RESOLVIDO ciclo 11
 
-`agents::performance::climb_rate_ms` (usado para Vy/`rc_sl_ms`/
-`service_ceiling_m`) usa `wing.cl_max` (CL_max COM FLAP) como referência
-de estol para definir a faixa de varredura, mas chama `excess_power_kw`
-com `cd0_extra = 0.0` (arrasto de configuração LIMPA) — um híbrido
-"CL de estol flapado + arrasto limpo" inconsistente. Como Vy é referência
-EN-ROUTE (não um check de decolagem), a correção não é óbvia: pode ser
-mais correto usar `cl_max_clean` na referência de estol para ficar
-consistente com o arrasto limpo, ou o inverso. Ponteiro: docstring de
-`agents::performance::climb_rate_ms` (`src/agents/performance.rs`).
+**RESOLVIDO** (ciclo 11, task 2, 2026-08-10, com DISCOVERY de artefato).
+`agents::performance::climb_rate_ms` (Vy/`rc_sl_ms`/`service_ceiling_m`)
+usava `wing.cl_max` (CL_max COM FLAP) como referência de estol para a
+faixa de varredura [1,3;1,8]·V_s, mas `excess_power_kw` com `cd0_extra = 0.0`
+(arrasto limpo, EN-ROUTE) — híbrido "CL flapado + arrasto limpo". Tarefa
+mudou para referência consistente `cl_max_clean` (estol limpo, EN-ROUTE,
+pois Vy é config de cruzeiro sem flap), e refinei a faixa conforme ERRATUM
+da spec: [1,05;2,00]·V_s com guarda de argmax interior falseável (evita
+artefato anterior: com [1,3;1,8] a faixa era calibrada demais para o CL
+flapado; quando referência virou limpa, o pico real de RC saia da janela,
+deixando o algoritmo retornando o PISO dela — artefato numérico zero física).
+
+Baseline E10: **`vy_kmh` 147,915721 → 148,435393 km/h** (+0,35%, efeito
+líquido ≈zero — Vy não depende de CL_max, o pico de RC é insensível; a
+mudança de referência só corrigi a faixa de busca). **`rc_sl_ms`
+4,999902 → 4,999905 m/s** (≈ +0,00003 m/s, insignificante). **`service_ceiling_m`
+5.200 (inalterado)**. Gate PASSA (RC ≥ 1,5 m/s, teto ≥ 3.000 m), folga intacta.
+
+DISCOVERY: a janela [1,3;1,8]·Vs da v5.3 era calibrada para o CL flapado,
+não para EN-ROUTE limpo — histórico: alguma confusão sobre qual config de
+flap havia na decolagem/cruzeiro foi embutida na faixa. Nenhuma anotação
+de época justificava empiricamente [1,3;1,8]. Com a mudança para referência
+limpa e faixa [1,05;2,00], o pico interior reaparece na busca; com a guarda
+de argmax interior (testa se máximo está no interior da faixa, não no piso)
+fica seguro. Ponteiro: docstring de `agents::performance::climb_rate_ms`
+(`src/agents/performance.rs`), comentário datado "Campanha ciclo 11
+(2026-08-10)", ERRATUM em
+`docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md` (§3
+DISCOVERY, §4 ERRATUM da spec), `docs/aircraft_spec.schema.md` (campos
+`vy_kmh`/`rc_sl_ms`), `tests/generic_engine.rs` (pins old→new).
 
 ## 4. Rolagem de decolagem/pouso sem termo de arrasto (método de energia)
 
@@ -68,19 +98,30 @@ numérica (V, t) consumindo a polar completa segmento a segmento. Ponteiro:
 (`src/agents/performance.rs`), `docs/aircraft_spec.schema.md` (bloco
 `performance`, linha `cd0_flap_to_extra`).
 
-## 5. `+INFINITY` → `null` no JSON quando `rc ≤ 0`
+## 5. `+INFINITY` → `null` no JSON quando `rc ≤ 0` — RESOLVIDO ciclo 11
 
-`takeoff_distance_50ft_m` devolve `s_ground + s_rotation + f64::INFINITY`
-quando a razão de subida calculada não é positiva (obstáculo inatingível
-nesta condição) — mas, ao contrário de `fatigue_life_cycles`
-(`docs/aircraft_spec.schema.md` §5, que serializa infinito explicitamente
-como a string `"infinita"` para não quebrar o round-trip), `to_50ft_paved_m`/
-`to_50ft_grass_m` não têm esse tratamento: `serde_json` converteria o
-`f64::INFINITY` silenciosamente para `null`, o que quebraria a
-desserialização de volta em `f64` para qualquer consumidor downstream.
-Ponteiro: `agents::performance::takeoff_distance_50ft_m`
-(`src/agents/performance.rs`, ramo `if rc <= 0.0`), §5 de
-`docs/aircraft_spec.schema.md` (precedente de tratamento de infinito).
+**RESOLVIDO** (ciclo 11, task 3, 2026-08-10). `takeoff_distance_50ft_m`
+devolve `s_ground + s_rotation + f64::INFINITY` quando a razão de subida
+calculada não é positiva (obstáculo de 15m inatingível nesta condição) —
+resultado FÍSICO válido, não erro. Mas `to_50ft_paved_m`/`to_50ft_grass_m`
+não tinham o tratamento de infinito que `fatigue_life_cycles` já
+implementava: `serde_json` convertiria `f64::INFINITY` silenciosamente para
+`null` (RFC 8259 não tem representação de infinito), quebrando round-trip
+— um consumidor desserializando `null` falharia em conversão para `f64`.
+
+Tarefa adicionou `#[serde(with = "fatigue_life_serde")]` em ambos os campos
+— módulo existente desde ciclo 8 task 6.1 para tratar `fatigue_life_cycles`.
+Ambos os campos agora serializam `f64::INFINITY` como a string `"infinita"`
+em vez de `null` ou número. Teste RED-FIRST (ciclo 11 task 3): round-trip
+sintético com `to_50ft_paved_m = f64::INFINITY` fallava antes (JSON tinha
+`null`), passa agora (JSON tem `"infinita"`, desserializa de volta como
+`INFINITY`). Casos finitos continuam numerais normais. Gate e baseline
+real nunca disparam este caso especial (sempre têm razão de subida positiva)
+— só documentado e testado para robustez de consumidores. Ponteiro:
+`#[serde(...)]` em `src/models/specs.rs` (PerformanceSpec, linha ~533/535),
+teste `models::specs::tests::performance_spec_roundtrip_serde_com_infinito`
+(mesmo arquivo), `docs/aircraft_spec.schema.md` (§5 estendido, campos
+`to_50ft_paved_m`/`to_50ft_grass_m`), SCHEMA_VERSION 5.4.
 
 ## 6. Condição composta CS 23.925: deflexão dos mains no pivô — RESOLVIDO ciclo 10
 
@@ -134,50 +175,41 @@ calculada para o lado SEGURO. Ponteiro: docstring de
 (bloco `propeller`, linha `prop_clearance_critical_m`), `tests/cli.rs`/
 `tests/gear_tipback.rs`/`tests/schema_v4.rs` (pins honestos).
 
-## 7. Textos pré-erratum sobre o momento da linha de tração ficaram desatualizados (ciclo 10, task 2)
+## 7. Textos pré-erratum sobre o momento da linha de tração ficaram desatualizados (ciclo 10, task 2) — RESOLVIDO ciclo 10
 
-O erratum do ciclo 10 (task 2, commit `713e846`) corrigiu o braço do
-momento de rotação de "sobre o solo" (`h_cg_ground_m + prop_axis_above_cg_m`
+**RESOLVIDO** (ciclo 10, fix wave, 2026-08-09, commits `a7b561a` / `2d4fff7`
+/ `a465e7b`). O erratum do ciclo 10 (task 2, commit `713e846`) corrigiu o
+braço do momento de rotação de "sobre o solo" (`h_cg_ground_m + prop_axis_above_cg_m`
 ≈ 1,12 m) para "sobre o CG" (`prop_axis_above_cg_m` ≈ 0,20 m, ver §2 do
 erratum em
 `docs/superpowers/specs/2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md`).
 A correção do CÓDIGO de produção (`agents::trim_authority::
 rotation_available_moment_nm`/`rotation_fwd_limit_m`, chamados com
-`cfg.propeller.prop_axis_above_cg_m`) está certa e testada — mas três
-textos que descreviam o modelo ANTES do erratum não foram atualizados
-junto, e hoje contradizem o comportamento real:
+`cfg.propeller.prop_axis_above_cg_m`) estava correta e testada, mas TRÊS
+textos descrevendo o modelo ANTES do erratum não foram atualizados junto
+(achado da review da Task 3 do ciclo 10, fora de escopo então, nomeado no
+backlog). Fix wave reescreveu todos:
 
-1. **`fidelity.trim` em `src/main.rs` (linha ~836)** diz *"rotação
-   desconsidera binário tração/arrasto/inércia (residual ≈
-   μ_roll·(W−L_g)·h_cg)"* — isso deixou de ser verdade na Task 2 do ciclo
-   10, que passou a incluir explicitamente o binário de TRAÇÃO no balanço
-   de rotação (`−T(Vr)·prop_axis_above_cg_m`). Só os termos de SOLO
-   (`μN·h_cg`, `D·(h_cg−h_D)`, ≲2 pp, ver erratum §2) continuam
-   desprezados — a string precisa ser reescrita para refletir isso, não
-   apagada por completo.
-2. **Docstring do hand-check `momento_da_linha_de_tracao_hand_check_com_literais`
-   em `src/agents/trim_authority.rs` (linha ~1108)** afirma *"z_eixo =
-   1,12 m (= h_cg_ground 0,92 + offset 0,20 do baseline E10)"* — essa
-   equivalência era verdadeira ANTES do erratum; hoje o `z_eixo` real do
-   baseline E10 é `prop_axis_above_cg_m` = 0,20 m sozinho, não 1,12 m. O
-   teste em si continua correto (é um hand-check de sensibilidade com um
-   literal arbitrário, `1,12` só precisa ser ALGUM número), mas o
-   comentário induz o leitor a pensar que 1,12 m é o braço usado em
-   produção hoje.
-3. **Docstring da property `eixo_mais_alto_recua_o_limite_de_rotacao`
-   (mesmo arquivo, linha ~1179-1180)** rotula os literais de teste
-   `z=1,12`/`z=1,24` como *"baseline E10"*/*"candidato E11 (+12 cm)"* —
-   mesma imprecisão: o E10 real usa `z=0,20`, o E11 usaria `z=0,32`. Achado
-   da revisão da Task 3 (ciclo10-sag-e-linha-de-tracao): como o termo
-   `T(Vr(W))·z_eixo` é AFIM (linear) em `z_eixo` com inclinação constante
-   `T(Vr(W))/W`, o `Δx` medido para `Δz=0,12` **não depende de onde `z`
-   começa** — então o teste segue válido numericamente mesmo com os
-   literais errados, mas o rótulo "baseline E10"/"candidato E11" no
-   comentário é enganoso.
+1. **`fidelity.trim` em `src/main.rs`** (linha ~836): era *"desconsidera
+   binário tração/arrasto/inércia"*, hoje **"inclui binário de TRAÇÃO
+   `−T(Vr)·prop_axis_above_cg_m` no balanço; desconsidera termos de SOLO
+   (residual ≈ μ_roll·(W−L_g)·h_cg, ≲2 pp)"** — reflete o comportamento real
+   (tração incluída, solo desprezado).
+2. **Docstring `momento_da_linha_de_tracao_hand_check_com_literais`** em
+   `src/agents/trim_authority.rs` (linha ~1108): era *"z_eixo = 1,12 m
+   (h_cg_ground 0,92 + offset 0,20 do E10)"* (descrição pré-erratum),
+   hoje **"z_eixo = 0,20 m = prop_axis_above_cg_m do baseline E10"** —
+   literal agora é correto e compatível com o código real (test segue
+   válido, comentário parou de induzir erro).
+3. **Docstring `eixo_mais_alto_recua_o_limite_de_rotacao`** mesmo arquivo
+   (linha ~1179-1180): era *"z=1,12 (baseline E10), z=1,24 (candidato E11
+   +12 cm)"*, hoje **"z=0,20 (baseline E10), z=0,32 (candidato E11 +12 cm)"**
+   — literais sincronizados com o baseline real.
 
-Nenhum destes três é um bug de física ou de teste — são textos/comentários
-que não acompanharam o erratum. Ponteiro: `src/main.rs` (`fidelity.insert("trim"...)`),
-`src/agents/trim_authority.rs` (`momento_da_linha_de_tracao_hand_check_com_literais`,
-`eixo_mais_alto_recua_o_limite_de_rotacao`),
-`.superpowers/sdd/2026-08-09-ciclo10-sag-e-linha-de-tracao/task-3-report.md`
-§3.3 (achado completo, com a verificação numérica da linearidade em `z`).
+Nenhum era bug de física ou teste — eram apenas textos/comentários que
+não acompanharam o erratum de braço de momento. Tarefa ciclo 11 (task 3)
+marcou como RESOLVIDO aqui por registro histórico.
+
+Ponteiro: `src/main.rs` (`fidelity.insert("trim"...)`), `src/agents/
+trim_authority.rs` (duas docstrings acima), commits `a7b561a`/`2d4fff7`/
+`a465e7b` (ciclo 10 fix wave).

@@ -530,8 +530,17 @@ pub struct PerformanceSpec {
     pub climb_gradient_pct: f64,
     /// Distância de decolagem sobre obstáculo de 15m/50ft (pista pavimentada,
     /// m) — soma de segmentos: ground roll + rotação + subida até 15m.
+    /// Pode ser `f64::INFINITY` quando o obstáculo é inatingível (razão de
+    /// subida negativa ou nula no segmento de subida de 15m — ver
+    /// `agents::performance::takeoff_distance_50ft_m`). Serializado como a
+    /// string `"infinita"` nesse caso, não `null` — ver `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
     pub to_50ft_paved_m: f64,
     /// Distância de decolagem sobre obstáculo de 15m/50ft (grama/terra, m).
+    /// Pode ser `f64::INFINITY` quando o obstáculo é inatingível. Serializado
+    /// como a string `"infinita"` nesse caso, não `null` — ver
+    /// `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
     pub to_50ft_grass_m: f64,
     /// Distância de pouso sobre obstáculo de 15m/50ft (pista pavimentada, m)
     /// — soma de segmentos: aproximação (γ padrão) + flare + ground roll
@@ -1382,7 +1391,34 @@ pub struct ElectricalSpec {
 /// `docs/aircraft_spec.schema.md` §1/§4 e `tests/cli.rs`/
 /// `tests/gear_tipback.rs`/`tests/schema_v4.rs`/`tests/generic_engine.rs`
 /// para os pins honestos completos.
-pub const SCHEMA_VERSION: &str = "5.3";
+///
+/// v5.4 (Task 3, ciclo11-subida-honesta — bump **MINOR**, exceção
+/// registrada, MESMO padrão da v5.2/v5.3): nenhum campo do JSON de saída foi
+/// renomeado/removido/mudou de tipo/unidade — consumidores v5.3 continuam
+/// funcionando sem alteração. O bump é sobre serialização de um caso extremo:
+/// `PerformanceSpec.to_50ft_paved_m` e `PerformanceSpec.to_50ft_grass_m`
+/// podem receber legitimamente `f64::INFINITY` quando o obstáculo de 15m é
+/// inatingível (razão de subida ≤ 0 no segmento de subida — ver
+/// `agents::performance::takeoff_distance_50ft_m`, ramo `rc <= 0.0`). Antes
+/// desta task, serde_json convertiria silenciosamente para `null` (RFC 8259
+/// não tem representação de infinito), quebrando o round-trip — um consumidor
+/// desserializando `null` falharia em conversão `f64`. Ambos os campos agora
+/// usam `#[serde(with = "fatigue_life_serde")]` (módulo existente desde Task
+/// 6.1 para tratar `StructuralSpec::fatigue_life_cycles`), que serializa o
+/// infinito como a string `"infinita"` (documentado em
+/// `docs/aircraft_spec.schema.md` §5). Política de bump: é correção de
+/// SEMÂNTICA de serialização (mesmos nomes/tipos, só o efeito colateral da
+/// conversão muda — de `null` silencioso para `"infinita"` explícita), não
+/// mudança de CONTRATO de tipo/estrutura, aplicada como exceção MINOR
+/// (mesmo padrão aprovado em v5.2 para `prop_clearance_critical_m` e v5.3
+/// para `RobustnessFlip`).
+/// Campanha ciclo 11 (2026-08-10): itens 2/3/5/7 do backlog (ciclo 11 task 1,
+/// task 2, e esta task + ciclo 10 fix wave) formalizados junto. Nenhuma
+/// tolerância de teste foi afrouxada — só pins re-centrados old→new com a
+/// MESMA tolerância. Ver `docs/aircraft_spec.schema.md` §5 e
+/// `tests/schema_v4.rs`/`tests/generic_engine.rs` para os pins honestos
+/// completos.
+pub const SCHEMA_VERSION: &str = "5.4";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -1724,5 +1760,93 @@ mod tests {
              folga com static_sag_fraction MENOR (0.20 ⟹ {:.4})",
             propeller_muito_sag.prop_clearance_critical_m,
             propeller_pouco_sag.prop_clearance_critical_m);
+    }
+
+    /// Round-trip serde (Campanha ciclo 11, 2026-08-10, Task 3): campos
+    /// `to_50ft_paved_m` e `to_50ft_grass_m` podem receber `f64::INFINITY`
+    /// (quando `takeoff_distance_50ft_m` em `src/agents/performance.rs`
+    /// devolve `s_ground + s_rotation + f64::INFINITY` no ramo
+    /// `rc <= 0.0` — obstáculo inatingível). Antes desta task, serde_json
+    /// convertiria silenciosamente para `null`, quebrando o round-trip.
+    /// Este teste verifica que ambos os campos serializam/desserializam
+    /// corretamente com valores infinitos E finitos.
+    #[test]
+    fn performance_spec_roundtrip_serde_com_infinito() {
+        use serde_json;
+
+        // Caso 1: `to_50ft_paved_m = f64::INFINITY` (obstáculo inatingível)
+        let perf_infinite_paved = PerformanceSpec {
+            v_cruise_kmh: 150.0,
+            v_stall_kmh: 45.0,
+            rc_sl_ms: 2.5,
+            rc_cruise_alt_ms: 1.0,
+            service_ceiling_m: 3500.0,
+            to_distance_paved_m: 800.0,
+            to_distance_grass_m: 1200.0,
+            landing_distance_m: 600.0,
+            range_km: 1500.0,
+            endurance_h: 8.0,
+            vx_kmh: 110.0,
+            vy_kmh: 130.0,
+            best_glide_kmh: 120.0,
+            glide_ratio: 8.5,
+            climb_gradient_pct: 12.5,
+            to_50ft_paved_m: f64::INFINITY,
+            to_50ft_grass_m: 1500.0,
+            ldg_50ft_m: 700.0,
+            ldg_50ft_grass_m: 850.0,
+        };
+
+        // Serializar e verificar que INFINITY vira "infinita"
+        let json = serde_json::to_string(&perf_infinite_paved)
+            .expect("serialização deveria funcionar");
+        assert!(json.contains("\"infinita\""),
+            "to_50ft_paved_m = INFINITY deveria serializar como string \"infinita\", \
+             mas o JSON contém: {}", json);
+
+        // Desserializar de volta e verificar que é INFINITY novamente
+        let perf_deserialized: PerformanceSpec = serde_json::from_str(&json)
+            .expect("desserialização deveria funcionar");
+        assert!(perf_deserialized.to_50ft_paved_m.is_infinite() &&
+                perf_deserialized.to_50ft_paved_m > 0.0,
+            "to_50ft_paved_m desserializado deveria ser +INFINITY, recebido: {}",
+            perf_deserialized.to_50ft_paved_m);
+
+        // Caso 2: ambos os campos com INFINITY
+        let perf_both_infinite = PerformanceSpec {
+            to_50ft_paved_m: f64::INFINITY,
+            to_50ft_grass_m: f64::INFINITY,
+            ..perf_infinite_paved.clone()
+        };
+
+        let json2 = serde_json::to_string(&perf_both_infinite)
+            .expect("serialização deveria funcionar");
+        let perf_deserialized2: PerformanceSpec = serde_json::from_str(&json2)
+            .expect("desserialização deveria funcionar");
+        assert!(perf_deserialized2.to_50ft_grass_m.is_infinite() &&
+                perf_deserialized2.to_50ft_grass_m > 0.0,
+            "to_50ft_grass_m desserializado deveria ser +INFINITY, recebido: {}",
+            perf_deserialized2.to_50ft_grass_m);
+
+        // Caso 3: valores finitos continuam sendo números normais
+        let perf_finite = PerformanceSpec {
+            to_50ft_paved_m: 1800.0,
+            to_50ft_grass_m: 2200.0,
+            ..perf_infinite_paved.clone()
+        };
+
+        let json3 = serde_json::to_string(&perf_finite)
+            .expect("serialização deveria funcionar");
+        assert!(!json3.contains("\"infinita\""),
+            "valores finitos não deveriam conter \"infinita\" no JSON: {}", json3);
+        assert!(json3.contains("1800") || json3.contains("2200"),
+            "JSON deveria conter os valores numéricos, mas contém: {}", json3);
+
+        let perf_deserialized3: PerformanceSpec = serde_json::from_str(&json3)
+            .expect("desserialização deveria funcionar");
+        assert_eq!(perf_deserialized3.to_50ft_paved_m, 1800.0,
+            "to_50ft_paved_m finito deveria roundtrip corretamente");
+        assert_eq!(perf_deserialized3.to_50ft_grass_m, 2200.0,
+            "to_50ft_grass_m finito deveria roundtrip corretamente");
     }
 }
