@@ -41,3 +41,32 @@
 
 - Item 4 (rolagem com arrasto — integração numérica) e termos de solo da rotação (μN·h_cg, D·(h_cg−h_D), `z_drag_above_cg_m`) — ciclo 12.
 - Disco de hélice inclinado no #25 (conservador ≈+3,4 mm, permanece nomeado no backlog item 6).
+
+## ERRATUM (2026-08-10, revisão da Task 2 — escalação ao principal)
+
+O §2 prescrevia trocar a referência de estol de `climb_rate_ms` (`wing.cl_max` →
+`wing.cl_max_clean`) tratando isso como a correção completa do híbrido. **Incompleto,
+e o resultado isolado é ERRADO.** O CL_max NÃO entra no cálculo de RC(V) — só define
+os limites da varredura `[1,3·Vs, 1,8·Vs]`, e essa heurística de 1,3–1,8 foi calibrada
+contra o estol FLAPADO. Com `cl_max_clean` (Vs 20,3% maior), a janela desloca para
+`[161,8; 224,0]` km/h enquanto o pico real de RC permanece em ≈148 km/h — **fora da
+janela**. A função passa a devolver o PISO da janela, não o máximo: Vy 147,9→161,8 km/h,
+`rc_sl_ms` 5,0010→4,9533, `service_ceiling_m` 5200→5100 m são ARTEFATOS DE BUSCA, não
+física. Verificado por sondagem numérica direta na revisão (RC(V) é idêntica antes e
+depois da troca de referência).
+
+Correção que governa (a intenção do §2 — "Vy consistente" — permanece):
+1. A referência de estol limpa está CERTA e fica (`cl_max_clean`).
+2. A janela passa a `[1,05·Vs_clean, 2,00·Vs_clean]` com `steps` 50→100 — larga o
+   bastante para conter o ótimo em vez de depender de uma heurística calibrada para
+   outra referência. Vy é, por definição, o argmax de RC(V); a janela é ferramenta de
+   busca, não modelagem.
+3. **Guarda falseável obrigatória** (a lição do erro): teste que exige o argmax
+   ESTRITAMENTE INTERIOR à janela no baseline real (`best_v > v_min && best_v < v_max`).
+   Argmax na fronteira de uma busca por ótimo é defeito de modelo, não resultado.
+   (Distinto de `best_climb_angle_ms`, onde avaliar em 1,2·Vs é PRESCRIÇÃO da CS 23.65,
+   não busca por ótimo — lá a fronteira é legítima e a guarda não se aplica.)
+4. Consequência esperada: Vy/RC/teto voltam a ≈148 km/h / ≈5,001 / 5200 m, e o efeito
+   LÍQUIDO da Task 2 sobre os números fica ≈zero — que é o resultado honesto, porque Vy
+   genuinamente não depende do CL_max. O entregável real da task passa a ser a
+   consistência da referência + a guarda contra ótimo de fronteira.
