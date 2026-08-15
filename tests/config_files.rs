@@ -125,6 +125,11 @@ fn carrega_baseline_do_disco_campo_a_campo() {
     // silencioso (ex. 0.015→0.014) passaria por todas as outras redes de
     // proteção (validação só checa a faixa (0.005, 0.05), não o valor).
     assert_eq!(cfg.wing.cd0_flap_delta, 0.015);
+    // Ciclo 12 (task 4): offset vertical centro-de-arrasto↔CG — campo NOVO,
+    // default conservador 0.0 (braço cheio no termo de arrasto de solo do
+    // balanço de rotação). Mesma disciplina anti-drift-silencioso do pin
+    // acima.
+    assert_eq!(cfg.wing.z_drag_above_cg_m, 0.0);
 }
 
 #[test]

@@ -9,7 +9,10 @@ use crate::agents::constraint_diagram::WingLoadingReport;
 /// (2026-08-10): reutilizado também por `PerformanceSpec::to_50ft_paved_m`/
 /// `to_50ft_grass_m` (ciclo 11 task 3, `docs/backlog.md` item 5) — mesmo
 /// problema de round-trip, gatilho físico diferente (obstáculo de 15 m
-/// inatingível, não limite de fadiga).
+/// inatingível, não limite de fadiga). Ciclo 12 (2026-08-15): estendido
+/// também a `PerformanceSpec::to_distance_paved_m`, `to_distance_grass_m`,
+/// e `landing_distance_m` (rolagem integrada devolve infinito quando tração
+/// ou frenagem insuficientes).
 ///
 /// `agents::structural::fatigue_life_cycles` retorna legitimamente
 /// `f64::INFINITY` quando a tensão equivalente fica abaixo do limite de
@@ -106,14 +109,44 @@ pub struct WingSpec {
     ///
     /// Consumido por `agents::performance::excess_power_kw` (parâmetro
     /// `cd0_extra`) no segmento de SUBIDA da decolagem
-    /// (`takeoff_distance_50ft_m`) e no gradiente CS 23.65 em configuração
-    /// de decolagem (`best_climb_angle_ms`) — fecha a lacuna declarada desde
-    /// o ciclo 7 ("não existe modelo de flap na polar deste crate"). Não há
-    /// um campo `cd0_flap_ldg_extra` equivalente para o pouso: auditoria de
-    /// call sites (ciclo 8, task 1) não encontrou nenhum segmento de pouso
-    /// que consuma a polar de arrasto (rolagem é frenagem pura; aproximação
-    /// usa ângulo FIXO, não L/D) — ver docstring de `WingCfg::cd0_flap_delta`.
+    /// (`takeoff_distance_50ft_m`), no gradiente CS 23.65 em configuração
+    /// de decolagem (`best_climb_angle_ms`) e — desde o ciclo 12 — na
+    /// própria rolagem de decolagem via `agents::performance::
+    /// cd_ground_roll` — fecha a lacuna declarada desde o ciclo 7 ("não
+    /// existe modelo de flap na polar deste crate").
+    ///
+    /// HISTÓRICO `old→new` (ciclo 8 → ciclo 12): até o ciclo 11 esta
+    /// docstring afirmava que não havia um campo `cd0_flap_ldg_extra`
+    /// equivalente para o pouso, porque a auditoria de call sites do ciclo
+    /// 8 (task 1) não encontrou nenhum segmento de pouso que consumisse a
+    /// polar de arrasto — a rolagem de pouso era frenagem pura (`S_G =
+    /// V_ref²/(2gμ)`, sem termo de arrasto) e a aproximação sobre 15 m usava
+    /// um ângulo de aproximação FIXO, não uma razão L/D. Essa conclusão
+    /// valia então: nenhuma fórmula fechada daquele momento tinha onde
+    /// receber um incremento de CD0 de pouso. **Ela morre no ciclo 12**: a
+    /// rolagem de pouso passa a integrar a equação de movimento
+    /// (`landing_ground_roll_m`, spec `2026-08-15-ciclo12-solo-honesto`
+    /// §5), que consome a polar completa — a sustentação residual do flap
+    /// de pouso ALIVIA o peso sobre as rodas e PIORA a frenagem, e o
+    /// arrasto do flap CHEIO passa a ter, pela primeira vez, um call site
+    /// que o consome: `WingSpec::cd0_flap_ldg_extra` (abaixo). Ver
+    /// `WingCfg::cd0_flap_delta` para a mesma história do lado da
+    /// configuração.
     pub cd0_flap_to_extra: f64,
+    /// ΔCD0 do flap CHEIO (configuração de POUSO) — CAMPO NOVO (ciclo 12,
+    /// spec §5.3a). Diferente de `cd0_flap_to_extra` (fração PARCIAL,
+    /// `to_flap_fraction · cd0_flap_delta`): este é o delta CHEIO,
+    /// `[wing].cd0_flap_delta` sem fração nenhuma — a aeronave rola no pouso
+    /// com o flap TOTALMENTE deflexionado (decisão de projeto, spec §5.1:
+    /// modelar o flap MANTIDO durante toda a rolagem de frenagem, a
+    /// configuração em que CS 23 mede a distância de pouso desta classe).
+    ///
+    /// Consumido por `agents::performance::cd_ground_roll` (via
+    /// `landing_ground_roll_m`/`landing_distance_m`/
+    /// `landing_distance_50ft_m`) — primeiro consumidor do delta CHEIO
+    /// desde que `cd0_flap_delta` existe (ver docstring `old→new` de
+    /// `cd0_flap_to_extra` acima e de `WingCfg::cd0_flap_delta`).
+    pub cd0_flap_ldg_extra: f64,
     /// VS0 — velocidade de stall com flap (configuração de pouso), km/h.
     pub stall_speed_flaps_kmh: f64,
     /// VS1 — velocidade de stall em configuração limpa, km/h.
@@ -509,8 +542,25 @@ pub struct PerformanceSpec {
     pub rc_sl_ms: f64,
     pub rc_cruise_alt_ms: f64,
     pub service_ceiling_m: f64,
+    /// Distância de decolagem sem obstáculo (pista pavimentada, m) —
+    /// estimativa simplificada (rolagem × 1,5). Pode ser `f64::INFINITY`
+    /// quando a rolagem integrada não consegue acelerar até V_LOF (tração
+    /// insuficiente). Serializado como a string `"infinita"` nesse caso, não
+    /// `null` — ver `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
     pub to_distance_paved_m: f64,
+    /// Distância de decolagem sem obstáculo (grama/terra, m) — estimativa
+    /// simplificada (rolagem × 1,5). Pode ser `f64::INFINITY` quando a
+    /// rolagem integrada não consegue acelerar até V_LOF. Serializado como a
+    /// string `"infinita"` nesse caso, não `null` — ver `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
     pub to_distance_grass_m: f64,
+    /// Distância de pouso sem obstáculo (m) — estimativa simplificada
+    /// (rolagem + 200 m). Pode ser `f64::INFINITY` quando a rolagem
+    /// integrada não consegue desacelerar (arrasto e frenagem insuficientes).
+    /// Serializado como a string `"infinita"` nesse caso, não `null` — ver
+    /// `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
     pub landing_distance_m: f64,
     /// INFORMATIVO — eco de `PropulsionSpec::range_km` (a tanque cheio,
     /// consumo constante). Não é a fonte dos gates de alcance do projeto
@@ -1422,7 +1472,7 @@ pub struct ElectricalSpec {
 /// MESMA tolerância. Ver `docs/aircraft_spec.schema.md` §5 e
 /// `tests/schema_v4.rs`/`tests/generic_engine.rs` para os pins honestos
 /// completos.
-pub const SCHEMA_VERSION: &str = "5.4";
+pub const SCHEMA_VERSION: &str = "5.5";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -1852,5 +1902,53 @@ mod tests {
             "to_50ft_paved_m finito deveria roundtrip corretamente");
         assert_eq!(perf_deserialized3.to_50ft_grass_m, 2200.0,
             "to_50ft_grass_m finito deveria roundtrip corretamente");
+    }
+
+    /// Ciclo 12: as três distâncias LEGADO (`to_distance_paved_m`,
+    /// `to_distance_grass_m`, `landing_distance_m`) passam a poder valer
+    /// `+INFINITY` — a rolagem integrada devolve infinito quando a tração
+    /// não basta para acelerar. Sem `fatigue_life_serde` elas virariam
+    /// `null` no JSON (RFC 8259 não representa infinito), quebrando
+    /// round-trip. Mesmo defeito que o ciclo 11 corrigiu em `to_50ft_*`.
+    #[test]
+    fn performance_spec_roundtrip_serde_com_infinito_nas_distancias_legado() {
+        use serde_json;
+
+        let mut p = PerformanceSpec {
+            v_cruise_kmh: 150.0,
+            v_stall_kmh: 45.0,
+            rc_sl_ms: 2.5,
+            rc_cruise_alt_ms: 1.0,
+            service_ceiling_m: 3500.0,
+            to_distance_paved_m: 800.0,
+            to_distance_grass_m: 1200.0,
+            landing_distance_m: 600.0,
+            range_km: 1500.0,
+            endurance_h: 8.0,
+            vx_kmh: 110.0,
+            vy_kmh: 130.0,
+            best_glide_kmh: 120.0,
+            glide_ratio: 8.5,
+            climb_gradient_pct: 12.5,
+            to_50ft_paved_m: 900.0,
+            to_50ft_grass_m: 1500.0,
+            ldg_50ft_m: 700.0,
+            ldg_50ft_grass_m: 850.0,
+        };
+
+        p.to_distance_paved_m = f64::INFINITY;
+        p.to_distance_grass_m = f64::INFINITY;
+        p.landing_distance_m = f64::INFINITY;
+
+        let json = serde_json::to_string(&p).expect("serializa");
+        assert!(json.contains("\"to_distance_paved_m\":\"infinita\""), "{json}");
+        assert!(json.contains("\"to_distance_grass_m\":\"infinita\""), "{json}");
+        assert!(json.contains("\"landing_distance_m\":\"infinita\""), "{json}");
+        assert!(!json.contains("null"), "nenhum campo pode virar null: {json}");
+
+        let volta: PerformanceSpec = serde_json::from_str(&json).expect("desserializa");
+        assert!(volta.to_distance_paved_m.is_infinite());
+        assert!(volta.to_distance_grass_m.is_infinite());
+        assert!(volta.landing_distance_m.is_infinite());
     }
 }

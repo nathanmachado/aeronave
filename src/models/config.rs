@@ -595,6 +595,16 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.wing.cd0_flap_delta
         )));
     }
+    // Ciclo 12 (task 4): offset vertical centro-de-arrasto↔CG — faixa
+    // plausível [0.0, 0.30] numa célula convencional (spec §6.2).
+    require_finite("wing.z_drag_above_cg_m", cfg.wing.z_drag_above_cg_m)?;
+    if cfg.wing.z_drag_above_cg_m < 0.0 || cfg.wing.z_drag_above_cg_m > 0.30 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.z_drag_above_cg_m deve estar em \
+             [0.0, 0.30] (valor: {})",
+            cfg.wing.z_drag_above_cg_m
+        )));
+    }
 
     // [fuselage]
     require_positive("fuselage.length_m", cfg.fuselage.length_m)?;
@@ -1097,6 +1107,25 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.performance.mu_brake_grass
         )));
     }
+    // Ciclo 12 (task 2, spec §4): atrito de ROLAGEM (livre, sem frenagem) —
+    // substitui `surface_factor` no caminho de decolagem. Faixa (0.0, 0.5),
+    // mesmo padrão dos demais coeficientes de atrito físicos deste bloco.
+    require_finite("performance.mu_roll_paved", cfg.performance.mu_roll_paved)?;
+    if cfg.performance.mu_roll_paved <= 0.0 || cfg.performance.mu_roll_paved >= 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.mu_roll_paved deve estar em \
+             (0.0, 0.5) (valor: {})",
+            cfg.performance.mu_roll_paved
+        )));
+    }
+    require_finite("performance.mu_roll_grass", cfg.performance.mu_roll_grass)?;
+    if cfg.performance.mu_roll_grass <= 0.0 || cfg.performance.mu_roll_grass >= 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.mu_roll_grass deve estar em \
+             (0.0, 0.5) (valor: {})",
+            cfg.performance.mu_roll_grass
+        )));
+    }
     require_positive("performance.static_thrust_factor", cfg.performance.static_thrust_factor)?;
     if cfg.performance.static_thrust_factor > 1.0 {
         return Err(ConfigError::Validation(format!(
@@ -1541,6 +1570,7 @@ mod tests {
             cm_ac = -0.008
             cm_flap_delta = -0.30
             cd0_flap_delta = 0.015
+            z_drag_above_cg_m = 0.0
             [fuselage]
             length_m = 7.5
             cabin_width_m = 1.1
@@ -1611,6 +1641,8 @@ mod tests {
             [performance]
             mu_brake_paved = 0.40
             mu_brake_grass = 0.30
+            mu_roll_paved = 0.04
+            mu_roll_grass = 0.08
             static_thrust_factor = 0.75
             rotation_time_s = 1.0
             flare_time_s = 1.5
@@ -2147,6 +2179,32 @@ mod tests {
         assert!(err.to_string().contains("finito"), "{err}");
     }
 
+    // ─── [wing] z_drag_above_cg_m (ciclo 12, task 4) ─────────────────────────
+
+    #[test]
+    fn rejeita_z_drag_above_cg_m_negativo() {
+        let toml = aircraft_toml_valido()
+            .replace("z_drag_above_cg_m = 0.0", "z_drag_above_cg_m = -0.01");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.z_drag_above_cg_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_z_drag_above_cg_m_acima_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("z_drag_above_cg_m = 0.0", "z_drag_above_cg_m = 0.31");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.z_drag_above_cg_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_z_drag_above_cg_m_nao_finito() {
+        let toml = aircraft_toml_valido()
+            .replace("z_drag_above_cg_m = 0.0", "z_drag_above_cg_m = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
     // ─── [stability] cl_h_stall_limit / trim_margin / cl_ground_rotation /
     //     to_flap_fraction (task refino-ciclo2; renomeado no ciclo 7) ──────
 
@@ -2564,6 +2622,22 @@ mod tests {
         let toml = aircraft_toml_valido().replace("mu_brake_grass = 0.30", "mu_brake_grass = 0.90");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("performance.mu_brake_grass"), "{err}");
+    }
+
+    // ─── [performance] (ciclo 12, task 2: mu_roll_paved/mu_roll_grass) ─────
+
+    #[test]
+    fn rejeita_mu_roll_paved_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("mu_roll_paved = 0.04", "mu_roll_paved = 0.6");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.mu_roll_paved"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_mu_roll_grass_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("mu_roll_grass = 0.08", "mu_roll_grass = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.mu_roll_grass"), "{err}");
     }
 
     #[test]

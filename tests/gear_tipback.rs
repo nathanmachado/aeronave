@@ -73,11 +73,20 @@
 //! critical_m` ≈−0,00249 m → **+0,007367 m**. `validation_status` volta a
 //! `PASS` — primeiro PASS do baseline com o MODELO COMPLETO (sag estático +
 //! linha de tração + transferência de atitude do #25, todos ativos).
-//! `rotation_limit_pct_mac` fica INALTERADO (13,354637% MAC — x_nose_m não
-//! entra na régua); o CG dos cenários avança um pouco (braço do item de
-//! massa `trem_nariz`), consumindo uma fração pequena da margem de rotação.
-//! Tipback/carga de nariz também se movem um pouco (ver testes abaixo);
-//! tail-strike e margem de combustível ficam INALTERADOS.
+//! `rotation_limit_pct_mac` fica INALTERADO por `x_nose_m` (13,354637% MAC
+//! NAQUELE momento — x_nose_m não entra na régua); o CG dos cenários
+//! avança um pouco (braço do item de massa `trem_nariz`), consumindo uma
+//! fração pequena da margem de rotação. Tipback/carga de nariz também se
+//! movem um pouco (ver testes abaixo); tail-strike e margem de combustível
+//! ficam INALTERADOS.
+//!
+//! `old→new` (ciclo 10/E12 → ciclo 12, task 4): o VALOR ABSOLUTO de
+//! 13,354637% MAC mudou por um mecanismo NÃO relacionado a `x_nose_m` — os
+//! termos de solo do balanço de rotação (atrito + arrasto, spec
+//! `2026-08-15-ciclo12-solo-honesto` §6) recuam o limite para
+//! **≈17,757974% MAC** (+4,40 pp). A afirmação acima ("x_nose_m não
+//! entra na régua") continua verdadeira; só o número de referência do
+//! momento em que foi escrita ficou desatualizado.
 
 use std::path::PathBuf;
 
@@ -363,6 +372,24 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 /// `prop_clearance_critical_m` ≈−0,00249 m → **+0,007367 m**. O nome do
 /// teste volta a ser literalmente verdadeiro — zero violações de trem E
 /// zero de hélice.
+///
+/// ATUALIZAÇÃO (ciclo 12, task 4, 2026-08-15) — `old→new`, O NOME FICA
+/// TECNICAMENTE IMPRECISO DE NOVO, NÃO RENOMEADO (mesmo precedente das TRÊS
+/// atualizações acima): os termos de solo do balanço de rotação (atrito +
+/// arrasto, spec `2026-08-15-ciclo12-solo-honesto` §6) apertam a margem de
+/// rotação NOMINAL de "Solo (piloto)"/"2 pax dianteiros" o bastante para o
+/// mundo de robustez `dianteiro` (±15% de massa estrutural) os flipar — 2
+/// violações de ROBUSTEZ NOVAS. A asserção correspondente, mais abaixo,
+/// muda de `robustez.is_empty()` para `assert_eq!(robustez.len(), 2, ...)`
+/// — ou seja, o teste passa a EXIGIR exatamente 2 violações de robustez
+/// para passar, o que contradiz literalmente a palavra "nem_de_robustez"
+/// no nome da função. Física honesta, não bug: os termos "deliberadamente
+/// desprezados" pelo ciclo 10 (estimativa "≲2 pp de MAC", medição real
+/// ≈4,40 pp — ver `old→new` em `agents::trim_authority::
+/// rotation_available_moment_nm`) finalmente cobram o preço que já
+/// deveriam cobrar. As demais asserções por check nomeado (tipback/tail-
+/// strike/carga de nariz/hélice) continuam todas verdadeiras — só a
+/// robustez, e com ela a contagem total, deixam de bater com o nome.
 #[test]
 fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
@@ -379,6 +406,7 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let mut propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
         &sized.state, wing, prop, sized.state.mtow_kg, &engine, &req, &cfg.performance,
+        cfg.stability.cl_ground_rotation,
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();
@@ -440,24 +468,52 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // tração (`−T(Vr(W))·prop_axis_above_cg_m`, com o `h_cg` do braço
     // cancelado pelo termo inercial de d'Alembert — ver
     // `agents::trim_authority::rotation_available_moment_nm`) faz o limite
-    // depender do peso, e ele passa de 8,533% para **13,355% MAC** no
-    // baseline real (+4,82 pp). A contagem de flips, porém, CONTINUA ZERO:
-    // os cenários mantêm folga suficiente sobre a régua do pior mundo
-    // dianteiro. O que encolhe é a margem de autoridade de rotação (o
-    // cenário mais apertado, "Solo (piloto)", vai de +21,6% para +10,5%).
+    // depender do peso, e ele passa de 8,533% para 13,355% MAC no baseline
+    // real (+4,82 pp) NAQUELE ciclo. A contagem de flips, porém, CONTINUAVA
+    // ZERO: os cenários mantinham folga suficiente sobre a régua do pior
+    // mundo dianteiro. O que encolhia era a margem de autoridade de
+    // rotação (o cenário mais apertado, "Solo (piloto)", ia de +21,6% para
+    // +10,5%).
+    //
+    // `old→new` (ciclo 10 → ciclo 12, task 4) — A CONTAGEM DEIXA DE SER
+    // ZERO, ACHADO HONESTO NÃO CORRIGIDO: os termos de solo do balanço de
+    // rotação (atrito + arrasto, spec §6) somam-se à linha de tração e
+    // recuam o limite mais ≈4,40 pp, de ≈13,355% para **≈17,758% MAC**. A
+    // margem do cenário "Solo (piloto)" — que ia de +21,6% (E10) para
+    // +10,5% (ciclo 10) — aperta para **≈0,0012%**, essencialmente ZERO
+    // (ainda tecnicamente dentro do envelope NOMINAL, mas sem folga
+    // nenhuma). O mundo de robustez `dianteiro` (massas estruturais ±15%,
+    // régua recalculada ≈18,09% MAC) cruza essa margem quase-nula: 2 flips
+    // NOVOS ("Solo (piloto)" e "2 pax dianteiros"). Não é regressão de
+    // código — é o modelo cobrando um termo de momento que o ciclo 10
+    // deliberadamente (e incorretamente, ver a estimativa "≲2 pp"
+    // reescrita `old→new` em `rotation_available_moment_nm`) desprezava.
     let robustez: Vec<&String> = report.violations.iter()
         .filter(|v| v.starts_with("Robustez:")).collect();
-    assert!(robustez.is_empty(),
-        "esperava ZERO violações de robustez (σ=15%) no baseline real — eram 2 (Solo/2 pax) \
-         até o ciclo 7, ZERO desde a campanha E10 e ZERO ainda no ciclo 10 task 2: {:?}",
+    assert_eq!(robustez.len(), 2,
+        "ciclo 12 (task 4): esperava EXATAMENTE 2 violações de robustez (σ=15%) no baseline \
+         real — 'Solo (piloto)' e '2 pax dianteiros', cuja margem de rotação NOMINAL os termos \
+         de solo do balanço de rotação apertaram a quase-zero (era ZERO desde a campanha E10 \
+         até o ciclo 10, task 2): {:?}",
         report.violations);
-    // Envelope de CG por cenário: nenhum cenário fora. O recuo do limite
-    // dianteiro (+4,82 pp) não alcança o CG mais dianteiro (17,9% MAC).
+    assert!(robustez.iter().any(|v| v.contains("Solo (piloto)")),
+        "esperava o flip de robustez do cenário 'Solo (piloto)' (margem nominal ≈0,0012%): {:?}",
+        report.violations);
+    assert!(robustez.iter().any(|v| v.contains("2 pax dianteiros")),
+        "esperava o flip de robustez do cenário '2 pax dianteiros': {:?}", report.violations);
+    // Envelope de CG NOMINAL por cenário: nenhum cenário fora (checagem
+    // ESPECÍFICA de envelope — não confundir com os flips de ROBUSTEZ
+    // acima, que também citam nomes de cenário mas não são violações de
+    // envelope). `old→new`: o recuo do limite dianteiro (+4,40 pp, ciclo
+    // 12 task 4, somado aos +4,82 pp do ciclo 10) ainda não alcança o CG
+    // mais dianteiro nominal (17,9% MAC) — a margem fica quase-zero, mas
+    // positiva.
     let fora: Vec<&String> = report.violations.iter()
         .filter(|v| v.contains("fora do envelope de CG admissível")).collect();
     assert!(fora.is_empty(),
-        "ciclo 10 (task 2): nenhum cenário deveria sair do envelope de CG — o limite dianteiro \
-         vai a ≈13,4% MAC contra um CG mais dianteiro de 17,9%: {:?}", report.violations);
+        "ciclo 12 (task 4): nenhum cenário deveria sair do envelope de CG NOMINAL — o limite \
+         dianteiro vai a ≈17,758% MAC contra um CG mais dianteiro de ≈17,9%: {:?}",
+        report.violations);
     // ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — old→new): a
     // afirmação abaixo ("o baseline real não deve reportar NENHUMA
     // violação") era o PASS completo da campanha E10 — verdadeira até este
@@ -485,9 +541,48 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // última violação restante (hélice, #25) FECHA — `x_nose_m` 1,30→1,20
     // reduz o fator de amplificação do pivô (≈1,46610→≈1,40650) o
     // suficiente para virar a folga crítica positiva. Contagem 1 → **0**.
-    assert_eq!(report.violations.len(), 0,
-        "campanha E12 nariz-only: esperava ZERO violações no baseline real (a última, hélice/\
-         #25, fecha com x_nose_m 1,30→1,20) — obteve: {:?}", report.violations);
+    //
+    // ATUALIZAÇÃO (ciclo 12, task 2, 2026-08-15 — old→new, O TESTE VOLTA A
+    // REPORTAR VIOLAÇÃO, DE PROPÓSITO): a rolagem de decolagem passa de
+    // método energético fechado (sem arrasto/atrito) para integração
+    // numérica consumindo a polar completa (spec
+    // `2026-08-15-ciclo12-solo-honesto`) — o segmento DOMINANTE da
+    // distância de decolagem finalmente paga arrasto e atrito, e a pista de
+    // fazenda de 600 m deixa de caber: `to_50ft_grass_m` 473,469470 m →
+    // **819,110978 m** (medido), estourando `req.runway_available_m`
+    // (600 m) por ≈219 m. Isto NÃO é regressão de código — é o modelo
+    // finalmente dizendo a verdade sobre operar 1.537 kg numa pista de
+    // grama de 600 m (diretriz permanente do usuário: "se uma decisão é
+    // perigosa, o modelo deve FALHAR no ponto de perigo"). Contagem
+    // 0 → 1, a violação de decolagem.
+    //
+    // ATUALIZAÇÃO (ciclo 12, task 3, 2026-08-15 — old→new, SEGUNDA
+    // VIOLAÇÃO, TAMBÉM DE PROPÓSITO): a rolagem de pouso passa pela MESMA
+    // transformação (spec §5) — com o flap de pouso mantido deflexionado
+    // durante toda a frenagem, a sustentação residual ALIVIA o peso sobre
+    // as rodas e PIORA a frenagem: `ldg_50ft_grass_m` 556,677173 m →
+    // **646,437301 m** (medido), estourando os 600 m por ≈46 m. Mesma
+    // diretriz permanente do usuário citada acima — não é regressão.
+    // Contagem 1 → 2, as duas violações de pista.
+    //
+    // ATUALIZAÇÃO (ciclo 12, task 4, 2026-08-15 — old→new, TERCEIRA E
+    // QUARTA VIOLAÇÃO, ROBUSTEZ): os termos de solo do balanço de rotação
+    // (ver o `old→new` completo no bloco de robustez acima) apertam a
+    // margem de rotação NOMINAL de "Solo (piloto)"/"2 pax dianteiros" o
+    // bastante para o mundo de robustez `dianteiro` os flipar. Contagem
+    // 2 → **4**: as duas violações de pista (Tasks 2/3, inalteradas) E os
+    // dois flips de robustez novos (Task 4).
+    assert_eq!(report.violations.len(), 4,
+        "ciclo 12 (task 4): esperava EXATAMENTE 4 violações no baseline real — decolagem na \
+         grama sobre 15 m (819 m), pouso na grama sobre 15 m (646 m), E os dois flips de \
+         robustez de 'Solo (piloto)'/'2 pax dianteiros' no mundo dianteiro (termos de solo do \
+         balanço de rotação), achados honestos, não uma regressão: {:?}", report.violations);
+    assert!(report.violations.iter().any(|v| v.contains("Decolagem (grama, 15 m)")),
+        "uma das quatro violações esperadas é a de decolagem na grama sobre 15 m: {:?}",
+        report.violations);
+    assert!(report.violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "outra das quatro violações esperadas é a de pouso na grama sobre 15 m: {:?}",
+        report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de
@@ -565,7 +660,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let mut propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, &sized.prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
         &sized.state, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &req,
-        &cfg.performance,
+        &cfg.performance, cfg.stability.cl_ground_rotation,
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();

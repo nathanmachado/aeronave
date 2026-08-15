@@ -63,7 +63,7 @@ fn toyota_missao_default_gera_spec_completo_v4() {
     let json: serde_json::Value = serde_json::from_str(&json_text)
         .expect("saída deveria ser JSON válido");
 
-    assert_eq!(json["schema_version"], "5.4", "schema_version deveria ser 5.4:\n{json_text}");
+    assert_eq!(json["schema_version"], "5.5", "schema_version deveria ser 5.5:\n{json_text}");
     assert!(json["propulsion"]["engine_model"].as_str().unwrap_or_default().contains("Toyota"),
         "engine_model deveria conter 'Toyota':\n{json_text}");
 
@@ -138,7 +138,7 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     let json: serde_json::Value = serde_json::from_str(&json_text)
         .expect("saída deveria ser JSON válido");
 
-    assert_eq!(json["schema_version"], "5.4");
+    assert_eq!(json["schema_version"], "5.5");
     assert_eq!(json["propulsion"]["engine_model"], "Rotax 915 iS",
         "engine_model deveria ser exatamente 'Rotax 915 iS':\n{json_text}");
 

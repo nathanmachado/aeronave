@@ -87,6 +87,207 @@ pub fn thrust_available_n(
     thrust_n(eta, p_shaft_w, v_ms)
 }
 
+/// Tração VÁLIDA na faixa da rolagem de decolagem (0 → V_LOF) — ciclo 12,
+/// spec §2. `thrust_available_n` não serve para este uso: seu ramo de voo
+/// (`prop_efficiency(J)`, polinômio calibrado com dados de JavaProp na faixa
+/// de CRUZEIRO, `J ≈ 1,3–1,5`) devolve η(0) = 0,58 — fisicamente errado (por
+/// definição η = T·V/P ⟹ η→0 quando V→0) — e na corrida de decolagem desta
+/// célula `J` varre 0 a 0,68, fora do domínio calibrado; medido: ≈80.000 N em
+/// V=1 m/s (20× a tração estática), precedido por uma janela de tração NULA
+/// em `[0,5; 1,0)` m/s (`thrust_n` tem uma guarda `if v_ms < 1.0 { return
+/// 0.0 }`). Ver spec §1 para o histórico completo — o defeito ficou dormente
+/// porque nenhum consumidor avaliava `prop_efficiency` nesta faixa até a
+/// rolagem passar a integrar sobre `V ∈ [0, V_LOF]`.
+///
+/// Teoria de quantidade de movimento (Rankine-Froude) COM velocidade de
+/// avanço, não só a tração estática em V=0. Com `u` = velocidade no disco
+/// (metade da velocidade de esteira longe do disco mais V), `A = π·D²/4` e
+/// `P` a potência de EIXO:
+///
+///   T = 2·ρ·A·u·(u − V)      [empuxo do disco]
+///   P = T·u                   [potência ideal]
+///   ⟹ u²·(u − V) = P/(2·ρ·A) =: K
+///
+/// Cúbica `u³ − V·u² − K = 0`. Para `K > 0` e `V ≥ 0` há exatamente uma raiz
+/// real com `u > V` (`f(V) = −K < 0`, `f` estritamente crescente em
+/// `u > 2V/3`, `f → +∞`) — resolvida por Newton a partir de
+/// `u₀ = V + K^(1/3)`, que converge monotonicamente (bracket
+/// `[V, V + K^(1/3) + V]`, provado no teste de identidade abaixo).
+///
+///   thrust_ground_roll_n(V) = static_thrust_factor · 2·ρ·A·u·(u − V)
+///
+/// **Continuidade exata com o modelo de hoje (spec §2.1).** Em V=0 a cúbica
+/// degenera em `u³ = K` ⟹ `u = K^(1/3)` ⟹
+/// `T = 2ρA·K^(2/3) = (2ρA·P²)^(1/3)` — ALGEBRICAMENTE idêntico a
+/// `static_thrust_ideal_n`. `thrust_ground_roll_n(0)` reproduz
+/// `thrust_available_n(0)` não por aproximação, mas por identidade —
+/// verificado por `tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_de_
+/// hoje` a 1e-9 relativo. Esta função é uma REFINAÇÃO do modelo estático de
+/// hoje, não uma substituição.
+///
+/// **Premissa calibrada esticada, declarada (spec §2.3).** `static_thrust_
+/// factor` (McCormick, ≈0,75) é calibrado só para tração ESTÁTICA — esta
+/// função o aplica como multiplicador PLANO em todo `V ∈ [0, V_LOF]`. A
+/// alternativa (fator 1,0 acima de V=0) criaria um degrau de +33% na tração
+/// logo depois da largada, pior. Direção do erro: se as perdas de ponta de
+/// pá/rotação de esteira caírem com a velocidade de avanço, o modelo
+/// SUBESTIMA a tração na segunda metade da corrida — é CONSERVADOR (a
+/// rolagem sai maior, não menor). Assumido e registrado, não escondido.
+///
+/// **A costura em V_LOF não é mascarada (spec §2.4).** Em `V_LOF` esta
+/// função e `thrust_available_n` divergem (domínios de validade disjuntos —
+/// um calibrado para tração ESTÁTICA, o outro para `J` de CRUZEIRO); a
+/// descontinuidade medida é item de backlog (unificar o modelo de tração),
+/// fora de escopo deste ciclo.
+///
+/// NÃO recebe `psru_ratio` — teoria de quantidade de movimento não usa rpm
+/// de hélice (a rotação da hélice entra em `prop_efficiency(J)`, que este
+/// modelo não usa).
+pub fn thrust_ground_roll_n(
+    v_ms: f64,
+    engine: &EngineSpec,
+    engine_rpm: f64,
+    prop_diam_m: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    static_thrust_factor: f64,
+    psru_efficiency: f64,
+) -> f64 {
+    let p_w = shaft_power_kw(engine, engine_rpm, altitude_m, psru_efficiency) * 1_000.0;
+    let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
+    let disk_area = std::f64::consts::PI * (prop_diam_m / 2.0).powi(2);
+    let k = p_w / (2.0 * rho * disk_area);
+
+    // Guarda (Fix round 1 do report da task — achado do revisor): a spec
+    // §2 assume `K > 0`. Se `K ≤ 0` (potência de eixo nula/negativa) E
+    // `V = 0` ao mesmo tempo, `u₀ = V + K^(1/3) = 0` e a primeira iteração
+    // de Newton calcula `f/fp = 0/0` — NaN SILENCIOSO, o modo de falha que
+    // este projeto não aceita (o padrão é falhar no ponto de perigo, não
+    // devolver um número que não é número). INALCANÇÁVEL hoje:
+    // `psru_efficiency > 0` é validado em `models::config` (`require_
+    // positive("propeller.psru_efficiency", ...)`) e `engine.power_kw_at`
+    // é positiva para qualquer rpm válida — `K` nunca chega a zero pelo
+    // caminho de produção. Se essa validação algum dia relaxar (ex.: motor
+    // "desligado" modelado com P=0), sem esta guarda a rolagem devolveria
+    // NaN em vez de `+INFINITY`/pane explícita — fisicamente correto seria
+    // tração nula (sem potência, o disco atuador não produz empuxo).
+    if k <= 0.0 {
+        return 0.0;
+    }
+
+    // Newton a partir de u0 = V + K^(1/3) — em V=0, f(u0) = u0³ − K = 0
+    // exatamente (converge em 1 iteração, prova a identidade do spec §2.1).
+    let mut u = v_ms + k.cbrt();
+    for _ in 0..100 {
+        let f = u * u * u - v_ms * u * u - k;
+        let fp = 3.0 * u * u - 2.0 * v_ms * u;
+        let delta = f / fp;
+        u -= delta;
+        if delta.abs() < 1e-12 * u {
+            break;
+        }
+    }
+    static_thrust_factor * 2.0 * rho * disk_area * u * (u - v_ms)
+}
+
+/// CD da aeronave em atitude de solo, com trem ESTENDIDO (ciclo 12, spec
+/// §3.1) — fonte única de verdade da rolagem de decolagem E de pouso (Task
+/// 3) e do balanço de rotação (Task 4).
+///
+///   CD_roll = wing.cd0 + state.cd0_gear_fixed_increment + cd0_flap_extra
+///             + cl_ground_roll²/(π·wing.aspect_ratio·wing.oswald_efficiency)
+///
+/// `state.cd0_gear_fixed_increment` (`[gear].cd0_fixed_increment`, hoje
+/// consumido só quando `gear_retractable = false`): `wing.cd0` embute
+/// `CD0_GEAR_RETRACTABLE = 0.0` — ou seja, é o CD0 de trem RECOLHIDO. Na
+/// rolagem o trem está ESTENDIDO. Reusar este campo assume que um trem
+/// retrátil ESTENDIDO tem arrasto próximo ao de um trem FIXO — levemente
+/// OTIMISTA (o retrátil estendido não tem as carenagens de um trem fixo bem
+/// projetado), assumido e declarado.
+pub fn cd_ground_roll(
+    wing: &WingSpec,
+    state: &AircraftState,
+    cl_ground_roll: f64,
+    cd0_flap_extra: f64,
+) -> f64 {
+    wing.cd0
+        + state.cd0_gear_fixed_increment
+        + cd0_flap_extra
+        + cl_ground_roll * cl_ground_roll
+            / (std::f64::consts::PI * wing.aspect_ratio * wing.oswald_efficiency)
+}
+
+/// Simpson composto — usado pela integração de rolagem (decolagem, e pouso
+/// na Task 3). `steps` é arredondado para cima ao próximo par (Simpson exige
+/// um número par de subintervalos).
+fn simpson_composto(f: impl Fn(f64) -> f64, a: f64, b: f64, steps: usize) -> f64 {
+    let n = if steps % 2 == 1 { steps + 1 } else { steps.max(2) };
+    let h = (b - a) / n as f64;
+    let mut soma = f(a) + f(b);
+    for i in 1..n {
+        let x = a + i as f64 * h;
+        let peso = if i % 2 == 0 { 2.0 } else { 4.0 };
+        soma += peso * f(x);
+    }
+    soma * h / 3.0
+}
+
+/// Integra `S = ∫₀^{V_LOF} m·V / F_net(V) dV` por Simpson composto — o
+/// integrador genérico da rolagem de decolagem (ciclo 12, spec §3.2),
+/// parametrizado sobre tração/arrasto/sustentação para permitir o teste
+/// contra a solução analítica fechada (`integrador_de_rolagem_reproduz_a_
+/// solucao_analitica_sem_atrito_nem_arrasto`, spec §7.1) sem depender de
+/// nenhum dos modelos físicos de produção.
+///
+/// `F_net(V) = thrust_fn(V) − drag_fn(V) − mu_roll·max(0, W − lift_fn(V))`,
+/// `W = mass_kg·G`. Guarda falseável (spec §3.2/§7.6): se `F_net(V) ≤ 0` em
+/// qualquer nó da malha de Simpson, o integrando naquele nó é `+INFINITY` —
+/// como todos os pesos de Simpson são estritamente positivos, isso propaga
+/// para o resultado inteiro (decolagem impossível nesta condição, resultado
+/// FÍSICO, não erro; nunca NaN, porque o caso `F_net ≤ 0` é interceptado
+/// ANTES da divisão, nunca por uma divisão por zero/negativo).
+fn integra_rolagem_decolagem_com_passos(
+    mass_kg: f64,
+    v_lof: f64,
+    thrust_fn: impl Fn(f64) -> f64,
+    drag_fn: impl Fn(f64) -> f64,
+    lift_fn: impl Fn(f64) -> f64,
+    mu_roll: f64,
+    steps: usize,
+) -> f64 {
+    let w = mass_kg * G;
+    let integrando = |v: f64| -> f64 {
+        let n = (w - lift_fn(v)).max(0.0);
+        let f_net = thrust_fn(v) - drag_fn(v) - mu_roll * n;
+        if f_net <= 0.0 {
+            return f64::INFINITY;
+        }
+        mass_kg * v / f_net
+    };
+    simpson_composto(integrando, 0.0, v_lof, steps)
+}
+
+/// `integra_rolagem_decolagem_com_passos` na resolução de PRODUÇÃO (200
+/// intervalos, spec §3.2) — convergência verificada contra 400 intervalos
+/// por `integrador_de_rolagem_esta_convergido_na_resolucao_escolhida`
+/// (spec §7.2). Só usada pelo teste contra a solução analítica fechada
+/// (spec §7.1, `integrador_de_rolagem_reproduz_a_solucao_analitica_sem_
+/// atrito_nem_arrasto`) — o caminho de PRODUÇÃO chama
+/// `integra_rolagem_decolagem_com_passos` diretamente via
+/// `takeoff_ground_roll_com_passos`/`takeoff_ground_roll_m`, `#[cfg(test)]`
+/// evita o aviso de código morto fora de `cfg(test)`.
+#[cfg(test)]
+fn integra_rolagem_decolagem(
+    mass_kg: f64,
+    v_lof: f64,
+    thrust_fn: impl Fn(f64) -> f64,
+    drag_fn: impl Fn(f64) -> f64,
+    lift_fn: impl Fn(f64) -> f64,
+    mu_roll: f64,
+) -> f64 {
+    integra_rolagem_decolagem_com_passos(mass_kg, v_lof, thrust_fn, drag_fn, lift_fn, mu_roll, 200)
+}
+
 // ─── ARRASTO E POTÊNCIA NECESSÁRIA ───────────────────────────────────────────
 
 /// Arrasto total em Newton para voo nivelado a V_ms e MTOW_kg
@@ -427,36 +628,67 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 
 // ─── DISTÂNCIAS DE DECOLAGEM E POUSO ─────────────────────────────────────────
 
-/// Rolagem de solo na decolagem (método energético de Raymer, Cap. 5):
+/// Rolagem de solo na decolagem — integração numérica da equação de
+/// movimento (ciclo 12, spec §2/§3), consumindo a polar completa:
 ///
-///   S_G = W² / (g · ρ · S · CL_TO · T_avg)
-///     onde CL_TO = 0.8·CL_max_TO
+///   m·dV/dt = T(V) − D(V) − μ_roll·N(V)
+///   N(V) = max(0, W − L(V))
+///   S = ∫₀^{V_LOF} m·V·dV / F_net(V)     (Simpson composto, 200 intervalos,
+///                                          `integra_rolagem_decolagem`)
+///   T(V) = `thrust_ground_roll_n`  (Rankine-Froude COM avanço, spec §2)
+///   D(V) = q·S_w·CD_roll,  CD_roll = `cd_ground_roll` (spec §3.1)
+///   L(V) = q·S_w·cl_ground_roll
+///   V_LOF = 1,10·√(2W/(ρ·S_w·cl_max_to))
 ///
-/// Ciclo 7 (task 1): `CL_max_TO` é o CLmax da configuração de DECOLAGEM
-/// (`WingSpec::cl_max_to`, flap PARCIAL — interpolado por
-/// `[stability].to_flap_fraction`), não mais o `cl_max` de POUSO. Ninguém
-/// decola com flap de pouso: usar o CLmax cheio produzia distâncias de
-/// decolagem OTIMISTAS, o espelho exato do pessimismo que a mesma
-/// inconsistência causava na rotação (`agents::trim_authority`). O 0,8 que
-/// multiplica continua sendo o fator de Raymer para o CL efetivo na
-/// corrida (a aeronave rola abaixo do CL_max), agora aplicado ao CLmax
-/// certo.
-///
-/// `T_avg` (Task 4.7): tração ESTÁTICA corrigida (Rankine-Froude × fator
-/// empírico `static_thrust_factor`, ver `thrust_available_n`/
-/// `static_thrust_ideal_n`) — substitui a estimativa ad hoc anterior ("80%
-/// da tração a V_lo/2"). Isso tende a ALONGAR a rolagem de solo (a tração
-/// estática corrigida é, para esta célula/hélice/motor, menor que a antiga
-/// estimativa em V_lo/2) — ver task-4.7-report.md para a tabela antes/depois.
-///
-/// NÃO recebe `cd0_extra`/arrasto de flap (ciclo 8, task 1 — auditoria de
-/// call sites): a fórmula é o método ENERGÉTICO de Raymer (Cap. 5) —
-/// trabalho da tração sobre a distância = energia cinética em V_LOF — que,
-/// por construção, não tem um termo de arrasto explícito (T_avg já é a
-/// tração LÍQUIDA média assumida constante; o arrasto entra implicitamente
-/// na calibração empírica de T_avg/CL_TO de Raymer, não como uma parcela
-/// somável de CD0). Não há onde inserir `cd0_flap_delta` sem reescrever o
-/// método inteiro — fora de escopo desta task.
+/// HISTÓRICO — DOCSTRING ANTIGA, RESCRITA `old→new` (ciclo 12): até este
+/// ciclo a fórmula era o método ENERGÉTICO de Raymer (Cap. 5),
+/// `S_G = W²/(g·ρ·S·CL_TO·T_avg)` com `CL_TO = 0,8·CL_max_TO` e `T_avg` a
+/// tração estática corrigida — e a docstring anterior afirmava que o método
+/// "por construção, não tem um termo de arrasto explícito ... T_avg já é a
+/// tração LÍQUIDA média assumida constante ... Não há onde inserir
+/// `cd0_flap_delta` sem reescrever o método inteiro — fora de escopo desta
+/// task" (ciclo 8, task 1). **É exatamente esse método inteiro que este
+/// ciclo reescreve** — ver spec §0/§1 para a motivação (a fórmula fechada
+/// escondia a faixa `V ∈ [0, V_LOF]` onde `thrust_available_n` é
+/// qualitativamente errada; integrar obriga a avaliar a tração nessa faixa
+/// e força um modelo de tração válido nela — `thrust_ground_roll_n`).
+/// `surface_factor` (1,00/1,15–1,20/1,25) SAI do caminho de decolagem —
+/// com `mu_roll` explícito, multiplicar pelo fator de superfície contaria a
+/// grama duas vezes (o 1,20 antigo ERA o atrito ausente, calibrado para
+/// suprir justamente o que a fórmula energética não tinha — spec §4).
+fn takeoff_ground_roll_com_passos(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    engine: &EngineSpec,
+    isa_delta_c: f64,
+    mu_roll: f64,
+    cl_ground_roll: f64,
+    static_thrust_factor: f64,
+    steps: usize,
+) -> f64 {
+    let w = mass_kg * G;
+    let v_lof = 1.10 * ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
+    // Ciclo 12, spec §3.1: flap PARCIAL de decolagem (`cd0_flap_to_extra`) —
+    // a aeronave rola com o flap de decolagem já deflexionado.
+    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll, wing.cd0_flap_to_extra);
+    let engine_rpm = engine.rpm_max_continuous;
+
+    let thrust_fn = |v: f64| thrust_ground_roll_n(
+        v, engine, engine_rpm, state.prop_diameter_m, 0.0, isa_delta_c,
+        static_thrust_factor, state.psru_efficiency);
+    let drag_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cd_roll;
+    let lift_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cl_ground_roll;
+
+    integra_rolagem_decolagem_com_passos(mass_kg, v_lof, thrust_fn, drag_fn, lift_fn, mu_roll,
+                                          steps)
+}
+
+/// `takeoff_ground_roll_com_passos` na resolução de PRODUÇÃO (200
+/// intervalos de Simpson) — ver docstring acima para o modelo físico
+/// completo e o histórico `old→new` do método energético de Raymer que
+/// esta função substitui.
 fn takeoff_ground_roll_m(
     mass_kg: f64,
     rho: f64,
@@ -464,74 +696,72 @@ fn takeoff_ground_roll_m(
     state: &AircraftState,
     engine: &EngineSpec,
     isa_delta_c: f64,
+    mu_roll: f64,
+    cl_ground_roll: f64,
     static_thrust_factor: f64,
 ) -> f64 {
-    let w = mass_kg * G;
-    let cl_to = 0.80 * wing.cl_max_to; // CLmax do flap PARCIAL de decolagem
-    let t_avg = thrust_available_n(
-        0.0, // tração estática (solo, V=0)
-        engine,
-        engine.rpm_max_continuous,
-        state.psru_ratio,
-        state.prop_diameter_m,
-        0.0, // nível do mar
-        isa_delta_c,
-        static_thrust_factor,
-        state.psru_efficiency,
-    );
-    w * w / (G * rho * wing.area_m2 * cl_to * t_avg)
+    takeoff_ground_roll_com_passos(mass_kg, rho, wing, state, engine, isa_delta_c, mu_roll,
+                                    cl_ground_roll, static_thrust_factor, 200)
 }
 
 /// Distância de decolagem — rolagem de solo × 1,5 (aproximação de
-/// transição de Raymer) × fator de superfície. MANTIDA como estimativa
-/// simplificada baseada em rolagem de solo (ver `PerformanceSpec::
-/// to_distance_paved_m`/`to_distance_grass_m`) — a distância física sobre
-/// obstáculo de 15m (50 ft) por segmentos vive em
-/// `takeoff_distance_50ft_m` (Task 4.7), que NÃO usa este fator ad hoc de
-/// 1,5.
+/// transição de Raymer). MANTIDA como estimativa simplificada baseada em
+/// rolagem de solo (ver `PerformanceSpec::to_distance_paved_m`/
+/// `to_distance_grass_m`) — a distância física sobre obstáculo de 15m
+/// (50 ft) por segmentos vive em `takeoff_distance_50ft_m` (Task 4.7), que
+/// NÃO usa este fator ad hoc de 1,5.
 ///
-/// Fator de superfície:
-///   pista pavimentada seca: 1.00
-///   gramado firme:          1.15–1.20
-///   terra compactada:       1.25
+/// Ciclo 12 (`old→new`): `surface_factor: f64` (1,00 pavimentado / 1,15–1,20
+/// grama / 1,25 terra) SAI da assinatura, substituído por `mu_roll: f64` e
+/// `cl_ground_roll: f64` — a rolagem de solo agora integra o atrito
+/// explicitamente (`takeoff_ground_roll_m`), então multiplicar pelo fator de
+/// superfície contaria a grama duas vezes (spec §4). `mu_roll` vem de
+/// `[performance].mu_roll_paved`/`mu_roll_grass`; `cl_ground_roll` de
+/// `[stability].cl_ground_rotation`.
 pub fn takeoff_distance_m(
     mass_kg: f64,
     rho: f64,
     wing: &WingSpec,
     state: &AircraftState,
-    surface_factor: f64,
+    mu_roll: f64,
+    cl_ground_roll: f64,
     engine: &EngineSpec,
     isa_delta_c: f64,
     static_thrust_factor: f64,
 ) -> f64 {
     let s_ground = takeoff_ground_roll_m(mass_kg, rho, wing, state, engine, isa_delta_c,
-                                          static_thrust_factor);
-    s_ground * 1.5 * surface_factor
+                                          mu_roll, cl_ground_roll, static_thrust_factor);
+    s_ground * 1.5
 }
 
 /// Distância de decolagem sobre obstáculo de 15m (50 ft), por segmentos
 /// (Task 4.7) — substitui o fator ad hoc de transição ×1,5 por física real:
 ///
 ///   S_total = S_ground + S_rotação + S_subida
-///     S_ground:  rolagem de solo (`takeoff_ground_roll_m`) × fator de
-///                superfície (a superfície só afeta o atrito no solo, não
-///                a rotação/subida no ar)
+///     S_ground:  rolagem de solo integrada (`takeoff_ground_roll_m`, ciclo
+///                12 — `mu_roll` já embute o atrito de superfície, sem
+///                multiplicador adicional, ver docstring de
+///                `takeoff_distance_m`)
 ///     S_rotação: V_LOF × `rotation_time_s` (rotação a V_LOF ≈ constante)
 ///     S_subida:  15 / tan(γ), γ = arcsin(RC/V) avaliado a 1,2·V_s_TO
 ///                (flap de decolagem, `cl_max_to`), potência de decolagem,
 ///                nível do mar
+///
+/// Ciclo 12 (`old→new`): mesma troca de assinatura de `takeoff_distance_m`
+/// — `surface_factor` sai, `mu_roll`/`cl_ground_roll` entram.
 pub fn takeoff_distance_50ft_m(
     mass_kg: f64,
     rho: f64,
     wing: &WingSpec,
     state: &AircraftState,
-    surface_factor: f64,
+    mu_roll: f64,
+    cl_ground_roll: f64,
     engine: &EngineSpec,
     isa_delta_c: f64,
     perf_cfg: &PerformanceCfg,
 ) -> f64 {
     let s_ground = takeoff_ground_roll_m(mass_kg, rho, wing, state, engine, isa_delta_c,
-                                          perf_cfg.static_thrust_factor) * surface_factor;
+                                          mu_roll, cl_ground_roll, perf_cfg.static_thrust_factor);
 
     let w = mass_kg * G;
     // Ciclo 7 (task 1): `cl_max_to` (flap PARCIAL de decolagem), não o
@@ -543,10 +773,10 @@ pub fn takeoff_distance_50ft_m(
 
     let v_climb = 1.20 * v_s_to;
     let engine_rpm_to = engine.rpm_max_continuous;
-    // Ciclo 8 (task 1): cd0_flap_to_extra — único segmento de decolagem que
-    // consome a polar de arrasto (rolagem é o método ENERGÉTICO de Raymer,
-    // sem termo de arrasto; rotação é puramente cinemática, V_LOF×tempo —
-    // ver `takeoff_ground_roll_m` e o parágrafo acima).
+    // Ciclo 8 (task 1): cd0_flap_to_extra — segmento de SUBIDA consome a
+    // polar de arrasto (rotação é puramente cinemática, V_LOF×tempo; o
+    // segmento de SOLO consome a polar via `cd_ground_roll` desde o ciclo
+    // 12, ver `takeoff_ground_roll_m`).
     let pex = excess_power_kw(v_climb, mass_kg, rho, wing, engine, engine_rpm_to,
                                state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
                                perf_cfg.static_thrust_factor, state.psru_efficiency,
@@ -563,20 +793,130 @@ pub fn takeoff_distance_50ft_m(
     s_ground + s_rotation + s_climb
 }
 
-/// Rolagem de solo no pouso (frenagem):
+/// CL em atitude de solo com flap de POUSO (cheio) — ciclo 12, spec §5.2.
+/// DERIVADO, não parâmetro livre novo: o flap desloca a curva CL(α) quase
+/// paralelamente, de modo que o incremento de CL em ATITUDE FIXA é
+/// aproximadamente igual ao incremento de CL_max — verdadeiro para flap
+/// simples e slotted dentro da precisão deste modelo. `cl_ground_roll_to`
+/// (`[stability].cl_ground_rotation`) já embute a fração PARCIAL de
+/// decolagem, então falta a fração COMPLEMENTAR `(1 − to_flap_fraction)` do
+/// incremento de flap CHEIO:
 ///
-///   S_G = V_ref² / (2·g·μ)     V_ref = 1.3·V_s
+///   CL_roll_ldg = cl_ground_roll_to + (1 − to_flap_fraction)·(cl_max_flaps
+///                 − cl_max_clean)
 ///
-/// `mu_brake` (Task 4.7, config `[performance]`): vem diretamente de
-/// `mu_brake_paved`/`mu_brake_grass` — substitui os fatores ad hoc
-/// `μ/surface_factor` e `·√surface_factor` do M5 (para pista pavimentada,
-/// factor=1.0, os dois hacks eram identidade — `mu_brake_paved = 0.40`
-/// reproduz numericamente o resultado antigo).
-fn landing_ground_roll_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64) -> f64 {
+/// `wing.cl_max` é o CL_max de POUSO (flap cheio, ver docstring do campo).
+/// Hand-check do baseline real: 0,50 + 0,65·(2,10 − 1,45) = 0,9225.
+///
+/// Derivar em vez de adicionar um campo de config novo mantém fonte única
+/// de verdade — mesma política que já tirou `cl_h_max_down` de parâmetro
+/// livre.
+pub fn cl_ground_roll_landing(
+    cl_ground_roll_to: f64,
+    to_flap_fraction: f64,
+    wing: &WingSpec,
+) -> f64 {
+    cl_ground_roll_to + (1.0 - to_flap_fraction) * (wing.cl_max - wing.cl_max_clean)
+}
+
+/// Integra `S = ∫₀^{V_ref} m·V / F_dec(V) dV` por Simpson composto — o
+/// integrador genérico da rolagem de POUSO (ciclo 12, spec §5), simétrico a
+/// `integra_rolagem_decolagem_com_passos` mas SEM termo de tração: no pouso
+/// a aeronave desacelera por arrasto E atrito de frenagem, os dois SOMAM
+/// (ao contrário da decolagem, onde o arrasto SUBTRAI da tração).
+///
+/// `F_dec(V) = drag_fn(V) + mu_brake·max(0, W_ldg − lift_fn(V))`,
+/// `W_ldg = mass_kg·G`. Mesma guarda falseável de `integra_rolagem_
+/// decolagem_com_passos`: se `F_dec(V) ≤ 0` em qualquer nó, o integrando
+/// naquele nó é `+INFINITY` (nunca NaN — a guarda intercepta ANTES da
+/// divisão).
+fn integra_rolagem_pouso_com_passos(
+    mass_kg: f64,
+    v_ref: f64,
+    drag_fn: impl Fn(f64) -> f64,
+    lift_fn: impl Fn(f64) -> f64,
+    mu_brake: f64,
+    steps: usize,
+) -> f64 {
     let w = mass_kg * G;
-    let v_s = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
-    let v_ref = 1.30 * v_s;
-    v_ref * v_ref / (2.0 * G * mu_brake)
+    let integrando = |v: f64| -> f64 {
+        let n = (w - lift_fn(v)).max(0.0);
+        let f_dec = drag_fn(v) + mu_brake * n;
+        if f_dec <= 0.0 {
+            return f64::INFINITY;
+        }
+        mass_kg * v / f_dec
+    };
+    simpson_composto(integrando, 0.0, v_ref, steps)
+}
+
+/// Rolagem de solo no pouso — integração numérica da equação de movimento
+/// (ciclo 12, spec §5), consumindo a polar completa:
+///
+///   m·dV/dt = −[D(V) + μ_brake·N(V)]
+///   N(V) = max(0, W_ldg − L(V))
+///   S = ∫₀^{V_ref} m·V·dV / F_dec(V)     (Simpson composto, 200 intervalos,
+///                                          `integra_rolagem_pouso_com_
+///                                          passos`)
+///   D(V) = q·S_w·CD_roll_ldg,  CD_roll_ldg = `cd_ground_roll` com
+///          `wing.cd0_flap_ldg_extra` (flap CHEIO — spec §5.3a)
+///   L(V) = q·S_w·cl_ground_roll_ldg   (`cl_ground_roll_landing`, spec §5.2)
+///   V_ref = 1,30·√(2·W_ldg/(ρ·S_w·wing.cl_max))     (inalterado)
+///
+/// **O achado central da task (spec §5.1):** com o flap de pouso mantido
+/// deflexionado durante toda a rolagem (decisão do usuário — a configuração
+/// em que CS 23 mede a distância de pouso desta classe), a sustentação
+/// residual ALIVIA o peso sobre as rodas e PIORA a frenagem; o arrasto
+/// ajuda; o saldo é uma rolagem MAIOR que a de hoje.
+///
+/// HISTÓRICO — DOCSTRING ANTIGA, RESCRITA `old→new` (ciclo 12): até este
+/// ciclo a fórmula era `S_G = V_ref²/(2·g·μ)` — frenagem constante, sem
+/// termo de arrasto aerodinâmico e, mais importante, sem o alívio de peso
+/// que a sustentação residual causa sobre as rodas. `mu_brake` (Task 4.7)
+/// continua vindo de `[performance].mu_brake_paved`/`mu_brake_grass` — essa
+/// parte não mudou; o que muda é que a rolagem agora integra `D(V)` e o
+/// termo `N(V) = max(0, W_ldg − L(V))` explicitamente, em vez de assumir
+/// frenagem a atrito constante sobre o peso TOTAL.
+///
+/// `state: &AircraftState` — parâmetro NOVO (ciclo 12, spec §5.3b): não
+/// existia porque nenhum segmento consumia a polar; agora necessário para
+/// `state.cd0_gear_fixed_increment` dentro de `cd_ground_roll` (o trem está
+/// ESTENDIDO na rolagem de pouso, `wing.cd0` é o CD0 de trem RECOLHIDO).
+fn landing_ground_roll_com_passos(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    mu_brake: f64,
+    cl_ground_roll_ldg: f64,
+    steps: usize,
+) -> f64 {
+    let w = mass_kg * G;
+    let v_ref = 1.30 * ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    // Ciclo 12, spec §5.3a: flap CHEIO de pouso (`cd0_flap_ldg_extra`) — a
+    // aeronave rola com o flap de pouso já deflexionado, ao contrário da
+    // rolagem de decolagem (`cd0_flap_to_extra`, flap PARCIAL).
+    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll_ldg, wing.cd0_flap_ldg_extra);
+
+    let drag_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cd_roll;
+    let lift_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cl_ground_roll_ldg;
+
+    integra_rolagem_pouso_com_passos(mass_kg, v_ref, drag_fn, lift_fn, mu_brake, steps)
+}
+
+/// `landing_ground_roll_com_passos` na resolução de PRODUÇÃO (200
+/// intervalos de Simpson) — ver docstring acima para o modelo físico
+/// completo e o histórico `old→new` da fórmula de frenagem constante que
+/// esta função substitui.
+fn landing_ground_roll_m(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    mu_brake: f64,
+    cl_ground_roll_ldg: f64,
+) -> f64 {
+    landing_ground_roll_com_passos(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg, 200)
 }
 
 /// Distância de pouso — rolagem de solo + distância aérea fixa de 200 m
@@ -584,8 +924,21 @@ fn landing_ground_roll_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64)
 /// estimativa baseada em rolagem de solo (`PerformanceSpec::
 /// landing_distance_m`) — a distância física sobre obstáculo de 15m (50 ft)
 /// por segmentos vive em `landing_distance_50ft_m` (Task 4.7).
-pub fn landing_distance_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64) -> f64 {
-    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, mu_brake);
+///
+/// Ciclo 12 (`old→new`): `state: &AircraftState` e `cl_ground_roll_ldg: f64`
+/// entram na assinatura — a rolagem de solo agora integra a polar completa
+/// (`landing_ground_roll_m`, spec §5), que precisa dos dois. `mu_brake` vem
+/// de `[performance].mu_brake_paved`/`mu_brake_grass`; `cl_ground_roll_ldg`
+/// de `cl_ground_roll_landing`.
+pub fn landing_distance_m(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    mu_brake: f64,
+    cl_ground_roll_ldg: f64,
+) -> f64 {
+    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg);
     let s_air = 200.0;
     s_ground + s_air
 }
@@ -596,28 +949,37 @@ pub fn landing_distance_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64
 ///   S_total = S_ar + S_flare + S_ground
 ///     S_ar:    15 / tan(γ_app), γ_app = `approach_angle_deg` (padrão 3°)
 ///     S_flare: V_ref × `flare_time_s`
-///     S_ground: rolagem de solo (`landing_ground_roll_m`, `mu_brake`)
+///     S_ground: rolagem de solo integrada (`landing_ground_roll_m`, ciclo
+///               12 — `mu_brake` já embute o atrito de superfície, sem
+///               multiplicador adicional)
 ///
-/// AUDITORIA (ciclo 8, task 1): nenhum dos três segmentos consome a polar de
-/// arrasto (`wing.cd0`), logo nenhum recebe `cd0_flap_delta` — `cd0_flap_
-/// ldg_extra` NÃO existe em `WingSpec` porque nada o consumiria (ver
-/// docstring de `WingCfg::cd0_flap_delta`):
-///   - S_ar usa um ângulo de aproximação FIXO (`approach_angle_deg`, dado de
-///     projeto), não uma razão L/D derivada da polar — diferente de
-///     `best_glide` (que usa `wing.cd0`, mas é planeio com motor cortado,
-///     conceito distinto de aproximação de pouso com flap, fora de escopo);
-///   - S_flare é puramente cinemático (V_ref × tempo fixo);
-///   - S_ground é dominado por frenagem (`mu_brake`), sem termo de arrasto.
-/// `wing.cl_max` (CL_max de POUSO, flap CHEIO) já é a referência correta de
-/// V_s/V_ref aqui — isso não mudou.
+/// HISTÓRICO — DOCSTRING ANTIGA, RESCRITA `old→new` (ciclo 12, spec §5.3b).
+/// A AUDITORIA do ciclo 8 (task 1) concluíra que nenhum dos três segmentos
+/// consumia a polar de arrasto, logo nenhum recebia `cd0_flap_delta`: S_ar
+/// usava um ângulo de aproximação FIXO (não uma razão L/D derivada da
+/// polar — diferente de `best_glide`, que usa `wing.cd0`, mas é planeio com
+/// motor cortado, conceito distinto de aproximação de pouso com flap); S_ar
+/// e S_flare continuam exatamente assim (ângulo fixo/puramente cinemático —
+/// **isso não mudou**). **O que mudou é S_ground**: até o ciclo 11 era
+/// dominado por frenagem sem termo de arrasto (`S_G = V_ref²/(2gμ)`); desde
+/// o ciclo 12 integra a equação de movimento e consome a polar completa via
+/// `landing_ground_roll_m` (`wing.cd0_flap_ldg_extra`, flap CHEIO —
+/// primeiro consumidor real do delta cheio). `wing.cl_max` (CL_max de
+/// POUSO, flap CHEIO) já era a referência correta de V_s/V_ref aqui — isso
+/// não mudou.
+///
+/// `state: &AircraftState` e `cl_ground_roll_ldg: f64` entram na assinatura
+/// pela mesma razão de `landing_distance_m` acima.
 pub fn landing_distance_50ft_m(
     mass_kg: f64,
     rho: f64,
     wing: &WingSpec,
+    state: &AircraftState,
     mu_brake: f64,
+    cl_ground_roll_ldg: f64,
     perf_cfg: &PerformanceCfg,
 ) -> f64 {
-    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, mu_brake);
+    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg);
 
     let w = mass_kg * G;
     let v_s = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
@@ -707,6 +1069,15 @@ impl PerformanceAgent {
         engine: &EngineSpec,
         req: &Requirements,
         perf_cfg: &PerformanceCfg,
+        // Ciclo 12 (task 2): CL de solo antes da rotação, consumido pela
+        // rolagem de decolagem integrada (`takeoff_distance_m`/
+        // `takeoff_distance_50ft_m`) — o mesmo `[stability].cl_ground_
+        // rotation` que `agents::trim_authority` já usa na rotação, agora
+        // reusado pela rolagem INTEIRA (assume atitude constante do início
+        // da corrida até a rotação, ver spec §3.1). Parâmetro novo: antes
+        // desta task `PerformanceAgent::run` não recebia nada de
+        // `[stability]`.
+        cl_ground_rotation: f64,
     ) -> PerformanceSpec {
         // Task 4.6: densidades de desempenho (subida/teto/decolagem/pouso)
         // agora usam a atmosfera ISA completa (`Isa::density_kgm3`) no ΔISA
@@ -740,21 +1111,39 @@ impl PerformanceAgent {
         // Teto de serviço
         let ceiling = service_ceiling_m(mass_mid, isa_delta_c, wing, state, engine, stf);
 
-        // Distâncias de decolagem (rolagem × 1,5, estimativa simplificada)
-        let d_to_paved = takeoff_distance_m(mtow_kg, rho_sl, wing, state, 1.00, engine, isa_delta_c, stf);
-        let d_to_grass  = takeoff_distance_m(mtow_kg, rho_sl, wing, state, 1.20, engine, isa_delta_c, stf);
+        // Distâncias de decolagem (rolagem × 1,5, estimativa simplificada).
+        // Ciclo 12: `surface_factor` (1,00/1,20) sai, `mu_roll_paved`/
+        // `mu_roll_grass` entram — a rolagem integrada já cobra o atrito de
+        // superfície explicitamente (spec §4).
+        let d_to_paved = takeoff_distance_m(mtow_kg, rho_sl, wing, state,
+                                             perf_cfg.mu_roll_paved, cl_ground_rotation, engine,
+                                             isa_delta_c, stf);
+        let d_to_grass  = takeoff_distance_m(mtow_kg, rho_sl, wing, state,
+                                              perf_cfg.mu_roll_grass, cl_ground_rotation, engine,
+                                              isa_delta_c, stf);
 
         // Distâncias de decolagem sobre obstáculo de 15m/50ft, por segmentos
         // (Task 4.7)
-        let d_to_50ft_paved = takeoff_distance_50ft_m(mtow_kg, rho_sl, wing, state, 1.00, engine,
-                                                        isa_delta_c, perf_cfg);
-        let d_to_50ft_grass = takeoff_distance_50ft_m(mtow_kg, rho_sl, wing, state, 1.20, engine,
-                                                        isa_delta_c, perf_cfg);
+        let d_to_50ft_paved = takeoff_distance_50ft_m(mtow_kg, rho_sl, wing, state,
+                                                        perf_cfg.mu_roll_paved, cl_ground_rotation,
+                                                        engine, isa_delta_c, perf_cfg);
+        let d_to_50ft_grass = takeoff_distance_50ft_m(mtow_kg, rho_sl, wing, state,
+                                                        perf_cfg.mu_roll_grass, cl_ground_rotation,
+                                                        engine, isa_delta_c, perf_cfg);
 
         // Distância de pouso (massa de pouso ≈ MTOW - 60% combustível)
         let mass_ldg = mtow_kg - prop.fuel_capacity_l * fuel_density * 0.60;
-        let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, perf_cfg.mu_brake_paved);
-        let d_ldg_50ft = landing_distance_50ft_m(mass_ldg, rho_sl, wing, perf_cfg.mu_brake_paved,
+        // Ciclo 12 (task 3), spec §5.2: CL de solo em atitude de pouso
+        // (flap CHEIO) — DERIVADO do mesmo `cl_ground_rotation` que a
+        // decolagem usa, mais a fração complementar de flap
+        // (`state.to_flap_fraction`, já consumida pela decolagem acima e
+        // por `agents::trim_authority`).
+        let cl_ground_roll_ldg = cl_ground_roll_landing(cl_ground_rotation, state.to_flap_fraction,
+                                                          wing);
+        let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, state, perf_cfg.mu_brake_paved,
+                                        cl_ground_roll_ldg);
+        let d_ldg_50ft = landing_distance_50ft_m(mass_ldg, rho_sl, wing, state,
+                                                   perf_cfg.mu_brake_paved, cl_ground_roll_ldg,
                                                    perf_cfg);
         // Pouso na GRAMA sobre 15 m (revisão final do ciclo 6): MESMA
         // chamada do pavimentado acima, só o μ de frenagem troca
@@ -762,8 +1151,9 @@ impl PerformanceAgent {
         // esta correção, `mu_brake_grass` era validado em `config.rs` e
         // NUNCA consumido — o check #24 gateava a pista de grama com a
         // distância de pouso PAVIMENTADA, otimista por construção.
-        let d_ldg_50ft_grass = landing_distance_50ft_m(mass_ldg, rho_sl, wing,
-                                                         perf_cfg.mu_brake_grass, perf_cfg);
+        let d_ldg_50ft_grass = landing_distance_50ft_m(mass_ldg, rho_sl, wing, state,
+                                                         perf_cfg.mu_brake_grass, cl_ground_roll_ldg,
+                                                         perf_cfg);
 
         // Melhor planeio (Task 4.7) — MTOW, nível do mar, motor cortado.
         let (v_bg_kmh, ld_max) = best_glide(mtow_kg, rho_sl, wing);
@@ -818,6 +1208,198 @@ mod tests {
         let prop   = PropulsionAgent::run(&state, &req, &wing, &engine);
         let perf_cfg = cfg.performance.clone();
         (state, wing, prop, engine, req, perf_cfg)
+    }
+
+    // ─── Ciclo 12 (task 2): fixtures locais para os testes de rolagem ───────
+    //
+    // `fixture_baseline()`, `MTOW_PIN_KG` não existem no repositório antes
+    // desta task — são a forma que os testes de `thrust_ground_roll_n`/
+    // integrador precisam (padrão orientado pelo plano: reaproveitar
+    // `config_teste()`/`setup()`, nenhuma fixture nova em arquivo separado).
+    // Nenhum destes testes precisa bater com os números congelados — são
+    // todos propriedades relacionais, então `MTOW_PIN_KG` não precisa
+    // coincidir com o MTOW real calculado por `config_teste()`. `RHO_SL` já
+    // está importado acima (`crate::models::atmosphere::RHO_SL`).
+    fn fixture_baseline() -> (EngineSpec, AircraftState, WingSpec) {
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
+        (engine, state, wing)
+    }
+
+    const MTOW_PIN_KG: f64 = 1500.0;
+
+    /// CL de solo antes da rotação (`[stability].cl_ground_rotation`) da
+    /// fixture sintética — helper para os testes que não desestruturam o
+    /// `AircraftConfig` inteiro via `setup()`.
+    fn cl_ground_rotation_teste() -> f64 {
+        config_teste().stability.cl_ground_rotation
+    }
+
+    // ─── Ciclo 12 (task 2), spec §2: `thrust_ground_roll_n` ─────────────────
+
+    /// Ciclo 12, spec §2.1: em V=0 a cúbica degenera em u³ = K e o empuxo
+    /// resultante é ALGEBRICAMENTE (2ρA·P²)^(1/3) — exatamente o modelo
+    /// estático de hoje. `thrust_ground_roll_n` é uma REFINAÇÃO do modelo
+    /// atual, não uma substituição: o ponto V=0 tem de coincidir.
+    #[test]
+    fn tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_de_hoje() {
+        let (engine, state, _wing) = fixture_baseline();
+        let novo = thrust_ground_roll_n(
+            0.0, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
+            0.0, 0.0, 0.75, state.psru_efficiency);
+        let hoje = thrust_available_n(
+            0.0, &engine, engine.rpm_max_continuous, state.psru_ratio,
+            state.prop_diameter_m, 0.0, 0.0, 0.75, state.psru_efficiency);
+        let erro_rel = (novo - hoje).abs() / hoje;
+        assert!(erro_rel < 1e-9, "novo={novo}, hoje={hoje}, erro_rel={erro_rel}");
+    }
+
+    /// A tração cai monotonicamente com a velocidade de avanço a potência
+    /// constante. Falseável: se a resolução da cúbica errar o ramo, isto
+    /// quebra.
+    #[test]
+    fn tracao_de_rolagem_cai_estritamente_com_a_velocidade() {
+        let (engine, state, _wing) = fixture_baseline();
+        let t = |v: f64| thrust_ground_roll_n(
+            v, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
+            0.0, 0.0, 0.75, state.psru_efficiency);
+        let (t0, t10, t20, t36) = (t(0.0), t(10.0), t(20.0), t(36.0));
+        assert!(t0 > t10 && t10 > t20 && t20 > t36,
+                "esperado estritamente decrescente: {t0} {t10} {t20} {t36}");
+        assert!(t36 > 0.0, "tração tem de ser positiva em V_LOF: {t36}");
+    }
+
+    /// Fix round 1 do report da task (achado do revisor) — guarda de NaN.
+    /// `K = P_eixo/(2ρA) ≤ 0` com `V = 0` faz a primeira iteração de Newton
+    /// calcular `0/0`. Este cenário é INALCANÇÁVEL pelo caminho de
+    /// produção (`psru_efficiency > 0` é validado em `models::config`),
+    /// mas chamar a função pura diretamente com `psru_efficiency = 0.0`
+    /// (fora da config validada, de propósito) prova a guarda: sem ela,
+    /// este teste veria NaN.
+    #[test]
+    fn tracao_de_rolagem_nao_produz_nan_quando_potencia_de_eixo_e_nula() {
+        let (engine, state, _wing) = fixture_baseline();
+        let t = thrust_ground_roll_n(
+            0.0, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
+            0.0, 0.0, 0.75, 0.0 /* psru_efficiency=0 ⟹ P_eixo=0 ⟹ K=0 */);
+        assert!(!t.is_nan(), "K=0 com V=0 não pode devolver NaN: {t}");
+        assert_eq!(t, 0.0, "sem potência de eixo, a tração devolvida deve ser exatamente zero: {t}");
+    }
+
+    // ─── Ciclo 12 (task 2), spec §3/§7: integrador de rolagem ───────────────
+
+    /// Spec §7.1 — prova contra fechada analítica, não contra pin: com
+    /// atrito e arrasto nulos e tração constante, a integração TEM de
+    /// reproduzir S = ½·m·V²/T exatamente.
+    #[test]
+    fn integrador_de_rolagem_reproduz_a_solucao_analitica_sem_atrito_nem_arrasto() {
+        let m = 1500.0_f64;
+        let v_lof = 35.0_f64;
+        let t_const = 3000.0_f64;
+        let s = integra_rolagem_decolagem(m, v_lof, |_v| t_const, |_v| 0.0, |_v| 0.0, 0.0);
+        let analitico = 0.5 * m * v_lof * v_lof / t_const;
+        let erro_rel = (s - analitico).abs() / analitico;
+        assert!(erro_rel < 1e-9, "s={s}, analitico={analitico}, erro_rel={erro_rel}");
+    }
+
+    /// Spec §7.2 — resultado em resolução não convergida é DEFEITO, não
+    /// resultado. Mesma lição do argmax na fronteira (ciclo 11).
+    #[test]
+    fn integrador_de_rolagem_esta_convergido_na_resolucao_escolhida() {
+        let (engine, state, wing) = fixture_baseline();
+        let s_200 = takeoff_ground_roll_com_passos(MTOW_PIN_KG, RHO_SL, &wing, &state,
+                                                    &engine, 0.0, 0.04, 0.5, 0.75, 200);
+        let s_400 = takeoff_ground_roll_com_passos(MTOW_PIN_KG, RHO_SL, &wing, &state,
+                                                    &engine, 0.0, 0.04, 0.5, 0.75, 400);
+        let dif_rel = (s_400 - s_200).abs() / s_200;
+        assert!(dif_rel < 1e-3, "não convergido: 200={s_200}, 400={s_400}, dif={dif_rel}");
+    }
+
+    /// Spec §7.3 — monotonicidades ESTRITAS: μ maior ⟹ rolagem maior; peso
+    /// maior ⟹ rolagem maior. Cada uma é falseável: se o sinal de um termo
+    /// estiver trocado, uma delas quebra. As outras duas exigidas pela spec
+    /// (CD0 maior ⟹ maior; tração maior ⟹ menor) vivem em
+    /// `rolagem_de_decolagem_aumenta_estritamente_com_cd0_maior` e
+    /// `rolagem_de_decolagem_cai_estritamente_com_tracao_maior` — Fix round
+    /// 1 do report da task (o plano só cobriu duas das quatro; achado do
+    /// revisor: trocar o sinal do arrasto em `F_net` fazia os 27 testes
+    /// locais de `performance.rs` passarem mesmo assim, inclusive este —
+    /// só o pin de 1% de `tests/generic_engine.rs` e um flip de robustez,
+    /// em outro arquivo, pegavam o bug).
+    #[test]
+    fn rolagem_de_decolagem_responde_no_sentido_certo_a_cada_termo() {
+        let (engine, state, wing) = fixture_baseline();
+        let roll = |mu: f64, mass: f64| takeoff_ground_roll_m(
+            mass, RHO_SL, &wing, &state, &engine, 0.0, mu, 0.5, 0.75);
+        assert!(roll(0.08, MTOW_PIN_KG) > roll(0.04, MTOW_PIN_KG), "atrito maior ⟹ rolagem maior");
+        assert!(roll(0.04, MTOW_PIN_KG) > roll(0.04, MTOW_PIN_KG * 0.8), "peso maior ⟹ rolagem maior");
+    }
+
+    /// Spec §7.3 (Fix round 1) — CD0 maior ⟹ mais arrasto ⟹ rolagem maior.
+    /// Falseável sozinha: se o sinal do termo de arrasto em `F_net` for
+    /// trocado (arrasto SOMADO em vez de SUBTRAÍDO), CD0 maior passa a dar
+    /// F_net MAIOR ⟹ rolagem MENOR — esta asserção quebra na hora. Muda só
+    /// `wing.cd0`, resto da config fixo.
+    #[test]
+    fn rolagem_de_decolagem_aumenta_estritamente_com_cd0_maior() {
+        let (engine, state, mut wing) = fixture_baseline();
+        let roll_baixo = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, 0.75);
+        wing.cd0 += 0.05; // CD0 bem maior — resto da fixture intacto
+        let roll_alto = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, 0.75);
+        assert!(roll_alto > roll_baixo,
+            "CD0 maior deveria dar rolagem ESTRITAMENTE maior (mais arrasto): \
+             roll(cd0 baixo)={roll_baixo}, roll(cd0 alto)={roll_alto}");
+    }
+
+    /// Spec §7.3 (Fix round 1) — tração maior ⟹ mais força líquida ⟹
+    /// rolagem menor. Varia `static_thrust_factor` (parâmetro direto de
+    /// `takeoff_ground_roll_m`, entra em `thrust_ground_roll_n` como
+    /// multiplicador plano — spec §2.3), resto da config fixo. Falseável
+    /// sozinha: se o sinal do termo de tração em `F_net` for trocado
+    /// (tração SUBTRAÍDA em vez de SOMADA), tração maior passaria a dar
+    /// F_net MENOR ⟹ rolagem MAIOR — esta asserção quebra na hora.
+    #[test]
+    fn rolagem_de_decolagem_cai_estritamente_com_tracao_maior() {
+        let (engine, state, wing) = fixture_baseline();
+        let roll = |stf: f64| takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, stf);
+        let roll_tracao_baixa = roll(0.60);
+        let roll_tracao_alta  = roll(0.90);
+        assert!(roll_tracao_baixa > roll_tracao_alta,
+            "tração maior (static_thrust_factor maior) deveria dar rolagem ESTRITAMENTE menor: \
+             roll(stf=0.60)={roll_tracao_baixa}, roll(stf=0.90)={roll_tracao_alta}");
+    }
+
+    /// Spec §7.4 — se a sustentação superar o peso antes de V_LOF, o
+    /// atrito é ZERO, nunca negativo (atrito negativo empurraria a
+    /// aeronave para a frente e ENCURTARIA a rolagem).
+    #[test]
+    fn atrito_nunca_fica_negativo_quando_a_sustentacao_supera_o_peso() {
+        let (engine, state, mut wing) = fixture_baseline();
+        wing.cl_max_to = 0.30; // V_LOF absurdamente alta ⟹ L ≫ W antes do fim
+        let com_atrito_alto = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.50, 3.0, 0.75);
+        let com_atrito_zero = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.00, 3.0, 0.75);
+        assert!(com_atrito_alto >= com_atrito_zero,
+                "atrito nunca pode ENCURTAR a rolagem: {com_atrito_alto} vs {com_atrito_zero}");
+    }
+
+    /// Spec §7.6 — o ramo que a Task 1 (serde de +INFINITY) pressupõe
+    /// existir em produção. No baseline real a tração sobra folgadamente
+    /// (em V_LOF: T=2.324,7 N contra D+μN≈900 N), então este ramo NUNCA é
+    /// exercitado sem um cenário adversarial construído de propósito. Sem
+    /// este teste, um `if F <= 0 { return INFINITY }` esquecido — ou um
+    /// NaN silencioso — passa despercebido.
+    #[test]
+    fn tracao_insuficiente_devolve_infinito_e_nao_numero_espurio() {
+        let (engine, state, wing) = fixture_baseline();
+        // Atrito absurdo: nenhuma tração desta célula acelera a aeronave.
+        let s = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 5.0, 0.5, 0.75);
+        assert!(s.is_infinite(), "esperado +INFINITY, veio {s}");
+        assert!(!s.is_nan(), "NaN é o modo de falha silencioso a evitar");
     }
 
     #[test]
@@ -1010,9 +1592,12 @@ mod tests {
     #[test]
     fn decolagem_50ft_maior_que_rolagem_de_solo_simples() {
         let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let cl_ground_roll = cl_ground_rotation_teste();
         let s_ground = takeoff_ground_roll_m(state.mtow_kg, RHO_SL, &wing, &state, &engine, 0.0,
+                                              perf_cfg.mu_roll_paved, cl_ground_roll,
                                               perf_cfg.static_thrust_factor);
-        let s_50ft = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+        let s_50ft = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
+                                              perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
                                               0.0, &perf_cfg);
         println!("S_ground={s_ground:.0}m  S_50ft={s_50ft:.0}m");
         assert!(s_50ft > s_ground,
@@ -1059,10 +1644,12 @@ mod tests {
             let state = AircraftState::from_config(&cfg);
             let wing = AerodynamicsAgent::run(&state, &req);
             let perf_cfg = cfg.performance.clone();
+            let cl_ground_roll = cfg.stability.cl_ground_rotation;
             (
                 wing.cl_max_to,
                 wing.cd0_flap_to_extra,
-                takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+                takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
+                                        perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
                                         0.0, &perf_cfg),
             )
         };
@@ -1110,11 +1697,14 @@ mod tests {
     #[test]
     fn helice_menor_alonga_decolagem_sobre_obstaculo() {
         let (mut state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let cl_ground_roll = cl_ground_rotation_teste();
         state.prop_diameter_m = 1.9;
-        let s_1_9 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+        let s_1_9 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
+                                             perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
                                              0.0, &perf_cfg);
         state.prop_diameter_m = 1.6;
-        let s_1_6 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine,
+        let s_1_6 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
+                                             perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
                                              0.0, &perf_cfg);
         println!("S_50ft(D=1.9m)={s_1_9:.1}m  S_50ft(D=1.6m)={s_1_6:.1}m");
         assert!(s_1_6 > s_1_9,
@@ -1122,13 +1712,145 @@ mod tests {
              de 15m em relação à maior (D=1.9m): S(1.6)={s_1_6:.1}m, S(1.9)={s_1_9:.1}m");
     }
 
+    // ─── Ciclo 12 (task 3), spec §5: rolagem de pouso por integração ────────
+
+    const M_LDG_PIN_KG: f64 = 1400.0;
+
+    /// Spec §5.2: CL_roll_ldg = cl_ground_rotation + (1 − to_flap_fraction)
+    ///                          · (cl_max_flaps − cl_max_clean)
+    /// Hand-check com os literais do BASELINE REAL (spec §5.2):
+    /// 0,50 + 0,65·(2,10 − 1,45) = 0,9225. A fixture sintética
+    /// `config_teste()` usa `cl_max_flaps`/`cl_max_clean` distintos
+    /// (1,65/1,40, não 2,10/1,45) — sobrescritos aqui SÓ nesta cópia local
+    /// de `wing` para reproduzir o hand-check exato da spec, sem tocar
+    /// `config_teste()` (usado por dezenas de outros testes). O valor
+    /// 0,9225 do baseline REAL é conferido pelo pin em
+    /// `tests/generic_engine.rs`.
+    #[test]
+    fn cl_de_rolagem_de_pouso_hand_check_do_baseline() {
+        let (_engine, _state, mut wing) = fixture_baseline();
+        wing.cl_max = 2.10;
+        wing.cl_max_clean = 1.45;
+        let cl = cl_ground_roll_landing(0.50, 0.35, &wing);
+        assert!((cl - 0.9225).abs() < 1e-9, "cl={cl}");
+        assert!(cl > 0.50, "flap cheio tem de dar MAIS CL que o parcial de decolagem");
+    }
+
+    /// Achado da task 5 (report do ciclo 12): o hand-check acima só cobre os
+    /// literais do BASELINE REAL, plantados numa cópia LOCAL de `wing` —
+    /// nenhum teste deste módulo asserta `cl_ground_roll_landing` contra os
+    /// literais da própria fixture SINTÉTICA `config_teste()`
+    /// (`cl_max_flaps = 1,65`, `cl_max_clean = 1,40`, ver
+    /// `src/models/aircraft_config.rs`), que é o `wing`/`state` que TODOS os
+    /// outros testes deste arquivo usam via `setup()`/`fixture_baseline()`.
+    /// Hand-check com os literais REAIS da fixture sintética (`stability.
+    /// cl_ground_rotation = 0,55`, `stability.to_flap_fraction = 0,5`,
+    /// `wing.cl_max_flaps = 1,65`, `wing.cl_max_clean = 1,40`):
+    ///
+    ///   CL_roll_ldg = cl_ground_rotation + (1 − to_flap_fraction)
+    ///                 · (cl_max_flaps − cl_max_clean)
+    ///               = 0,55 + (1 − 0,5)·(1,65 − 1,40)
+    ///               = 0,55 + 0,5·0,25 = 0,675
+    #[test]
+    fn cl_de_rolagem_de_pouso_hand_check_da_fixture_sintetica() {
+        let (state, wing, _prop, _engine, _req, _perf_cfg) = setup();
+        let cl = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        assert!((cl - 0.675).abs() < 1e-9, "cl={cl}, esperado 0,675");
+    }
+
+    /// Convergência (spec §7.2), mesma exigência da Task 2: dobrar os
+    /// passos muda o resultado em menos de 0,1%.
+    #[test]
+    fn integrador_de_pouso_esta_convergido_na_resolucao_escolhida() {
+        let (_engine, state, wing) = fixture_baseline();
+        let s200 = landing_ground_roll_com_passos(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225,
+                                                    200);
+        let s400 = landing_ground_roll_com_passos(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225,
+                                                    400);
+        assert!((s400 - s200).abs() / s200 < 1e-3, "não convergido: {s200} vs {s400}");
+    }
+
+    /// Spec §5.1 — o achado central desta task: a sustentação residual
+    /// ALIVIA o peso sobre as rodas e PIORA a frenagem. Falseável: se o
+    /// sinal de L no termo de atrito estiver trocado, isto quebra. Termo
+    /// isolado de F_dec = D(V) + μ·max(0, W−L(V)): o de ALÍVIO DE
+    /// SUSTENTAÇÃO.
+    #[test]
+    fn sustentacao_residual_alonga_a_rolagem_de_pouso() {
+        let (_engine, state, wing) = fixture_baseline();
+        let com_cl = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225);
+        let sem_cl = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.0);
+        assert!(com_cl > sem_cl,
+                "CL de solo maior ⟹ menos peso nas rodas ⟹ rolagem MAIOR: {com_cl} vs {sem_cl}");
+    }
+
+    /// Freio melhor ⟹ rolagem menor. Estrita. Termo isolado de F_dec: o de
+    /// ATRITO DE FRENAGEM.
+    #[test]
+    fn frenagem_melhor_encurta_a_rolagem_de_pouso() {
+        let (_engine, state, wing) = fixture_baseline();
+        let pav = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225);
+        let grama = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.30, 0.9225);
+        assert!(grama > pav, "grama (μ menor) tem de dar rolagem maior: {grama} vs {pav}");
+    }
+
+    /// Ciclo 12 (task 3, orientação do engenheiro): o plano cobre atrito de
+    /// frenagem e alívio de sustentação isoladamente, mas falta o terceiro
+    /// termo de F_dec = D(V) + μ·N(V) — o ARRASTO. Lição da Task 2 (achado
+    /// do revisor): sem cobrir cada termo isoladamente, um sinal trocado
+    /// pode passar despercebido pelos testes locais do módulo (na Task 2,
+    /// os 27 testes locais passavam com o sinal do arrasto trocado). No
+    /// POUSO o arrasto SOMA à frenagem (ajuda a desacelerar) — sinal OPOSTO
+    /// ao da decolagem, onde o arrasto ALONGA a rolagem (mais CD0 ⟹ mais
+    /// resistência a vencer para acelerar). CD0 de flap de pouso maior ⟹
+    /// D(V) maior ⟹ F_dec maior ⟹ rolagem MENOR. Termo isolado de F_dec: o
+    /// de ARRASTO.
+    #[test]
+    fn arrasto_maior_encurta_a_rolagem_de_pouso() {
+        let (_engine, state, mut wing) = fixture_baseline();
+        wing.cd0_flap_ldg_extra = 0.100; // artificialmente alto
+        let com_arrasto_alto = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40,
+                                                       0.9225);
+        wing.cd0_flap_ldg_extra = 0.015; // valor de projeto (delta cheio, spec §5.3a)
+        let com_arrasto_baixo = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40,
+                                                        0.9225);
+        assert!(com_arrasto_alto < com_arrasto_baixo,
+            "arrasto maior deveria ENCURTAR a rolagem de pouso (ajuda a desacelerar): \
+             {com_arrasto_alto} vs {com_arrasto_baixo}");
+    }
+
+    /// Espelho do teste de +INFINITY da decolagem (Task 2, spec §7.6): sem
+    /// nenhum mecanismo de desaceleração no início da rolagem (mu_brake=0 e
+    /// CD0 zerados), `F_dec(0) = D(0) + 0·N(0) = 0` exatamente — a guarda
+    /// intercepta ANTES da divisão e o integrando no primeiro nó de Simpson
+    /// (V=0) é +INFINITY, que se propaga para o resultado inteiro (todos os
+    /// pesos de Simpson são positivos, nunca ocorre uma subtração de
+    /// infinitos que produziria NaN). Fisicamente correto: sem atrito, o
+    /// arrasto quadrático sozinho nunca desacelera a aeronave a V=0 em
+    /// distância finita (perto de V=0 o integrando ~ V/V² = 1/V, diverge).
+    /// Este cenário É atingível pela implementação (ao contrário do que o
+    /// plano cogitava como possível) — ver report da task para a
+    /// justificativa medida.
+    #[test]
+    fn desaceleracao_nula_devolve_infinito_e_nao_numero_espurio() {
+        let (_engine, state, mut wing) = fixture_baseline();
+        wing.cd0 = 0.0;
+        wing.cd0_flap_ldg_extra = 0.0;
+        let s = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.0, 0.0);
+        assert!(s.is_infinite() || s.is_nan() == false,
+                "sem arrasto e sem freio a rolagem não pode ser um número finito: {s}");
+    }
+
     #[test]
     fn pouso_50ft_maior_que_pouso_ground_roll_mais_ar_fixo() {
         let (state, wing, prop, engine, _req, perf_cfg) = setup();
         let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
-        let d_legado = landing_distance_m(mass_ldg, RHO_SL, &wing, perf_cfg.mu_brake_paved);
-        let d_50ft = landing_distance_50ft_m(mass_ldg, RHO_SL, &wing, perf_cfg.mu_brake_paved,
-                                              &perf_cfg);
+        // Ciclo 12 (task 3): CL de solo em atitude de pouso (flap CHEIO).
+        let cl_ldg = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        let d_legado = landing_distance_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved,
+                                           cl_ldg);
+        let d_50ft = landing_distance_50ft_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved,
+                                              cl_ldg, &perf_cfg);
         println!("Pouso legado (200m ar fixo)={d_legado:.0}m  Pouso 50ft (segmentado)={d_50ft:.0}m");
         assert!(d_50ft > d_legado,
             "pouso sobre 15m por segmentos ({d_50ft:.0}m) deveria ser MAIOR que a estimativa \
@@ -1139,8 +1861,9 @@ mod tests {
     #[test]
     fn distancia_decolagem_plausivel() {
         let (state, wing, _prop, engine, _req, perf_cfg) = setup();
-        let d = takeoff_distance_m(state.mtow_kg, RHO_SL, &wing, &state, 1.0, &engine, 0.0,
-                                    perf_cfg.static_thrust_factor);
+        let cl_ground_roll = cl_ground_rotation_teste();
+        let d = takeoff_distance_m(state.mtow_kg, RHO_SL, &wing, &state, perf_cfg.mu_roll_paved,
+                                    cl_ground_roll, &engine, 0.0, perf_cfg.static_thrust_factor);
         println!("Decolagem pista pavimentada: {d:.0} m");
         // Task 4.7: T_avg passou a usar tração ESTÁTICA corrigida (Rankine-
         // Froude × static_thrust_factor da fixture, 0.72) em vez da antiga
@@ -1148,21 +1871,39 @@ mod tests {
         // (T_avg menor). Valor observado empiricamente para a fixture
         // sintética pós-Task-4.7: ver task-4.7-report.md para a tabela
         // antes/depois. Janela alargada para cobrir o novo patamar.
-        assert!(d > 200.0 && d < 700.0,
-            "Distância TO {d:.0} m fora do esperado (200–700 m)");
+        //
+        // Ciclo 12 (task 2, `old→new`): a rolagem de solo passa de método
+        // energético fechado (sem arrasto/atrito) para integração numérica
+        // com arrasto e atrito explícitos — mais caro por construção (spec
+        // §0). Valor medido na fixture sintética: 773 m (era < 700 m).
+        // Janela alargada de (200, 700) para (200, 900) para cobrir o novo
+        // patamar — mesmo padrão da atualização anterior, não é um pin
+        // apertado contra o baseline real (esse vive em
+        // `tests/generic_engine.rs`, tolerância 1%).
+        assert!(d > 200.0 && d < 900.0,
+            "Distância TO {d:.0} m fora do esperado (200–900 m)");
     }
 
     #[test]
     fn distancia_pouso_plausivel() {
         let (state, wing, prop, engine, _req, perf_cfg) = setup();
         let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
-        let d = landing_distance_m(mass_ldg, RHO_SL, &wing, perf_cfg.mu_brake_paved);
+        let cl_ldg = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        let d = landing_distance_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved, cl_ldg);
         println!("Pouso pista pavimentada: {d:.0} m");
         // Valor observado empiricamente para a fixture sintética: ~390 m
         // (mu_brake_paved da fixture, 0.38, é próximo do antigo literal
         // hardcoded 0.40 — variação pequena).
-        assert!(d > 300.0 && d < 520.0,
-            "Distância LDG {d:.0} m fora do esperado (300–520 m)");
+        //
+        // Ciclo 12 (task 3, `old→new`): a rolagem de pouso passa a integrar
+        // arrasto e o alívio de sustentação sobre as rodas (spec §5) — mais
+        // longa por construção, mesmo padrão qualitativo da task 2 na
+        // decolagem. Janela alargada de (300, 520) para (300, 650) para
+        // cobrir o novo patamar da fixture sintética — não é um pin
+        // apertado contra o baseline real (esse vive em
+        // `tests/generic_engine.rs`, tolerância 1%).
+        assert!(d > 300.0 && d < 650.0,
+            "Distância LDG {d:.0} m fora do esperado (300–650 m)");
     }
 
     #[test]
@@ -1246,7 +1987,8 @@ mod tests {
     #[test]
     fn velocidade_cruzeiro_acima_do_requisito() {
         let (state, wing, prop, engine, req, perf_cfg) = setup();
-        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req, &perf_cfg);
+        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req, &perf_cfg,
+                                          cl_ground_rotation_teste());
         println!("V_cruise = {:.1} km/h", perf.v_cruise_kmh);
         assert!(perf.v_cruise_kmh >= 280.0,
             "V_cruise {:.1} km/h abaixo do requisito de 280 km/h", perf.v_cruise_kmh);
@@ -1258,7 +2000,8 @@ mod tests {
         // (bloqueado por `.max(0.0)`) nem fisicamente >100% para esta
         // aeronave/motor sintéticos.
         let (state, wing, prop, engine, req, perf_cfg) = setup();
-        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req, &perf_cfg);
+        let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req, &perf_cfg,
+                                          cl_ground_rotation_teste());
         println!("climb_gradient_pct = {:.2}%  Vx={:.1}km/h  Vy={:.1}km/h",
                  perf.climb_gradient_pct, perf.vx_kmh, perf.vy_kmh);
         assert!(perf.climb_gradient_pct > 0.0 && perf.climb_gradient_pct < 100.0,

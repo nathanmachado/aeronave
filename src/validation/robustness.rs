@@ -501,7 +501,8 @@ impl RobustnessAgent {
                 // passasse a depender de `sigma`).
                 let perf_p = crate::agents::performance::PerformanceAgent::run(
                     &sized_p.state, &sized_p.wing, &sized_p.prop,
-                    sized_p.state.mtow_kg, engine, req, &cfg_p.performance);
+                    sized_p.state.mtow_kg, engine, req, &cfg_p.performance,
+                    cfg_p.stability.cl_ground_rotation);
                 // Pista (Ciclo 6, task 2/3): mesma comparação de
                 // `ConstraintChecker::verify` #23/#24 (`perf.{to_50ft_grass,
                 // ldg_50ft_grass}_m > req.runway_available_m` é violação,
@@ -708,7 +709,7 @@ mod tests {
         let prop = sized.prop;
         let mission = sized.mission;
         let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
-                                          &cfg.performance);
+                                          &cfg.performance, cfg.stability.cl_ground_rotation);
         let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
         let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
         let gear = LandingGearAgent::run(
@@ -824,6 +825,15 @@ mod tests {
     /// (desenhada só para o caso "traseiro") agora produz 2 flips de
     /// Tipback, não 1: "traseiro" (achado original) e "massa-total"
     /// (achado honesto desta task — não forçado, apenas verificado).
+    ///
+    /// Ciclo 12 (task 2, `old→new`): a rolagem de decolagem passa a integrar
+    /// arrasto e atrito explícitos (spec `2026-08-15-ciclo12-solo-honesto`)
+    /// — na fixture sintética a distância sobre 15 m na grama cresce o
+    /// bastante para que o mundo massa-total (peso ainda maior que o
+    /// nominal) estoure `req.runway_available_m` (700 m) pela primeira vez,
+    /// mesmo nesta config que não mexe em nada de decolagem — achado
+    /// honesto colateral, não forçado. Contagem 2 → **3** flips: os dois de
+    /// Tipback (inalterados) mais "Decolagem (grama, 15 m)"/massa-total.
     #[test]
     fn config_marginal_gera_flip_nomeado() {
         let n0 = nominal_pipeline(config_teste());
@@ -836,6 +846,9 @@ mod tests {
         assert!(n.gear.tipback_angle_deg >= n.cfg.gear.tipback_min_deg,
             "pré-condição do teste: tipback nominal ({:.3}) deveria passar por pouco o piso \
              marginal ({:.3})", n.gear.tipback_angle_deg, n.cfg.gear.tipback_min_deg);
+        assert!(n.perf.to_50ft_grass_m <= n.req.runway_available_m,
+            "pré-condição do teste: decolagem nominal na grama ({:.1} m) deveria passar dentro \
+             da pista ({:.1} m)", n.perf.to_50ft_grass_m, n.req.runway_available_m);
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
@@ -843,11 +856,14 @@ mod tests {
         );
         println!("flips={:?}", out.flips);
 
-        assert_eq!(out.flips.len(), 2,
-            "esperava exatamente 2 flips (Tipback/traseiro + Tipback/massa-total): {:?}",
-            out.flips);
-        for flip in &out.flips {
-            assert_eq!(flip.check, "Tipback");
+        let flips_tipback: Vec<_> = out.flips.iter().filter(|f| f.check == "Tipback").collect();
+        let flips_decolagem: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Decolagem (grama, 15 m)").collect();
+        assert_eq!(out.flips.len(), flips_tipback.len() + flips_decolagem.len(),
+            "só esperava flips de Tipback ou de Decolagem (grama, 15 m): {:?}", out.flips);
+        assert_eq!(flips_tipback.len(), 2,
+            "esperava exatamente 2 flips de Tipback (traseiro + massa-total): {:?}", out.flips);
+        for flip in &flips_tipback {
             assert!(flip.caso == "traseiro" || flip.caso == "massa-total",
                 "caso inesperado para o flip de Tipback: {}", flip.caso);
             assert!(flip.valor < flip.limite,
@@ -855,6 +871,14 @@ mod tests {
                 flip.valor, flip.limite);
             assert!((flip.limite - n.cfg.gear.tipback_min_deg).abs() < 1e-9);
         }
+        // Ciclo 12 (task 2): achado colateral honesto — ver docstring acima.
+        assert_eq!(flips_decolagem.len(), 1,
+            "esperava exatamente 1 flip de Decolagem (grama, 15 m), caso massa-total (achado \
+             colateral do ciclo 12, task 2): {:?}", out.flips);
+        assert_eq!(flips_decolagem[0].caso, "massa-total");
+        assert!(flips_decolagem[0].valor > flips_decolagem[0].limite,
+            "valor ({}) deveria exceder o limite ({}) — é isso que caracteriza o flip de \
+             decolagem", flips_decolagem[0].valor, flips_decolagem[0].limite);
     }
 
     /// Tanque apertado (`fuel_system.capacity_l = 172.0`, achado por sonda
@@ -1076,21 +1100,46 @@ mod tests {
     }
 
     /// Envelope/nariz no mundo massa-total: fixture com `arms.pax_rear_m`
-    /// deslocado (5.75→6.2, achado por sonda numérica) até o cenário "4 pax
-    /// sem bagagem" ficar DENTRO do envelope nominal mas perto do limite
-    /// TRASEIRO — o mundo +σ re-convergido (MTOW maior desloca o CG desse
-    /// cenário para TRÁS, ≈37,35%) cruza esse limite, gerando o flip
-    /// nomeado "Cenário '4 pax sem bagagem'" caso "massa-total".
+    /// deslocado até o cenário "4 pax sem bagagem" ficar DENTRO do envelope
+    /// nominal mas perto do limite TRASEIRO — o mundo +σ re-convergido
+    /// (MTOW maior desloca o CG desse cenário para TRÁS) cruza esse limite,
+    /// gerando o flip nomeado "Cenário '4 pax sem bagagem'" caso
+    /// "massa-total".
     /// Fixture folgada (`config_teste()` intacta, sem o ajuste): NENHUM
     /// cenário passa no nominal (`inside_envelope` sempre `false` nessa
     /// fixture sintética — o envelope nominal nunca abraça a faixa de CG
     /// carregado dela, achado da sonda), logo nenhum flip de "Cenário" é
     /// sequer POSSÍVEL — confirmado abaixo, não só assumido.
     ///
+    /// `old→new` (ciclo 10 → ciclo 12, task 4) — RECALIBRAÇÃO de fixture,
+    /// mesma disciplina das mutações de `elevator_chord_frac` alhures neste
+    /// repositório (não é a config de PRODUÇÃO sendo ajustada para salvar
+    /// um veredito — é o dial SINTÉTICO desta fixture de teste sendo
+    /// re-sondado depois que a física mudou). Os termos de solo do balanço
+    /// de rotação (spec §6) recuam o limite dianteiro de `config_teste()`
+    /// tanto (+5,4 pp, de 34,097% para 39,534% MAC — MAIS que na fixture do
+    /// baseline real, porque `[gear].h_cg_ground_m` desta fixture sintética
+    /// é 1,03 m, MAIOR que os 0,92 m do baseline real, e o termo de atrito
+    /// escala com `h_cg`) que ele ULTRAPASSA o limite traseiro (36,415%
+    /// MAC, invariante — não depende dos termos novos): o envelope nominal
+    /// de `config_teste()` intacta fica VAZIO para QUALQUER `pax_rear_m`
+    /// (fwd/aft não dependem desse campo). Sonda numérica: `[gear].
+    /// h_cg_ground_m` reduzido para 0,30 m (LOCAL a este teste, NÃO
+    /// alterado em `config_teste()` — os demais testes deste arquivo e de
+    /// `tests/gear_tipback.rs` continuam com 1,03 m) reabre o envelope
+    /// (fwd=35,558% < aft=36,415%, folga 0,857 pp), e `pax_rear_m`
+    /// 6,2→**6,30** (era 5,75→6,2 antes desta task) volta a colocar "4 pax
+    /// sem bagagem" perto do limite TRASEIRO (cg≈36,027%, folga 0,388 pp).
     #[test]
     fn envelope_no_mundo_massa_total_flipa_quando_marginal() {
         let mut cfg = config_teste();
-        cfg.arms.pax_rear_m = 6.2;
+        // Ciclo 12 (task 4): `h_cg_ground_m` reduzido LOCALMENTE nesta
+        // fixture de teste — ver "old→new" acima — para reabrir o envelope
+        // nominal de `config_teste()` depois que os termos de solo do
+        // balanço de rotação o fecharam com o valor padrão (1,03 m) da
+        // fixture. `pax_rear_m` recalibrado no mesmo espírito.
+        cfg.gear.h_cg_ground_m = 0.30;
+        cfg.arms.pax_rear_m = 6.30;
         let n = nominal_pipeline(cfg);
         let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")
             .expect("fixture deveria ter o cenário '4 pax sem bagagem'");
@@ -1184,6 +1233,28 @@ mod tests {
                     .unwrap_or_else(|| panic!("cenário '{nome_cenario}' do flip não existe no nominal"));
                 assert!(sc.inside_envelope,
                     "flip do cenário '{nome_cenario}' só deveria existir se ele passava no nominal");
+            } else if flip.check == "Decolagem (grama, 15 m)" {
+                // Ciclo 12 (task 2): a rolagem de decolagem integrada
+                // (arrasto+atrito explícitos) alonga bastante a distância
+                // sobre 15 m na fixture sintética — o mundo massa-total
+                // (peso ainda maior) passa a estourar `runway_available_m`
+                // com alguma frequência, algo que nunca acontecia com o
+                // método energético de Raymer. Propriedade preservada:
+                // o flip só pode existir se o nominal passava.
+                assert!(n.perf.to_50ft_grass_m <= n.req.runway_available_m,
+                    "flip de Decolagem (grama, 15 m) só deveria existir se o nominal passava");
+            } else if flip.check == "Pouso (grama, 15 m)" {
+                assert!(n.perf.ldg_50ft_grass_m <= n.req.runway_available_m,
+                    "flip de Pouso (grama, 15 m) só deveria existir se o nominal passava");
+            } else if flip.check == "Razão de subida" {
+                assert!(n.perf.rc_sl_ms >= RC_SL_MIN_MS,
+                    "flip de Razão de subida só deveria existir se o nominal passava");
+            } else if flip.check == "Velocidade de cruzeiro" {
+                assert!(n.perf.v_cruise_kmh >= n.req.cruise_speed_min_kmh,
+                    "flip de Velocidade de cruzeiro só deveria existir se o nominal passava");
+            } else if flip.check == "Teto de serviço" {
+                assert!(n.perf.service_ceiling_m >= SERVICE_CEILING_MIN_M,
+                    "flip de Teto de serviço só deveria existir se o nominal passava");
             } else {
                 panic!("check de flip desconhecido: {}", flip.check);
             }
@@ -1294,28 +1365,35 @@ mod tests {
     /// funciona).
     ///
     /// Mesma fixture de `envelope_no_mundo_massa_total_flipa_quando_marginal`
-    /// (`arms.pax_rear_m` 5.75→6.2, achado por sonda numérica): desloca o
-    /// cenário "4 pax sem bagagem" para DENTRO do envelope nominal
-    /// (cg≈34,97%, entre fwd≈34,10% e aft≈36,41%). Sob o conjunto
-    /// adversarial DIANTEIRO (`caso="dianteiro"`, as 7 massas estruturais
-    /// dianteiras ×(1+σ), as traseiras ×(1−σ)) o cenário some para
-    /// cg≈31,72% — à FRENTE do limite dianteiro nominal (34,10%), gerando
-    /// o flip. A régua contra a qual esse flip é medido (`fwd_limit_p_pct_mac`
-    /// em `evaluate_world`) NÃO é a nominal: o momento da linha de tração
-    /// faz `rotation_limit_pct_mac` responder ao peso dos cenários, e as
-    /// massas estruturais do mundo dianteiro mudam a massa de TODOS os
-    /// cenários (via OEW) — a régua recalculada sobe para ≈34,41%, ~0,32pp
-    /// ATRÁS da régua nominal (≈34,10%). Uma regressão que voltasse a
-    /// comparar contra `wb_nominal.spec.cg_limit_fwd_pct_mac` produziria o
-    /// MESMO flip (mesmo `valor`, mesmo `check`), só com `limite` errado —
-    /// por isso o teste reconstrói a régua do mundo independentemente (via
+    /// (achado por sonda numérica): desloca o cenário "4 pax sem bagagem"
+    /// para DENTRO do envelope nominal. Sob o conjunto adversarial
+    /// DIANTEIRO (`caso="dianteiro"`, as 7 massas estruturais dianteiras
+    /// ×(1+σ), as traseiras ×(1−σ)) o cenário some para À FRENTE do limite
+    /// dianteiro nominal, gerando o flip. A régua contra a qual esse flip é
+    /// medido (`fwd_limit_p_pct_mac` em `evaluate_world`) NÃO é a nominal:
+    /// o momento da linha de tração faz `rotation_limit_pct_mac` responder
+    /// ao peso dos cenários, e as massas estruturais do mundo dianteiro
+    /// mudam a massa de TODOS os cenários (via OEW) — a régua recalculada
+    /// diverge da régua nominal. Uma regressão que voltasse a comparar
+    /// contra `wb_nominal.spec.cg_limit_fwd_pct_mac` produziria o MESMO
+    /// flip (mesmo `valor`, mesmo `check`), só com `limite` errado — por
+    /// isso o teste reconstrói a régua do mundo independentemente (via
     /// `WeightBalanceAgent`/`TrimAuthorityAgent` no MESMO conjunto
     /// adversarial `m_fwd`, não uma cópia do número) e compara com
     /// `flip.limite`, não só com um pin numérico solto.
+    ///
+    /// `old→new` (ciclo 10 → ciclo 12, task 4) — MESMA recalibração de
+    /// fixture de `envelope_no_mundo_massa_total_flipa_quando_marginal`
+    /// (ver o `old→new` completo lá): `[gear].h_cg_ground_m` LOCAL a 0,30 m
+    /// e `arms.pax_rear_m` 6,2→6,30, porque os termos de solo do balanço de
+    /// rotação fecham o envelope nominal de `config_teste()` intacta
+    /// (fwd>aft) — nenhum `pax_rear_m` reabriria sozinho, já que ele não
+    /// move fwd/aft.
     #[test]
     fn regua_do_mundo_dianteiro_diverge_da_nominal_no_flip_de_cenario() {
         let mut cfg = config_teste();
-        cfg.arms.pax_rear_m = 6.2;
+        cfg.gear.h_cg_ground_m = 0.30;
+        cfg.arms.pax_rear_m = 6.30;
         let n = nominal_pipeline(cfg);
 
         let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")

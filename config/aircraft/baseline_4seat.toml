@@ -59,6 +59,13 @@ cm_flap_delta = -0.30
 # call site de pouso que consuma o delta CHEIO (auditoria de
 # agents::performance, ver docstring de WingCfg::cd0_flap_delta).
 cd0_flap_delta = 0.015
+# Offset vertical centro-de-arrasto↔CG (m, positivo = acima do CG) — ciclo
+# 12, spec §6.2. 0.0 é o caso CONSERVADOR (braço CHEIO h_cg no termo de
+# arrasto de solo do balanço de rotação, agents::trim_authority::
+# rotation_available_moment_nm) — não medido no CAD desta célula. Faixa
+# plausível 0-0,10 m; validar no CAD (Fase 3), mesma disciplina de
+# prop_axis_above_cg_m/prop_plane_x_m.
+z_drag_above_cg_m = 0.0
 
 [fuselage]
 length_m = 8.2
@@ -456,9 +463,17 @@ fuselage_kf = 0.02
 [performance]
 mu_brake_paved = 0.40      # frenagem em pista pavimentada seca
 mu_brake_grass = 0.30      # frenagem em grama firme/terra compactada
+# Ciclo 12 (task 2, spec §4): atrito de ROLAGEM LIVRE (sem frenagem) —
+# substitui `surface_factor` (1,00/1,20) no caminho de decolagem, que
+# multiplicava a rolagem de solo inteira por fora. Raymer Tab. 17.1/
+# Gudmundsson cap. 17.
+mu_roll_paved = 0.04       # rolagem livre, asfalto/concreto seco (faixa 0,03-0,05)
+mu_roll_grass = 0.08       # grama firme de fazenda (faixa curta 0,05 / alta 0,10)
 # Fator empírico (McCormick) sobre a tração estática ideal de Rankine-Froude
 # (disco atuador) — corrige a superestimativa por não modelar perdas de
-# ponta de pá/rotação de esteira.
+# ponta de pá/rotação de esteira. Ciclo 12: também usado por
+# `thrust_ground_roll_n` como multiplicador plano em toda a rolagem de
+# decolagem (spec §2.3), não mais só no ramo estático V<0,5 m/s.
 static_thrust_factor = 0.75
 rotation_time_s = 1.0      # tempo de rotação até V_LOF, s
 flare_time_s = 1.5         # tempo de flare no pouso a V_ref, s

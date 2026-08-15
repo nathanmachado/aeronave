@@ -72,7 +72,7 @@ fn build_baseline_report() -> AircraftReport {
     );
 
     let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
-                                      &cfg.performance);
+                                      &cfg.performance, cfg.stability.cl_ground_rotation);
 
     // Ciclo 3 (oew-parametrico): massas estruturais COMPUTADAS
     // (`agents::mass_model` via `SizedAircraft::structural_masses`) —
@@ -173,7 +173,7 @@ fn build_baseline_report() -> AircraftReport {
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "5.4");
+    assert_eq!(report.schema_version, "5.5");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -190,7 +190,7 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.4");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.5");
 }
 
 /// Schema 5.0 (Task 2, ciclo7-clmax-decolagem — bump MAJOR): `wing.cl_max_to`

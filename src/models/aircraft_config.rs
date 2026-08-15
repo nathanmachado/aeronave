@@ -115,18 +115,49 @@ pub struct WingCfg {
     /// também o arrasto: um único dial de deployment para os três efeitos do
     /// flap PARCIAL de decolagem.
     ///
-    /// O delta CHEIO (pouso) NÃO tem, hoje, um call site que o consuma —
-    /// auditoria de `agents::performance` (ciclo 8, task 1): a rolagem de
-    /// solo de decolagem é o método ENERGÉTICO de Raymer (sem termo de
-    /// arrasto, por construção); a rolagem de pouso é dominada por frenagem
-    /// (sem polar); e a aproximação de pouso (`landing_distance_50ft_m`) usa
-    /// um ângulo FIXO (`[performance].approach_angle_deg`), não uma razão
-    /// L/D — nenhuma delas tem onde receber um incremento de CD0. Ver
-    /// docstring de `takeoff_ground_roll_m`/`landing_distance_50ft_m` para o
-    /// detalhe de cada segmento.
+    /// HISTÓRICO `old→new` (ciclo 8 → ciclo 12). Até o ciclo 11, o delta
+    /// CHEIO (pouso) NÃO tinha um call site que o consumisse — auditoria de
+    /// `agents::performance` (ciclo 8, task 1): a rolagem de solo de
+    /// decolagem era o método ENERGÉTICO de Raymer (sem termo de arrasto,
+    /// por construção); a rolagem de pouso era dominada por frenagem
+    /// (`S_G = V_ref²/(2gμ)`, sem polar); e a aproximação de pouso
+    /// (`landing_distance_50ft_m`) usava um ângulo FIXO
+    /// (`[performance].approach_angle_deg`), não uma razão L/D — nenhuma
+    /// delas tinha onde receber um incremento de CD0. Essa conclusão valia
+    /// para o modelo daquele momento.
+    ///
+    /// **Ela morre no ciclo 12** (spec `2026-08-15-ciclo12-solo-honesto`
+    /// §5.3a): a rolagem de pouso passa a integrar a equação de movimento
+    /// (`agents::performance::landing_ground_roll_m`), consumindo a polar
+    /// completa. O delta CHEIO ganha o seu primeiro consumidor real —
+    /// `WingSpec::cd0_flap_ldg_extra` = `cfg.wing.cd0_flap_delta` (SEM
+    /// fração, ao contrário de `cd0_flap_to_extra`: a rolagem de pouso é
+    /// modelada com o flap de pouso TOTALMENTE deflexionado do início ao
+    /// fim da frenagem, spec §5.1) — via `agents::performance::
+    /// cd_ground_roll`, a mesma fonte única de CD de solo que a rolagem de
+    /// decolagem (ciclo 12, task 2) e o balanço de rotação (ciclo 12, task
+    /// 4) também consomem.
     ///
     /// Faixa validada (0.005, 0.05) — `models::config::validate_aircraft`.
     pub cd0_flap_delta: f64,
+    /// Offset vertical entre o CENTRO DE ARRASTO (resultante de arrasto da
+    /// aeronave) e o CG (m, positivo = centro de arrasto ACIMA do CG) —
+    /// ciclo 12, spec §6.2. Default `0.0` (braço CHEIO `h_cg`, caso
+    /// CONSERVADOR: `h_D > 0` encolheria o braço líquido `h_cg − h_D` do
+    /// termo de arrasto de solo). Faixa plausível numa célula convencional
+    /// (asa baixa/média, motor no nariz): 0–0,10 m — o centro de arrasto
+    /// fica alguns centímetros ACIMA do CG. Faixa validada `[0.0, 0.30]`
+    /// (`models::config::validate_aircraft`).
+    ///
+    /// Consumido por `agents::trim_authority::rotation_available_moment_nm`
+    /// (braço líquido `h_cg − z_drag_above_cg_m` do termo de arrasto de
+    /// solo no balanço de rotação). A docstring de `cm_thrust_cruise` já
+    /// registrava a necessidade deste campo desde o ciclo 10 (aproximação
+    /// `z_D = 0` do arrasto de CRUZEIRO) — este ciclo cria o campo, mas
+    /// **NÃO** o pluga em `cm_thrust_cruise`: fazê-lo mudaria `CL_h_trim`,
+    /// `cd_trim`, cruzeiro/alcance/autonomia — cascata fora de escopo,
+    /// registrada no backlog como consumidor pendente.
+    pub z_drag_above_cg_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -562,10 +593,30 @@ pub struct PerformanceCfg {
     /// pouso pavimentado (assimetria pré-existente — só a decolagem tinha
     /// variantes pavimentada/grama desde a Task 4.7).
     pub mu_brake_grass: f64,
+    /// Coeficiente de atrito de ROLAGEM (rolagem LIVRE, sem frenagem) em
+    /// pista pavimentada seca — ciclo 12, spec §4 (Raymer Tab. 17.1,
+    /// faixa 0,03–0,05). Consumido por `agents::performance::
+    /// takeoff_distance_m`/`takeoff_distance_50ft_m` — substitui
+    /// `surface_factor` (1,00/1,15–1,20/1,25), que multiplicava a rolagem
+    /// de solo INTEIRA por fora. Com `mu_roll` explícito na integração da
+    /// rolagem, o antigo fator de superfície contaria a grama duas vezes
+    /// (o 1,20 antigo ERA o atrito ausente que a fórmula energética não
+    /// tinha) — por isso `surface_factor` SAI do caminho de decolagem, não
+    /// fica ao lado de `mu_roll`.
+    pub mu_roll_paved: f64,
+    /// Coeficiente de atrito de ROLAGEM em grama firme de fazenda — ciclo
+    /// 12, spec §4 (Gudmundsson cap. 17, faixa curta 0,05 / alta 0,10).
+    pub mu_roll_grass: f64,
     /// Fator empírico (McCormick) aplicado sobre a tração estática IDEAL de
     /// Rankine-Froude (disco atuador) — a teoria de disco atuador
     /// superestima a tração real por não modelar perdas de ponta de pá,
     /// rotação de esteira e não-uniformidade da distribuição de carga.
+    ///
+    /// Ciclo 12 (spec §2.3): `agents::performance::thrust_ground_roll_n`
+    /// também consome este fator, agora esticado como multiplicador PLANO
+    /// em toda a faixa `V ∈ [0, V_LOF]` da rolagem — não mais só no ramo
+    /// estático (`V < 0,5 m/s`) de `thrust_available_n`. Premissa calibrada
+    /// esticada, declarada: ver docstring de `thrust_ground_roll_n`.
     pub static_thrust_factor: f64,
     /// Tempo de rotação — do início da rotação até V_LOF, a V_LOF
     /// aproximadamente constante (s).
@@ -703,6 +754,13 @@ pub mod test_fixtures {
                 // "nenhum destes números coincide com o baseline real" usada
                 // nas demais seções desta fixture (ciclo 8, task 1).
                 cd0_flap_delta: 0.020,
+                // Distinto do baseline real (0.0) — ciclo 12, task 4. Valor
+                // não-nulo DELIBERADO nesta fixture (dentro da faixa
+                // plausível 0–0.10m) para que os testes que exercitam o
+                // termo de arrasto de solo do balanço de rotação, se algum
+                // dia usarem `config_teste()` em vez de literais próprios,
+                // não fiquem mascarados pelo caso degenerado `h_D=0`.
+                z_drag_above_cg_m: 0.05,
             },
             fuselage: FuselageCfg {
                 length_m: 8.0,
@@ -882,6 +940,11 @@ pub mod test_fixtures {
             performance: PerformanceCfg {
                 mu_brake_paved: 0.38,
                 mu_brake_grass: 0.28,
+                // Ciclo 12 (task 2): valores sintéticos, deliberadamente
+                // distintos do baseline real (mesmo padrão dos demais
+                // campos desta fixture).
+                mu_roll_paved: 0.045,
+                mu_roll_grass: 0.085,
                 static_thrust_factor: 0.72,
                 rotation_time_s: 1.2,
                 flare_time_s: 1.4,
