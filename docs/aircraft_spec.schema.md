@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.4
+# `aircraft_spec.json` — contrato do schema v5.5
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -703,7 +703,10 @@ documentação a ser corrigido, não um comportamento aceitável.
      2026-08-09-ciclo10-sag-e-linha-de-tracao-design.md` §2: a corrida de
      decolagem é ACELERADA, o termo de d'Alembert cancela a porção
      `h_cg`, termos de solo `μN·h_cg`/`D·(h_cg−h_D)` permanecem
-     DESPREZADOS e documentados, ≲2 pp, direção anti-conservadora); o trim
+     DESPREZADOS e documentados, ≲2 pp, direção anti-conservadora —
+     **`old→new`, ciclo 12 task 4**: essa estimativa de magnitude estava
+     ERRADA, a medição real deu ≈4,40 pp, mais que o dobro; os termos foram
+     IMPLEMENTADOS nesta task, ver v5.5 abaixo e §3/§4 (bloco `trim`)); o trim
      de cruzeiro ganha `cm_thrust = −T_cruzeiro·prop_axis_above_cg_m/
      (q·S_w·MAC)` somado ao `cm_ac` (aproximação `z_D = 0` documentada,
      conservadora em até ~50% no pior caso plausível). Nenhum campo novo
@@ -776,6 +779,61 @@ documentação a ser corrigido, não um comportamento aceitável.
     `service_ceiling_m` 5.200 inalterado; ciclo 10 fix wave: textos de linha de
     tração, item 7). Ver `tests/schema_v4.rs`/`tests/generic_engine.rs` para os
     pins honestos completos.
+- **v5.5** (Task 1, ciclo12-solo-honesto, 2026-08-15 — bump **MINOR**,
+  exceção registrada, mesmo padrão da v5.2/v5.3/v5.4): nenhum campo do JSON
+  de saída foi renomeado/removido/mudou de tipo/unidade — consumidores v5.4
+  continuam funcionando sem alteração. O bump é sobre serialização de um
+  caso extremo que passou a ser ATINGÍVEL nesta task: `performance.
+  to_distance_paved_m`, `performance.to_distance_grass_m` e
+  `performance.landing_distance_m` podem receber `f64::INFINITY` quando a
+  rolagem integrada (ver Task 2/3 abaixo) não consegue acelerar/desacelerar
+  dentro da distância (tração ou frenagem insuficientes). Mesmo tratamento
+  de `to_50ft_paved_m`/`to_50ft_grass_m` desde a v5.4:
+  `#[serde(with = "fatigue_life_serde")]` serializa o infinito como a
+  string `"infinita"`, nunca `null` (ver §5 abaixo, agora com SEIS campos).
+  Política de bump: mesma exceção MINOR das versões anteriores (correção de
+  semântica de serialização, não de contrato de tipo/estrutura).
+  - **Campanha ciclo 12 (tasks 2/3, 2026-08-15, fecha `docs/backlog.md`
+    item 4)**: a mudança de CONTEÚDO que torna o caso `+INFINITY` acima
+    genuinamente alcançável — `takeoff_ground_roll_m`/`landing_ground_roll_m`
+    passam do método ENERGÉTICO fechado de Raymer (`V_ref²/2gμ`, sem termo
+    de arrasto por construção) para integração numérica da equação de
+    movimento em V (Simpson composto, 200 intervalos), consumindo a polar
+    completa (CD0 + trem estendido + incremento de flap + induzido)
+    segmento a segmento. Valores MEDIDOS old→new no baseline real
+    (`aircraft_spec.json`, commit pré-ciclo-12 `1e11998` vs HEAD):
+    `to_50ft_paved_m` **420,372451 → 651,258408 m** (+54,92%),
+    `to_50ft_grass_m` **473,469470 → 819,110978 m** (+73,00%),
+    `to_distance_paved_m` **398,227641 → 744,556577 m** (+86,97%),
+    `to_distance_grass_m` **477,873169 → 996,335432 m** (+108,49%),
+    `ldg_50ft_m` **502,458299 → 582,341118 m** (+15,90%),
+    `ldg_50ft_grass_m` **556,677173 → 646,437301 m** (+16,12%),
+    `landing_distance_m` **362,656622 → 442,539441 m** (+22,03%).
+    Consequência de gate: `to_50ft_grass_m`/`ldg_50ft_grass_m` passam a
+    EXCEDER a pista de 600 m das checagens #23/#24 —
+    `validation_status` do baseline real vira `"FAIL"` com 4 violações
+    (2 de robustez de massa estrutural, já nomeadas antes deste ciclo, +
+    #23 + #24). Não é regressão — é o modelo pagando arrasto que sempre
+    esteve fisicamente presente. Tolerâncias de teste INALTERADAS — só
+    pins re-centrados old→new. Ver `docs/backlog.md` item 4 (RESOLVIDO) e
+    `docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md`
+    (§2, §3, §5, §9 tabela congelada, §10 veredito).
+  - **Campanha ciclo 12 (task 4)**: o balanço de momentos da ROTAÇÃO
+    (`trim.rotation_limit_pct_mac`) ganha os termos de SOLO
+    (`−μ_roll·N·h_cg − D·(h_cg−z_drag_above_cg_m)`) que a v5.3 havia
+    deixado deliberadamente de fora com uma estimativa de magnitude
+    (`≲2 pp de MAC`) que a medição real desta task DESMENTIU — ver
+    correção `old→new` em §3 e §4 (bloco `trim`) abaixo. Nenhum campo novo
+    de schema — mesmo padrão de bump MINOR por correção de física da v5.3.
+    Campos de CONFIGURAÇÃO novos (`aircraft.toml`, não deste schema JSON,
+    ambos introduzidos na task 2 deste ciclo): `[performance].mu_roll_paved`/
+    `mu_roll_grass` (atrito de rolagem, consumidos pela rolagem integrada E,
+    desde a task 4, pelo termo de solo da rotação) e `[wing].
+    z_drag_above_cg_m` (default 0,0, task 4) — ver
+    `config/aircraft/baseline_4seat.toml`.
+  - Nenhuma tolerância de teste foi afrouxada em nenhuma das mudanças
+    acima — só pins re-centrados old→new com a MESMA tolerância. Ver
+    `tests/generic_engine.rs` para os pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -826,8 +884,8 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
 | `weight` | **v4.5**: semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — as 7 massas estruturais (`weight.structural_masses`) vêm de equações semi-empíricas de componente, mas o hardware/instalação (aviônicos, bateria, cabos etc.) ainda é estimativa de catálogo/projeto, não massa medida; erros aqui se propagam para MTOW/estrutura/trem de pouso |
-| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação CONSIDERA o binário da linha de TRAÇÃO (braço `prop_axis_above_cg_m`, pós-cancelamento do termo inercial de d'Alembert — ciclo 10 task 2), mas ainda DESPREZA o binário de atrito de rolamento (`μ_roll·N·h_cg`) e de arrasto (`D·(h_cg−h_D)`) — residual estimado ≲2 pp de %MAC, ANTI-conservador (subestima o limite dianteiro de rotação)) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
-| `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); rolagem de solo (energético) e aproximação de pouso (ângulo fixo) seguem sem termo de arrasto por construção; **ciclo 11 task 1**: `climb_gradient_pct` avaliado no piso LEGAL da norma (1,2·Vs_to, referência típica da CS 23.65 ≥1,2·Vs1), não mais no piso de varredura 1,05·Vs_to (viés otimista removido, `docs/backlog.md` item 2); **ciclo 11 task 2**: Vy/teto de serviço usam referência de estol LIMPA (`wing.cl_max_clean`) e polar limpa, janela de busca [1,05;2,00]·Vs com guarda de argmax interior (`docs/backlog.md` item 3) | Mapa de desempenho de hélice real do fabricante para refinar a polar de subida |
+| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação CONSIDERA o binário da linha de TRAÇÃO (braço `prop_axis_above_cg_m`, pós-cancelamento do termo inercial de d'Alembert — ciclo 10 task 2) **e**, desde o ciclo 12 task 4, os binários de atrito de rolamento (`μ_roll·N·h_cg`) e de arrasto de solo (`D·(h_cg−z_drag_above_cg_m)`) — `old→new`: a v5.3 os desprezava com uma estimativa de "≲2 pp de %MAC" que a medição real desta task DESMENTIU (≈4,40 pp medido, mais que o dobro, os dois termos somados são 29% MAIORES que o termo de tração já no balanço); ambos IMPLEMENTADOS neste ciclo, limite dianteiro de rotação recua de 13,3546% para ≈17,76% MAC no baseline real) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
+| `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); **ciclo 12 tasks 2/3 (`old→new`, fecha `docs/backlog.md` item 4)**: rolagem de solo de decolagem E de pouso passam do método ENERGÉTICO fechado (Raymer, `V_ref²/2gμ`, sem termo de arrasto por construção) para integração numérica consumindo a polar completa segmento a segmento — medido: `to_50ft_paved_m` +54,92%, `to_50ft_grass_m` +73,00%, `ldg_50ft_m` +15,90%, `ldg_50ft_grass_m` +16,12% no baseline real (ver v5.5 em §1); a aproximação de pouso (segmento antes do toque, ângulo fixo) SEGUE sem termo de arrasto por construção, não afetada; **ciclo 11 task 1**: `climb_gradient_pct` avaliado no piso LEGAL da norma (1,2·Vs_to, referência típica da CS 23.65 ≥1,2·Vs1), não mais no piso de varredura 1,05·Vs_to (viés otimista removido, `docs/backlog.md` item 2); **ciclo 11 task 2**: Vy/teto de serviço usam referência de estol LIMPA (`wing.cl_max_clean`) e polar limpa, janela de busca [1,05;2,00]·Vs com guarda de argmax interior (`docs/backlog.md` item 3) | Mapa de desempenho de hélice real do fabricante para refinar a polar de subida; ver `docs/backlog.md` item 8 (unificação do modelo de tração, descontinuidade ≈27,69% medida em V_LOF entre `thrust_ground_roll_n` e `thrust_available_n`) |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
 | `landing_gear` | preliminary (dimensionamento estático de cargas) | Análise dinâmica de pouso/afundamento |
@@ -1141,6 +1199,22 @@ continua sendo a causa raiz de a ROTAÇÃO (não a flare) governar o limite
 dianteiro — ver `agents::trim_authority` (docstring do módulo) para a
 dedução completa.
 
+**ATUALIZAÇÃO — `rotation_limit_pct_mac`, ciclos 7 a 12 (`old→new`,
+números MEDIDOS, não os do parágrafo acima que descreve o estado logo
+após a task refino-ciclo2):** o valor mudou repetidamente desde então —
+`cl_max_to` consistente (ciclo 7): **8,533%**; momento da linha de tração
+(ciclo 10 task 2, braço sobre o CG): **8,533% → 13,355% MAC** (+4,82 pp);
+termos de solo da rotação (ciclo 12 task 4, backlog item RESOLVIDO acima
+sobre "≲2 pp"): **13,355% → ≈17,76% MAC** (+4,40 pp, mais que o dobro da
+estimativa de magnitude que a v5.3 registrava). O limite dianteiro
+publicado no baseline real HOJE é **≈17,76% MAC**, não os ≈6,10%/10,95%
+do parágrafo acima. A margem de rotação do cenário mais apertado ("Solo
+(piloto)") também deixou de ser a folga ampla (+21,6%/+10,5%) descrita em
+versões anteriores desta seção — ver `trim.rotation_margin_per_scenario`
+no JSON para o valor exato POR CENÁRIO e o report da task 5
+(`.superpowers/sdd/2026-08-15-ciclo12-solo-honesto/task-5-report.md`) para
+a margem medida do baseline real após esta task.
+
 ### `performance` — `PerformanceSpec` (PerformanceAgent)
 
 | Campo | Tipo | Unidade | Descrição |
@@ -1148,15 +1222,15 @@ dedução completa.
 | `v_cruise_kmh` / `v_stall_kmh` | f64 | km/h | Velocidades de cruzeiro / stall |
 | `rc_sl_ms` / `rc_cruise_alt_ms` | f64 | m/s | Razão de subida ao nível do mar / na altitude de cruzeiro. **Campanha ciclo 11 (task 2, 2026-08-10)**: Vy referência mudou para `cl_max_clean` (estol limpo), janela de busca refinada de [1,3;1,8]·Vs para [1,05;2,00]·Vs com guarda de argmax interior (ver `docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md` ERRATUM). Baseline real: **4,999902 → 4,999905 m/s** (~0,00003 m/s de mudança, efeito líquido ≈zero: Vy genuinamente não depende de CL_max). |
 | `service_ceiling_m` | f64 | m | Teto de serviço |
-| `to_distance_paved_m` / `to_distance_grass_m` | f64 | m | Distância de decolagem (rolagem simples, pista pavimentada/grama) |
-| `landing_distance_m` | f64 | m | Distância de pouso (rolagem simples) |
+| `to_distance_paved_m` / `to_distance_grass_m` | **f64 ou a string `"infinita"`** | m | Distância de decolagem — estimativa SIMPLIFICADA legada, rolagem × fator ad hoc 1,5 (aproximação de transição de Raymer). **`old→new`, ciclo 12 (backlog item 4, RESOLVIDO)**: a rolagem que este fator multiplica passou do método energético fechado para integração numérica com arrasto — medido: **398,227641 → 744,556577 m** (pavimentada, +86,97%), **477,873169 → 996,335432 m** (grama, +108,49%). **Caso especial (v5.5)**: pode ser `f64::INFINITY` (tração insuficiente para acelerar até V_LOF), serializado como `"infinita"` — ver §5. **Achado companheiro (backlog item 11, fora de escopo)**: o fator 1,5 foi calibrado para o método ANTIGO; a razão real medida hoje é `to_50ft_paved_m/rolagem_pavimentada ≈ 1,312` — abaixo de 1,5 — e `to_distance_paved_m` (744,56 m) passa a EXCEDER `to_50ft_paved_m` (651,26 m), inconsistência entre a estimativa legada e o campo FÍSICO do mesmo JSON. `to_50ft_paved_m`/`to_50ft_grass_m` (abaixo) são a referência física, não estes dois campos. |
+| `landing_distance_m` | **f64 ou a string `"infinita"`** | m | Distância de pouso — estimativa SIMPLIFICADA legada, rolagem + 200 m fixos de aproximação. **`old→new`, ciclo 12 (backlog item 4, RESOLVIDO)**: a rolagem que este campo soma passou do método energético fechado para integração numérica com arrasto e alívio de sustentação — medido: **362,656622 → 442,539441 m** (+22,03%). **Caso especial (v5.5)**: pode ser `f64::INFINITY` (arrasto e frenagem insuficientes para desacelerar), serializado como `"infinita"` — ver §5. `ldg_50ft_m`/`ldg_50ft_grass_m` (abaixo) são a referência física, não este campo (backlog item 11, fora de escopo — remoção num MAJOR futuro). |
 | `range_km` / `endurance_h` | f64 | km / h | **INFORMATIVO** — eco de `propulsion.range_km`/`endurance_h`; não é o gate do projeto |
 | `vx_kmh` / `vy_kmh` | f64 | km/h | Velocidade de melhor ângulo / melhor razão de subida. **Viés RESOLVIDO em `vx_kmh`** (ciclo 11, task 1, 2026-08-10): `best_climb_angle_ms` varria a partir do piso 1,05·V_s_to; como RC/V é monotonicamente DECRESCENTE na faixa modelada, a função devolvia esse piso como resultado — avaliar mais cedo (mais devagar) dá gradiente MAIOR, então 1,05·V_s_to era um viés OTIMISTA. O piso da varredura subiu para 1,20·V_s_to, referência típica da CS 23.65 (≥1,2·Vs1). Baseline real: **121,519501 → 138,871480 km/h** (+14,28%, razão exata 1,20/1,05 = 1,142857). **Viés RESOLVIDO em `vy_kmh`** (ciclo 11, task 2, 2026-08-10): referência de estol mudou de `wing.cl_max` (flap cheio) para `wing.cl_max_clean` (estol limpo — ver bloco `wing`); janela de busca refinada de [1,3;1,8]·Vs para [1,05;2,00]·Vs com guarda de argmax interior (evita artefato de piso da janela anterior que ocorria quando o pico real de RC ficava fora). Baseline real: **147,915721 → 148,435393 km/h** (+0,35%, efeito líquido ≈zero: Vy genuinamente não depende de CL_max, o pico de RC é quase insensível à mudança). Ver `docs/superpowers/specs/2026-08-10-ciclo11-subida-honesta-design.md` (DISCOVERY e ERRATUM da spec). |
 | `best_glide_kmh` / `glide_ratio` | f64 | km/h / — | Velocidade e razão L/D de melhor planeio |
 | `climb_gradient_pct` | f64 | % | Gradiente de subida em Vx, solo, MTOW (CS 23.65 exige ≥ 8,3%). **Viés RESOLVIDO** (ciclo 11, task 1, 2026-08-10): a varredura de `best_climb_angle_ms` partia do piso 1,05·V_s_to; como RC/V é monotonicamente DECRESCENTE nessa faixa, a função devolvia esse piso — avaliar mais cedo (mais devagar) sempre dá gradiente MAIOR, então 1,05·V_s_to era um viés OTIMISTA, não uma leitura conservadora. O piso subiu para 1,20·V_s_to, referência típica da CS 23.65 (≥1,2·Vs1). Baseline real E10: **13,896713% (antigo, a 1,05·Vs, otimista) → 12,451842%** (novo, a 1,20·Vs, honesto), -1,444871 pp. Gate PASSA (≥ 8,3%), folga intacta. Ver `docs/backlog.md` item 2 (RESOLVIDO). |
-| `to_50ft_paved_m` / `to_50ft_grass_m` | **f64 ou a string `"infinita"`** | m | Distância de decolagem sobre obstáculo de 15 m/50 ft. **Caso especial (v5.4)**: quando o obstáculo é inatingível (razão de subida ≤ 0 no segmento de subida até 15m — ver `agents::performance::takeoff_distance_50ft_m`, ramo `rc <= 0.0`), o resultado é `f64::INFINITY`, serializado como a string literal `"infinita"`, NUNCA como `null` nem como um número (ver §5). Um parser JSON genérico deve tratar estes campos como `number \| "infinita"`, não como `number` puro. |
-| `ldg_50ft_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft, pista PAVIMENTADA (`mu_brake_paved`) — **INFORMATIVO** desde a v4.8: não é o gate de pista |
-| `ldg_50ft_grass_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (`mu_brake_grass`) — sempre > `ldg_50ft_m`; é a grandeza gateada pela checagem #24 contra `runway_available_m` |
+| `to_50ft_paved_m` / `to_50ft_grass_m` | **f64 ou a string `"infinita"`** | m | Distância de decolagem sobre obstáculo de 15 m/50 ft — referência FÍSICA (segmentada: rolagem + rotação + subida até 15 m). **Caso especial (v5.4)**: quando o obstáculo é inatingível (razão de subida ≤ 0 no segmento de subida até 15m — ver `agents::performance::takeoff_distance_50ft_m`, ramo `rc <= 0.0`), o resultado é `f64::INFINITY`, serializado como a string literal `"infinita"`, NUNCA como `null` nem como um número (ver §5). Um parser JSON genérico deve tratar estes campos como `number \| "infinita"`, não como `number` puro. **`old→new`, ciclo 12 (tasks 2/3, backlog item 4, RESOLVIDO)**: a rolagem que alimenta este campo passou do método energético fechado para integração numérica com arrasto — medido no baseline real: `to_50ft_paved_m` **420,372451 → 651,258408 m** (+54,92%), `to_50ft_grass_m` **473,469470 → 819,110978 m** (+73,00%). **Consequência de gate**: `to_50ft_grass_m` (819,11 m) passa a EXCEDER a pista de grama de 600 m — checagem #23 REPROVA no baseline real (antes PASSAVA). |
+| `ldg_50ft_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft, pista PAVIMENTADA (`mu_brake_paved`) — **INFORMATIVO** desde a v4.8: não é o gate de pista. Diferente de `to_50ft_*`/`to_distance_*`/`landing_distance_m`, este campo NÃO tem tratamento especial de infinito (sempre `number`, nunca `"infinita"`) — ver §5. **`old→new`, ciclo 12 (task 3, backlog item 4, RESOLVIDO)**: rolagem por integração com arrasto e alívio de sustentação — medido: **502,458299 → 582,341118 m** (+15,90%). |
+| `ldg_50ft_grass_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (`mu_brake_grass`) — sempre > `ldg_50ft_m`; é a grandeza gateada pela checagem #24 contra `runway_available_m`. NÃO tem tratamento especial de infinito (sempre `number`) — ver §5. **`old→new`, ciclo 12 (task 3, backlog item 4, RESOLVIDO)**: medido **556,677173 → 646,437301 m** (+16,12%). **Consequência de gate**: 646,44 m passa a EXCEDER a pista de grama de 600 m — checagem #24 REPROVA no baseline real (antes PASSAVA, por ≈46 m). |
 
 ### `vn_diagram` — `VnDiagramSpec` (VnDiagramAgent, CS 23.333/.335/.337/.341)
 
@@ -1365,15 +1439,16 @@ no nominal mas reprova com massas estruturais ±{σ}% (pior caso {caso}):
   alternador, coberto pela bateria). Pode ser vazio mesmo com
   `validation_status == "PASS"`; pode ser não-vazio mesmo com `"FAIL"`.
 
-## 5. Nota especial: infinito em campos `f64` — `fatigue_life_cycles`, `to_50ft_paved_m`, `to_50ft_grass_m`
+## 5. Nota especial: infinito em campos `f64` — `fatigue_life_cycles`, `to_50ft_paved_m`, `to_50ft_grass_m`, `to_distance_paved_m`, `to_distance_grass_m`, `landing_distance_m`
 
 JSON (RFC 8259) não tem representação nativa de `Infinity`/`NaN`. A
 biblioteca de serialização usada pelo pipeline (`serde_json`), por padrão,
 converteria um `f64::INFINITY` silenciosamente para `null` — o que quebra
 a desserialização de volta em `f64` (achado do próprio teste de round-trip
-deste schema, `tests/schema_v4.rs`). O pipeline trata três campos
+deste schema, `tests/schema_v4.rs`). O pipeline trata **SEIS** campos
 especificamente com este comportamento, serializando `f64::INFINITY` como a
-string `"infinita"` em vez de `null`:
+string `"infinita"` em vez de `null` (`old→new`: eram TRÊS até a v5.4;
+subiu para seis na v5.5, ciclo 12 task 1):
 
 1. **`structure.fatigue_life_cycles`** (v4.0+): "vida em fadiga infinita" é
    um resultado FISICAMENTE VÁLIDO do modelo de Goodman modificado — a
@@ -1389,13 +1464,33 @@ string `"infinita"` em vez de `null`:
    carga/configuração testada — um resultado de FÍSICA válido, não um erro.
    Comportamento: infinito serializa como `"infinita"`.
 
-**Um parser de `aircraft_spec.json` deve tratar estes TRÊS campos como
+3. **`performance.to_distance_paved_m`, `performance.to_distance_grass_m` e
+   `performance.landing_distance_m`** (v5.5+, ciclo 12, task 1): com a
+   rolagem de solo agora integrada numericamente (tasks 2/3 do mesmo ciclo,
+   backlog item 4), o integrando pode divergir para `+INFINITY` quando a
+   tração (decolagem) ou o arrasto+frenagem (pouso) não bastam para
+   acelerar/desacelerar dentro do domínio de integração — ver
+   `agents::performance::integra_rolagem_decolagem_com_passos`/
+   `integra_rolagem_pouso_com_passos` (guarda: `F_net(V) ≤ 0` ⟹ integrando
+   `+INFINITY` naquele nó de Simpson, nunca `NaN`). Resultado de FÍSICA
+   válido ("decolagem/pouso impossível nesta condição"), não um erro.
+   Comportamento: infinito serializa como `"infinita"`. **NÃO afeta**
+   `ldg_50ft_m`/`ldg_50ft_grass_m` — estes dois continuam sempre `number`,
+   sem tratamento especial (não têm `#[serde(with = "fatigue_life_serde")]`
+   em `src/models/specs.rs`).
+
+**Um parser de `aircraft_spec.json` deve tratar estes SEIS campos como
 `number | "infinita"`, nunca assumir que são sempre números:**
 - `structure.fatigue_life_cycles`
 - `performance.to_50ft_paved_m`
 - `performance.to_50ft_grass_m`
+- `performance.to_distance_paved_m`
+- `performance.to_distance_grass_m`
+- `performance.landing_distance_m`
 
-Nenhum outro campo do schema tem esse comportamento especial.
+Nenhum outro campo do schema tem esse comportamento especial — em
+particular, `performance.ldg_50ft_m`/`ldg_50ft_grass_m` são sempre
+`number`, mesmo após o ciclo 12.
 
 ## 6. Manutenção deste documento
 
