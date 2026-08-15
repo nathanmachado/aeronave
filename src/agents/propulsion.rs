@@ -34,31 +34,15 @@ pub fn advance_ratio(v_ms: f64, prop_rpm: f64, prop_diameter_m: f64) -> f64 {
     v_ms / (n_rps * prop_diameter_m)
 }
 
-/// Eficiência da hélice de passo variável (curva empírica por razão de avanço J).
-///
-/// Hélice de passo variável ajusta continuamente o ângulo das pás para manter
-/// eficiência alta numa ampla faixa de J. Para este projeto:
-///   Diâmetro: 1,95 m | 2 pás | PSRU + motor em cruzeiro
-///
-/// O pico de eficiência (~83%) ocorre em J ≈ 1,3–1,5.
-///
-/// Modelo polinomial calibrado com dados do JavaProp (Hepperle, DLR):
-///   η = -0.15·J² + 0.39·J + 0.58   (válido para 0 < J < 2.8)
-pub fn prop_efficiency(j: f64) -> f64 {
-    if j <= 0.0 || j > 2.8 {
-        return 0.0;
-    }
-    let eta = -0.15 * j * j + 0.39 * j + 0.58;
-    eta.clamp(0.0, 0.86)
-}
-
-/// Tração disponível da hélice em Newton:
-/// T = η · P_shaft / V
-/// P_shaft em W, V em m/s
-pub fn thrust_n(eta: f64, power_shaft_w: f64, v_ms: f64) -> f64 {
-    if v_ms < 1.0 { return 0.0; } // evita divisão por zero no static
-    eta * power_shaft_w / v_ms
-}
+// `old→new` (ciclo 13, spec §4): `prop_efficiency(J)` (polinômio JavaProp,
+// η = -0,15·J²+0,39·J+0,58) e `thrust_n(eta, P, V)` foram APAGADAS — a
+// primeira violava o teto de quantidade de movimento em 4 dos 8 pontos de
+// operação do baseline (spec §1.1) e devolvia η(0)=0,58 (fisicamente errado:
+// por definição η=T·V/P→0 quando V→0); a segunda tinha a guarda
+// `v_ms < 1.0 { return 0.0 }` que era a origem da janela de tração NULA em
+// V ∈ [0,5; 1,0). As duas foram substituídas por `FigureOfMerit` (ver
+// `agents::performance::thrust_available_n`) — η vira SAÍDA derivada da lei
+// única (spec §5), não entrada polinomial.
 
 // ─── CONSUMO DE COMBUSTÍVEL ──────────────────────────────────────────────────
 
@@ -108,6 +92,28 @@ struct CruisePoint {
 /// é sempre um `CruisePoint` válido, e a viabilidade é reportada como dado
 /// (`PropulsionSpec::cruise_feasible`), verificada depois pelo
 /// `ConstraintChecker`.
+///
+/// **Ciclo 13 (spec §5): inversão em FORMA FECHADA, não mais polinômio.**
+/// Antes, para cada rpm candidata: `eta = prop_efficiency(J)` (polinômio
+/// JavaProp, apagado — spec §4) e `p_req_kw = drag_n·V/(eta·1000)`. Com a
+/// lei única, η depende da potência efetivamente absorvida — e em cruzeiro
+/// nivelado a tração exigida é conhecida (`T = drag_n`). Isso NÃO cria ponto
+/// fixo: a quadrática do disco atuador inverte diretamente. De
+/// `T = 2ρA·u·(u − V)`:
+///
+///   u = [ V + √(V² + 2T/(ρA)) ] / 2
+///   P_ideal    = T · u
+///   P_eixo_req = P_ideal / FoM(J)
+///   η          = FoM(J) · V / u
+///
+/// `u` só depende de `T` (=drag_n, fixo), `V`, `ρ` e `A` — NÃO do rpm
+/// candidato (a teoria de disco atuador abstrai a rotação: qualquer rpm que
+/// entregue o mesmo `T` na mesma `V` precisa da MESMA velocidade induzida no
+/// disco). Só `FoM(J)` varia entre candidatos, via `J = J(engine_rpm)`.
+///
+/// **Guarda obrigatória (spec §5):** se `FoM(J) ≤ 0` ou `u ≤ 0` (config
+/// degenerada — nunca alcançável pelo caminho de produção validado, mesmo
+/// tratamento do `eta > 0.0` de hoje), `p_req_kw = f64::INFINITY`. Nunca NaN.
 fn search_cruise_rpm(
     engine: &EngineSpec,
     v_cruise_ms: f64,
@@ -115,6 +121,8 @@ fn search_cruise_rpm(
     psru_efficiency: f64,
     prop_diameter_m: f64,
     altitude_m: f64,
+    isa_delta_c: f64,
+    fom: FigureOfMerit,
     drag_n: f64,
 ) -> (CruisePoint, bool) {
     let rpm_hi = engine.rpm_max_continuous.min(engine.bsfc.rpm_optimal * 1.2);
@@ -124,16 +132,32 @@ fn search_cruise_rpm(
     // laço vazio.
     let rpm_lo = (engine.bsfc.rpm_optimal * 0.8).min(rpm_hi);
 
+    // `isa_delta_c` (achado da revisão de plano): a densidade da inversão
+    // tem que ser a MESMA que gerou `drag_n` no chamador, senão a identidade
+    // T = arrasto não fecha. Hoje todas as missões têm isa_delta_c = 0,0,
+    // então hardcodar seria inofensivo E errado — bug latente para a
+    // primeira missão com ISA ≠ 0, e violação da política "nunca hardcodar
+    // dado de missão".
+    let rho = crate::models::atmosphere::Isa::density_kgm3(altitude_m, isa_delta_c);
+    let disk_area = std::f64::consts::PI * (prop_diameter_m / 2.0).powi(2);
+    // Velocidade induzida no disco para produzir T=drag_n em V_cruise —
+    // constante através da varredura de rpm (ver docstring acima).
+    let u = (v_cruise_ms
+             + (v_cruise_ms * v_cruise_ms + 2.0 * drag_n / (rho * disk_area)).sqrt())
+            / 2.0;
+    let p_ideal_kw = drag_n * u / 1_000.0;
+
     let evaluate = |engine_rpm: f64| -> CruisePoint {
         let prop_rpm_c = prop_rpm(engine_rpm, psru_ratio);
         let j = advance_ratio(v_cruise_ms, prop_rpm_c, prop_diameter_m);
-        let eta = prop_efficiency(j);
-        let p_shaft_kw = engine.power_kw_at(engine_rpm, altitude_m) * psru_efficiency;
-        let p_req_kw = if eta > 0.0 {
-            drag_n * v_cruise_ms / (eta * 1_000.0)
+        let fom_j = fom.at(j);
+        let eta = if u > 0.0 { fom_j * v_cruise_ms / u } else { 0.0 };
+        let p_req_kw = if fom_j > 0.0 && u > 0.0 {
+            p_ideal_kw / fom_j
         } else {
             f64::INFINITY
         };
+        let p_shaft_kw = engine.power_kw_at(engine_rpm, altitude_m) * psru_efficiency;
         let load_fraction = (p_req_kw / p_shaft_kw).min(1.0);
         let bsfc_gkwh = engine.bsfc.bsfc_gkwh(engine_rpm, load_fraction);
         CruisePoint { engine_rpm, prop_rpm: prop_rpm_c, eta, p_shaft_kw, p_req_kw, bsfc_gkwh }
@@ -208,10 +232,13 @@ impl PropulsionAgent {
 
         // RPM de cruzeiro: busca o rpm de menor BSFC que sustenta o voo
         // nivelado exigido, dentro da faixa ao redor do rpm ótimo de BSFC do
-        // motor (ver `search_cruise_rpm`).
+        // motor (ver `search_cruise_rpm`). `old→new` (ciclo 13): `fom` e
+        // `req.isa_delta_c` são parâmetros novos — a inversão fechada do
+        // disco atuador precisa das âncoras da hélice e da mesma densidade
+        // que gerou `drag_n` acima (spec §5).
         let (cp, cruise_feasible) = search_cruise_rpm(
             engine, v_cruise_ms, state.psru_ratio, state.psru_efficiency, state.prop_diameter_m,
-            req.cruise_altitude_m, drag_n,
+            req.cruise_altitude_m, req.isa_delta_c, state.figure_of_merit(), drag_n,
         );
 
         // `cp.p_req_kw` é potência de EIXO (pós-PSRU, na hélice) — BSFC
@@ -223,9 +250,14 @@ impl PropulsionAgent {
             cp.p_req_kw / state.psru_efficiency, cp.bsfc_gkwh, engine.fuel.density_kg_per_l,
         );
 
-        // Tração em cruzeiro (por construção, iguala o arrasto em regime
-        // permanente: T = η·P_req/V = η·(D·V/η)/V = D).
-        let thrust = thrust_n(cp.eta, cp.p_req_kw * 1_000.0, v_cruise_ms);
+        // Tração em cruzeiro: por CONSTRUÇÃO iguala o arrasto em regime
+        // permanente (`T = drag_n`, a mesma premissa que `search_cruise_rpm`
+        // usa para inverter a quadrática do disco atuador — spec §5).
+        // `old→new` (ciclo 13): antes era `thrust_n(cp.eta, cp.p_req_kw·1000,
+        // v_cruise_ms)` — `thrust_n` foi apagada (spec §4); usar `drag_n`
+        // diretamente é MAIS direto, não uma aproximação nova (T=D já era a
+        // identidade que o `thrust_n` antigo reproduzia algebricamente).
+        let thrust = drag_n;
 
         // Autonomia e alcance (inclui reserva)
         let endurance_h = state.fuel_capacity_l / fc_lph
@@ -258,6 +290,54 @@ impl PropulsionAgent {
     }
 }
 
+// ─── FIGURA DE MÉRITO DA HÉLICE ──────────────────────────────────────────────
+
+/// Figura de mérito da hélice: tração REAL sobre tração IDEAL de disco
+/// atuador na mesma potência de eixo (ciclo 13, spec §3).
+///
+///   FoM(J) = fom_static + (fom_design − fom_static)·min(J/j_design, 1)
+///
+/// Por definição `FoM ≤ 1` — uma hélice não produz mais tração que o disco
+/// atuador ideal absorvendo a mesma potência (conservação de quantidade de
+/// movimento, spec §1). Esta é a grandeza que substitui o polinômio
+/// `prop_efficiency` apagado neste ciclo: aquele violava o teto físico em
+/// QUATRO dos oito pontos de operação do baseline (spec §1.1) — rolagem a
+/// V=10 (2,1432x) e V=20 (1,3417x), `V_LOF` (1,0372x) e `Vx` (1,0095x).
+/// Os dois últimos alimentam gates que PASSAVAM: o balanço de rotação e o
+/// gradiente CS 23.65.
+///
+/// As duas âncoras são propriedades da HÉLICE, vindas de `[propeller]` do
+/// TOML — nunca hardcodadas aqui.
+///   - `fom_static` (J=0): fator de McCormick, ≈0,75. Reproduz a tração
+///     estática de hoje por IDENTIDADE algébrica (spec §3.1).
+///   - `fom_design` (J=`j_design`): retro-derivada UMA VEZ do polinômio
+///     JavaProp no ponto de cruzeiro do baseline, o que preserva
+///     cruzeiro/alcance/autonomia por construção (spec §3.2).
+///
+/// PREMISSA CALIBRADA DECLARADA (spec §3.3): `j_design` foi derivada de
+/// `prop_rpm_cruise`, que era SAÍDA da busca de rpm. Congelada em config, ela
+/// NÃO se reajusta se a velocidade de cruzeiro, a razão de PSRU ou o diâmetro
+/// mudarem — a âncora fica obsoleta em silêncio. Item de backlog nomeado.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FigureOfMerit {
+    pub fom_static: f64,
+    pub fom_design: f64,
+    pub j_design: f64,
+}
+
+impl FigureOfMerit {
+    /// Figura de mérito na razão de avanço `j`. Grampeada em `fom_design`
+    /// acima de `j_design` (extrapolar levaria FoM > 1) e em `fom_static`
+    /// abaixo de zero (J negativo não é alcançável, mas não pode virar NaN).
+    pub fn at(&self, j: f64) -> f64 {
+        if !(j > 0.0) {
+            return self.fom_static;   // cobre j ≤ 0 e j NaN
+        }
+        let t = (j / self.j_design).min(1.0);
+        self.fom_static + (self.fom_design - self.fom_static) * t
+    }
+}
+
 // ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -266,6 +346,74 @@ mod tests {
     use crate::models::engine::test_fixtures::{motor_generico_teste as engine_teste,
                                                  motor_generico_fraco_teste as engine_fraco_teste};
 
+    /// Âncoras da figura de mérito — spec ciclo 13 §3. Os dois valores são
+    /// EXATOS por construção da curva, não aproximados: `at(0)` devolve
+    /// `fom_static` e `at(j_design)` devolve `fom_design` sem interpolação.
+    #[test]
+    fn figura_de_merito_reproduz_as_ancoras_exatamente() {
+        let fom = FigureOfMerit {
+            fom_static: 0.75,
+            fom_design: 0.823_706_394_572_155_44,
+            j_design:   1.875_143_480_257_116_75,
+        };
+        assert_eq!(fom.at(0.0), 0.75);
+        assert_eq!(fom.at(1.875_143_480_257_116_75), 0.823_706_394_572_155_44);
+    }
+
+    /// Grampo acima de `j_design` (spec §3): a curva satura, não extrapola.
+    /// Extrapolar linearmente levaria FoM acima de 1,0 em J alto — violaria o
+    /// teto de quantidade de movimento que este ciclo inteiro existe para impor.
+    #[test]
+    fn figura_de_merito_satura_acima_do_j_de_projeto() {
+        let fom = FigureOfMerit { fom_static: 0.75, fom_design: 0.82, j_design: 1.9 };
+        assert_eq!(fom.at(1.9), 0.82);
+        assert_eq!(fom.at(3.8), 0.82);
+        assert_eq!(fom.at(50.0), 0.82);
+    }
+
+    /// FoM é uma FRAÇÃO da tração ideal — nunca pode passar de 1,0 nem chegar a
+    /// zero com âncoras válidas. Guarda falseável do teto físico (spec §8.5).
+    #[test]
+    fn figura_de_merito_fica_estritamente_dentro_de_zero_e_um() {
+        let fom = FigureOfMerit {
+            fom_static: 0.75,
+            fom_design: 0.823_706_394_572_155_44,
+            j_design:   1.875_143_480_257_116_75,
+        };
+        for i in 0..=1000 {
+            let j = i as f64 * 0.01;
+            let v = fom.at(j);
+            assert!(v > 0.0 && v <= 1.0, "FoM({j}) = {v} fora de (0, 1]");
+        }
+    }
+
+    /// Monotonicidade não-decrescente (spec §8.5): as pás vão saindo do estol
+    /// conforme a razão de avanço sobe; a figura de mérito não pode PIORAR com J
+    /// dentro da faixa de projeto.
+    #[test]
+    fn figura_de_merito_e_monotonica_nao_decrescente() {
+        let fom = FigureOfMerit {
+            fom_static: 0.75,
+            fom_design: 0.823_706_394_572_155_44,
+            j_design:   1.875_143_480_257_116_75,
+        };
+        let mut anterior = fom.at(0.0);
+        for i in 1..=1000 {
+            let atual = fom.at(i as f64 * 0.01);
+            assert!(atual >= anterior, "FoM caiu em J={}", i as f64 * 0.01);
+            anterior = atual;
+        }
+    }
+
+    /// J negativo não é fisicamente alcançável neste modelo (V ≥ 0), mas se
+    /// chegar aqui a curva devolve o valor estático — nunca extrapola para baixo
+    /// de `fom_static`, nunca NaN. Guarda de robustez, não de física.
+    #[test]
+    fn figura_de_merito_com_j_negativo_devolve_o_estatico() {
+        let fom = FigureOfMerit { fom_static: 0.75, fom_design: 0.82, j_design: 1.9 };
+        assert_eq!(fom.at(-1.0), 0.75);
+    }
+
     #[test]
     fn prop_rpm_correto() {
         // Motor a 2.400 rpm com PSRU 1.867 → hélice a 1.285 rpm
@@ -273,14 +421,20 @@ mod tests {
         assert!((n - 1_285.0).abs() < 5.0, "RPM hélice = {n:.0} (esperado ~1.285)");
     }
 
+    /// `old→new` (ciclo 13, spec §4): `prop_efficiency(J)` (polinômio
+    /// JavaProp) foi apagada — η vira SAÍDA derivada de `FigureOfMerit`, não
+    /// entrada polinomial (spec §5). Âncoras SINTÉTICAS, deliberadamente
+    /// diferentes do baseline real (spec §10 item 4) — mesmas de
+    /// `aircraft_config::test_fixtures::config_teste().propeller`.
     #[test]
-    fn eficiencia_helice_cruzeiro() {
+    fn figura_de_merito_em_j_tipico_de_cruzeiro() {
         // J típico de cruzeiro: V=77.8 m/s, n_prop=1.285 rpm, D=1.95m
         let j = advance_ratio(77.8, 1_285.0, 1.95);
-        let eta = prop_efficiency(j);
-        println!("J = {j:.3}, η_prop = {eta:.3}");
-        assert!(eta > 0.78 && eta < 0.90,
-            "Eficiência hélice {eta:.3} fora do intervalo esperado (0.78–0.90)");
+        let fom = FigureOfMerit { fom_static: 0.72, fom_design: 0.80, j_design: 1.60 };
+        let valor = fom.at(j);
+        println!("J = {j:.3}, FoM = {valor:.3}");
+        // J≈1,863 > j_design=1,60 ⟹ grampeado em fom_design (spec §3).
+        assert_eq!(valor, 0.80, "FoM(J={j:.3}) deveria saturar em fom_design=0,80");
     }
 
     #[test]
@@ -320,6 +474,12 @@ mod tests {
         assert!(prop.fc_cruise_lph > 0.0);
         assert!(prop.bsfc_cruise_gkwh >= engine.bsfc.bsfc_min_gkwh);
         assert!(prop.endurance_h > 0.0);
+        // `old→new` (ciclo 13): 0.86 era o CLAMP DURO do polinômio apagado
+        // (`prop_efficiency`, `.clamp(0.0, 0.86)`). A lei nova não tem esse
+        // clamp — η = FoM(J)·V/u é estruturalmente < FoM(J) ≤ fom_design
+        // (0,80 na fixture sintética, `config_teste().propeller`), então
+        // 0,86 segue válido como teto de sanidade solto, não mais um limite
+        // físico do modelo.
         assert!(prop.prop_efficiency > 0.0 && prop.prop_efficiency <= 0.86);
     }
 

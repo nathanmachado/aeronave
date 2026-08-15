@@ -68,6 +68,14 @@ pub struct AircraftState {
     pub psru_efficiency: f64,
     pub prop_diameter_m: f64,
     pub fuel_capacity_l: f64,
+    /// Figura de mérito da hélice em J=0 (ciclo 13, spec §3.1) — âncora
+    /// estática de McCormick.
+    pub fom_static: f64,
+    /// Figura de mérito da hélice em J=j_design (ciclo 13, spec §3.2) —
+    /// âncora de cruzeiro.
+    pub fom_design: f64,
+    /// Razão de avanço de projeto da hélice (ciclo 13, spec §3.2).
+    pub j_design: f64,
 
     // --- Trem de pouso ---
     pub gear_retractable: bool,
@@ -145,12 +153,28 @@ impl AircraftState {
             }),
             fuel_capacity_l: cfg.fuel_system.capacity_l,
 
+            fom_static: cfg.propeller.fom_static,
+            fom_design: cfg.propeller.fom_design,
+            j_design: cfg.propeller.j_design,
+
             gear_retractable: cfg.gear.retractable,
         }
     }
 
     pub fn aspect_ratio(&self) -> f64 {
         self.wing_span_m.powi(2) / self.wing_area_m2
+    }
+
+    /// Figura de mérito da hélice instalada (ciclo 13, spec §2.2). Mora no
+    /// estado, e não num parâmetro solto, porque TODO agente já recebe
+    /// `&AircraftState` — assim nenhuma assinatura de agente muda quando o
+    /// modelo de tração muda. Mesmo trajeto de `psru_ratio`/`prop_diameter_m`.
+    pub fn figure_of_merit(&self) -> crate::agents::propulsion::FigureOfMerit {
+        crate::agents::propulsion::FigureOfMerit {
+            fom_static: self.fom_static,
+            fom_design: self.fom_design,
+            j_design:   self.j_design,
+        }
     }
 }
 

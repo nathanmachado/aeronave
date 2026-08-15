@@ -1153,6 +1153,12 @@ mod tests {
         TrimSpec {
             flare_limit_pct_mac: flare_pct,
             rotation_limit_pct_mac: rotation_pct,
+            // Ciclo 13 (spec §7): fixture sintética não distingue superfície
+            // — os dois campos novos ecoam o mesmo `rotation_pct` que o
+            // campo legado sempre usou aqui, para não inventar um segundo
+            // grau de liberdade nesta fixture minimalista.
+            rotation_limit_pct_mac_paved: rotation_pct,
+            rotation_limit_pct_mac_grass: rotation_pct,
             rotation_margin_per_scenario: vec![
                 ScenarioTrimLimit { scenario: "Leve (dianteiro)".to_string(), rotation_authority_margin_pct: -10.0 },
                 ScenarioTrimLimit { scenario: "Pesado (traseiro)".to_string(), rotation_authority_margin_pct: 5.0 },

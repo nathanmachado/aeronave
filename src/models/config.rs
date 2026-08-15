@@ -213,6 +213,7 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_mass_nose_migration(toml_str)?;
     check_shaft_height_migration(toml_str)?;
     check_to_flap_cm_fraction_migration(toml_str)?;
+    check_static_thrust_factor_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -470,6 +471,28 @@ fn check_to_flap_cm_fraction_migration(toml_str: &str) -> Result<(), ConfigError
              Vr da rotação e as distâncias de decolagem (antes calculadas com o CL_max de \
              POUSO). Renomeie a chave (o valor numérico e a faixa [0, 1] são os mesmos). Ver \
              docs/aircraft_spec.schema.md e config/aircraft/baseline_4seat.toml"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 13, spec §9.2): `[performance].
+/// static_thrust_factor` foi MOVIDO para `[propeller].fom_static` e deixou de
+/// ser um multiplicador plano — virou a âncora J=0 de uma figura de mérito
+/// (`agents::propulsion::FigureOfMerit`). Sem `deny_unknown_fields`, um TOML
+/// antigo seria aceito em SILÊNCIO com a tração vindo só dos defaults novos
+/// de `[propeller]` — exatamente a classe de falha que as demais guardas de
+/// migração deste módulo já existem para evitar.
+fn check_static_thrust_factor_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("performance").and_then(|p| p.get("static_thrust_factor")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [performance].static_thrust_factor foi \
+             substituído pela figura de mérito da hélice — remova o campo e adicione \
+             [propeller].fom_static (mesmo valor), [propeller].fom_design e \
+             [propeller].j_design (ver docs/aircraft_spec.schema.md e \
+             config/aircraft/baseline_4seat.toml)"
                 .to_string(),
         ));
     }
@@ -779,6 +802,23 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
              (0.0, 1.0) (valor: {})",
             cfg.propeller.prop_plane_x_m
         )));
+    }
+    require_positive("propeller.fom_static", cfg.propeller.fom_static)?;
+    require_positive("propeller.fom_design", cfg.propeller.fom_design)?;
+    require_positive("propeller.j_design",   cfg.propeller.j_design)?;
+    // Teto de quantidade de movimento (spec §1): a figura de mérito é uma
+    // FRAÇÃO da tração ideal. FoM > 1 significaria uma hélice produzindo mais
+    // empuxo que o disco atuador ideal na mesma potência — impossível.
+    for (nome, v) in [("propeller.fom_static", cfg.propeller.fom_static),
+                      ("propeller.fom_design", cfg.propeller.fom_design)] {
+        if v > 1.0 {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: {nome} = {v} excede 1,0 — a figura de \
+                 mérito é a fração da tração IDEAL de disco atuador que a hélice real \
+                 entrega, e passar de 1,0 violaria a conservação de quantidade de \
+                 movimento (ver agents::propulsion::FigureOfMerit)"
+            )));
+        }
     }
 
     // [fuel_system]
@@ -1126,15 +1166,13 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.performance.mu_roll_grass
         )));
     }
-    require_positive("performance.static_thrust_factor", cfg.performance.static_thrust_factor)?;
-    if cfg.performance.static_thrust_factor > 1.0 {
-        return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: performance.static_thrust_factor deve estar em \
-             (0, 1.0] — é uma correção que reduz a tração estática IDEAL de Rankine-Froude para \
-             a real (perdas de ponta de pá/rotação de esteira), nunca aumenta (valor: {})",
-            cfg.performance.static_thrust_factor
-        )));
-    }
+    // `old→new` (ciclo 13, spec §9.2): a validação de
+    // `performance.static_thrust_factor` (positivo, ≤1.0) foi REMOVIDA
+    // daqui — o campo deixou de existir em `PerformanceCfg`. A mesma
+    // propriedade física (a figura de mérito nunca excede 1,0 — conservação
+    // de quantidade de movimento) agora é validada para as duas âncoras
+    // novas em `[propeller]`, logo abaixo do bloco de validação de
+    // `propeller` (`propeller.fom_static`/`propeller.fom_design`).
     require_positive("performance.rotation_time_s", cfg.performance.rotation_time_s)?;
     require_positive("performance.flare_time_s", cfg.performance.flare_time_s)?;
     require_finite("performance.approach_angle_deg", cfg.performance.approach_angle_deg)?;
@@ -1598,6 +1636,9 @@ mod tests {
             tip_mach_max_cruise = 0.80
             ground_clearance_min_m = 0.23
             prop_plane_x_m = 0.20
+            fom_static = 0.72
+            fom_design = 0.80
+            j_design   = 1.60
             [fuel_system]
             capacity_l = 200.0
             [gear]
@@ -1643,7 +1684,6 @@ mod tests {
             mu_brake_grass = 0.30
             mu_roll_paved = 0.04
             mu_roll_grass = 0.08
-            static_thrust_factor = 0.75
             rotation_time_s = 1.0
             flare_time_s = 1.5
             approach_angle_deg = 3.0
@@ -2640,25 +2680,72 @@ mod tests {
         assert!(err.to_string().contains("performance.mu_roll_grass"), "{err}");
     }
 
+    /// `old→new` (ciclo 13): as antigas `rejeita_static_thrust_factor_
+    /// nao_positivo`/`rejeita_static_thrust_factor_acima_de_1` testavam
+    /// `[performance].static_thrust_factor` fora de faixa — mas o campo foi
+    /// MIGRADO para `[propeller].fom_static` (spec §9.2), então "fora de
+    /// faixa" deixou de ser o modo de falha alcançável para a chave antiga:
+    /// QUALQUER presença dela, mesmo um valor que seria válido no schema
+    /// velho, dispara a guarda de migração ANTES de qualquer validação de
+    /// faixa rodar. As duas propriedades que os testes antigos guardavam
+    /// (rejeitar valor ≤0 e rejeitar valor >1.0) CONTINUAM valendo — agora
+    /// cobertas para os campos novos por `rejeita_ancoras_da_figura_de_
+    /// merito_nao_positivas`/`rejeita_figura_de_merito_acima_de_um` acima.
+    /// Reescritos (não apagados) para provar a guarda de migração em si.
     #[test]
-    fn rejeita_static_thrust_factor_nao_positivo() {
+    fn rejeita_config_com_static_thrust_factor_legado_mesmo_com_valor_que_seria_valido() {
         let toml = aircraft_toml_valido()
-            .replace("static_thrust_factor = 0.75", "static_thrust_factor = 0.0");
+            .replace("[performance]\n", "[performance]\nstatic_thrust_factor = 0.75\n");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("performance.static_thrust_factor"), "{err}");
+        assert!(err.to_string().contains("static_thrust_factor"), "{err}");
+        assert!(err.to_string().contains("fom_static"),
+                "a mensagem tem que apontar para o campo novo: {err}");
     }
 
-    /// `static_thrust_factor` é uma correção que reduz a tração estática
-    /// IDEAL de Rankine-Froude — fisicamente nunca pode ultrapassar 1.0. Sem
-    /// este teto, um erro de digitação (ex.: 7.5 em vez de 0.75) passaria
-    /// silenciosamente e SUBESTIMARIA as distâncias de decolagem (tração
-    /// maior que a ideal é fisicamente impossível para este modelo).
+    /// A guarda de migração dispara ANTES da validação de faixa — mesmo um
+    /// valor que também seria rejeitado pelo schema velho (>1.0) produz o
+    /// erro de MIGRAÇÃO, não o antigo erro de faixa (que nem existe mais).
     #[test]
-    fn rejeita_static_thrust_factor_acima_de_1() {
+    fn rejeita_config_com_static_thrust_factor_legado_fora_de_faixa_tambem() {
         let toml = aircraft_toml_valido()
-            .replace("static_thrust_factor = 0.75", "static_thrust_factor = 7.5");
+            .replace("[performance]\n", "[performance]\nstatic_thrust_factor = 7.5\n");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("performance.static_thrust_factor"), "{err}");
+        assert!(err.to_string().contains("static_thrust_factor"), "{err}");
+    }
+
+    /// Ciclo 13: a guarda do TETO DE QUANTIDADE DE MOVIMENTO na validação de
+    /// config precisa ser falseável. Sem este teste ela é código que nunca
+    /// dispara — e uma guarda que não consegue reprovar não é guarda.
+    /// `FoM > 1` significaria uma hélice produzindo mais empuxo que o disco
+    /// atuador ideal na mesma potência de eixo.
+    #[test]
+    fn rejeita_figura_de_merito_acima_de_um() {
+        for (campo, linha_antiga, linha_nova) in [
+            ("propeller.fom_static", "fom_static = 0.72", "fom_static = 1.4"),
+            ("propeller.fom_design", "fom_design = 0.80", "fom_design = 1.4"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains(campo), "{campo}: {err}");
+            assert!(err.to_string().contains("quantidade de movimento"),
+                    "a mensagem tem que dizer POR QUE é impossível: {err}");
+        }
+    }
+
+    /// As três âncoras têm que ser estritamente positivas — `j_design ≤ 0`
+    /// faria `FigureOfMerit::at` dividir por zero ou inverter o sinal da
+    /// interpolação em silêncio.
+    #[test]
+    fn rejeita_ancoras_da_figura_de_merito_nao_positivas() {
+        for (campo, linha_antiga, linha_nova) in [
+            ("propeller.fom_static", "fom_static = 0.72", "fom_static = 0.0"),
+            ("propeller.fom_design", "fom_design = 0.80", "fom_design = -0.5"),
+            ("propeller.j_design",   "j_design   = 1.60", "j_design   = 0.0"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains(campo), "{campo}: {err}");
+        }
     }
 
     #[test]

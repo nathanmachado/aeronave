@@ -21,7 +21,7 @@ use crate::models::atmosphere::Isa;
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
 use crate::models::specs::{WingSpec, PropulsionSpec, PerformanceSpec};
-use crate::agents::propulsion::{prop_rpm, prop_efficiency, advance_ratio, thrust_n};
+use crate::agents::propulsion::{prop_rpm, advance_ratio, FigureOfMerit};
 use crate::models::aircraft_state::AircraftState;
 use crate::models::aircraft_config::PerformanceCfg;
 
@@ -44,6 +44,17 @@ pub fn shaft_power_kw(engine: &EngineSpec, engine_rpm: f64, altitude_m: f64,
 /// empírica. A teoria de disco atuador superestima a tração real por não
 /// modelar perdas de ponta de pá, rotação de esteira e não-uniformidade da
 /// distribuição de carga ao longo da pá.
+///
+/// `old→new` (ciclo 13, spec §4): até este ciclo era chamada por
+/// `thrust_available_n` no ramo estático V<0,5 m/s. A lei única (spec §2)
+/// não tem ramos — `thrust_ideal_momentum_n` (a cúbica com avanço) cobre
+/// V=0 por degeneração algébrica, sem chamar esta função. **MANTIDA,
+/// privada** (spec §4): continua sendo a prova INDEPENDENTE da identidade
+/// estática do §3.1 (`tracao_em_v_zero_e_identica_ao_estatico_vezes_a_
+/// ancora` e os testes de sensibilidade ao diâmetro, abaixo). `#[cfg(test)]`
+/// evita o aviso de código morto fora de `cfg(test)` — mesmo padrão de
+/// `integra_rolagem_decolagem`.
+#[cfg(test)]
 fn static_thrust_ideal_n(engine: &EngineSpec, engine_rpm: f64, prop_diam_m: f64,
                           altitude_m: f64, isa_delta_c: f64, psru_efficiency: f64) -> f64 {
     let p_w = shaft_power_kw(engine, engine_rpm, altitude_m, psru_efficiency) * 1_000.0;
@@ -52,57 +63,14 @@ fn static_thrust_ideal_n(engine: &EngineSpec, engine_rpm: f64, prop_diam_m: f64,
     (2.0 * rho * disk_area * p_w * p_w).powf(1.0 / 3.0)
 }
 
-/// Tração disponível da hélice em função da velocidade e altitude.
+/// Tração IDEAL de disco atuador com velocidade de avanço (Rankine-Froude) —
+/// o TETO físico de qualquer hélice absorvendo `P_eixo` (ciclo 13, spec §1).
 ///
-/// `isa_delta_c`: desvio ISA da missão — usado no ramo de tração estática
-/// (Rankine-Froude).
+///   T_ideal(V) = 2·ρ·A·u·(u − V),  u = raiz real de u³ − V·u² − K = 0,
+///   K = P_eixo/(2ρA)
 ///
-/// `static_thrust_factor` (Task 4.7, config `[performance]`): fator empírico
-/// (McCormick, tipicamente ≈0.75) aplicado sobre a tração estática IDEAL —
-/// ver `static_thrust_ideal_n`. Ignorado no ramo de voo (V ≥ 0,5 m/s), que já
-/// usa o modelo de disco atuador com eficiência de hélice (`prop_efficiency`),
-/// fisicamente distinto e já calibrado.
-pub fn thrust_available_n(
-    v_ms: f64,
-    engine: &EngineSpec,
-    engine_rpm: f64,
-    psru_ratio: f64,
-    prop_diam_m: f64,
-    altitude_m: f64,
-    isa_delta_c: f64,
-    static_thrust_factor: f64,
-    psru_efficiency: f64,
-) -> f64 {
-    if v_ms < 0.5 {
-        // Tração estática (solo): estimativa por impulso de disco
-        // (Rankine-Froude) × fator empírico de correção.
-        return static_thrust_ideal_n(engine, engine_rpm, prop_diam_m, altitude_m, isa_delta_c,
-                                      psru_efficiency)
-            * static_thrust_factor;
-    }
-    let n_prop = prop_rpm(engine_rpm, psru_ratio);
-    let j = advance_ratio(v_ms, n_prop, prop_diam_m);
-    let eta = prop_efficiency(j);
-    let p_shaft_w = shaft_power_kw(engine, engine_rpm, altitude_m, psru_efficiency) * 1_000.0;
-    thrust_n(eta, p_shaft_w, v_ms)
-}
-
-/// Tração VÁLIDA na faixa da rolagem de decolagem (0 → V_LOF) — ciclo 12,
-/// spec §2. `thrust_available_n` não serve para este uso: seu ramo de voo
-/// (`prop_efficiency(J)`, polinômio calibrado com dados de JavaProp na faixa
-/// de CRUZEIRO, `J ≈ 1,3–1,5`) devolve η(0) = 0,58 — fisicamente errado (por
-/// definição η = T·V/P ⟹ η→0 quando V→0) — e na corrida de decolagem desta
-/// célula `J` varre 0 a 0,68, fora do domínio calibrado; medido: ≈80.000 N em
-/// V=1 m/s (20× a tração estática), precedido por uma janela de tração NULA
-/// em `[0,5; 1,0)` m/s (`thrust_n` tem uma guarda `if v_ms < 1.0 { return
-/// 0.0 }`). Ver spec §1 para o histórico completo — o defeito ficou dormente
-/// porque nenhum consumidor avaliava `prop_efficiency` nesta faixa até a
-/// rolagem passar a integrar sobre `V ∈ [0, V_LOF]`.
-///
-/// Teoria de quantidade de movimento (Rankine-Froude) COM velocidade de
-/// avanço, não só a tração estática em V=0. Com `u` = velocidade no disco
-/// (metade da velocidade de esteira longe do disco mais V), `A = π·D²/4` e
-/// `P` a potência de EIXO:
+/// Com `u` = velocidade no disco (metade da velocidade de esteira longe do
+/// disco mais V), `A = π·D²/4` e `P` a potência de EIXO:
 ///
 ///   T = 2·ρ·A·u·(u − V)      [empuxo do disco]
 ///   P = T·u                   [potência ideal]
@@ -111,72 +79,34 @@ pub fn thrust_available_n(
 /// Cúbica `u³ − V·u² − K = 0`. Para `K > 0` e `V ≥ 0` há exatamente uma raiz
 /// real com `u > V` (`f(V) = −K < 0`, `f` estritamente crescente em
 /// `u > 2V/3`, `f → +∞`) — resolvida por Newton a partir de
-/// `u₀ = V + K^(1/3)`, que converge monotonicamente (bracket
-/// `[V, V + K^(1/3) + V]`, provado no teste de identidade abaixo).
+/// `u₀ = V + K^(1/3)`, que converge monotonicamente (ciclo 12, prova
+/// preservada no teste de identidade estática do baseline real,
+/// `tests/generic_engine.rs`). Em V=0 degenera em `u = K^(1/3)` e o
+/// resultado é algebricamente idêntico a `static_thrust_ideal_n`.
 ///
-///   thrust_ground_roll_n(V) = static_thrust_factor · 2·ρ·A·u·(u − V)
-///
-/// **Continuidade exata com o modelo de hoje (spec §2.1).** Em V=0 a cúbica
-/// degenera em `u³ = K` ⟹ `u = K^(1/3)` ⟹
-/// `T = 2ρA·K^(2/3) = (2ρA·P²)^(1/3)` — ALGEBRICAMENTE idêntico a
-/// `static_thrust_ideal_n`. `thrust_ground_roll_n(0)` reproduz
-/// `thrust_available_n(0)` não por aproximação, mas por identidade —
-/// verificado por `tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_de_
-/// hoje` a 1e-9 relativo. Esta função é uma REFINAÇÃO do modelo estático de
-/// hoje, não uma substituição.
-///
-/// **Premissa calibrada esticada, declarada (spec §2.3).** `static_thrust_
-/// factor` (McCormick, ≈0,75) é calibrado só para tração ESTÁTICA — esta
-/// função o aplica como multiplicador PLANO em todo `V ∈ [0, V_LOF]`. A
-/// alternativa (fator 1,0 acima de V=0) criaria um degrau de +33% na tração
-/// logo depois da largada, pior. Direção do erro: se as perdas de ponta de
-/// pá/rotação de esteira caírem com a velocidade de avanço, o modelo
-/// SUBESTIMA a tração na segunda metade da corrida — é CONSERVADOR (a
-/// rolagem sai maior, não menor). Assumido e registrado, não escondido.
-///
-/// **A costura em V_LOF não é mascarada (spec §2.4).** Em `V_LOF` esta
-/// função e `thrust_available_n` divergem (domínios de validade disjuntos —
-/// um calibrado para tração ESTÁTICA, o outro para `J` de CRUZEIRO); a
-/// descontinuidade medida é item de backlog (unificar o modelo de tração),
-/// fora de escopo deste ciclo.
-///
-/// NÃO recebe `psru_ratio` — teoria de quantidade de movimento não usa rpm
-/// de hélice (a rotação da hélice entra em `prop_efficiency(J)`, que este
-/// modelo não usa).
-pub fn thrust_ground_roll_n(
+/// `pub` de propósito: é a referência contra a qual
+/// `tracao_nunca_excede_o_teto_de_quantidade_de_movimento` mede. Um teto que
+/// só existe dentro da função que ele limita não é falseável (ciclo 13,
+/// spec §8.1).
+pub fn thrust_ideal_momentum_n(
     v_ms: f64,
     engine: &EngineSpec,
     engine_rpm: f64,
     prop_diam_m: f64,
     altitude_m: f64,
     isa_delta_c: f64,
-    static_thrust_factor: f64,
     psru_efficiency: f64,
 ) -> f64 {
     let p_w = shaft_power_kw(engine, engine_rpm, altitude_m, psru_efficiency) * 1_000.0;
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     let disk_area = std::f64::consts::PI * (prop_diam_m / 2.0).powi(2);
     let k = p_w / (2.0 * rho * disk_area);
-
-    // Guarda (Fix round 1 do report da task — achado do revisor): a spec
-    // §2 assume `K > 0`. Se `K ≤ 0` (potência de eixo nula/negativa) E
-    // `V = 0` ao mesmo tempo, `u₀ = V + K^(1/3) = 0` e a primeira iteração
-    // de Newton calcula `f/fp = 0/0` — NaN SILENCIOSO, o modo de falha que
-    // este projeto não aceita (o padrão é falhar no ponto de perigo, não
-    // devolver um número que não é número). INALCANÇÁVEL hoje:
-    // `psru_efficiency > 0` é validado em `models::config` (`require_
-    // positive("propeller.psru_efficiency", ...)`) e `engine.power_kw_at`
-    // é positiva para qualquer rpm válida — `K` nunca chega a zero pelo
-    // caminho de produção. Se essa validação algum dia relaxar (ex.: motor
-    // "desligado" modelado com P=0), sem esta guarda a rolagem devolveria
-    // NaN em vez de `+INFINITY`/pane explícita — fisicamente correto seria
-    // tração nula (sem potência, o disco atuador não produz empuxo).
+    // Guarda do ciclo 12 preservada (spec §8.7): K ≤ 0 ∧ V = 0 daria 0/0 no
+    // primeiro Newton (NaN silencioso). Sem potência, o disco não produz
+    // empuxo — resultado FÍSICO, não erro.
     if k <= 0.0 {
         return 0.0;
     }
-
-    // Newton a partir de u0 = V + K^(1/3) — em V=0, f(u0) = u0³ − K = 0
-    // exatamente (converge em 1 iteração, prova a identidade do spec §2.1).
     let mut u = v_ms + k.cbrt();
     for _ in 0..100 {
         let f = u * u * u - v_ms * u * u - k;
@@ -187,7 +117,56 @@ pub fn thrust_ground_roll_n(
             break;
         }
     }
-    static_thrust_factor * 2.0 * rho * disk_area * u * (u - v_ms)
+    2.0 * rho * disk_area * u * (u - v_ms)
+}
+
+/// Tração disponível da hélice — **a única lei de tração do projeto**
+/// (ciclo 13, spec §2).
+///
+///   T(V) = FoM(J) · T_ideal_momentum(V, P_eixo)
+///
+/// `old→new` (ciclo 12 → ciclo 13). Antes deste ciclo esta função tinha DOIS
+/// ramos: disco atuador estático × `static_thrust_factor` abaixo de
+/// V=0,5 m/s, e `prop_efficiency(J)·P/V` (polinômio JavaProp) acima. O ramo
+/// de voo violava o TETO DE QUANTIDADE DE MOVIMENTO em 4 dos 8 pontos de
+/// operação do baseline (spec §1.1) — 2,1432x em V=10 m/s, 1,3417x em
+/// V=20 m/s, e também em `Vx` e em `V_LOF`, os dois alimentando gates que
+/// PASSAVAM (gradiente CS 23.65 e o balanço de rotação). Nenhuma hélice
+/// produz mais empuxo que um disco atuador ideal na mesma potência; o
+/// polinômio dizia que sim.
+///
+/// A função paralela `thrust_ground_roll_n` (ciclo 12, quantidade de
+/// movimento com avanço, usada só na rolagem) foi FUNDIDA aqui: os dois
+/// modelos descreviam a mesma grandeza e divergiam 27,69% em `V_LOF`,
+/// quebrando a identidade de d'Alembert do balanço de rotação (backlog
+/// #15). Com uma lei só, o resíduo daquela identidade é ZERO por construção
+/// — ver `agents::trim_authority::thrust_at_rotation_n`.
+///
+/// Sem ramos ⟹ sem degraus (spec §2.1): morrem juntos o `η(0) = 0,58` (por
+/// definição η = T·V/P → 0 quando V → 0; a lei nova dá η = FoM·V/u → 0
+/// automaticamente porque u → K^(1/3) finito), o salto de 84.843,5 N em
+/// V=1,0 m/s, a janela de tração NULA em V ∈ [0,5; 1,0) e o corte duro em
+/// J > 2,8 (a lei nova dá T → 0 suavemente quando V → ∞, porque u → V).
+///
+/// `fom: FigureOfMerit` substitui `static_thrust_factor: f64` — não é mais
+/// um multiplicador plano, é uma curva de DUAS âncoras (spec §3), medida no
+/// próprio `J` de operação: `fom.at(advance_ratio(v_ms, ...))`.
+pub fn thrust_available_n(
+    v_ms: f64,
+    engine: &EngineSpec,
+    engine_rpm: f64,
+    psru_ratio: f64,
+    prop_diam_m: f64,
+    altitude_m: f64,
+    isa_delta_c: f64,
+    fom: FigureOfMerit,
+    psru_efficiency: f64,
+) -> f64 {
+    let t_ideal = thrust_ideal_momentum_n(v_ms, engine, engine_rpm, prop_diam_m, altitude_m,
+                                          isa_delta_c, psru_efficiency);
+    let n_prop = prop_rpm(engine_rpm, psru_ratio);
+    let j = advance_ratio(v_ms, n_prop, prop_diam_m);
+    fom.at(j) * t_ideal
 }
 
 /// CD da aeronave em atitude de solo, com trem ESTENDIDO (ciclo 12, spec
@@ -328,7 +307,7 @@ pub fn excess_power_kw(
     prop_diam_m: f64,
     altitude_m: f64,
     isa_delta_c: f64,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
     psru_efficiency: f64,
     cd0_extra: f64,
 ) -> f64 {
@@ -337,7 +316,7 @@ pub fn excess_power_kw(
     let drag = drag_limpo + q * wing.area_m2 * cd0_extra;
     let p_req  = power_required_kw(v_ms, drag);
     let thrust = thrust_available_n(v_ms, engine, engine_rpm, psru_ratio, prop_diam_m,
-                                     altitude_m, isa_delta_c, static_thrust_factor,
+                                     altitude_m, isa_delta_c, fom,
                                      psru_efficiency);
     let p_avail = thrust * v_ms / 1_000.0;
     p_avail - p_req
@@ -391,10 +370,10 @@ pub fn climb_rate_ms(
     wing: &WingSpec,
     state: &AircraftState,
     engine: &EngineSpec,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> (f64, f64) {
     let r = climb_rate_search(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
-                               static_thrust_factor);
+                               fom);
     (r.best_rc_ms.max(0.0), r.best_v_ms * 3.6) // (RC em m/s, Vy em km/h)
 }
 
@@ -416,7 +395,7 @@ fn climb_rate_search(
     wing: &WingSpec,
     state: &AircraftState,
     engine: &EngineSpec,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> ClimbRateSearch {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     // RPM de subida: máximo contínuo do motor (uso prolongado, não redline).
@@ -443,7 +422,7 @@ fn climb_rate_search(
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
-                                   static_thrust_factor, state.psru_efficiency, 0.0);
+                                   fom, state.psru_efficiency, 0.0);
         let rc = pex * 1_000.0 / (mass_kg * G);
         if rc > best_rc {
             best_rc = rc;
@@ -467,10 +446,10 @@ pub fn climb_rate_search_window_kmh(
     wing: &WingSpec,
     state: &AircraftState,
     engine: &EngineSpec,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> (f64, f64, f64) {
     let r = climb_rate_search(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
-                               static_thrust_factor);
+                               fom);
     (r.best_v_ms * 3.6, r.v_min_ms * 3.6, r.v_max_ms * 3.6)
 }
 
@@ -531,7 +510,7 @@ fn best_climb_angle_com_piso(
     wing: &WingSpec,
     state: &AircraftState,
     engine: &EngineSpec,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
     piso: f64,
 ) -> (f64, f64) {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
@@ -556,7 +535,7 @@ fn best_climb_angle_com_piso(
         let pex = excess_power_kw(v, mass_kg, rho, wing, engine,
                                    engine_rpm_climb, state.psru_ratio,
                                    state.prop_diameter_m, altitude_m, isa_delta_c,
-                                   static_thrust_factor, state.psru_efficiency,
+                                   fom, state.psru_efficiency,
                                    wing.cd0_flap_to_extra);
         let rc = pex * 1_000.0 / (mass_kg * G);
         let grad = rc / v;
@@ -578,10 +557,10 @@ pub fn best_climb_angle_ms(
     wing: &WingSpec,
     state: &AircraftState,
     engine: &EngineSpec,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> (f64, f64) {
     best_climb_angle_com_piso(mass_kg, altitude_m, isa_delta_c, wing, state, engine,
-                               static_thrust_factor, 1.20)
+                               fom, 1.20)
 }
 
 /// Teto de serviço: altitude onde RC = 0,5 m/s (padrão CS-23)
@@ -591,13 +570,13 @@ pub fn service_ceiling_m(
     wing: &WingSpec,
     state: &AircraftState,
     engine: &EngineSpec,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> f64 {
     let mut alt = 0.0_f64;
     let step = 100.0_f64;
     loop {
         let (rc, _) = climb_rate_ms(mass_kg, alt, isa_delta_c, wing, state, engine,
-                                     static_thrust_factor);
+                                     fom);
         if rc <= 0.5 || alt > 8_000.0 {
             return alt;
         }
@@ -635,7 +614,7 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 ///   N(V) = max(0, W − L(V))
 ///   S = ∫₀^{V_LOF} m·V·dV / F_net(V)     (Simpson composto, 200 intervalos,
 ///                                          `integra_rolagem_decolagem`)
-///   T(V) = `thrust_ground_roll_n`  (Rankine-Froude COM avanço, spec §2)
+///   T(V) = `thrust_available_n`  (lei única de tração, ciclo 13 spec §2)
 ///   D(V) = q·S_w·CD_roll,  CD_roll = `cd_ground_roll` (spec §3.1)
 ///   L(V) = q·S_w·cl_ground_roll
 ///   V_LOF = 1,10·√(2W/(ρ·S_w·cl_max_to))
@@ -650,12 +629,19 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 /// task" (ciclo 8, task 1). **É exatamente esse método inteiro que este
 /// ciclo reescreve** — ver spec §0/§1 para a motivação (a fórmula fechada
 /// escondia a faixa `V ∈ [0, V_LOF]` onde `thrust_available_n` é
-/// qualitativamente errada; integrar obriga a avaliar a tração nessa faixa
-/// e força um modelo de tração válido nela — `thrust_ground_roll_n`).
+/// qualitativamente errada; integrar obriga a avaliar a tração nessa faixa).
 /// `surface_factor` (1,00/1,15–1,20/1,25) SAI do caminho de decolagem —
 /// com `mu_roll` explícito, multiplicar pelo fator de superfície contaria a
 /// grama duas vezes (o 1,20 antigo ERA o atrito ausente, calibrado para
 /// suprir justamente o que a fórmula energética não tinha — spec §4).
+///
+/// `old→new` (ciclo 13): `T(V)` vinha de `thrust_ground_roll_n`, uma função
+/// PARALELA a `thrust_available_n` (quantidade de movimento COM avanço,
+/// `static_thrust_factor` como multiplicador plano). As duas divergiam
+/// 27,69% em `V_LOF` — a origem física do backlog #15. `thrust_ground_roll_n`
+/// foi APAGADA (fundida em `thrust_available_n`, ciclo 13 spec §2): esta
+/// função agora chama a MESMA lei única de tração que cruzeiro/subida/teto,
+/// avaliada com `fom: FigureOfMerit` no lugar do fator plano.
 fn takeoff_ground_roll_com_passos(
     mass_kg: f64,
     rho: f64,
@@ -665,7 +651,7 @@ fn takeoff_ground_roll_com_passos(
     isa_delta_c: f64,
     mu_roll: f64,
     cl_ground_roll: f64,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
     steps: usize,
 ) -> f64 {
     let w = mass_kg * G;
@@ -675,9 +661,9 @@ fn takeoff_ground_roll_com_passos(
     let cd_roll = cd_ground_roll(wing, state, cl_ground_roll, wing.cd0_flap_to_extra);
     let engine_rpm = engine.rpm_max_continuous;
 
-    let thrust_fn = |v: f64| thrust_ground_roll_n(
-        v, engine, engine_rpm, state.prop_diameter_m, 0.0, isa_delta_c,
-        static_thrust_factor, state.psru_efficiency);
+    let thrust_fn = |v: f64| thrust_available_n(
+        v, engine, engine_rpm, state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
+        fom, state.psru_efficiency);
     let drag_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cd_roll;
     let lift_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cl_ground_roll;
 
@@ -698,10 +684,10 @@ fn takeoff_ground_roll_m(
     isa_delta_c: f64,
     mu_roll: f64,
     cl_ground_roll: f64,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> f64 {
     takeoff_ground_roll_com_passos(mass_kg, rho, wing, state, engine, isa_delta_c, mu_roll,
-                                    cl_ground_roll, static_thrust_factor, 200)
+                                    cl_ground_roll, fom, 200)
 }
 
 /// Distância de decolagem — rolagem de solo × 1,5 (aproximação de
@@ -727,10 +713,10 @@ pub fn takeoff_distance_m(
     cl_ground_roll: f64,
     engine: &EngineSpec,
     isa_delta_c: f64,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> f64 {
     let s_ground = takeoff_ground_roll_m(mass_kg, rho, wing, state, engine, isa_delta_c,
-                                          mu_roll, cl_ground_roll, static_thrust_factor);
+                                          mu_roll, cl_ground_roll, fom);
     s_ground * 1.5
 }
 
@@ -758,10 +744,11 @@ pub fn takeoff_distance_50ft_m(
     cl_ground_roll: f64,
     engine: &EngineSpec,
     isa_delta_c: f64,
+    fom: FigureOfMerit,
     perf_cfg: &PerformanceCfg,
 ) -> f64 {
     let s_ground = takeoff_ground_roll_m(mass_kg, rho, wing, state, engine, isa_delta_c,
-                                          mu_roll, cl_ground_roll, perf_cfg.static_thrust_factor);
+                                          mu_roll, cl_ground_roll, fom);
 
     let w = mass_kg * G;
     // Ciclo 7 (task 1): `cl_max_to` (flap PARCIAL de decolagem), não o
@@ -779,7 +766,7 @@ pub fn takeoff_distance_50ft_m(
     // 12, ver `takeoff_ground_roll_m`).
     let pex = excess_power_kw(v_climb, mass_kg, rho, wing, engine, engine_rpm_to,
                                state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
-                               perf_cfg.static_thrust_factor, state.psru_efficiency,
+                               fom, state.psru_efficiency,
                                wing.cd0_flap_to_extra);
     let rc = pex * 1_000.0 / (mass_kg * G);
     if rc <= 0.0 {
@@ -1015,7 +1002,7 @@ pub fn landing_distance_50ft_m(
 ///      à direita nesse intervalo (onde P_excesso muda de + para -).
 pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, isa_delta_c: f64, wing: &WingSpec,
                           state: &AircraftState, engine: &EngineSpec,
-                          static_thrust_factor: f64) -> f64 {
+                          fom: FigureOfMerit) -> f64 {
     let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
     let engine_rpm = engine.rpm_rated;
     let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
@@ -1024,7 +1011,7 @@ pub fn max_level_speed_ms(mass_kg: f64, altitude_m: f64, isa_delta_c: f64, wing:
     // configuração limpa — cd0_extra=0.0.
     let pex = |v: f64| excess_power_kw(v, mass_kg, rho, wing, engine, engine_rpm,
                                        state.psru_ratio, state.prop_diameter_m, altitude_m,
-                                       isa_delta_c, static_thrust_factor, state.psru_efficiency,
+                                       isa_delta_c, fom, state.psru_efficiency,
                                        0.0);
 
     // Varredura grosseira: 100 passos (101 amostras) sobre [lo, hi]
@@ -1086,16 +1073,20 @@ impl PerformanceAgent {
         let isa_delta_c = req.isa_delta_c;
         let rho_sl = Isa::density_kgm3(0.0, isa_delta_c);
         let fuel_density = engine.fuel.density_kg_per_l;
-        let stf = perf_cfg.static_thrust_factor;
+        // `old→new` (ciclo 13): `perf_cfg.static_thrust_factor` (multiplicador
+        // plano) foi substituído por `state.figure_of_merit()` (ciclo 13,
+        // spec §2.2/§3) — as três âncoras da hélice viajam em
+        // `AircraftState`, como `psru_ratio`/`prop_diameter_m` já viajavam.
+        let fom = state.figure_of_merit();
 
         // Razão de subida ao nível do mar (MTOW cheio)
-        let (rc_sl, vy_sl_kmh) = climb_rate_ms(mtow_kg, 0.0, isa_delta_c, wing, state, engine, stf);
+        let (rc_sl, vy_sl_kmh) = climb_rate_ms(mtow_kg, 0.0, isa_delta_c, wing, state, engine, fom);
 
         // Vx/gradiente de subida ao nível do mar (MTOW cheio) — Task 4.7,
         // mesma condição de referência de `rc_sl` (CS 23.65 exige gradiente
         // ≥ 8.3% para esta categoria — ver `ConstraintChecker::verify`).
         let (gradient_sl, vx_sl_kmh) = best_climb_angle_ms(mtow_kg, 0.0, isa_delta_c, wing, state,
-                                                             engine, stf);
+                                                             engine, fom);
 
         // Razão de subida na altitude de CRUZEIRO DA MISSÃO (Finding 2 da
         // revisão final: antes hardcoded em 2.500 m, ignorando
@@ -1106,10 +1097,10 @@ impl PerformanceAgent {
         // cruzeiro parcialmente queimado (~35% do combustível gasto).
         let mass_mid = mtow_kg - (prop.fuel_capacity_l * fuel_density * 0.35); // 35% do combustível gasto
         let (rc_cruise_alt, _) =
-            climb_rate_ms(mass_mid, req.cruise_altitude_m, isa_delta_c, wing, state, engine, stf);
+            climb_rate_ms(mass_mid, req.cruise_altitude_m, isa_delta_c, wing, state, engine, fom);
 
         // Teto de serviço
-        let ceiling = service_ceiling_m(mass_mid, isa_delta_c, wing, state, engine, stf);
+        let ceiling = service_ceiling_m(mass_mid, isa_delta_c, wing, state, engine, fom);
 
         // Distâncias de decolagem (rolagem × 1,5, estimativa simplificada).
         // Ciclo 12: `surface_factor` (1,00/1,20) sai, `mu_roll_paved`/
@@ -1117,19 +1108,19 @@ impl PerformanceAgent {
         // superfície explicitamente (spec §4).
         let d_to_paved = takeoff_distance_m(mtow_kg, rho_sl, wing, state,
                                              perf_cfg.mu_roll_paved, cl_ground_rotation, engine,
-                                             isa_delta_c, stf);
+                                             isa_delta_c, fom);
         let d_to_grass  = takeoff_distance_m(mtow_kg, rho_sl, wing, state,
                                               perf_cfg.mu_roll_grass, cl_ground_rotation, engine,
-                                              isa_delta_c, stf);
+                                              isa_delta_c, fom);
 
         // Distâncias de decolagem sobre obstáculo de 15m/50ft, por segmentos
         // (Task 4.7)
         let d_to_50ft_paved = takeoff_distance_50ft_m(mtow_kg, rho_sl, wing, state,
                                                         perf_cfg.mu_roll_paved, cl_ground_rotation,
-                                                        engine, isa_delta_c, perf_cfg);
+                                                        engine, isa_delta_c, fom, perf_cfg);
         let d_to_50ft_grass = takeoff_distance_50ft_m(mtow_kg, rho_sl, wing, state,
                                                         perf_cfg.mu_roll_grass, cl_ground_rotation,
-                                                        engine, isa_delta_c, perf_cfg);
+                                                        engine, isa_delta_c, fom, perf_cfg);
 
         // Distância de pouso (massa de pouso ≈ MTOW - 60% combustível)
         let mass_ldg = mtow_kg - prop.fuel_capacity_l * fuel_density * 0.60;
@@ -1162,7 +1153,7 @@ impl PerformanceAgent {
         // missão, rpm nominal do motor — Finding 2 da revisão final, mesma
         // razão do `rc_cruise_alt` acima).
         let v_max_cruise_ms =
-            max_level_speed_ms(mtow_kg, req.cruise_altitude_m, isa_delta_c, wing, state, engine, stf);
+            max_level_speed_ms(mtow_kg, req.cruise_altitude_m, isa_delta_c, wing, state, engine, fom);
 
         PerformanceSpec {
             v_cruise_kmh:         v_max_cruise_ms * 3.6,
@@ -1234,23 +1225,89 @@ mod tests {
         config_teste().stability.cl_ground_rotation
     }
 
-    // ─── Ciclo 12 (task 2), spec §2: `thrust_ground_roll_n` ─────────────────
+    /// Figura de mérito da fixture SINTÉTICA (`config_teste()`) — spec §10
+    /// item 4: deliberadamente diferente do baseline real (0,72/0,80/1,60,
+    /// não 0,75/0,8237/1,8751). Helper para os testes que não desestruturam
+    /// o `AircraftConfig` inteiro via `setup()`.
+    fn fom_teste() -> FigureOfMerit {
+        config_teste().propeller.figure_of_merit()
+    }
 
-    /// Ciclo 12, spec §2.1: em V=0 a cúbica degenera em u³ = K e o empuxo
-    /// resultante é ALGEBRICAMENTE (2ρA·P²)^(1/3) — exatamente o modelo
-    /// estático de hoje. `thrust_ground_roll_n` é uma REFINAÇÃO do modelo
-    /// atual, não uma substituição: o ponto V=0 tem de coincidir.
+    // ─── Ciclo 13, spec §8.1/§8.4: guardas centrais, RED-FIRST ──────────────
+    //
+    // Escritas e RODADAS contra o modelo de HOJE (commit 1afe72f, antes da
+    // lei única) num checkout temporário, ANTES desta implementação —
+    // ambas FALHARAM: `sonda_red_tracao_nunca_excede_o_teto_de_quantidade_
+    // de_movimento` viu 360/1200 pontos violando o teto (pior razão
+    // T/T_ideal = 16,2371× em V=1 m/s, fixture sintética); `sonda_red_
+    // tracao_e_continua_em_toda_a_faixa` viu um degrau de 82.772,2 N entre
+    // V=0,99 e V=1,00 m/s. Ver o relatório da Task 2 para a saída literal
+    // completa. Implementada a lei única, as duas guardas abaixo passam a
+    // ser QUASE TAUTOLÓGICAS (spec §8.1: `T = FoM(J)·T_ideal` com
+    // `FoM ≤ 1` garantido em três camadas — validação de config, o
+    // `min(·, 1)` de `FigureOfMerit::at`, e o grampo — só podem falhar por
+    // bug dentro de `at()` ou de `thrust_ideal_momentum_n`). Continuam
+    // valendo por dois motivos que NÃO são "descobrir física agora": (1) a
+    // sonda RED documentada acima é a prova do defeito; (2) são a rede que
+    // pega uma FUTURA reintrodução de um modelo de tração paralelo — é
+    // exatamente como o projeto chegou aqui (backlog #15).
     #[test]
-    fn tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_de_hoje() {
+    fn tracao_nunca_excede_o_teto_de_quantidade_de_movimento() {
         let (engine, state, _wing) = fixture_baseline();
-        let novo = thrust_ground_roll_n(
-            0.0, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
-            0.0, 0.0, 0.75, state.psru_efficiency);
-        let hoje = thrust_available_n(
+        let fom = fom_teste();
+        let rpm = engine.rpm_max_continuous;
+        let d = state.prop_diameter_m;
+        for i in 1..=1200 {
+            let v = i as f64 * 0.1;              // 0,1 .. 120,0 m/s
+            let t = thrust_available_n(v, &engine, rpm, state.psru_ratio, d,
+                                       0.0, 0.0, fom, state.psru_efficiency);
+            let teto = thrust_ideal_momentum_n(v, &engine, rpm, d, 0.0, 0.0,
+                                               state.psru_efficiency);
+            assert!(t <= teto * (1.0 + 1e-12),
+                    "V={v} m/s: T={t} N excede o teto ideal de {teto} N (razão {})",
+                    t / teto);
+        }
+    }
+
+    #[test]
+    fn tracao_e_continua_em_toda_a_faixa() {
+        let (engine, state, _wing) = fixture_baseline();
+        let fom = fom_teste();
+        let rpm = engine.rpm_max_continuous;
+        let d = state.prop_diameter_m;
+        let t_de = |v: f64| thrust_available_n(v, &engine, rpm, state.psru_ratio, d,
+                                               0.0, 0.0, fom, state.psru_efficiency);
+        for i in 0..10_000 {
+            let v = i as f64 * 0.01;
+            let salto = (t_de(v + 0.01) - t_de(v)).abs();
+            assert!(salto < 5.0, "degrau de {salto} N entre V={v} e V={}", v + 0.01);
+        }
+    }
+
+    // ─── Ciclo 13, spec §2: lei única de tração (`thrust_available_n`) ──────
+    //
+    // `old→new`: os três testes abaixo pertenciam ao ciclo 12
+    // (`thrust_ground_roll_n`, quantidade de movimento com avanço, função
+    // PARALELA a `thrust_available_n`). O ciclo 13 apagou
+    // `thrust_ground_roll_n` — fundida em `thrust_available_n` (spec §2) —,
+    // então os três foram REESCRITOS contra a função nova (spec §10 item 5:
+    // "reescrito ou removido com justificativa, nunca comentado/ignorado").
+
+    /// Em V=0 a cúbica degenera em u³ = K e o empuxo resultante é
+    /// ALGEBRICAMENTE `(2ρA·P²)^(1/3) · fom_static` — exatamente o modelo
+    /// estático de hoje (spec §3.1).
+    #[test]
+    fn tracao_em_v_zero_e_identica_ao_estatico_vezes_a_ancora() {
+        let (engine, state, _wing) = fixture_baseline();
+        let fom = fom_teste();
+        let t0 = thrust_available_n(
             0.0, &engine, engine.rpm_max_continuous, state.psru_ratio,
-            state.prop_diameter_m, 0.0, 0.0, 0.75, state.psru_efficiency);
-        let erro_rel = (novo - hoje).abs() / hoje;
-        assert!(erro_rel < 1e-9, "novo={novo}, hoje={hoje}, erro_rel={erro_rel}");
+            state.prop_diameter_m, 0.0, 0.0, fom, state.psru_efficiency);
+        let ideal = static_thrust_ideal_n(&engine, engine.rpm_max_continuous,
+                                           state.prop_diameter_m, 0.0, 0.0, state.psru_efficiency);
+        let esperado = ideal * fom.fom_static;
+        let erro_rel = (t0 - esperado).abs() / esperado;
+        assert!(erro_rel < 1e-9, "t0={t0}, esperado={esperado}, erro_rel={erro_rel}");
     }
 
     /// A tração cai monotonicamente com a velocidade de avanço a potência
@@ -1259,28 +1316,30 @@ mod tests {
     #[test]
     fn tracao_de_rolagem_cai_estritamente_com_a_velocidade() {
         let (engine, state, _wing) = fixture_baseline();
-        let t = |v: f64| thrust_ground_roll_n(
-            v, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
-            0.0, 0.0, 0.75, state.psru_efficiency);
+        let fom = fom_teste();
+        let t = |v: f64| thrust_available_n(
+            v, &engine, engine.rpm_max_continuous, state.psru_ratio, state.prop_diameter_m,
+            0.0, 0.0, fom, state.psru_efficiency);
         let (t0, t10, t20, t36) = (t(0.0), t(10.0), t(20.0), t(36.0));
         assert!(t0 > t10 && t10 > t20 && t20 > t36,
                 "esperado estritamente decrescente: {t0} {t10} {t20} {t36}");
         assert!(t36 > 0.0, "tração tem de ser positiva em V_LOF: {t36}");
     }
 
-    /// Fix round 1 do report da task (achado do revisor) — guarda de NaN.
-    /// `K = P_eixo/(2ρA) ≤ 0` com `V = 0` faz a primeira iteração de Newton
-    /// calcular `0/0`. Este cenário é INALCANÇÁVEL pelo caminho de
-    /// produção (`psru_efficiency > 0` é validado em `models::config`),
-    /// mas chamar a função pura diretamente com `psru_efficiency = 0.0`
-    /// (fora da config validada, de propósito) prova a guarda: sem ela,
-    /// este teste veria NaN.
+    /// Fix round 1 do report da task do ciclo 12 (achado do revisor) — guarda
+    /// de NaN, preservada (spec §8.7): `K = P_eixo/(2ρA) ≤ 0` com `V = 0`
+    /// faz a primeira iteração de Newton calcular `0/0`. Este cenário é
+    /// INALCANÇÁVEL pelo caminho de produção (`psru_efficiency > 0` é
+    /// validado em `models::config`), mas chamar a função pura diretamente
+    /// com `psru_efficiency = 0.0` (fora da config validada, de propósito)
+    /// prova a guarda: sem ela, este teste veria NaN.
     #[test]
-    fn tracao_de_rolagem_nao_produz_nan_quando_potencia_de_eixo_e_nula() {
+    fn tracao_nao_produz_nan_quando_potencia_de_eixo_e_nula() {
         let (engine, state, _wing) = fixture_baseline();
-        let t = thrust_ground_roll_n(
-            0.0, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
-            0.0, 0.0, 0.75, 0.0 /* psru_efficiency=0 ⟹ P_eixo=0 ⟹ K=0 */);
+        let fom = fom_teste();
+        let t = thrust_available_n(
+            0.0, &engine, engine.rpm_max_continuous, state.psru_ratio, state.prop_diameter_m,
+            0.0, 0.0, fom, 0.0 /* psru_efficiency=0 ⟹ P_eixo=0 ⟹ K=0 */);
         assert!(!t.is_nan(), "K=0 com V=0 não pode devolver NaN: {t}");
         assert_eq!(t, 0.0, "sem potência de eixo, a tração devolvida deve ser exatamente zero: {t}");
     }
@@ -1306,10 +1365,11 @@ mod tests {
     #[test]
     fn integrador_de_rolagem_esta_convergido_na_resolucao_escolhida() {
         let (engine, state, wing) = fixture_baseline();
+        let fom = fom_teste();
         let s_200 = takeoff_ground_roll_com_passos(MTOW_PIN_KG, RHO_SL, &wing, &state,
-                                                    &engine, 0.0, 0.04, 0.5, 0.75, 200);
+                                                    &engine, 0.0, 0.04, 0.5, fom, 200);
         let s_400 = takeoff_ground_roll_com_passos(MTOW_PIN_KG, RHO_SL, &wing, &state,
-                                                    &engine, 0.0, 0.04, 0.5, 0.75, 400);
+                                                    &engine, 0.0, 0.04, 0.5, fom, 400);
         let dif_rel = (s_400 - s_200).abs() / s_200;
         assert!(dif_rel < 1e-3, "não convergido: 200={s_200}, 400={s_400}, dif={dif_rel}");
     }
@@ -1328,8 +1388,9 @@ mod tests {
     #[test]
     fn rolagem_de_decolagem_responde_no_sentido_certo_a_cada_termo() {
         let (engine, state, wing) = fixture_baseline();
+        let fom = fom_teste();
         let roll = |mu: f64, mass: f64| takeoff_ground_roll_m(
-            mass, RHO_SL, &wing, &state, &engine, 0.0, mu, 0.5, 0.75);
+            mass, RHO_SL, &wing, &state, &engine, 0.0, mu, 0.5, fom);
         assert!(roll(0.08, MTOW_PIN_KG) > roll(0.04, MTOW_PIN_KG), "atrito maior ⟹ rolagem maior");
         assert!(roll(0.04, MTOW_PIN_KG) > roll(0.04, MTOW_PIN_KG * 0.8), "peso maior ⟹ rolagem maior");
     }
@@ -1342,33 +1403,40 @@ mod tests {
     #[test]
     fn rolagem_de_decolagem_aumenta_estritamente_com_cd0_maior() {
         let (engine, state, mut wing) = fixture_baseline();
+        let fom = fom_teste();
         let roll_baixo = takeoff_ground_roll_m(
-            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, 0.75);
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, fom);
         wing.cd0 += 0.05; // CD0 bem maior — resto da fixture intacto
         let roll_alto = takeoff_ground_roll_m(
-            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, 0.75);
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, fom);
         assert!(roll_alto > roll_baixo,
             "CD0 maior deveria dar rolagem ESTRITAMENTE maior (mais arrasto): \
              roll(cd0 baixo)={roll_baixo}, roll(cd0 alto)={roll_alto}");
     }
 
     /// Spec §7.3 (Fix round 1) — tração maior ⟹ mais força líquida ⟹
-    /// rolagem menor. Varia `static_thrust_factor` (parâmetro direto de
-    /// `takeoff_ground_roll_m`, entra em `thrust_ground_roll_n` como
-    /// multiplicador plano — spec §2.3), resto da config fixo. Falseável
-    /// sozinha: se o sinal do termo de tração em `F_net` for trocado
-    /// (tração SUBTRAÍDA em vez de SOMADA), tração maior passaria a dar
-    /// F_net MENOR ⟹ rolagem MAIOR — esta asserção quebra na hora.
+    /// rolagem menor. `old→new` (ciclo 13): antes variava `static_thrust_
+    /// factor` (multiplicador plano de `thrust_ground_roll_n`, apagada);
+    /// agora varia a FIGURA DE MÉRITO inteira (`fom_static`/`fom_design`
+    /// escalados pelo mesmo fator, `j_design` fixo) — uma curva "achatada"
+    /// em cada valor constante, mesmo espírito de "mais tração em toda a
+    /// faixa", resto da config fixo. Falseável sozinha: se o sinal do termo
+    /// de tração em `F_net` for trocado (tração SUBTRAÍDA em vez de
+    /// SOMADA), tração maior passaria a dar F_net MENOR ⟹ rolagem MAIOR —
+    /// esta asserção quebra na hora.
     #[test]
     fn rolagem_de_decolagem_cai_estritamente_com_tracao_maior() {
         let (engine, state, wing) = fixture_baseline();
-        let roll = |stf: f64| takeoff_ground_roll_m(
-            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, stf);
+        let j_design = fom_teste().j_design;
+        let roll = |nivel: f64| {
+            let fom = FigureOfMerit { fom_static: nivel, fom_design: nivel, j_design };
+            takeoff_ground_roll_m(MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, fom)
+        };
         let roll_tracao_baixa = roll(0.60);
         let roll_tracao_alta  = roll(0.90);
         assert!(roll_tracao_baixa > roll_tracao_alta,
-            "tração maior (static_thrust_factor maior) deveria dar rolagem ESTRITAMENTE menor: \
-             roll(stf=0.60)={roll_tracao_baixa}, roll(stf=0.90)={roll_tracao_alta}");
+            "tração maior (FoM maior) deveria dar rolagem ESTRITAMENTE menor: \
+             roll(fom=0.60)={roll_tracao_baixa}, roll(fom=0.90)={roll_tracao_alta}");
     }
 
     /// Spec §7.4 — se a sustentação superar o peso antes de V_LOF, o
@@ -1377,11 +1445,12 @@ mod tests {
     #[test]
     fn atrito_nunca_fica_negativo_quando_a_sustentacao_supera_o_peso() {
         let (engine, state, mut wing) = fixture_baseline();
+        let fom = fom_teste();
         wing.cl_max_to = 0.30; // V_LOF absurdamente alta ⟹ L ≫ W antes do fim
         let com_atrito_alto = takeoff_ground_roll_m(
-            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.50, 3.0, 0.75);
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.50, 3.0, fom);
         let com_atrito_zero = takeoff_ground_roll_m(
-            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.00, 3.0, 0.75);
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.00, 3.0, fom);
         assert!(com_atrito_alto >= com_atrito_zero,
                 "atrito nunca pode ENCURTAR a rolagem: {com_atrito_alto} vs {com_atrito_zero}");
     }
@@ -1395,18 +1464,19 @@ mod tests {
     #[test]
     fn tracao_insuficiente_devolve_infinito_e_nao_numero_espurio() {
         let (engine, state, wing) = fixture_baseline();
+        let fom = fom_teste();
         // Atrito absurdo: nenhuma tração desta célula acelera a aeronave.
         let s = takeoff_ground_roll_m(
-            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 5.0, 0.5, 0.75);
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 5.0, 0.5, fom);
         assert!(s.is_infinite(), "esperado +INFINITY, veio {s}");
         assert!(!s.is_nan(), "NaN é o modo de falha silencioso a evitar");
     }
 
     #[test]
     fn razao_subida_positiva_no_solo() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
         let (rc, vy) = climb_rate_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine,
-                                      perf_cfg.static_thrust_factor);
+                                      state.figure_of_merit());
         println!("RC SL = {rc:.2} m/s = {:.0} fpm, Vy = {vy:.1} km/h",
                  rc * 196.85);
         assert!(rc > 0.0, "RC SL deve ser positiva");
@@ -1414,40 +1484,49 @@ mod tests {
 
     #[test]
     fn razao_subida_decresce_com_altitude() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
-        let stf = perf_cfg.static_thrust_factor;
-        let (rc0, _) = climb_rate_ms(state.mtow_kg, 0.0,     0.0, &wing, &state, &engine, stf);
-        let (rc2, _) = climb_rate_ms(state.mtow_kg, 2_500.0, 0.0, &wing, &state, &engine, stf);
-        let (rc5, _) = climb_rate_ms(state.mtow_kg, 5_000.0, 0.0, &wing, &state, &engine, stf);
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
+        let fom = state.figure_of_merit();
+        let (rc0, _) = climb_rate_ms(state.mtow_kg, 0.0,     0.0, &wing, &state, &engine, fom);
+        let (rc2, _) = climb_rate_ms(state.mtow_kg, 2_500.0, 0.0, &wing, &state, &engine, fom);
+        let (rc5, _) = climb_rate_ms(state.mtow_kg, 5_000.0, 0.0, &wing, &state, &engine, fom);
         println!("RC SL={rc0:.2} | RC 2500m={rc2:.2} | RC 5000m={rc5:.2} m/s");
         assert!(rc0 > rc2 && rc2 > rc5, "RC deve diminuir com a altitude");
     }
 
     #[test]
     fn teto_de_servico_razoavel() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
         let ceiling = service_ceiling_m(state.mtow_kg * 0.85, 0.0, &wing, &state, &engine,
-                                         perf_cfg.static_thrust_factor);
+                                         state.figure_of_merit());
         println!("Teto de serviço: {ceiling:.0} m ({:.0} ft)", ceiling * 3.2808);
-        // Valor observado empiricamente para a fixture sintética: ~7.600 m.
+        // Valor observado empiricamente para a fixture sintética PRÉ-ciclo-13: ~7.600 m.
         // Janela apertada o suficiente para pegar regressões reais (não é só
-        // "menor que o teto artificial de 8.000 m do laço de busca"). Sem
-        // mudança na Task 4.7: `static_thrust_factor` só afeta o ramo
-        // estático (V<0,5 m/s) de `thrust_available_n`, jamais atingido pela
-        // varredura de `climb_rate_ms` (sempre V ≥ 1,05·Vs — ERRATUM ciclo 11
-        // §2, era 1,3·Vs).
-        assert!(ceiling > 7_000.0 && ceiling < 7_900.0,
-            "Teto {ceiling:.0} m fora do intervalo esperado (7.000–7.900 m)");
+        // "menor que o teto artificial de 8.000 m do laço de busca").
+        //
+        // `old→new` (ciclo 13): antes o comentário dizia que `static_thrust_
+        // factor` só afetava o ramo estático (V<0,5 m/s) — essa frase MORRE
+        // com a lei única (spec §2.1, sem ramos): a figura de mérito agora é
+        // avaliada em TODA velocidade, inclusive dentro da varredura de
+        // `climb_rate_ms` (sempre V ≥ 1,05·Vs — ERRATUM ciclo 11 §2, era
+        // 1,3·Vs). Consequência MEDIDA (spec §11: a tração cai em toda a
+        // faixa de voo porque o polinômio apagado violava o teto físico —
+        // spec §1.1): teto de serviço da fixture sintética 7.600 m →
+        // **6.900 m** (−700 m, −9,2%). Janela deslocada de (7.000, 7.900)
+        // para (6.700, 7.100) para cobrir o novo patamar — mesmo padrão de
+        // "janela alargada" já usado nos outros pins desta fixture pós-
+        // mudança de modelo de tração (ciclo 12).
+        assert!(ceiling > 6_700.0 && ceiling < 7_100.0,
+            "Teto {ceiling:.0} m fora do intervalo esperado pós-ciclo-13 (6.700–7.100 m)");
     }
 
     // ─── Task 4.7: Vx, planeio, gradiente CS 23.65, tração estática ─────────
 
     #[test]
     fn vx_estritamente_menor_que_vy() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
-        let stf = perf_cfg.static_thrust_factor;
-        let (_rc, vy_kmh) = climb_rate_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine, stf);
-        let (_grad, vx_kmh) = best_climb_angle_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine, stf);
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
+        let fom = state.figure_of_merit();
+        let (_rc, vy_kmh) = climb_rate_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine, fom);
+        let (_grad, vx_kmh) = best_climb_angle_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine, fom);
         println!("Vx={vx_kmh:.1} km/h  Vy={vy_kmh:.1} km/h");
         assert!(vx_kmh < vy_kmh,
             "Vx ({vx_kmh:.1} km/h) deveria ser ESTRITAMENTE menor que Vy ({vy_kmh:.1} km/h) — \
@@ -1461,17 +1540,18 @@ mod tests {
     /// CD0 ⟹ mais arrasto ⟹ mais potência necessária ⟹ menos excesso.
     #[test]
     fn excess_power_kw_cai_estritamente_com_cd0_extra() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
+        let fom = state.figure_of_merit();
         let v = 60.0; // m/s, velocidade genérica de subida
         let rho = RHO_SL;
         let pex_limpo = excess_power_kw(v, state.mtow_kg, rho, &wing, &engine,
                                          engine.rpm_max_continuous, state.psru_ratio,
                                          state.prop_diameter_m, 0.0, 0.0,
-                                         perf_cfg.static_thrust_factor, state.psru_efficiency, 0.0);
+                                         fom, state.psru_efficiency, 0.0);
         let pex_com_extra = excess_power_kw(v, state.mtow_kg, rho, &wing, &engine,
                                              engine.rpm_max_continuous, state.psru_ratio,
                                              state.prop_diameter_m, 0.0, 0.0,
-                                             perf_cfg.static_thrust_factor, state.psru_efficiency,
+                                             fom, state.psru_efficiency,
                                              0.01);
         println!("P_excesso(cd0_extra=0.0)={pex_limpo:.3}kW  P_excesso(cd0_extra=0.01)={pex_com_extra:.3}kW");
         assert!(pex_com_extra < pex_limpo,
@@ -1494,7 +1574,7 @@ mod tests {
             let state = AircraftState::from_config(&cfg);
             let wing = AerodynamicsAgent::run(&state, &req);
             let (grad, _vx) = best_climb_angle_ms(state.mtow_kg, 0.0, 0.0, &wing, &state, &engine,
-                                                   cfg.performance.static_thrust_factor);
+                                                   state.figure_of_merit());
             grad
         };
 
@@ -1524,12 +1604,12 @@ mod tests {
     /// evita cópia da lógica de busca no teste.
     #[test]
     fn gradiente_com_piso_de_varredura_maior_nao_aumenta() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
-        let stf = perf_cfg.static_thrust_factor;
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
+        let fom = state.figure_of_merit();
         let (grad_105, _vx_105) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
-                                                              &engine, stf, 1.05);
+                                                              &engine, fom, 1.05);
         let (grad_120, _vx_120) = best_climb_angle_com_piso(state.mtow_kg, 0.0, 0.0, &wing, &state,
-                                                              &engine, stf, 1.20);
+                                                              &engine, fom, 1.20);
         println!("gradiente(piso=1,05·Vs)={grad_105:.6}  gradiente(piso=1,20·Vs)={grad_120:.6}");
         // Fix wave ciclo 11 (2026-08-10): `<` estrito, não `<=` — valores
         // medidos (0,128641 vs 0,146417) têm folga enorme, sem risco de
@@ -1574,31 +1654,38 @@ mod tests {
         let t_ideal = static_thrust_ideal_n(&engine, engine.rpm_max_continuous,
                                              state.prop_diameter_m, 0.0, 0.0,
                                              state.psru_efficiency);
+        // Em V=0, J=0 — `FigureOfMerit::at(0.0)` devolve `fom_static`
+        // EXATAMENTE, sem interpolação (spec §3.1), então esta identidade
+        // continua exigível byte-a-byte com a lei nova: `fom_design`/
+        // `j_design` são irrelevantes em J=0.
+        let fom_075 = FigureOfMerit { fom_static: 0.75, fom_design: 0.75, j_design: 1.0 };
+        let fom_100 = FigureOfMerit { fom_static: 1.00, fom_design: 1.00, j_design: 1.0 };
         let t_075 = thrust_available_n(0.0, &engine, engine.rpm_max_continuous,
-                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, 0.75,
+                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, fom_075,
                                         state.psru_efficiency);
         let t_100 = thrust_available_n(0.0, &engine, engine.rpm_max_continuous,
-                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, 1.0,
+                                        state.psru_ratio, state.prop_diameter_m, 0.0, 0.0, fom_100,
                                         state.psru_efficiency);
-        println!("T_ideal={t_ideal:.1}N  T(factor=0.75)={t_075:.1}N  T(factor=1.0)={t_100:.1}N");
-        // factor=1.0 deve reproduzir exatamente o valor IDEAL (sem correção).
+        println!("T_ideal={t_ideal:.1}N  T(fom_static=0.75)={t_075:.1}N  T(fom_static=1.0)={t_100:.1}N");
+        // fom_static=1.0 deve reproduzir exatamente o valor IDEAL (sem correção).
         assert!((t_100 - t_ideal).abs() < 1e-6,
-            "T(factor=1.0) deveria ser idêntica à tração ideal sem correção");
+            "T(fom_static=1.0) deveria ser idêntica à tração ideal sem correção");
         // 0.75× do valor ideal — a razão exata exigida pela Task 4.7.
         assert!((t_075 - 0.75 * t_ideal).abs() < 1e-6,
-            "T(factor=0.75) deveria ser exatamente 0.75 × tração ideal");
+            "T(fom_static=0.75) deveria ser exatamente 0.75 × tração ideal");
     }
 
     #[test]
     fn decolagem_50ft_maior_que_rolagem_de_solo_simples() {
         let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let fom = state.figure_of_merit();
         let cl_ground_roll = cl_ground_rotation_teste();
         let s_ground = takeoff_ground_roll_m(state.mtow_kg, RHO_SL, &wing, &state, &engine, 0.0,
                                               perf_cfg.mu_roll_paved, cl_ground_roll,
-                                              perf_cfg.static_thrust_factor);
+                                              fom);
         let s_50ft = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
                                               perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
-                                              0.0, &perf_cfg);
+                                              0.0, fom, &perf_cfg);
         println!("S_ground={s_ground:.0}m  S_50ft={s_50ft:.0}m");
         assert!(s_50ft > s_ground,
             "distância sobre 15m ({s_50ft:.0}m) deveria ser MAIOR que a rolagem de solo pura \
@@ -1650,7 +1737,7 @@ mod tests {
                 wing.cd0_flap_to_extra,
                 takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
                                         perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
-                                        0.0, &perf_cfg),
+                                        0.0, state.figure_of_merit(), &perf_cfg),
             )
         };
 
@@ -1701,11 +1788,11 @@ mod tests {
         state.prop_diameter_m = 1.9;
         let s_1_9 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
                                              perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
-                                             0.0, &perf_cfg);
+                                             0.0, state.figure_of_merit(), &perf_cfg);
         state.prop_diameter_m = 1.6;
         let s_1_6 = takeoff_distance_50ft_m(state.mtow_kg, RHO_SL, &wing, &state,
                                              perf_cfg.mu_roll_paved, cl_ground_roll, &engine,
-                                             0.0, &perf_cfg);
+                                             0.0, state.figure_of_merit(), &perf_cfg);
         println!("S_50ft(D=1.9m)={s_1_9:.1}m  S_50ft(D=1.6m)={s_1_6:.1}m");
         assert!(s_1_6 > s_1_9,
             "hélice MENOR (D=1.6m) deveria alongar ESTRITAMENTE a decolagem sobre obstáculo \
@@ -1861,9 +1948,8 @@ mod tests {
     #[test]
     fn distancia_decolagem_plausivel() {
         let (state, wing, _prop, engine, _req, perf_cfg) = setup();
-        let cl_ground_roll = cl_ground_rotation_teste();
         let d = takeoff_distance_m(state.mtow_kg, RHO_SL, &wing, &state, perf_cfg.mu_roll_paved,
-                                    cl_ground_roll, &engine, 0.0, perf_cfg.static_thrust_factor);
+                                    cl_ground_rotation_teste(), &engine, 0.0, state.figure_of_merit());
         println!("Decolagem pista pavimentada: {d:.0} m");
         // Task 4.7: T_avg passou a usar tração ESTÁTICA corrigida (Rankine-
         // Froude × static_thrust_factor da fixture, 0.72) em vez da antiga
@@ -1908,9 +1994,9 @@ mod tests {
 
     #[test]
     fn velocidade_maxima_resolvida_do_equilibrio() {
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
         let v_max = max_level_speed_ms(state.mtow_kg, 2_500.0, 0.0, &wing, &state, &engine,
-                                        perf_cfg.static_thrust_factor);
+                                        state.figure_of_merit());
         let v_max_kmh = v_max * 3.6;
         println!("V_max nivelada = {v_max_kmh:.2} km/h");
         // Deve ser um número resolvido (não o requisito ecoado) e > requisito
@@ -1956,7 +2042,18 @@ mod tests {
         // S_h≈2,3762/S_v≈1,4218/S_w=13,5, cd0_empennage cai para
         // ≈0,003798 (< 0,0042 antigo) — menos arrasto parasita, V_max sobe:
         // 302.9220524587 km/h → 304.6465774391 km/h (+1,725 km/h, +0,57%).
-        let v_max_observado_kmh = 304.6465774391;
+        //
+        // `old→new` (ciclo 13): lei única de tração — `prop_efficiency(J)`
+        // (polinômio) apagado, substituído por `FigureOfMerit` (spec §2/§4).
+        // Nesta fixture SINTÉTICA (`config_teste().propeller`: fom_static
+        // 0,72, fom_design 0,80, j_design 1,60 — deliberadamente diferente
+        // do baseline real, spec §10 item 4), o J de V_max fica ACIMA de
+        // j_design (FoM grampeada em 0,80, spec §3), e 0,80 é mais
+        // conservador que o polinômio antigo no mesmo ponto — menos tração
+        // disponível em voo nivelado: 304.6465774391 km/h →
+        // **297.7139815481 km/h** (−6,933 km/h, −2,28%). Tolerância
+        // INALTERADA (±0,5 km/h).
+        let v_max_observado_kmh = 297.7139815481;
         assert!((v_max_kmh - v_max_observado_kmh).abs() < 0.5,
             "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor observado \
              {v_max_observado_kmh:.2} km/h em mais de 0.5 km/h — possível \
@@ -1969,14 +2066,14 @@ mod tests {
         // amostra da varredura terá excesso de potência positivo, então a
         // função deve retornar o limite inferior (1.2·Vs) em vez de um
         // resultado espúrio ou o teto do modelo (200 m/s).
-        let (state, wing, _prop, engine, _req, perf_cfg) = setup();
+        let (state, wing, _prop, engine, _req, _perf_cfg) = setup();
         let rho = Isa::density_kgm3(2_500.0, 0.0);
         let mass_kg = 20_000.0;
         let v_stall = ((2.0 * mass_kg * G) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
         let v_lo_esperado = 1.2 * v_stall;
 
         let v_max = max_level_speed_ms(mass_kg, 2_500.0, 0.0, &wing, &state, &engine,
-                                        perf_cfg.static_thrust_factor);
+                                        state.figure_of_merit());
         println!("V_max (massa inviável) = {:.2} m/s, esperado ≈ {v_lo_esperado:.2} m/s",
                   v_max);
         assert!((v_max - v_lo_esperado).abs() < 1e-6,

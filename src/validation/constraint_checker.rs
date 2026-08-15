@@ -1029,17 +1029,47 @@ mod tests {
         // permanente do usuário: "se uma decisão é perigosa, o modelo deve
         // FALHAR no ponto de perigo". Nenhuma config foi ajustada para
         // salvar este achado.
+        //
+        // `old→new` (ciclo 13, task 2, spec §2/§6): a lei única de tração faz
+        // `thrust_at_rotation_n` chamar a MESMA função que a rolagem — o
+        // ramo de voo do polinômio apagado violava o teto de quantidade de
+        // movimento em `Vr≡V_LOF` por 1,0372× (spec §1.1); com a lei nova
+        // (fisicamente mais fraca nesse ponto), o momento nariz-abaixo da
+        // tração cai, o limite dianteiro de rotação AVANÇA (~17,9%→~16,5%
+        // MAC neste fixture, ver o hand-check gêmeo em
+        // `agents::trim_authority`), e a violação de envelope do cenário
+        // 'Solo (piloto)' (CG ≈16,5% MAC) DESAPARECE — o CG volta a ficar
+        // dentro (ou na borda) do envelope. Efeito de VIDA CURTA, só desta
+        // task: revertido pela task seguinte, ver abaixo.
+        //
+        // `old→new` (ciclo 13, task 4, spec §7 — fecha o backlog #16): o
+        // limite dianteiro de rotação passou a ser publicado na superfície
+        // de OPERAÇÃO (grama), não mais pavimentada — a mesma premissa que
+        // as checagens #23/#24 já usam para reprovar a decolagem/pouso
+        // desta aeronave. Grama tem mais atrito ⟹ mais momento nariz-abaixo
+        // de solo ⟹ limite dianteiro RECUA de novo: ~16,5%→**~18,3% MAC**
+        // (ver `tests/generic_engine.rs::limite_de_rotacao_em_grama_e_mais_
+        // restritivo_que_em_pavimentado`, medido ≈+1,888 pp — mesma ordem
+        // da projeção da spec §11, "grama: +~1,9 pp"). O CG do cenário
+        // 'Solo (piloto)' (≈16,5% MAC) volta a ficar À FRENTE do limite —
+        // **a violação de envelope RETORNA**, e desta vez com a superfície
+        // CORRETA (a que a decolagem realmente usa), não uma regressão:
+        // o nome do teste ("sem violação") fica parcialmente desatualizado,
+        // mas preservado por estabilidade de referência cruzada (ver
+        // `src/models/engine.rs:154`, `tests/empennage.rs:111`) — o que ele
+        // continua garantindo é que o envelope NÃO fica VAZIO (asserção
+        // logo abaixo), só um cenário fica marginalmente fora. Diretriz
+        // permanente do usuário: "se uma decisão é perigosa, o modelo deve
+        // FALHAR no ponto de perigo" — e agora falha na superfície certa.
         assert_eq!(violacoes_de_envelope.len(), 1,
-            "ciclo 12 (task 4): esperada EXATAMENTE 1 violação de envelope (cenário 'Solo \
-             (piloto)', que cruza para fora do limite dianteiro com os termos de solo no \
-             balanço de rotação) — obtido {:?}",
+            "ciclo 13 task 4: com o limite de rotação na superfície de OPERAÇÃO (grama, spec \
+             §7), o cenário 'Solo (piloto)' volta a ficar fora do envelope de CG — obtido {:?}",
             violacoes_de_envelope);
         assert!(violacoes_de_envelope[0].contains("Solo (piloto)"),
-            "a violação de envelope esperada é a do cenário 'Solo (piloto)' (o CG mais \
-             dianteiro do baseline) — obtido {:?}",
+            "a única violação de envelope esperada é 'Solo (piloto)' — obtido {:?}",
             violacoes_de_envelope);
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
-            "o envelope continua FECHADO como faixa (fwd ≈17,9% < aft ≈43,5%) — só o cenário \
+            "o envelope continua FECHADO como faixa (fwd ≈18,3% < aft ≈43,5%) — só o cenário \
              'Solo (piloto)' fica fora dele, não é o caso degenerado de envelope vazio: {:?}",
             report.violations);
 

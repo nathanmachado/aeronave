@@ -284,18 +284,21 @@ impl MissionAgent {
         while alt_m < req.cruise_altitude_m - 1e-9 {
             let step_m = CLIMB_STEP_M.min(req.cruise_altitude_m - alt_m);
 
-            // `static_thrust_factor=1.0`: parâmetro exigido pela assinatura
-            // de `climb_rate_ms`, mas PROVADAMENTE inerte neste caminho —
-            // ele só afeta o ramo de tração ESTÁTICA (V<0,5 m/s) de
-            // `thrust_available_n`, e `climb_rate_ms` varre exclusivamente
-            // V ∈ [1,05·Vs, 2,00·Vs] (ERRATUM ciclo 11 §2, era
-            // [1,3·Vs, 1,8·Vs] — ver docstring de `climb_rate_ms`), sempre
-            // ≫ 0,5 m/s para esta classe de aeronave. Qualquer valor
-            // produziria o mesmo resultado; `1.0` evita threading
-            // `PerformanceCfg` por uma assinatura que o controller fixou
-            // sem esse parâmetro.
+            // `old→new` (ciclo 13): a justificativa que estava aqui —
+            // "`static_thrust_factor=1.0` é PROVADAMENTE INERTE porque só
+            // afeta o ramo estático V<0,5 m/s, e `climb_rate_ms` nunca varre
+            // essa faixa" — MORRE com a lei única de tração (spec §2.1, sem
+            // ramos): `fom.at(j)` agora é avaliado em TODA velocidade,
+            // inclusive dentro da varredura real de `climb_rate_ms`. Um
+            // `FigureOfMerit{1.0, 1.0, x}` aqui não seria mais "neutro" — o
+            // teto físico do §1 diz que FoM=1,0 é o disco atuador IDEAL, sem
+            // NENHUMA perda de pá/esteira: teria sido uma regressão física
+            // SILENCIOSA no combustível de subida (que alimenta o laço de
+            // convergência de MTOW). `state` já carrega as âncoras reais da
+            // hélice (Task 1, `AircraftState::figure_of_merit`) — usa-se
+            // aqui a mesma figura de mérito real que o resto do pipeline.
             let (rc_ms, vy_kmh) = climb_rate_ms(
-                mass_kg, alt_m, req.isa_delta_c, wing, state, engine, 1.0,
+                mass_kg, alt_m, req.isa_delta_c, wing, state, engine, state.figure_of_merit(),
             );
             if rc_ms <= RC_MIN_MS {
                 return Err(MissionError::SubidaInviavel { altitude_m: alt_m, massa_kg: mass_kg, rc_ms });
@@ -586,7 +589,8 @@ mod tests {
 
         while alt_m < req.cruise_altitude_m - 1e-9 {
             let step_m = CLIMB_STEP_M.min(req.cruise_altitude_m - alt_m);
-            let (rc_ms, _vy) = climb_rate_ms(mass_kg, alt_m, req.isa_delta_c, &wing, &state, &engine, 1.0);
+            let (rc_ms, _vy) = climb_rate_ms(mass_kg, alt_m, req.isa_delta_c, &wing, &state, &engine,
+                                              state.figure_of_merit());
             assert!(rc_ms > RC_MIN_MS, "fixture sintética deveria ter subida viável em todo o perfil");
             let dt_s = step_m / rc_ms;
             let p_shaft_kw = shaft_power_kw(&engine, engine.rpm_max_continuous, alt_m,

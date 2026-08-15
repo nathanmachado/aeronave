@@ -296,7 +296,7 @@ Ponteiro: `src/main.rs` (`fidelity.insert("trim"...)`), `src/agents/
 trim_authority.rs` (duas docstrings acima), commits `a7b561a`/`2d4fff7`/
 `a465e7b` (ciclo 10 fix wave).
 
-## 8. Unificar o modelo de tração (`thrust_ground_roll_n` × `thrust_available_n` divergem em `V_LOF`)
+## 8. Unificar o modelo de tração (`thrust_ground_roll_n` × `thrust_available_n` divergem em `V_LOF`) — RESOLVIDO ciclo 13
 
 Nomeado no ciclo 12 (task 2, spec §2.4) como fora de escopo, medido aqui
 (task 5). `agents::performance::thrust_ground_roll_n` (teoria de
@@ -340,7 +340,42 @@ fica fora de escopo deste ciclo. Ponteiro: docstrings de
 (`src/agents/performance.rs`), spec §2.4 e §11 item 1
 (`docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md`).
 
-## 9. `prop_efficiency` com `η(0) = 0,58` — fisicamente errado por definição, janela de tração nula sem consumidor
+**RESOLVIDO** (ciclo 13, task 2, 2026-08-15, spec
+`2026-08-15-ciclo13-tracao-unificada-design.md` §1/§2/§4). Os dois
+modelos foram FUNDIDOS numa lei única `T(V) = FoM(J)·T_ideal_momentum(V,
+P_eixo)`: `T_ideal_momentum` é a cúbica de Rankine-Froude com avanço já
+validada em `thrust_ground_roll_n` (ciclo 12), e `FoM(J)` é uma figura de
+mérito linear entre duas âncoras medidas (`fom_static` em J=0,
+`fom_design` em J=`j_design`) que substitui o multiplicador plano
+`static_thrust_factor` e o polinômio `prop_efficiency`.
+`thrust_ground_roll_n`, `prop_efficiency` e `thrust_n` foram APAGADOS —
+não há mais dois caminhos de código para a mesma grandeza física.
+
+**Medido no baseline real, mesma comparação do achado original**: a
+divergência de 27,69% em `V_LOF` (2.324,6885 N vs 3.214,9867 N) deixou de
+poder existir — as duas chamadas são agora a MESMA função com os MESMOS
+argumentos. Verificado por teste dedicado (`tracao_do_momento_de_
+rotacao_e_identica_a_da_rolagem_no_mesmo_vr`, `tests/generic_engine.rs`):
+resíduo relativo `0e0` (zero exato) nos 6 cenários de CG, tolerância
+1e-12 — ver item 15 abaixo para a consequência no balanço de rotação.
+
+Consequência colateral medida (não é regressão — é o polinômio deixando
+de mascarar tração fisicamente impossível, ver item 9 abaixo):
+`climb_gradient_pct` **12,451842% → 7,913277%** (FLIPA de PASS para FAIL
+contra o mínimo de 8,3% da CS 23.65); `to_50ft_grass_m` **819,110978 →
+858,593425 m** (segue REPROVANDO #23); `v_cruise_kmh` **300,220683 →
+291,076342 km/h** (−3,05%, `max_level_speed_ms` avalia com
+`engine.rpm_rated`=3400, onde o polinômio apagado estava perto do próprio
+pico — ver item 20 abaixo); `range_km`/`endurance_h`
+**inalterados a −0,037%** (residual do laço de convergência de MTOW, ver
+item 21 abaixo — o PONTO de cruzeiro em si é preservado por construção,
+spec §3.2/§8.3). Ponteiro: docstrings de
+`agents::performance::thrust_available_n`/`thrust_ideal_momentum_n`,
+`agents::propulsion::FigureOfMerit` (`src/agents/`), spec ciclo13 §1/§2/
+§8.1, `tests/generic_engine.rs`/`src/agents/performance.rs` (`mod tests`,
+guardas do teto de quantidade de movimento).
+
+## 9. `prop_efficiency` com `η(0) = 0,58` — fisicamente errado por definição, janela de tração nula sem consumidor — RESOLVIDO ciclo 13
 
 O polinômio `agents::propulsion::prop_efficiency` (`η = −0,15·J² + 0,39·J +
 0,58`, clampado em `[0, 0,86]`) é calibrado com dados de JavaProp na faixa
@@ -376,6 +411,46 @@ Ponteiro: `agents::propulsion::prop_efficiency`/`thrust_n`
 (`src/agents/propulsion.rs`, linhas 47–61), docstring de
 `agents::performance::thrust_ground_roll_n` (`src/agents/performance.rs`),
 spec §11 item 2.
+
+**RESOLVIDO** (ciclo 13, task 2, 2026-08-15, spec
+`2026-08-15-ciclo13-tracao-unificada-design.md` §1.1/§2.1/§4). O polinômio
+`prop_efficiency` e a função `thrust_n` foram APAGADOS. A lei única
+`T(V) = FoM(J)·T_ideal_momentum(V, P_eixo)` não tem nenhum ramo de
+velocidade — `η(0) = 0` por CONSTRUÇÃO (a cúbica de Rankine-Froude
+degenera em `u = K^(1/3)` finito quando V → 0, e `η = FoM·V/u → 0`), não
+por calibração. Consequência direta, todas verificadas por teste: morre o
+`η(0) = 0,58` fisicamente errado; morre o salto de 84.843,5 N em V=1,0
+m/s; morre a janela de tração NULA em V ∈ [0,5; 1,0); morre o corte duro
+em J > 2,8.
+
+**O número CORRIGIDO do achado original desta entrada** (medido na
+revisão de plano do ciclo 13 contra as funções REAIS de produção, spec
+`old→new` do §1.1 — a primeira versão da spec dizia "5 de 8 pontos, 3
+alimentando gates que passavam"; ESSE número estava errado e nunca virou
+registro permanente): dos 8 pontos de operação nomeados do baseline real
+(rolagem 10/20 m/s, `V_LOF`, `Vx`, `Vy` nível do mar, teto de serviço,
+cruzeiro, V máx), o polinômio apagado violava o teto físico de
+conservação de quantidade de movimento (`T_real ≤ T_ideal`) em
+**QUATRO** deles — rolagem a 10 m/s (2,1432×), rolagem a 20 m/s
+(1,3417×), `V_LOF` (1,0372×) e `Vx` (1,0095×) —, **DOIS** alimentando
+gates que PASSAVAM (`Vx` → gradiente CS 23.65; `V_LOF` → balanço de
+rotação, item 15 abaixo). Os outros dois violadores (rolagem) alimentavam
+um gate que já REPROVAVA. As duas linhas que a primeira versão da spec
+contava como violação adicional (`V máx` e teto de serviço) foram
+recomputadas com os argumentos REAIS de produção
+(`max_level_speed_ms` usa `engine.rpm_rated`=3400, não o rpm de cruzeiro;
+`service_ceiling_m` usa o `Vy` real da altitude do teto com `mass_mid`,
+não o `Vy` de nível do mar) e NÃO violam o teto (`V máx`: razão 0,8604;
+teto de serviço: razão 0,9313) — a afirmação original de que eram
+violadoras era FALSA, corrigida antes de virar registro permanente aqui.
+
+Ponteiro: `agents::propulsion::FigureOfMerit`
+(`src/agents/propulsion.rs`), docstring de
+`agents::performance::thrust_available_n`/`thrust_ideal_momentum_n`
+(`src/agents/performance.rs`), teste
+`tracao_nunca_excede_o_teto_de_quantidade_de_movimento` (mesmo arquivo,
+`mod tests`) e `tracao_e_continua_em_toda_a_faixa`, spec ciclo13 §1.1
+(tabela `old→new`) e §8.1/§8.4.
 
 ## 10. `z_drag_above_cg_m` ainda não consumido por `cm_thrust_cruise`
 
@@ -516,7 +591,7 @@ SOLO", `src/agents/trim_authority.rs`), `docs/aircraft_spec.schema.md`
 (`trim.rotation_limit_pct_mac`, `trim.rotation_margin_per_scenario`,
 `robustness.flips`).
 
-## 15. PRIORIDADE ALTA — inconsistência do modelo de tração no balanço de rotação (erro de spec, indeterminação ≈8,3 pp de MAC)
+## 15. PRIORIDADE ALTA — inconsistência do modelo de tração no balanço de rotação (erro de spec, indeterminação ≈8,3 pp de MAC) — RESOLVIDO ciclo 13
 
 Achado central da revisão final de branch do ciclo 12, erro de
 especificação (não de implementação da task — a task seguiu a spec à
@@ -595,7 +670,57 @@ takeoff_ground_roll_com_passos` (`performance.rs:672`, `v_lof`), item 8
 acima (`thrust_ground_roll_n` × `thrust_available_n`, divergência
 medida).
 
-## 16. Assimetria de superfície entre a rotação e a decolagem/pouso (`mu_roll_paved` vs. grama, decisão de usuário)
+**RESOLVIDO** (ciclo 13, task 4, 2026-08-15, spec
+`2026-08-15-ciclo13-tracao-unificada-design.md` §6/§8.6). A decisão que
+esta entrada registrava como "de usuário" — qual dos dois modelos de
+tração vale em `V_LOF` — deixou de ser uma escolha: o ciclo 13 mediu que
+o ramo `≈24,57% MAC` (manter o polinômio no termo de momento) mantinha,
+em `Vr`, uma tração **3,72% acima do limite de conservação de quantidade
+de movimento** (spec §1.2) — excluído por FÍSICA, não por preferência. O
+ciclo substituiu os dois modelos por uma lei única `T(V) =
+FoM(J)·T_ideal_momentum(V, P_eixo)`; `thrust_at_rotation_n` (termo de
+momento) e a tração implícita nos termos de solo da rolagem passam a ser
+a MESMA chamada da MESMA função nos MESMOS argumentos em `Vr ≡ V_LOF`.
+
+**O resíduo de d'Alembert `(T_solo − T_momento)·h_cg` vai a ZERO por
+construção** — medido, não assumido: teste
+`tracao_do_momento_de_rotacao_e_identica_a_da_rolagem_no_mesmo_vr`
+(`tests/generic_engine.rs`) dá erro relativo **0e0 (zero exato)** nos 6
+cenários de CG, contra tolerância 1e-12. A banda de indeterminação de
+≈8,3 pp de MAC **acabou**.
+
+**REGISTRO DO NÚMERO CORRIGIDO** (a spec original desta task tinha um
+erro de medição no achado companheiro — ver item 9 acima — que NÃO deve
+se propagar aqui): o achado físico que exclui o ramo `≈24,57% MAC` não
+depende da contagem "5 de 8"/"4 de 8" pontos violadores do teto de
+quantidade de movimento — é a medição direta em `Vr`, isolada. Fica
+registrado aqui, para que este item não repita o número errado da
+primeira versão da spec: dos 8 pontos de operação nomeados na medição
+original do backlog #9, **QUATRO** violam o teto físico (não cinco), e
+**DOIS** deles alimentam gates que PASSAVAM — `Vx` (gradiente CS 23.65) e
+**`V_LOF` (exatamente o balanço de rotação desta entrada)**. O terceiro
+ponto que a primeira versão da spec contava como violador do teto
+(`service_ceiling_m`, avaliado com o `Vy` de nível do mar) foi
+recomputado com o `Vy` REAL da altitude do teto e `mass_mid` — razão
+0,9313, **NÃO viola** — e não tem relação com o balanço de rotação em
+`Vr`, então nunca fez parte do argumento físico que fecha este item.
+
+**Valor publicado, medido no baseline real (HEAD)**: `rotation_limit_
+pct_mac` (superfície de operação, GRAMA — ver item 16 abaixo) **18,268251%
+MAC**; em pavimentado (informativo, `rotation_limit_pct_mac_paved`)
+**16,380458%**. Nenhum dos dois cai fora do teto — ambos abaixo do valor
+`≈24,57%` fisicamente excluído por §1.2 da spec, e o extremo `≈16,28%`
+(resíduo zero nos dois termos com `thrust_ground_roll_n`) é
+aproximadamente o valor pavimentado medido agora com a lei única
+(16,380458%, pequena diferença porque a lei nova não é idêntica a
+`thrust_ground_roll_n` em todo J — só coincidem em V=0). Ponteiro:
+docstring de `agents::trim_authority::thrust_at_rotation_n`/
+`rotation_available_moment_nm` (`old→new` do ciclo 13), teste
+`tracao_do_momento_de_rotacao_e_identica_a_da_rolagem_no_mesmo_vr`
+(`tests/generic_engine.rs`), spec ciclo13 §1.1 (`old→new`), §1.2, §6,
+§8.6.
+
+## 16. Assimetria de superfície entre a rotação e a decolagem/pouso (`mu_roll_paved` vs. grama, decisão de usuário) — RESOLVIDO ciclo 13
 
 `agents::trim_authority` avalia o balanço de rotação com
 `mu_roll_ground = cfg.performance.mu_roll_paved` (ver
@@ -629,3 +754,245 @@ assumir (ou se deve reportar as duas) é de projeto/usuário. Ponteiro:
 "pavimentada é a superfície menos conservadora das duas"),
 `config/aircraft/baseline_4seat.toml` (`[performance].mu_roll_paved`/
 `mu_roll_grass`).
+
+**RESOLVIDO** (ciclo 13, task 4, 2026-08-15, spec
+`2026-08-15-ciclo13-tracao-unificada-design.md` §7). A decisão de projeto
+foi tomada: o limite dianteiro de rotação é calculado nas DUAS
+superfícies e AMBAS publicadas (`trim.rotation_limit_pct_mac_paved`,
+`trim.rotation_limit_pct_mac_grass`, campos novos, schema 5.6); o campo
+legado `trim.rotation_limit_pct_mac` passa a valer a superfície de
+OPERAÇÃO — **GRAMA** — porque é a mesma premissa que as checagens #23/#24
+(decolagem/pouso) já usam para a MESMA decolagem: não existe campo
+dizendo qual é a superfície, mas os gates existentes decidem por
+extensão. Se essa premissa mudar, muda aqui e em #23/#24 juntos (spec
+§7).
+
+**Medido no baseline real, lei única de tração (não mais o
+`thrust_available_n` que este item media originalmente)**:
+`rotation_limit_pct_mac_paved` = **16,380458137686837%**,
+`rotation_limit_pct_mac_grass` = **18,268251143882534%** MAC
+(+1,887793 pp — mesma direção do achado original: mais atrito, mais
+momento nariz-abaixo de solo, limite mais recuado; magnitude quase
+idêntica, +1,888 pp medida aqui contra +1,888 pp medida no ciclo 12 com o
+modelo antigo — o efeito de SUPERFÍCIE é aditivo ao efeito da unificação
+de tração e praticamente ortogonal a ele, como a spec §11 previu).
+
+**Consequência de gate, confirmada**: com a rotação em grama, a margem
+'Solo (piloto)' (`rotation_authority_margin_pct`) fica **−1,179429677656323%**
+— violação NOMINAL de autoridade de rotação, sem precisar de perturbação
+de robustez — e o cenário cruza para violação NOMINAL de envelope de CG
+(`validation_status` do baseline real inclui "Cenário 'Solo (piloto)': CG
+17,8% MAC fora do envelope de CG admissível [18,3%–43,5%]" entre as 5
+violações publicadas). Ponteiro: docstring de
+`agents::trim_authority::TrimAuthorityAgent::run` (bloco `limite_para_
+superficie`, `old→new` do ciclo 13), `aircraft_spec.json`
+(`trim.rotation_limit_pct_mac_paved`/`_grass`), teste
+`limite_de_rotacao_em_grama_e_mais_restritivo_que_em_pavimentado`
+(`tests/generic_engine.rs`), spec ciclo13 §7/§8.6/§11.1.
+
+## 17. Segmento aéreo do pouso em grama usa a rampa de 3° de ILS pavimentado, nunca calibrada para pista de fazenda
+
+Achado do chefe na abertura do ciclo 13 (spec
+`2026-08-15-ciclo13-tracao-unificada-design.md` §12 item 1), fora de
+escopo daquele ciclo — registrado aqui para o ciclo 14.
+
+`agents::performance::landing_distance_50ft_m` calcula o segmento de
+APROXIMAÇÃO (antes do toque) com um ângulo de descida FIXO de 3°
+(`15/tan(3°) ≈ 286,2 m` para o obstáculo de 15 m/50 ft), convenção
+herdada de procedimento de ILS de aeroporto PAVIMENTADO — nunca calibrada
+para esta célula nem para pista de fazenda/grama.
+
+**Medido no baseline real**: o segmento de aproximação (286,2 m) é **44%
+da distância de pouso em grama** (`ldg_50ft_grass_m` = 646,660942 m). O
+planeio power-off desta célula NA PRÓPRIA configuração de pouso (flap
+cheio, trem embaixo) é **5,118°** (`L/D = 11,165` a `V_ref`) — quase 71%
+mais íngreme que os 3° assumidos. A 5,118° o pouso em grama cairia para
+**≈528 m** e PASSARIA o gate de 600 m (#24), em vez de reprovar em
+646,66 m.
+
+**Não é erro de cálculo** — é uma premissa de procedimento (ângulo de
+aproximação-padrão de aeroporto) aplicada a um cenário operacional
+diferente (pista de fazenda, sem ILS, aproximação mais íngreme e mais
+curta é operacionalmente normal para este tipo de aeronave). Corrigir
+exige decidir se o ângulo de aproximação deve vir do L/D power-off REAL
+da célula (mais físico, mas precisa de justificativa operacional — nem
+todo piloto voa no L/D máximo em aproximação final) ou permanecer
+convenção regulatória conservadora. Decisão de projeto, ciclo 14.
+Ponteiro: `agents::performance::landing_distance_50ft_m`
+(`src/agents/performance.rs`), spec ciclo13 §12 item 1.
+
+## 18. `j_design` congelada em config não se reajusta se a velocidade de cruzeiro, `psru_ratio` ou o diâmetro da hélice mudarem
+
+Achado da spec do ciclo 13 (§3.3 item 2), fora de escopo — a implementação
+apenas declara o risco, não o mitiga.
+
+`[propeller].j_design` (1,87514348025711675 no baseline) foi derivada de
+`prop_rpm_cruise`, que HOJE é uma SAÍDA da busca de rpm de cruzeiro
+(`agents::propulsion::search_cruise_rpm`). Congelá-la em config quebra
+essa circularidade de propósito — a partir do ciclo 13, `j_design` é
+ENTRADA de projeto da hélice, não resultado. Se a velocidade de cruzeiro
+alvo, a razão de PSRU ou o diâmetro da hélice mudarem (troca de motor,
+troca de hélice, nova missão), `j_design` **NÃO se reajusta sozinha** —
+a âncora fica obsoleta em silêncio: o `J` real de cruzeiro se afasta de
+`j_design`, `FoM(J_cruzeiro) ≠ fom_design`, e a preservação de
+alcance/autonomia por construção (spec §3.2) deixa de ser exata.
+
+**Já se manifestou, medido**: as missões com motor Rotax (fora do
+baseline principal, mas exercitadas pelos testes de troca de motor)
+tiveram combustível **+5,35%** e **+8,04%** em relação ao esperado, porque
+o `J` de cruzeiro do Rotax cai fora da calibração desta hélice (a hélice
+do baseline foi calibrada para o Toyota 1GD-FTV a 2640 rpm de motor).
+
+**Guarda existente, mas parcial**: `rpm_de_cruzeiro_do_baseline_
+permanece_2640` (`tests/generic_engine.rs`) pega o caso em que o rpm de
+cruzeiro do PRÓPRIO baseline Toyota se afasta de 2640 — mas não pega
+troca de hélice/motor/missão que mude `J` de cruzeiro de outra aeronave
+sem que o `j_design` daquela hélice seja recalibrado. Corrigir exigiria
+recalcular `j_design`/`fom_design` automaticamente a cada mudança de
+config (reabre a circularidade que a spec §3.3 documentou) ou um alerta
+explícito quando `J_cruzeiro` diverge de `j_design` além de um limiar.
+Decisão de projeto, fora de escopo. Ponteiro: docstring de
+`agents::propulsion::FigureOfMerit` (premissa calibrada declarada),
+spec ciclo13 §3.3 item 2, teste `rpm_de_cruzeiro_do_baseline_permanece_
+2640` (`tests/generic_engine.rs`), `tests/generic_engine.rs`
+(`orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l`,
+`trocar_motor_muda_resultado_sem_mudar_codigo`).
+
+## 19. Cruzeiro opera em J=1,875, acima do pico de eficiência da hélice (J≈1,30) — ≈6% de eficiência propulsiva deixada na mesa
+
+Achado da spec do ciclo 13 (§3.3, §12 item 6), fora de escopo — decisão de
+projeto de hélice/PSRU, não de modelo de tração.
+
+O ponto de operação de cruzeiro deste baseline é `J = j_design =
+1,87514348025711675`, mas o polinômio JavaProp apagado neste ciclo tinha
+pico de eficiência em `J ≈ 1,30` (`η ≈ 0,8335` contra `η(j_design) =
+0,7838814965676598` — uma diferença de **≈6% de eficiência propulsiva**
+disponível e não capturada no ponto de cruzeiro real).
+
+Isso não é um defeito de MODELAGEM — a lei única de tração deste ciclo
+não herda a curva de formato do polinômio, só as duas âncoras (`fom_static`
+em J=0, `fom_design` em `j_design`); o pico em J≈1,30 nunca foi uma
+propriedade FÍSICA desta hélice modelada explicitamente, era uma
+característica do polinômio JavaProp original (calibrado para OUTRA
+combinação hélice/rpm/diâmetro que gerou os dados de origem). O achado é
+de PROJETO: esta combinação motor/PSRU/hélice/velocidade de cruzeiro
+opera a célula fora do ponto ótimo de eficiência propulsiva da hélice
+instalada — reduzir `psru_ratio` (rpm de hélice mais alta em cruzeiro,
+J mais baixo) ou trocar o diâmetro/passo da hélice para deslocar o pico
+de eficiência para perto de J≈1,875 recuperaria essa margem, com impacto
+em consumo/alcance a avaliar. Decisão de projeto de hélice/PSRU, fora de
+escopo. Ponteiro: spec ciclo13 §3.3, §3.2 (retro-derivação de
+`fom_design`), `docs/backlog.md` item 18 (relacionado — mesma âncora).
+
+## 20. `max_level_speed_ms` avalia V máx com `engine.rpm_rated` (3400) enquanto o cruzeiro opera a 2640 rpm — dois pontos de operação de motor nunca declarados
+
+Achado da revisão de plano do ciclo 13 (spec §1.1 `old→new`), fora de
+escopo — não é erro, mas nunca foi documentado.
+
+`agents::performance::max_level_speed_ms` avalia a velocidade máxima de
+nível com `engine.rpm_rated` = **3400 rpm** (potência máxima contínua do
+motor), enquanto `PropulsionAgent::run`/`search_cruise_rpm` opera o
+CRUZEIRO a **2640 rpm** (o argmin de BSFC entre os rpms que entregam a
+potência requerida em cruzeiro). São DOIS pontos de operação de motor
+diferentes coexistindo no mesmo `aircraft_spec.json`
+(`propulsion.engine_rpm_cruise` = 2640, `performance.v_cruise_kmh`
+implicitamente calculado a 3400) — a divergência só ficou visível porque
+a revisão de plano do ciclo 13 recomputou a razão de avanço (`J`) nos
+dois pontos separadamente para medir a tabela do §1.1 (`J=1,5611` em V
+máx contra `J=1,875` em cruzeiro).
+
+**Não é erro** — V máx por definição é avaliada em potência MÁXIMA do
+motor, e cruzeiro é avaliado no rpm mais econômico que atende a potência
+requerida; são perguntas diferentes com respostas em rpms diferentes por
+natureza. Mas o JSON nunca declara explicitamente que os dois blocos
+(`performance`/`propulsion`) usam rpms de motor distintos — um consumidor
+de CAD/estrutura que assumisse "um único ponto de operação de motor" leria
+os dois campos como coerentes entre si sem sê-lo. Documentar (campo novo
+explícito, ou nota em `fidelity`) ou reconciliar (padronizar em um único
+rpm de referência para ambos, com trade-off de precisão) é decisão de
+projeto. Ponteiro: `agents::performance::max_level_speed_ms`
+(`src/agents/performance.rs:1020`, uso de `engine.rpm_rated`),
+`agents::propulsion::search_cruise_rpm` (uso do rpm buscado), spec
+ciclo13 §1.1 (`old→new`, tabela de medição).
+
+## 21. Âncora de cruzeiro preserva o PONTO exatamente, mas `range_km`/`endurance_h` residuam −0,037% via o laço de convergência de MTOW
+
+Achado medido na Task 5 do ciclo 13, fora de escopo de correção — resíduo
+declarado, não corrigido (spec ciclo13 §3.2 nota "a âncora tem uma
+dependência que ela não controla"; achado companheiro registrado aqui com
+a medição completa).
+
+A retro-derivação de `fom_design` (spec §3.2/§3.2.1, corrigida por
+ERRATUM e convergida por ponto fixo) garante que a lei nova reproduz,
+EXATAMENTE, a eficiência que o polinômio JavaProp apagado entregava NO
+PONTO de cruzeiro do baseline — verificado a 1e-9 pelo teste
+`eficiencia_de_cruzeiro_reproduz_a_ancora_do_polinomio_apagado`
+(`tests/generic_engine.rs`). Isso preserva `prop_efficiency`,
+`thrust_cruise_n`, `p_req_cruise_kw`/`p_shaft_cruise_kw` no PONTO de
+cruzeiro por construção.
+
+**Mas a promessa correta é "cruzeiro preservado por construção; MISSÃO
+preservada a menos do laço de convergência"**, não "missão inalterada".
+Medido no baseline real, `ed537ae` → HEAD:
+
+| Campo | `ed537ae` | HEAD (ciclo 13) | Δ |
+|---|---|---|---|
+| `range_km` | 2027,070681 | 2026,312721 | **−0,0374%** |
+| `endurance_h` | 7,239538 | 7,236831 | **−0,0374%** |
+| `fuel_total_kg` | 198,269071 | 199,212369 | **+0,4758%** |
+| `mtow_mission_kg` (sizing) | — | 1538,332304 | (+0,0614% sobre a iteração 10 anterior) |
+
+**Causa**: o segmento de SUBIDA da missão (`agents::mission`,
+`fuel_climb_kg`) usa a curva `FoM(J)` INTEIRA ao longo do perfil de
+subida, não só o ponto J=`j_design` da âncora — e a FORMA dessa curva
+(linear entre `fom_static` e `fom_design`) difere da forma do polinômio
+JavaProp fora do ponto de projeto. Isso muda o combustível de SUBIDA
+(`fuel_climb_kg`: **4,920084 → 7,198478 kg**, **+46,31%** — o efeito
+DOMINANTE, não o de cruzeiro), que muda a massa convergida (laço de
+ponto fixo de MTOW), que muda o arrasto, que muda a tração requerida em
+cruzeiro — um resíduo de segunda ordem que retroalimenta o próprio ponto
+que a âncora preserva.
+
+**Não corrigido** — corrigir exigiria uma âncora de subida separada (fora
+do escopo da spec §3.2, que só ancora CRUZEIRO) ou aceitar que "cruzeiro
+preservado" nunca implicou "missão preservada" quando o modelo de tração
+muda em qualquer OUTRO ponto do perfil de voo. Registrado como resíduo
+MEDIDO e DECLARADO, não como bug. Ponteiro: spec ciclo13 §3.2 (nota
+final), `agents::mission::MissionAgent::run` (`fuel_climb_kg`, consome
+`state.figure_of_merit()` via `climb_rate_ms`/`excess_power_kw`),
+`tests/generic_engine.rs` (pins `mission.*`, `sizing.*`, `old→new`
+ciclo 13).
+
+## 22. Nome do teste `envelope_de_cg_fechado_sem_violacao_no_baseline_real` ficou incoerente com o conteúdo (agora 1 violação de envelope)
+
+Achado nomeado pela própria Task 4 do ciclo 12 e mantido pela Task 4 do
+ciclo 13 — registrado aqui para consolidar o ponteiro no backlog.
+
+O teste `envelope_de_cg_fechado_sem_violacao_no_baseline_real`
+(`src/validation/constraint_checker.rs`, módulo `tests`) verifica que o
+ENVELOPE de CG do baseline real é uma FAIXA fechada (limite dianteiro <
+limite traseiro — não o caso degenerado "envelope vazio"), não que não
+haja NENHUMA violação de CG. Desde o ciclo 12 (task 4, termos de solo do
+balanço de rotação) o baseline real passou a ter exatamente **1 violação**
+de envelope de CG (cenário 'Solo (piloto)', hoje NOMINAL desde o ciclo 13
+— ver item 16 acima), então o nome do teste — que promete "sem violação"
+— ficou parcialmente incoerente com o que o teste de fato verifica
+(envelope FECHADO, questão diferente de "sem violação").
+
+A Task 4 do ciclo 12 (e a Task 4 do ciclo 13, que tocou o mesmo balanço)
+mantiveram o nome por **estabilidade de referências cruzadas** — o nome
+do teste é citado por docstring/comentário em pelo menos dois outros
+arquivos (`src/models/engine.rs:154`, `tests/empennage.rs:111`) — e
+documentaram a incoerência DIRETAMENTE no próprio teste (bloco `old→new`
+na docstring, `src/validation/constraint_checker.rs`, linhas ~951–961:
+"o nome deste teste fica parcialmente impreciso, mantido por continuidade
+histórica... 'Sem violação' deixa de ser literalmente verdadeiro para o
+baseline completo; continua verdadeiro para a pergunta original do teste
+(envelope fechado vs. vazio)").
+
+**Não corrigido** — renomear o teste (e todas as referências cruzadas que
+o citam pelo nome) é escopo maior que uma fix wave de task, decisão de
+limpeza para um ciclo dedicado a housekeeping de testes. Ponteiro:
+`src/validation/constraint_checker.rs` (teste e docstring `old→new`,
+linhas ~940–979), `src/models/engine.rs:154`, `tests/empennage.rs:111`
+(referências cruzadas pelo nome).

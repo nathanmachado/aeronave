@@ -1,6 +1,6 @@
 {
-  "schema_version": "5.5",
-  "revision": "5.5",
+  "schema_version": "5.6",
+  "revision": "5.6",
   "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
@@ -11,16 +11,16 @@
     "thickness_ratio": 0.15,
     "oswald_efficiency": 0.7555832290782708,
     "cd0": 0.023504020056742125,
-    "cl_cruise": 0.3667806866640199,
-    "cd_cruise": 0.029201496298239628,
+    "cl_cruise": 0.36700297638270013,
+    "cd_cruise": 0.029208424833470158,
     "cl_max": 2.1,
     "cl_max_clean": 1.45,
     "cl_max_to": 1.6775,
     "cd0_flap_to_extra": 0.0052499999999999995,
     "cd0_flap_ldg_extra": 0.015,
-    "stall_speed_flaps_kmh": 103.42056105111811,
-    "stall_speed_clean_kmh": 124.46078496394205,
-    "ld_ratio_cruise": 12.560338789424664
+    "stall_speed_flaps_kmh": 103.4518956416601,
+    "stall_speed_clean_kmh": 124.49849436810447,
+    "ld_ratio_cruise": 12.564969815220868
   },
   "propulsion": {
     "engine_model": "Toyota 1GD-FTV 2.8 Turbo Diesel",
@@ -35,13 +35,13 @@
     "prop_diameter_m": 1.76,
     "fuel_type": "Diesel S-10",
     "fuel_capacity_l": 260.0,
-    "fc_cruise_lph": 32.3225038997723,
-    "bsfc_cruise_gkwh": 221.1717954871603,
-    "endurance_h": 7.239538147341625,
-    "range_km": 2027.070681255655,
+    "fc_cruise_lph": 32.334594416588764,
+    "bsfc_cruise_gkwh": 221.20204291970418,
+    "endurance_h": 7.236831147012932,
+    "range_km": 2026.312721163621,
     "prop_efficiency": 0.7838814965676598,
-    "thrust_cruise_n": 1200.1102797596711,
-    "p_req_cruise_kw": 119.07655820004128,
+    "thrust_cruise_n": 1200.395025659981,
+    "p_req_cruise_kw": 119.1048110717501,
     "p_shaft_cruise_kw": 122.88722938820213,
     "cruise_feasible": true
   },
@@ -113,7 +113,7 @@
     "cg_mac_fwd_pct": 17.758487182256133,
     "cg_mac_aft_pct": 38.701383265654876,
     "static_margin_pct": 9.75865290109127,
-    "cg_limit_fwd_pct_mac": 17.757974445030644,
+    "cg_limit_fwd_pct_mac": 18.268251143882534,
     "cg_limit_aft_pct_mac": 43.460036166746164,
     "structural_masses": {
       "asa_kg": 149.6977561039546,
@@ -132,31 +132,33 @@
   },
   "trim": {
     "flare_limit_pct_mac": -8.818503827231059,
-    "rotation_limit_pct_mac": 17.757974445030644,
+    "rotation_limit_pct_mac": 18.268251143882534,
+    "rotation_limit_pct_mac_paved": 16.380458137686837,
+    "rotation_limit_pct_mac_grass": 18.268251143882534,
     "rotation_margin_per_scenario": [
       {
         "scenario": "Solo (piloto)",
-        "rotation_authority_margin_pct": 0.0011863088529595282
+        "rotation_authority_margin_pct": -1.179429677656323
       },
       {
         "scenario": "2 pax dianteiros",
-        "rotation_authority_margin_pct": 7.776175219315161
+        "rotation_authority_margin_pct": 5.992729490842495
       },
       {
         "scenario": "4 pax sem bagagem",
-        "rotation_authority_margin_pct": 53.861773145095015
+        "rotation_authority_margin_pct": 50.54501797131071
       },
       {
         "scenario": "4 pax + bagagem + cheio",
-        "rotation_authority_margin_pct": 100.57072320379189
+        "rotation_authority_margin_pct": 95.86217358293354
       },
       {
         "scenario": "4 pax + bagagem + meia",
-        "rotation_authority_margin_pct": 90.26752554093848
+        "rotation_authority_margin_pct": 86.31541163080112
       },
       {
         "scenario": "4 pax + bagagem vazio",
-        "rotation_authority_margin_pct": 81.55268544463128
+        "rotation_authority_margin_pct": 78.267678825998
       }
     ],
     "governing": "rotacao",
@@ -180,35 +182,35 @@
     "trim_margin": 0.1,
     "cl_ground_rotation": 0.5,
     "to_flap_fraction": 0.35,
-    "cl_h_trim_cruise": 0.045752696793160186,
-    "cd_trim": 0.00005252080785111187,
+    "cl_h_trim_cruise": 0.0457893152301853,
+    "cd_trim": 0.000052604912162497885,
     "cg_reference_scenario": "4 pax + bagagem + meia",
     "cg_reference_pct_mac": 37.687109320503446
   },
   "performance": {
-    "v_cruise_kmh": 300.2206831479499,
-    "v_stall_kmh": 103.42056105111811,
-    "rc_sl_ms": 4.999904667293841,
-    "rc_cruise_alt_ms": 4.544519960916836,
-    "service_ceiling_m": 5200.0,
-    "to_distance_paved_m": 744.5565768095555,
-    "to_distance_grass_m": 996.3354319423928,
-    "landing_distance_m": 442.53944063006907,
-    "range_km": 2027.070681255655,
-    "endurance_h": 7.239538147341625,
-    "vx_kmh": 138.8714795598457,
-    "vy_kmh": 148.43539330199408,
-    "best_glide_kmh": 173.25645368960977,
+    "v_cruise_kmh": 291.07634156270603,
+    "v_stall_kmh": 103.4518956416601,
+    "rc_sl_ms": 3.460340693496421,
+    "rc_cruise_alt_ms": 3.0585407380305507,
+    "service_ceiling_m": 4800.0,
+    "to_distance_paved_m": 719.6387552400685,
+    "to_distance_grass_m": 951.3920558515983,
+    "landing_distance_m": 442.7021220486796,
+    "range_km": 2026.312721163621,
+    "endurance_h": 7.236831147012932,
+    "vx_kmh": 138.91407679224818,
+    "vy_kmh": 167.4067945715867,
+    "best_glide_kmh": 173.30959811815933,
     "glide_ratio": 15.921177186890732,
-    "climb_gradient_pct": 12.451842484809621,
-    "to_50ft_paved_m": 651.2584082804725,
-    "to_50ft_grass_m": 819.1109783690307,
-    "ldg_50ft_m": 582.3411181885572,
-    "ldg_50ft_grass_m": 646.4373010985819
+    "climb_gradient_pct": 7.913277151685835,
+    "to_50ft_paved_m": 704.09122423612,
+    "to_50ft_grass_m": 858.5934246438065,
+    "ldg_50ft_m": 582.5217673279861,
+    "ldg_50ft_grass_m": 646.6609422476247
   },
   "vn_diagram": {
-    "va_kmh": 242.61873500740694,
-    "vb_kmh": 235.24758241549247,
+    "va_kmh": 242.69224416885424,
+    "vb_kmh": 235.31885824880902,
     "vc_kmh": 280.0,
     "vd_kmh": 350.0,
     "n_lim_pos": 3.8,
@@ -223,23 +225,23 @@
         0.0
       ],
       [
-        60.654683751851735,
-        0.2374999999999999
+        60.67306104221356,
+        0.23749999999999996
       ],
       [
-        121.30936750370347,
-        0.9499999999999996
+        121.34612208442712,
+        0.9499999999999998
       ],
       [
-        181.9640512555552,
-        2.1374999999999993
+        182.01918312664068,
+        2.1374999999999997
       ],
       [
-        242.61873500740694,
-        3.7999999999999985
+        242.69224416885424,
+        3.7999999999999994
       ],
       [
-        254.19918654987288,
+        254.2762043821656,
         4.171413491926393
       ],
       [
@@ -273,7 +275,7 @@
     "frame_spacing_mm": 300.0,
     "flutter_speed_kmh": 698.5006596309569,
     "design_dive_speed_kmh": 350.0,
-    "va_kmh": 242.61873500740694,
+    "va_kmh": 242.69224416885424,
     "fatigue_life_cycles": "infinita",
     "flutter_ok": true
   },
@@ -314,19 +316,19 @@
   },
   "mission": {
     "fuel_taxi_kg": 2.52,
-    "fuel_climb_kg": 4.920083893203234,
-    "fuel_cruise_kg": 171.86178648472296,
-    "fuel_descent_kg": 0.942739697076692,
-    "fuel_reserve_kg": 18.02446100750029,
-    "fuel_total_kg": 198.26907108250316,
-    "fuel_total_l": 236.0346084315514,
-    "climb_time_min": 8.564000005190014,
-    "climb_distance_km": 22.16161742226535,
+    "fuel_climb_kg": 7.198478043699908,
+    "fuel_cruise_kg": 170.44058288856687,
+    "fuel_descent_kg": 0.9430923371505057,
+    "fuel_reserve_kg": 18.11021532694173,
+    "fuel_total_kg": 199.21236859635903,
+    "fuel_total_l": 237.15758166233218,
+    "climb_time_min": 12.531465016833907,
+    "climb_distance_km": 36.558351920916614,
     "descent_distance_km": 48.61111111111111,
-    "cruise_distance_km": 1889.2272714666235,
-    "block_time_h": 7.063584699768885,
+    "cruise_distance_km": 1874.8305369679722,
+    "block_time_h": 7.078292207705862,
     "range_no_wind_km": 1960.0,
-    "breguet_range_full_tank_km": 2395.3943886731604
+    "breguet_range_full_tank_km": 2395.9694435984375
   },
   "electrical": {
     "bus_voltage_v": 28.0,
@@ -373,34 +375,34 @@
     ]
   },
   "sizing": {
-    "mtow_mission_kg": 1537.3890060038352,
+    "mtow_mission_kg": 1538.3323035176911,
     "mtow_envelope_kg": 1557.5199349213322,
     "iterations": [
       1461.0,
-      1487.5026175748287,
-      1509.8024970557012,
-      1522.4508453749322,
-      1529.3210491654354,
-      1533.0382002389701,
-      1535.0488777640587,
-      1536.1368334039669,
-      1536.725391548541,
-      1537.0441213880576,
-      1537.3890060038352
+      1487.8428468624684,
+      1510.3302134757846,
+      1523.1201131005776,
+      1530.0897749478904,
+      1533.8730122640106,
+      1535.9268068363701,
+      1537.0416143176378,
+      1537.6470775072235,
+      1537.975656547256,
+      1538.3323035176911
     ],
     "converged": true,
-    "fuel_required_l": 236.0346084315514,
+    "fuel_required_l": 237.15758166233218,
     "fuel_capacity_l": 260.0,
-    "fuel_margin_l": 23.96539156844861,
-    "fuel_margin_pct": 9.217458295557158,
+    "fuel_margin_l": 22.842418337667823,
+    "fuel_margin_pct": 8.785545514487625,
     "constraints": {
       "ws_max_stall_n_m2": 2401.5489254686786,
       "v_stall_ref_ms": 43.20987654320987,
       "ws_optimal_cruise_n_m2": 2166.0826627226597,
-      "ws_actual_n_m2": 1061.772815625325,
-      "pw_min_climb_w_n": 5.191084603562674,
-      "pw_actual_w_n": 9.566845277183532,
-      "recommended_wing_area_m2": 6.960571838439602,
+      "ws_actual_n_m2": 1062.424288774507,
+      "pw_min_climb_w_n": 5.192101774453139,
+      "pw_actual_w_n": 9.560978936507478,
+      "recommended_wing_area_m2": 6.964842644386942,
       "ws_chosen_n_m2": 2166.0826627226597
     }
   },
@@ -416,21 +418,14 @@
     ],
     "flips": [
       {
-        "check": "Cenário 'Solo (piloto)'",
-        "caso": "dianteiro",
-        "valor": 13.741405494153906,
-        "limite": 18.09465525936554,
-        "limite_nominal": 17.757974445030644
-      },
-      {
         "check": "Cenário '2 pax dianteiros'",
         "caso": "dianteiro",
         "valor": 16.804949003464134,
-        "limite": 18.09465525936554,
-        "limite_nominal": 17.757974445030644
+        "limite": 18.47233349501252,
+        "limite_nominal": 18.268251143882534
       }
     ],
-    "mtow_masstotal_kg": 1609.350620833172
+    "mtow_masstotal_kg": 1610.6236247965044
   },
   "fidelity": {
     "control_surfaces": "preliminary (frações históricas — Raymer Tab. 6.5; requer análise de autoridade/eficiência de controle)",
@@ -439,22 +434,23 @@
     "geometry": "computed (derivado da configuração + WeightBalanceAgent)",
     "landing_gear": "preliminary (dimensionamento estático de cargas; requer análise dinâmica de pouso/afundamento)",
     "mission": "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, L/D constante em cruzeiro)",
-    "performance": "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na polar (ciclo 8, task 1: cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta, semi-empírico Raymer cap. 12/Hoerner) no segmento de SUBIDA da decolagem e no gradiente CS 23.65; a rolagem de solo de decolagem E de pouso (old→new, ciclo 12 tasks 2/3, docs/backlog.md item 4: RESOLVIDO) passam de método ENERGÉTICO fechado (Raymer, V_ref²/2gμ, sem termo de arrasto por construção) para integração numérica da equação de movimento em V (Simpson composto, 200 intervalos), consumindo a polar completa (CD0 + trem estendido + incremento de flap + induzido) segmento a segmento — medido: to_50ft_paved_m +54,92%, to_50ft_grass_m +73,00%, ldg_50ft_m +15,90%, ldg_50ft_grass_m +16,12% no baseline real; checagens #23/#24 (pista de grama, 600 m) passam a REPROVAR (819,11 m e 646,44 m); descontinuidade de ≈27,69% entre o modelo de tração da rolagem (thrust_ground_roll_n) e o de cruzeiro/subida (thrust_available_n) em V_LOF, medida e registrada como backlog item 8, fora de escopo; a aproximação de pouso (segmento de APROXIMAÇÃO antes do toque, ângulo fixo de 3°, não L/D) continua sem consumir a polar, por construção — não afetada por esta task; Vy/teto de serviço (climb_rate_ms) usam referência de estol LIMPA (wing.cl_max_clean, não mais o CL_max flapado do ciclo 11 task 2, docs/backlog.md item 3) e polar limpa (cd0_extra = 0.0, config EN-ROUTE), com janela de busca do argmax de RC(V) em [1,05;2,00]·Vs e guarda de argmax estritamente interior (evita o artefato de piso da janela antiga [1,3;1,8]·Vs quando a referência de estol muda); gradiente CS 23.65 (climb_gradient_pct) avaliado no piso LEGAL da norma desde o ciclo 11, task 1 (1,2·Vs_to, não mais o piso da varredura em 1,05·Vs_to — fecha o viés otimista remanescente nomeado no ciclo 8, docs/backlog.md item 2); ver docstring de agents::performance::best_climb_angle_com_piso, agents::performance::climb_rate_ms, agents::performance::takeoff_ground_roll_m e agents::performance::landing_ground_roll_m",
-    "propeller": "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — aeronave CARREGADA, em deflexão estática de trem (não trem totalmente estendido sem carga — CONTRATO de [gear].h_cg_ground_m) — E folga em condição CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no batente + pneu murcho, checagem #25; ambas piso de projeto, não verificação regulatória direta. Ciclo 9 (transferência de atitude do #25): a folga crítica agora modela o PIVÔ da célula sobre o trem principal (não mais uma translação vertical 1:1 do nariz) — a hélice, à frente do trem de nariz, mergulha um braço amplificado por um fator geométrico (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m−gear.x_nose_m) sobre o curso do nariz/deflexão de pneu. Achado honesto: no baseline real esse fator (≈1,466) vira a folga crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m (FAIL) — a simplificação antiga era OTIMISTA e mascarava este resultado, como o achado de review do ciclo 8 previu. Ciclo 10 (task 1, deflexão estática — CS 23.925 pela LETRA): o CAVEAT dos mains rígidos nomeado no ciclo 9 (deflexão do amortecedor/pneu principal precisaria entrar como termo aditivo, condição COMPOSTA de CS 23.925) está RESOLVIDO — `[gear].h_cg_ground_m` sempre foi a altura da aeronave CARREGADA, em deflexão estática (não trem estendido sem carga), então os mains JÁ estão nessa deflexão dentro de `ground_clearance_m`; a norma, pela letra, só exige o trem CRÍTICO (nariz) no batente, os demais ficam na deflexão estática que já é modelada. Não faltava termo nenhum. Campo novo `[gear].static_sag_fraction` (0,33 no baseline) corrige a fórmula do nariz do curso TOTAL do batente para o curso RESTANTE (o amortecedor de nariz também parte da mesma deflexão estática, não estendido) — dupla contagem do ciclo 9 corrigida. Fator geométrico inalterado (≈1,466); folga crítica ≈−0,064 m (ciclo 9) → ≈−0,0025 m (ciclo 10) — MESMO veredito (checagem #25 continuou FAIL do ciclo 9 ao ciclo 10), honestamente ANTI-conservador. Fix wave ciclo 11 (2026-08-10): a checagem #25 ESTEVE FAIL do ciclo 9 ao ciclo 10 — desde o baseline E12 (trem de nariz recuado, x_nose_m 1,30→1,20) ela PASSA, com folga crítica +0,00737 m. `old→new` (ciclo 11 → ciclo 12): a esta altura o texto dizia `validation_status: PASS`, `violations: []` — verdade NAQUELE momento (só a checagem #25 pendia), mas ficaria FALSO sem reescrita: desde o ciclo 12 `validation_status` do baseline real vira `FAIL` com 4 violações — TODAS não relacionadas à hélice; a checagem #25 (esta seção) CONTINUA PASSANDO, sem violação própria. `old→new` (proveniência corrigida, fix wave ciclo 12): a frase acima (antes desta reescrita) atribuía as 4 violações a \"tasks 2/3, ground roll por integração\" — FALSO para 2 delas. Medido (task 4 desligada, tasks 2/3 intactas): restam apenas 2 violações — só #23 e #24 (pista de GRAMA), essas sim causadas pelas tasks 2/3. As outras 2 (Robustez: cenários 'Solo (piloto)' e '2 pax dianteiros') são causadas pela TASK 4 (termos de solo do balanço de rotação) — NOVAS deste ciclo, sem relação alguma com a rolagem por integração; `git show 1e11998:aircraft_spec.json` (pré-ciclo-12) tem `validation_status: \"PASS\"`, `violations: []`, `robustness.flips: []`. A folga crítica de hélice em si (+0,00737 m) não mudou desde o ciclo 11. Achado companheiro (docs/backlog.md item 9, fora de escopo): `agents::propulsion::prop_efficiency` — o polinômio de eficiência da hélice usado por `thrust_available_n` (cruzeiro/subida/ teto) — devolve η(0) = 0,58 por construção, quando por definição η = T·V/P → 0 quando V → 0; medido no baseline real, `thrust_available_n` salta de 0 N em V=0,7 m/s (janela nula da guarda de thrust_n) para 84.843,52 N em V=1,0 m/s — descontinuidade sem física por trás, sem consumidor de produção hoje porque nenhum código varre essa faixa estreita com este modelo (a rolagem usa thrust_ground_roll_n, quantidade de movimento com avanço, não este). Ver docstring de PropellerSpec::prop_clearance_critical_m e docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO ciclo 10; item 9, prop_efficiency, aberto ciclo 12). Requer mapa de desempenho de hélice real do fabricante)",
-    "propulsion": "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)",
+    "performance": "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na polar (ciclo 8, task 1: cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta, semi-empírico Raymer cap. 12/Hoerner) no segmento de SUBIDA da decolagem e no gradiente CS 23.65; a rolagem de solo de decolagem E de pouso (old→new, ciclo 12 tasks 2/3, docs/backlog.md item 4: RESOLVIDO) passam de método ENERGÉTICO fechado (Raymer, V_ref²/2gμ, sem termo de arrasto por construção) para integração numérica da equação de movimento em V (Simpson composto, 200 intervalos), consumindo a polar completa (CD0 + trem estendido + incremento de flap + induzido) segmento a segmento — medido: to_50ft_paved_m +54,92%, to_50ft_grass_m +73,00%, ldg_50ft_m +15,90%, ldg_50ft_grass_m +16,12% no baseline real; checagens #23/#24 (pista de grama, 600 m) passam a REPROVAR (819,11 m e 646,44 m); `old→new` (ciclo 12 → ciclo 13, backlog item 8: RESOLVIDO) — a descontinuidade de ≈27,69% entre o modelo de tração da rolagem (thrust_ground_roll_n, APAGADA) e o de cruzeiro/subida (thrust_available_n) em V_LOF deixou de existir: os dois viraram a MESMA lei única T(V)=FoM(J)·T_ideal_momentum(V,P_eixo) (ver comentário acima); a aproximação de pouso (segmento de APROXIMAÇÃO antes do toque, ângulo fixo de 3°, não L/D) continua sem consumir a polar, por construção — não afetada por esta task; Vy/teto de serviço (climb_rate_ms) usam referência de estol LIMPA (wing.cl_max_clean, não mais o CL_max flapado do ciclo 11 task 2, docs/backlog.md item 3) e polar limpa (cd0_extra = 0.0, config EN-ROUTE), com janela de busca do argmax de RC(V) em [1,05;2,00]·Vs e guarda de argmax estritamente interior (evita o artefato de piso da janela antiga [1,3;1,8]·Vs quando a referência de estol muda); gradiente CS 23.65 (climb_gradient_pct) avaliado no piso LEGAL da norma desde o ciclo 11, task 1 (1,2·Vs_to, não mais o piso da varredura em 1,05·Vs_to — fecha o viés otimista remanescente nomeado no ciclo 8, docs/backlog.md item 2); ver docstring de agents::performance::best_climb_angle_com_piso, agents::performance::climb_rate_ms, agents::performance::takeoff_ground_roll_m e agents::performance::landing_ground_roll_m",
+    "propeller": "semi-empirical (Mach de ponta; folga de solo ESTÁTICA — aeronave CARREGADA, em deflexão estática de trem (não trem totalmente estendido sem carga — CONTRATO de [gear].h_cg_ground_m) — E folga em condição CRÍTICA de CS 23.925 desde o ciclo 8: amortecedor de nariz no batente + pneu murcho, checagem #25; ambas piso de projeto, não verificação regulatória direta. Ciclo 9 (transferência de atitude do #25): a folga crítica agora modela o PIVÔ da célula sobre o trem principal (não mais uma translação vertical 1:1 do nariz) — a hélice, à frente do trem de nariz, mergulha um braço amplificado por um fator geométrico (gear.x_main_m−propeller.prop_plane_x_m)/(gear.x_main_m−gear.x_nose_m) sobre o curso do nariz/deflexão de pneu. Achado honesto: no baseline real esse fator (≈1,466) vira a folga crítica de +0,0325 m (PASS, simplificação 1:1) para ≈−0,064 m (FAIL) — a simplificação antiga era OTIMISTA e mascarava este resultado, como o achado de review do ciclo 8 previu. Ciclo 10 (task 1, deflexão estática — CS 23.925 pela LETRA): o CAVEAT dos mains rígidos nomeado no ciclo 9 (deflexão do amortecedor/pneu principal precisaria entrar como termo aditivo, condição COMPOSTA de CS 23.925) está RESOLVIDO — `[gear].h_cg_ground_m` sempre foi a altura da aeronave CARREGADA, em deflexão estática (não trem estendido sem carga), então os mains JÁ estão nessa deflexão dentro de `ground_clearance_m`; a norma, pela letra, só exige o trem CRÍTICO (nariz) no batente, os demais ficam na deflexão estática que já é modelada. Não faltava termo nenhum. Campo novo `[gear].static_sag_fraction` (0,33 no baseline) corrige a fórmula do nariz do curso TOTAL do batente para o curso RESTANTE (o amortecedor de nariz também parte da mesma deflexão estática, não estendido) — dupla contagem do ciclo 9 corrigida. Fator geométrico inalterado (≈1,466); folga crítica ≈−0,064 m (ciclo 9) → ≈−0,0025 m (ciclo 10) — MESMO veredito (checagem #25 continuou FAIL do ciclo 9 ao ciclo 10), honestamente ANTI-conservador. Fix wave ciclo 11 (2026-08-10): a checagem #25 ESTEVE FAIL do ciclo 9 ao ciclo 10 — desde o baseline E12 (trem de nariz recuado, x_nose_m 1,30→1,20) ela PASSA, com folga crítica +0,00737 m. `old→new` (ciclo 11 → ciclo 12): a esta altura o texto dizia `validation_status: PASS`, `violations: []` — verdade NAQUELE momento (só a checagem #25 pendia), mas ficaria FALSO sem reescrita: desde o ciclo 12 `validation_status` do baseline real vira `FAIL` com 4 violações — TODAS não relacionadas à hélice; a checagem #25 (esta seção) CONTINUA PASSANDO, sem violação própria. `old→new` (proveniência corrigida, fix wave ciclo 12): a frase acima (antes desta reescrita) atribuía as 4 violações a \"tasks 2/3, ground roll por integração\" — FALSO para 2 delas. Medido (task 4 desligada, tasks 2/3 intactas): restam apenas 2 violações — só #23 e #24 (pista de GRAMA), essas sim causadas pelas tasks 2/3. As outras 2 (Robustez: cenários 'Solo (piloto)' e '2 pax dianteiros') são causadas pela TASK 4 (termos de solo do balanço de rotação) — NOVAS deste ciclo, sem relação alguma com a rolagem por integração; `git show 1e11998:aircraft_spec.json` (pré-ciclo-12) tem `validation_status: \"PASS\"`, `violations: []`, `robustness.flips: []`. A folga crítica de hélice em si (+0,00737 m) não mudou desde o ciclo 11. `old→new` (ciclo 12 → ciclo 13, spec §2/§4, docs/backlog.md item 9: RESOLVIDO): o parágrafo anterior registrava `agents::propulsion::prop_efficiency` — o polinômio de eficiência da hélice usado por `thrust_available_n` (cruzeiro/subida/ teto) — devolvendo η(0) = 0,58 por construção (quando por definição η = T·V/P → 0 quando V → 0), com `thrust_available_n` saltando de 0 N em V=0,7 m/s (janela nula da guarda de thrust_n) para 84.843,52 N em V=1,0 m/s. O polinômio `prop_efficiency` e a função `thrust_n` foram APAGADAS; a lei única `T(V) = FoM(J)·T_ideal_momentum(V,P_eixo)` não tem ramo de velocidade nem guarda de V<1,0 — η → 0 quando V → 0 por CONSTRUÇÃO da cúbica de Rankine-Froude (u → K^(1/3) finito quando V → 0), então o salto e a janela nula deixaram de existir. Ver docstring de PropellerSpec::prop_clearance_critical_m, agents::propulsion::FigureOfMerit e docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO ciclo 10; item 9, RESOLVIDO ciclo 13). Requer mapa de desempenho de hélice real do fabricante)",
+    "propulsion": "semi-empirical (curvas de catálogo do motor + BSFC paramétrico). `prop_efficiency` mudou de ORIGEM no ciclo 13 (schema 5.6): era o polinômio `agents::propulsion::prop_efficiency` (η = −0,15·J² + 0,39·J + 0,58, JavaProp), APAGADO por violar o teto de quantidade de movimento em quatro dos oito pontos de operação do baseline; hoje é SAÍDA DERIVADA da lei única de tração T(V) = FoM(J)·T_ideal_momentum(V, P_eixo), obtida por inversão em forma FECHADA da quadrática do disco atuador em cruzeiro nivelado (T = arrasto conhecido, u = [V + √(V² + 2T/(ρA))]/2, η = FoM(J)·V/u — sem ponto fixo, sem iteração). O valor no baseline é IDÊNTICO ao do polinômio apagado por construção da âncora `[propeller].fom_design`, calibrada exatamente para isso. RESSALVA (backlog #21): a âncora preserva o PONTO de cruzeiro, não a missão inteira — o segmento de SUBIDA consome a curva FoM(J) completa, cuja forma linear entre as âncoras não foi calibrada para aquele regime, e `mission.fuel_climb_kg` subiu 46,31%. O efeito quase se cancela no total (`range_km`/`endurance_h` a −0,037%), o que torna o agregado enganosamente estável — ver backlog #21.",
     "robustness": "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope avaliados na régua do PRÓPRIO mundo perturbado desde o ciclo 10 task 2 — o limite dianteiro deixou de ser invariante a massa (linha de tração); flips[].limite_nominal carrega a régua nominal para contraste; caso massa-total: re-sizing completo com fatores ×(1+σ))",
     "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
     "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
-    "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — ver erratum da spec §2) E, desde o ciclo 12 task 4, os binários de atrito de rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)) — os três recuam o limite dianteiro de rotação em conjunto (≈4,40 pp dos dois últimos, medido; o ciclo 10 os desprezava com uma estimativa de ≲2 pp que a medição desmentiu); validar em ensaio de voo antes de tratar como definitivo. QUALIFICAÇÃO DE INDETERMINAÇÃO (fix wave ciclo 12, docs/backlog.md item 15, PRIORIDADE ALTA): o termo de tração do balanço de rotação (thrust_available_n, em Vr) e os termos de solo introduzidos por esta mesma task (via D/μN, que fisicamente correspondem a thrust_ground_roll_n na MESMA velocidade — Vr = V_LOF por construção) vêm de dois modelos de tração que divergem ≈27,69% nessa velocidade; o resíduo não cancelado desse descasamento não está incluído no rotation_limit_pct_mac publicado. Enquanto a escolha de modelo de tração em V_LOF permanecer em aberto (backlog item 15), rotation_limit_pct_mac carrega uma indeterminação de MODELO de ≈8,3 pp de %MAC (banda medida entre os dois extremos coerentes de modelagem) — a margem de autoridade do cenário mais apertado ('Solo (piloto)', ≈0,000513 pp de %MAC) fica QUATRO ORDENS DE GRANDEZA dentro dessa banda, não fora dela: a precisão numérica publicada (17,757974...% MAC) excede o que o modelo atual sustenta.)",
+    "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — ver erratum da spec §2) E, desde o ciclo 12 task 4, os binários de atrito de rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)). RESOLVIDO (ciclo 13, spec §2/§6, backlog #15 — PRIORIDADE ALTA): a indeterminação de MODELO de ≈8,3 pp de %MAC que existia entre este JSON e a versão anterior (thrust_available_n no termo de momento vs. thrust_ground_roll_n nos termos de solo, ≈27,69% de divergência em Vr≡V_LOF) ACABOU — os dois termos agora vêm da MESMA lei única de tração T(V)=FoM(J)·T_ideal_momentum(V,P_eixo), a MESMA chamada nos MESMOS argumentos; o resíduo de d'Alembert é ZERO por construção, medido a 1e-12 relativo nos 6 cenários de CG (agents::trim_authority::thrust_at_rotation_n). RESOLVIDO (ciclo 13, spec §7, backlog #16): o limite dianteiro de rotação é calculado nas DUAS superfícies (trim.rotation_limit_pct_mac_paved/trim.rotation_limit_pct_mac_grass) e o campo legado trim.rotation_limit_pct_mac passa a valer a superfície de OPERAÇÃO (GRAMA — mesma premissa das checagens #23/#24 de decolagem/pouso), não mais pavimentada; medido no baseline real: pavimentado 16,380458% → grama 18,268251% MAC (+1,888 pp). Continua SENSÍVEL aos parâmetros semi-empíricos citados acima; validar em ensaio de voo antes de tratar como definitivo.)",
     "vn_diagram": "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)",
     "weight": "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados não pesados — validar na balança)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
-    "Robustez: Cenário 'Solo (piloto)' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 13.74 vs 18.09",
-    "Robustez: Cenário '2 pax dianteiros' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 16.80 vs 18.09",
-    "Decolagem (grama, 15 m): 819 m excede a pista disponível de 600 m",
-    "Pouso (grama, 15 m): 646 m excede a pista disponível de 600 m"
+    "Cenário 'Solo (piloto)': CG 17.8% MAC fora do envelope de CG admissível [18.3%–43.5%] (SM=0.307; x_cg=3.121m, limites em x: [3.128m, 3.442m])",
+    "Gradiente de subida 7.9% abaixo do mínimo de 8.3% exigido pela CS 23.65 (Vx=138.9km/h)",
+    "Robustez: Cenário '2 pax dianteiros' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 16.80 vs 18.47",
+    "Decolagem (grama, 15 m): 859 m excede a pista disponível de 600 m",
+    "Pouso (grama, 15 m): 647 m excede a pista disponível de 600 m"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
