@@ -17,6 +17,7 @@
     "cl_max_clean": 1.45,
     "cl_max_to": 1.6775,
     "cd0_flap_to_extra": 0.0052499999999999995,
+    "cd0_flap_ldg_extra": 0.015,
     "stall_speed_flaps_kmh": 103.42056105111811,
     "stall_speed_clean_kmh": 124.46078496394205,
     "ld_ratio_cruise": 12.560338789424664
@@ -192,7 +193,7 @@
     "service_ceiling_m": 5200.0,
     "to_distance_paved_m": 744.5565768095555,
     "to_distance_grass_m": 996.3354319423928,
-    "landing_distance_m": 362.6566215019111,
+    "landing_distance_m": 442.53944063006907,
     "range_km": 2027.070681255655,
     "endurance_h": 7.239538147341625,
     "vx_kmh": 138.8714795598457,
@@ -202,8 +203,8 @@
     "climb_gradient_pct": 12.451842484809621,
     "to_50ft_paved_m": 651.2584082804725,
     "to_50ft_grass_m": 819.1109783690307,
-    "ldg_50ft_m": 502.4582990603992,
-    "ldg_50ft_grass_m": 556.6771728943696
+    "ldg_50ft_m": 582.3411181885572,
+    "ldg_50ft_grass_m": 646.4373010985819
   },
   "vn_diagram": {
     "va_kmh": 242.61873500740694,
@@ -435,7 +436,8 @@
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
-    "Decolagem (grama, 15 m): 819 m excede a pista disponível de 600 m"
+    "Decolagem (grama, 15 m): 819 m excede a pista disponível de 600 m",
+    "Pouso (grama, 15 m): 646 m excede a pista disponível de 600 m"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"

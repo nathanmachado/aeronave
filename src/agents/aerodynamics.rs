@@ -170,6 +170,14 @@ impl AerodynamicsAgent {
         // polar" declarada desde o ciclo 7.
         let cd0_flap_to_extra = state.to_flap_fraction * state.cd0_flap_delta;
 
+        // ΔCD0 de POUSO (ciclo 12, task 3 — ver `WingSpec::
+        // cd0_flap_ldg_extra`): delta CHEIO, SEM fração — a rolagem de
+        // pouso é modelada com o flap de pouso TOTALMENTE deflexionado
+        // (spec §5.1), ao contrário do flap PARCIAL de decolagem acima.
+        // Primeiro consumidor real do delta cheio desde que `cd0_flap_delta`
+        // existe (ver docstring `old→new` de `WingCfg::cd0_flap_delta`).
+        let cd0_flap_ldg_extra = state.cd0_flap_delta;
+
         // Velocidades de stall ao nível do mar (condição mais crítica).
         // VS0 — configuração com flap/pouso (CL_max maior → V_stall MENOR).
         let v_stall_flaps_ms = stall_speed_ms(weight_n, RHO_SL, state.wing_area_m2, state.cl_max_flaps);
@@ -191,6 +199,7 @@ impl AerodynamicsAgent {
             cl_max_clean:           state.cl_max_clean,
             cl_max_to,
             cd0_flap_to_extra,
+            cd0_flap_ldg_extra,
             stall_speed_flaps_kmh:  v_stall_flaps_ms * 3.6,
             stall_speed_clean_kmh:  v_stall_clean_ms * 3.6,
             ld_ratio_cruise:  ld,
@@ -290,6 +299,26 @@ mod tests {
         assert!(wing.cd0_flap_to_extra > 0.0 && wing.cd0_flap_to_extra < cfg.wing.cd0_flap_delta,
             "cd0_flap_to_extra {:.4} deveria ficar ESTRITAMENTE entre 0 e o delta cheio ({:.4})",
             wing.cd0_flap_to_extra, cfg.wing.cd0_flap_delta);
+    }
+
+    /// Ciclo 12 (task 3): `cd0_flap_ldg_extra` é o delta CHEIO, SEM fração
+    /// nenhuma (`[wing].cd0_flap_delta` direto) — diferente de
+    /// `cd0_flap_to_extra` (fração PARCIAL). Falseável: se alguém
+    /// reintroduzir `to_flap_fraction` aqui por engano (copiar-colar de
+    /// `cd0_flap_to_extra`), este teste quebra.
+    #[test]
+    fn cd0_flap_ldg_extra_e_o_delta_cheio_sem_fracao() {
+        let cfg = config_teste();
+        let state = AircraftState::from_config(&cfg);
+        let req = crate::models::requirements::test_fixtures::requisitos_teste();
+        let wing = AerodynamicsAgent::run(&state, &req);
+
+        assert!((wing.cd0_flap_ldg_extra - cfg.wing.cd0_flap_delta).abs() < 1e-12,
+            "cd0_flap_ldg_extra {:.12} deveria ser o delta CHEIO {:.12}, sem fração",
+            wing.cd0_flap_ldg_extra, cfg.wing.cd0_flap_delta);
+        assert!(wing.cd0_flap_ldg_extra > wing.cd0_flap_to_extra,
+            "delta CHEIO ({:.4}) deveria ser MAIOR que a fração parcial de decolagem ({:.4}) \
+             para to_flap_fraction < 1", wing.cd0_flap_ldg_extra, wing.cd0_flap_to_extra);
     }
 
     #[test]

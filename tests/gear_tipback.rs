@@ -499,13 +499,26 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // finalmente dizendo a verdade sobre operar 1.537 kg numa pista de
     // grama de 600 m (diretriz permanente do usuário: "se uma decisão é
     // perigosa, o modelo deve FALHAR no ponto de perigo"). Contagem
-    // 0 → **1**, a violação nomeada abaixo.
-    assert_eq!(report.violations.len(), 1,
-        "ciclo 12 (task 2): esperava EXATAMENTE 1 violação no baseline real — a decolagem na \
-         grama sobre 15 m (819 m) passa a exceder a pista de 600 m, achado honesto da rolagem \
-         integrada (ver comentário acima), não uma regressão: {:?}", report.violations);
+    // 0 → 1, a violação de decolagem.
+    //
+    // ATUALIZAÇÃO (ciclo 12, task 3, 2026-08-15 — old→new, SEGUNDA
+    // VIOLAÇÃO, TAMBÉM DE PROPÓSITO): a rolagem de pouso passa pela MESMA
+    // transformação (spec §5) — com o flap de pouso mantido deflexionado
+    // durante toda a frenagem, a sustentação residual ALIVIA o peso sobre
+    // as rodas e PIORA a frenagem: `ldg_50ft_grass_m` 556,677173 m →
+    // **646,437301 m** (medido), estourando os 600 m por ≈46 m. Mesma
+    // diretriz permanente do usuário citada acima — não é regressão.
+    // Contagem 1 → **2**, as duas violações nomeadas abaixo.
+    assert_eq!(report.violations.len(), 2,
+        "ciclo 12 (task 3): esperava EXATAMENTE 2 violações no baseline real — decolagem na \
+         grama sobre 15 m (819 m) E pouso na grama sobre 15 m (646 m), ambas excedendo a pista \
+         de 600 m, achados honestos da rolagem integrada (ver comentário acima), não uma \
+         regressão: {:?}", report.violations);
     assert!(report.violations.iter().any(|v| v.contains("Decolagem (grama, 15 m)")),
-        "a única violação esperada é a de decolagem na grama sobre 15 m: {:?}",
+        "uma das duas violações esperadas é a de decolagem na grama sobre 15 m: {:?}",
+        report.violations);
+    assert!(report.violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "a outra violação esperada é a de pouso na grama sobre 15 m: {:?}",
         report.violations);
 }
 

@@ -523,18 +523,35 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// arrasto). Medido: `to_50ft_grass_m` 473,469470 m → **819,110978 m**
 /// (+73,0%), estourando `req.runway_available_m` (600 m) por ≈219 m —
 /// checagem #23 REPROVA pela primeira vez. `validation_status` volta a
-/// `"FAIL"` com **EXATAMENTE 1 violação** — a de decolagem na grama.
-/// Nenhum outro achado muda (hélice/#25, carga de nariz, robustez,
+/// `"FAIL"` com, na task 2, **EXATAMENTE 1 violação** — a de decolagem na
+/// grama. Nenhum outro achado muda (hélice/#25, carga de nariz, robustez,
 /// tipback/tail-strike/margem de combustível, pouso na grama): a rolagem de
-/// pouso e o balanço de rotação são as Tasks 3/4 deste ciclo, fora do
-/// escopo desta task. **Isto não é regressão** — é o modelo passando a
+/// pouso e o balanço de rotação eram as Tasks 3/4 deste ciclo, fora do
+/// escopo da task 2. **Isto não é regressão** — é o modelo passando a
 /// dizer a verdade sobre operar esta célula numa pista de fazenda de
 /// 600 m (diretriz permanente do usuário: "se uma decisão é perigosa, o
-/// modelo deve FALHAR no ponto de perigo"). O ciclo 13 decide o que fazer
-/// a respeito (mais potência, mais asa, pista maior, ou aceitar operação
-/// só pavimentada) — não esta task.
+/// modelo deve FALHAR no ponto de perigo").
+///
+/// ─── ATUALIZAÇÃO (ciclo 12, task 3, 2026-08-15) — SEGUNDA VIOLAÇÃO,
+/// TAMBÉM O RESULTADO ESPERADO ─────────────────────────────────────────────
+///
+/// A rolagem de pouso passa pela MESMA transformação (método fechado
+/// `S_G=V_ref²/(2gμ)` → integração numérica, spec §5) — com o flap de
+/// pouso mantido deflexionado durante toda a frenagem (decisão do usuário),
+/// a sustentação residual ALIVIA o peso sobre as rodas e PIORA a frenagem;
+/// o arrasto ajuda, mas o saldo é uma rolagem MAIOR. Medido:
+/// `ldg_50ft_grass_m` 556,677173 m → **646,437301 m** (+16,1%), estourando
+/// os 600 m de pista por ≈46 m — checagem #24 REPROVA também.
+/// `validation_status` continua `"FAIL"`, agora com **EXATAMENTE 2
+/// violações** — decolagem E pouso na grama. Nenhum outro achado muda
+/// (hélice/#25, carga de nariz, robustez, tipback/tail-strike/margem de
+/// combustível): o balanço de rotação é a Task 4 deste ciclo, fora do
+/// escopo desta task. **Isto também não é regressão** — mesma diretriz
+/// permanente do usuário citada acima. O ciclo 13 decide o que fazer a
+/// respeito (mais potência, mais asa, pista maior, ou aceitar operação só
+/// pavimentada) — não esta task.
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolagem_grama() {
+fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolagem_e_pouso_grama() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -574,14 +591,15 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    // Contagem 0 → **1** (ciclo 12, task 2: decolagem na grama sobre 15 m
-    // estoura os 600 m de pista disponível). Assert de contagem PRIMEIRO,
-    // com a lista inteira na mensagem: qualquer violação nova aparece por
-    // nome no output do teste, sem precisar adivinhar qual foi.
-    assert_eq!(violations.len(), 1,
-        "ciclo 12 (task 2): esperava EXATAMENTE 1 violação no baseline real — a decolagem na \
-         grama sobre 15 m (819 m > 600 m), achado honesto da rolagem integrada (ver comentário \
-         acima), não uma regressão: {violations:#?}");
+    // Contagem 0 → 1 (task 2: decolagem na grama) → **2** (task 3: pouso na
+    // grama também estoura). Assert de contagem PRIMEIRO, com a lista
+    // inteira na mensagem: qualquer violação nova aparece por nome no
+    // output do teste, sem precisar adivinhar qual foi.
+    assert_eq!(violations.len(), 2,
+        "ciclo 12 (task 3): esperava EXATAMENTE 2 violações no baseline real — decolagem na \
+         grama sobre 15 m (819 m > 600 m, task 2) E pouso na grama sobre 15 m (646 m > 600 m, \
+         task 3), achados honestos da rolagem integrada (ver comentário acima), não uma \
+         regressão: {violations:#?}");
     // Asserts NOMEADOS por checagem — redundantes com a contagem acima de
     // propósito: se um refactor um dia reabrir/fechar uma violação, a
     // contagem sozinha não diria QUAL mudou.
@@ -601,20 +619,25 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
         "esperava ZERO violações de robustez (σ=15%) — INTOCADA pelo ciclo 12, task 2: \
          {violations:#?}");
-    // (4) Pouso na GRAMA sobre 15 m: continua dentro dos 600 m — o pouso é
-    // a Task 3 deste ciclo, fora do escopo desta task (ainda usa o método
-    // energético fechado/frenagem constante).
-    assert!(!violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
-        "pouso na grama (≈556,7 m, INTOCADO pela task 2 — o método muda só na Task 3 deste \
-         ciclo) deveria caber nos 600 m: {violations:#?}");
+    // (4) HISTÓRICO — ASSERT MORTO, `old→new` (ciclo 12, task 3): até a
+    // task 2, o pouso na grama continuava dentro dos 600 m (≈556,7 m sobre
+    // 15 m, método fechado de frenagem constante sem arrasto nem alívio de
+    // sustentação — o pouso era a Task 3, ainda não implementada). Com a
+    // rolagem de pouso integrada (arrasto + alívio de sustentação
+    // explícitos, spec §5), `ldg_50ft_grass_m` sobe para 646,4 m — EXCEDE
+    // os 600 m da pista. O assert antigo ("pouso na grama continua
+    // PASSANDO") morre aqui, não é mais verdadeiro por construção.
+    assert!(violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "pouso na grama (≈646,4 m, ciclo 12 task 3 — rolagem integrada com alívio de \
+         sustentação) deveria exceder os 600 m de pista disponível: {violations:#?}");
     // (5) HISTÓRICO — ASSERT MORTO, `old→new` (ciclo 12, task 2): até este
     // ciclo, a decolagem na grama sempre PASSAVA (≈473,5 m sobre 15 m,
     // método energético sem arrasto). Com a rolagem integrada
     // (arrasto+atrito explícitos), `to_50ft_grass_m` sobe para 819,1 m —
-    // EXCEDE os 600 m da pista. Esta é agora a ÚNICA violação do baseline
-    // real, já verificada pela contagem/lista acima; o assert antigo
-    // ("decolagem na grama continua PASSANDO") morre aqui, não é mais
-    // verdadeiro por construção.
+    // EXCEDE os 600 m da pista. Esta é uma das DUAS violações do baseline
+    // real (a outra é o pouso na grama, acima), já verificadas pela
+    // contagem/lista acima; o assert antigo ("decolagem na grama continua
+    // PASSANDO") morre aqui, não é mais verdadeiro por construção.
     assert!(violations.iter().any(|v| v.contains("Decolagem (grama")),
         "decolagem na grama (819,1 m, ciclo 12 — rolagem integrada) deveria exceder os 600 m \
          de pista disponível: {violations:#?}");

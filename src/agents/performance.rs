@@ -793,20 +793,130 @@ pub fn takeoff_distance_50ft_m(
     s_ground + s_rotation + s_climb
 }
 
-/// Rolagem de solo no pouso (frenagem):
+/// CL em atitude de solo com flap de POUSO (cheio) — ciclo 12, spec §5.2.
+/// DERIVADO, não parâmetro livre novo: o flap desloca a curva CL(α) quase
+/// paralelamente, de modo que o incremento de CL em ATITUDE FIXA é
+/// aproximadamente igual ao incremento de CL_max — verdadeiro para flap
+/// simples e slotted dentro da precisão deste modelo. `cl_ground_roll_to`
+/// (`[stability].cl_ground_rotation`) já embute a fração PARCIAL de
+/// decolagem, então falta a fração COMPLEMENTAR `(1 − to_flap_fraction)` do
+/// incremento de flap CHEIO:
 ///
-///   S_G = V_ref² / (2·g·μ)     V_ref = 1.3·V_s
+///   CL_roll_ldg = cl_ground_roll_to + (1 − to_flap_fraction)·(cl_max_flaps
+///                 − cl_max_clean)
 ///
-/// `mu_brake` (Task 4.7, config `[performance]`): vem diretamente de
-/// `mu_brake_paved`/`mu_brake_grass` — substitui os fatores ad hoc
-/// `μ/surface_factor` e `·√surface_factor` do M5 (para pista pavimentada,
-/// factor=1.0, os dois hacks eram identidade — `mu_brake_paved = 0.40`
-/// reproduz numericamente o resultado antigo).
-fn landing_ground_roll_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64) -> f64 {
+/// `wing.cl_max` é o CL_max de POUSO (flap cheio, ver docstring do campo).
+/// Hand-check do baseline real: 0,50 + 0,65·(2,10 − 1,45) = 0,9225.
+///
+/// Derivar em vez de adicionar um campo de config novo mantém fonte única
+/// de verdade — mesma política que já tirou `cl_h_max_down` de parâmetro
+/// livre.
+pub fn cl_ground_roll_landing(
+    cl_ground_roll_to: f64,
+    to_flap_fraction: f64,
+    wing: &WingSpec,
+) -> f64 {
+    cl_ground_roll_to + (1.0 - to_flap_fraction) * (wing.cl_max - wing.cl_max_clean)
+}
+
+/// Integra `S = ∫₀^{V_ref} m·V / F_dec(V) dV` por Simpson composto — o
+/// integrador genérico da rolagem de POUSO (ciclo 12, spec §5), simétrico a
+/// `integra_rolagem_decolagem_com_passos` mas SEM termo de tração: no pouso
+/// a aeronave desacelera por arrasto E atrito de frenagem, os dois SOMAM
+/// (ao contrário da decolagem, onde o arrasto SUBTRAI da tração).
+///
+/// `F_dec(V) = drag_fn(V) + mu_brake·max(0, W_ldg − lift_fn(V))`,
+/// `W_ldg = mass_kg·G`. Mesma guarda falseável de `integra_rolagem_
+/// decolagem_com_passos`: se `F_dec(V) ≤ 0` em qualquer nó, o integrando
+/// naquele nó é `+INFINITY` (nunca NaN — a guarda intercepta ANTES da
+/// divisão).
+fn integra_rolagem_pouso_com_passos(
+    mass_kg: f64,
+    v_ref: f64,
+    drag_fn: impl Fn(f64) -> f64,
+    lift_fn: impl Fn(f64) -> f64,
+    mu_brake: f64,
+    steps: usize,
+) -> f64 {
     let w = mass_kg * G;
-    let v_s = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
-    let v_ref = 1.30 * v_s;
-    v_ref * v_ref / (2.0 * G * mu_brake)
+    let integrando = |v: f64| -> f64 {
+        let n = (w - lift_fn(v)).max(0.0);
+        let f_dec = drag_fn(v) + mu_brake * n;
+        if f_dec <= 0.0 {
+            return f64::INFINITY;
+        }
+        mass_kg * v / f_dec
+    };
+    simpson_composto(integrando, 0.0, v_ref, steps)
+}
+
+/// Rolagem de solo no pouso — integração numérica da equação de movimento
+/// (ciclo 12, spec §5), consumindo a polar completa:
+///
+///   m·dV/dt = −[D(V) + μ_brake·N(V)]
+///   N(V) = max(0, W_ldg − L(V))
+///   S = ∫₀^{V_ref} m·V·dV / F_dec(V)     (Simpson composto, 200 intervalos,
+///                                          `integra_rolagem_pouso_com_
+///                                          passos`)
+///   D(V) = q·S_w·CD_roll_ldg,  CD_roll_ldg = `cd_ground_roll` com
+///          `wing.cd0_flap_ldg_extra` (flap CHEIO — spec §5.3a)
+///   L(V) = q·S_w·cl_ground_roll_ldg   (`cl_ground_roll_landing`, spec §5.2)
+///   V_ref = 1,30·√(2·W_ldg/(ρ·S_w·wing.cl_max))     (inalterado)
+///
+/// **O achado central da task (spec §5.1):** com o flap de pouso mantido
+/// deflexionado durante toda a rolagem (decisão do usuário — a configuração
+/// em que CS 23 mede a distância de pouso desta classe), a sustentação
+/// residual ALIVIA o peso sobre as rodas e PIORA a frenagem; o arrasto
+/// ajuda; o saldo é uma rolagem MAIOR que a de hoje.
+///
+/// HISTÓRICO — DOCSTRING ANTIGA, RESCRITA `old→new` (ciclo 12): até este
+/// ciclo a fórmula era `S_G = V_ref²/(2·g·μ)` — frenagem constante, sem
+/// termo de arrasto aerodinâmico e, mais importante, sem o alívio de peso
+/// que a sustentação residual causa sobre as rodas. `mu_brake` (Task 4.7)
+/// continua vindo de `[performance].mu_brake_paved`/`mu_brake_grass` — essa
+/// parte não mudou; o que muda é que a rolagem agora integra `D(V)` e o
+/// termo `N(V) = max(0, W_ldg − L(V))` explicitamente, em vez de assumir
+/// frenagem a atrito constante sobre o peso TOTAL.
+///
+/// `state: &AircraftState` — parâmetro NOVO (ciclo 12, spec §5.3b): não
+/// existia porque nenhum segmento consumia a polar; agora necessário para
+/// `state.cd0_gear_fixed_increment` dentro de `cd_ground_roll` (o trem está
+/// ESTENDIDO na rolagem de pouso, `wing.cd0` é o CD0 de trem RECOLHIDO).
+fn landing_ground_roll_com_passos(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    mu_brake: f64,
+    cl_ground_roll_ldg: f64,
+    steps: usize,
+) -> f64 {
+    let w = mass_kg * G;
+    let v_ref = 1.30 * ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    // Ciclo 12, spec §5.3a: flap CHEIO de pouso (`cd0_flap_ldg_extra`) — a
+    // aeronave rola com o flap de pouso já deflexionado, ao contrário da
+    // rolagem de decolagem (`cd0_flap_to_extra`, flap PARCIAL).
+    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll_ldg, wing.cd0_flap_ldg_extra);
+
+    let drag_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cd_roll;
+    let lift_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cl_ground_roll_ldg;
+
+    integra_rolagem_pouso_com_passos(mass_kg, v_ref, drag_fn, lift_fn, mu_brake, steps)
+}
+
+/// `landing_ground_roll_com_passos` na resolução de PRODUÇÃO (200
+/// intervalos de Simpson) — ver docstring acima para o modelo físico
+/// completo e o histórico `old→new` da fórmula de frenagem constante que
+/// esta função substitui.
+fn landing_ground_roll_m(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    mu_brake: f64,
+    cl_ground_roll_ldg: f64,
+) -> f64 {
+    landing_ground_roll_com_passos(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg, 200)
 }
 
 /// Distância de pouso — rolagem de solo + distância aérea fixa de 200 m
@@ -814,8 +924,21 @@ fn landing_ground_roll_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64)
 /// estimativa baseada em rolagem de solo (`PerformanceSpec::
 /// landing_distance_m`) — a distância física sobre obstáculo de 15m (50 ft)
 /// por segmentos vive em `landing_distance_50ft_m` (Task 4.7).
-pub fn landing_distance_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64) -> f64 {
-    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, mu_brake);
+///
+/// Ciclo 12 (`old→new`): `state: &AircraftState` e `cl_ground_roll_ldg: f64`
+/// entram na assinatura — a rolagem de solo agora integra a polar completa
+/// (`landing_ground_roll_m`, spec §5), que precisa dos dois. `mu_brake` vem
+/// de `[performance].mu_brake_paved`/`mu_brake_grass`; `cl_ground_roll_ldg`
+/// de `cl_ground_roll_landing`.
+pub fn landing_distance_m(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    mu_brake: f64,
+    cl_ground_roll_ldg: f64,
+) -> f64 {
+    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg);
     let s_air = 200.0;
     s_ground + s_air
 }
@@ -826,28 +949,37 @@ pub fn landing_distance_m(mass_kg: f64, rho: f64, wing: &WingSpec, mu_brake: f64
 ///   S_total = S_ar + S_flare + S_ground
 ///     S_ar:    15 / tan(γ_app), γ_app = `approach_angle_deg` (padrão 3°)
 ///     S_flare: V_ref × `flare_time_s`
-///     S_ground: rolagem de solo (`landing_ground_roll_m`, `mu_brake`)
+///     S_ground: rolagem de solo integrada (`landing_ground_roll_m`, ciclo
+///               12 — `mu_brake` já embute o atrito de superfície, sem
+///               multiplicador adicional)
 ///
-/// AUDITORIA (ciclo 8, task 1): nenhum dos três segmentos consome a polar de
-/// arrasto (`wing.cd0`), logo nenhum recebe `cd0_flap_delta` — `cd0_flap_
-/// ldg_extra` NÃO existe em `WingSpec` porque nada o consumiria (ver
-/// docstring de `WingCfg::cd0_flap_delta`):
-///   - S_ar usa um ângulo de aproximação FIXO (`approach_angle_deg`, dado de
-///     projeto), não uma razão L/D derivada da polar — diferente de
-///     `best_glide` (que usa `wing.cd0`, mas é planeio com motor cortado,
-///     conceito distinto de aproximação de pouso com flap, fora de escopo);
-///   - S_flare é puramente cinemático (V_ref × tempo fixo);
-///   - S_ground é dominado por frenagem (`mu_brake`), sem termo de arrasto.
-/// `wing.cl_max` (CL_max de POUSO, flap CHEIO) já é a referência correta de
-/// V_s/V_ref aqui — isso não mudou.
+/// HISTÓRICO — DOCSTRING ANTIGA, RESCRITA `old→new` (ciclo 12, spec §5.3b).
+/// A AUDITORIA do ciclo 8 (task 1) concluíra que nenhum dos três segmentos
+/// consumia a polar de arrasto, logo nenhum recebia `cd0_flap_delta`: S_ar
+/// usava um ângulo de aproximação FIXO (não uma razão L/D derivada da
+/// polar — diferente de `best_glide`, que usa `wing.cd0`, mas é planeio com
+/// motor cortado, conceito distinto de aproximação de pouso com flap); S_ar
+/// e S_flare continuam exatamente assim (ângulo fixo/puramente cinemático —
+/// **isso não mudou**). **O que mudou é S_ground**: até o ciclo 11 era
+/// dominado por frenagem sem termo de arrasto (`S_G = V_ref²/(2gμ)`); desde
+/// o ciclo 12 integra a equação de movimento e consome a polar completa via
+/// `landing_ground_roll_m` (`wing.cd0_flap_ldg_extra`, flap CHEIO —
+/// primeiro consumidor real do delta cheio). `wing.cl_max` (CL_max de
+/// POUSO, flap CHEIO) já era a referência correta de V_s/V_ref aqui — isso
+/// não mudou.
+///
+/// `state: &AircraftState` e `cl_ground_roll_ldg: f64` entram na assinatura
+/// pela mesma razão de `landing_distance_m` acima.
 pub fn landing_distance_50ft_m(
     mass_kg: f64,
     rho: f64,
     wing: &WingSpec,
+    state: &AircraftState,
     mu_brake: f64,
+    cl_ground_roll_ldg: f64,
     perf_cfg: &PerformanceCfg,
 ) -> f64 {
-    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, mu_brake);
+    let s_ground = landing_ground_roll_m(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg);
 
     let w = mass_kg * G;
     let v_s = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
@@ -1001,8 +1133,17 @@ impl PerformanceAgent {
 
         // Distância de pouso (massa de pouso ≈ MTOW - 60% combustível)
         let mass_ldg = mtow_kg - prop.fuel_capacity_l * fuel_density * 0.60;
-        let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, perf_cfg.mu_brake_paved);
-        let d_ldg_50ft = landing_distance_50ft_m(mass_ldg, rho_sl, wing, perf_cfg.mu_brake_paved,
+        // Ciclo 12 (task 3), spec §5.2: CL de solo em atitude de pouso
+        // (flap CHEIO) — DERIVADO do mesmo `cl_ground_rotation` que a
+        // decolagem usa, mais a fração complementar de flap
+        // (`state.to_flap_fraction`, já consumida pela decolagem acima e
+        // por `agents::trim_authority`).
+        let cl_ground_roll_ldg = cl_ground_roll_landing(cl_ground_rotation, state.to_flap_fraction,
+                                                          wing);
+        let d_ldg = landing_distance_m(mass_ldg, rho_sl, wing, state, perf_cfg.mu_brake_paved,
+                                        cl_ground_roll_ldg);
+        let d_ldg_50ft = landing_distance_50ft_m(mass_ldg, rho_sl, wing, state,
+                                                   perf_cfg.mu_brake_paved, cl_ground_roll_ldg,
                                                    perf_cfg);
         // Pouso na GRAMA sobre 15 m (revisão final do ciclo 6): MESMA
         // chamada do pavimentado acima, só o μ de frenagem troca
@@ -1010,8 +1151,9 @@ impl PerformanceAgent {
         // esta correção, `mu_brake_grass` era validado em `config.rs` e
         // NUNCA consumido — o check #24 gateava a pista de grama com a
         // distância de pouso PAVIMENTADA, otimista por construção.
-        let d_ldg_50ft_grass = landing_distance_50ft_m(mass_ldg, rho_sl, wing,
-                                                         perf_cfg.mu_brake_grass, perf_cfg);
+        let d_ldg_50ft_grass = landing_distance_50ft_m(mass_ldg, rho_sl, wing, state,
+                                                         perf_cfg.mu_brake_grass, cl_ground_roll_ldg,
+                                                         perf_cfg);
 
         // Melhor planeio (Task 4.7) — MTOW, nível do mar, motor cortado.
         let (v_bg_kmh, ld_max) = best_glide(mtow_kg, rho_sl, wing);
@@ -1570,13 +1712,123 @@ mod tests {
              de 15m em relação à maior (D=1.9m): S(1.6)={s_1_6:.1}m, S(1.9)={s_1_9:.1}m");
     }
 
+    // ─── Ciclo 12 (task 3), spec §5: rolagem de pouso por integração ────────
+
+    const M_LDG_PIN_KG: f64 = 1400.0;
+
+    /// Spec §5.2: CL_roll_ldg = cl_ground_rotation + (1 − to_flap_fraction)
+    ///                          · (cl_max_flaps − cl_max_clean)
+    /// Hand-check com os literais do BASELINE REAL (spec §5.2):
+    /// 0,50 + 0,65·(2,10 − 1,45) = 0,9225. A fixture sintética
+    /// `config_teste()` usa `cl_max_flaps`/`cl_max_clean` distintos
+    /// (1,65/1,40, não 2,10/1,45) — sobrescritos aqui SÓ nesta cópia local
+    /// de `wing` para reproduzir o hand-check exato da spec, sem tocar
+    /// `config_teste()` (usado por dezenas de outros testes). O valor
+    /// 0,9225 do baseline REAL é conferido pelo pin em
+    /// `tests/generic_engine.rs`.
+    #[test]
+    fn cl_de_rolagem_de_pouso_hand_check_do_baseline() {
+        let (_engine, _state, mut wing) = fixture_baseline();
+        wing.cl_max = 2.10;
+        wing.cl_max_clean = 1.45;
+        let cl = cl_ground_roll_landing(0.50, 0.35, &wing);
+        assert!((cl - 0.9225).abs() < 1e-9, "cl={cl}");
+        assert!(cl > 0.50, "flap cheio tem de dar MAIS CL que o parcial de decolagem");
+    }
+
+    /// Convergência (spec §7.2), mesma exigência da Task 2: dobrar os
+    /// passos muda o resultado em menos de 0,1%.
+    #[test]
+    fn integrador_de_pouso_esta_convergido_na_resolucao_escolhida() {
+        let (_engine, state, wing) = fixture_baseline();
+        let s200 = landing_ground_roll_com_passos(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225,
+                                                    200);
+        let s400 = landing_ground_roll_com_passos(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225,
+                                                    400);
+        assert!((s400 - s200).abs() / s200 < 1e-3, "não convergido: {s200} vs {s400}");
+    }
+
+    /// Spec §5.1 — o achado central desta task: a sustentação residual
+    /// ALIVIA o peso sobre as rodas e PIORA a frenagem. Falseável: se o
+    /// sinal de L no termo de atrito estiver trocado, isto quebra. Termo
+    /// isolado de F_dec = D(V) + μ·max(0, W−L(V)): o de ALÍVIO DE
+    /// SUSTENTAÇÃO.
+    #[test]
+    fn sustentacao_residual_alonga_a_rolagem_de_pouso() {
+        let (_engine, state, wing) = fixture_baseline();
+        let com_cl = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225);
+        let sem_cl = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.0);
+        assert!(com_cl > sem_cl,
+                "CL de solo maior ⟹ menos peso nas rodas ⟹ rolagem MAIOR: {com_cl} vs {sem_cl}");
+    }
+
+    /// Freio melhor ⟹ rolagem menor. Estrita. Termo isolado de F_dec: o de
+    /// ATRITO DE FRENAGEM.
+    #[test]
+    fn frenagem_melhor_encurta_a_rolagem_de_pouso() {
+        let (_engine, state, wing) = fixture_baseline();
+        let pav = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40, 0.9225);
+        let grama = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.30, 0.9225);
+        assert!(grama > pav, "grama (μ menor) tem de dar rolagem maior: {grama} vs {pav}");
+    }
+
+    /// Ciclo 12 (task 3, orientação do engenheiro): o plano cobre atrito de
+    /// frenagem e alívio de sustentação isoladamente, mas falta o terceiro
+    /// termo de F_dec = D(V) + μ·N(V) — o ARRASTO. Lição da Task 2 (achado
+    /// do revisor): sem cobrir cada termo isoladamente, um sinal trocado
+    /// pode passar despercebido pelos testes locais do módulo (na Task 2,
+    /// os 27 testes locais passavam com o sinal do arrasto trocado). No
+    /// POUSO o arrasto SOMA à frenagem (ajuda a desacelerar) — sinal OPOSTO
+    /// ao da decolagem, onde o arrasto ALONGA a rolagem (mais CD0 ⟹ mais
+    /// resistência a vencer para acelerar). CD0 de flap de pouso maior ⟹
+    /// D(V) maior ⟹ F_dec maior ⟹ rolagem MENOR. Termo isolado de F_dec: o
+    /// de ARRASTO.
+    #[test]
+    fn arrasto_maior_encurta_a_rolagem_de_pouso() {
+        let (_engine, state, mut wing) = fixture_baseline();
+        wing.cd0_flap_ldg_extra = 0.100; // artificialmente alto
+        let com_arrasto_alto = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40,
+                                                       0.9225);
+        wing.cd0_flap_ldg_extra = 0.015; // valor de projeto (delta cheio, spec §5.3a)
+        let com_arrasto_baixo = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.40,
+                                                        0.9225);
+        assert!(com_arrasto_alto < com_arrasto_baixo,
+            "arrasto maior deveria ENCURTAR a rolagem de pouso (ajuda a desacelerar): \
+             {com_arrasto_alto} vs {com_arrasto_baixo}");
+    }
+
+    /// Espelho do teste de +INFINITY da decolagem (Task 2, spec §7.6): sem
+    /// nenhum mecanismo de desaceleração no início da rolagem (mu_brake=0 e
+    /// CD0 zerados), `F_dec(0) = D(0) + 0·N(0) = 0` exatamente — a guarda
+    /// intercepta ANTES da divisão e o integrando no primeiro nó de Simpson
+    /// (V=0) é +INFINITY, que se propaga para o resultado inteiro (todos os
+    /// pesos de Simpson são positivos, nunca ocorre uma subtração de
+    /// infinitos que produziria NaN). Fisicamente correto: sem atrito, o
+    /// arrasto quadrático sozinho nunca desacelera a aeronave a V=0 em
+    /// distância finita (perto de V=0 o integrando ~ V/V² = 1/V, diverge).
+    /// Este cenário É atingível pela implementação (ao contrário do que o
+    /// plano cogitava como possível) — ver report da task para a
+    /// justificativa medida.
+    #[test]
+    fn desaceleracao_nula_devolve_infinito_e_nao_numero_espurio() {
+        let (_engine, state, mut wing) = fixture_baseline();
+        wing.cd0 = 0.0;
+        wing.cd0_flap_ldg_extra = 0.0;
+        let s = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.0, 0.0);
+        assert!(s.is_infinite() || s.is_nan() == false,
+                "sem arrasto e sem freio a rolagem não pode ser um número finito: {s}");
+    }
+
     #[test]
     fn pouso_50ft_maior_que_pouso_ground_roll_mais_ar_fixo() {
         let (state, wing, prop, engine, _req, perf_cfg) = setup();
         let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
-        let d_legado = landing_distance_m(mass_ldg, RHO_SL, &wing, perf_cfg.mu_brake_paved);
-        let d_50ft = landing_distance_50ft_m(mass_ldg, RHO_SL, &wing, perf_cfg.mu_brake_paved,
-                                              &perf_cfg);
+        // Ciclo 12 (task 3): CL de solo em atitude de pouso (flap CHEIO).
+        let cl_ldg = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        let d_legado = landing_distance_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved,
+                                           cl_ldg);
+        let d_50ft = landing_distance_50ft_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved,
+                                              cl_ldg, &perf_cfg);
         println!("Pouso legado (200m ar fixo)={d_legado:.0}m  Pouso 50ft (segmentado)={d_50ft:.0}m");
         assert!(d_50ft > d_legado,
             "pouso sobre 15m por segmentos ({d_50ft:.0}m) deveria ser MAIOR que a estimativa \
@@ -1614,13 +1866,22 @@ mod tests {
     fn distancia_pouso_plausivel() {
         let (state, wing, prop, engine, _req, perf_cfg) = setup();
         let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
-        let d = landing_distance_m(mass_ldg, RHO_SL, &wing, perf_cfg.mu_brake_paved);
+        let cl_ldg = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        let d = landing_distance_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved, cl_ldg);
         println!("Pouso pista pavimentada: {d:.0} m");
         // Valor observado empiricamente para a fixture sintética: ~390 m
         // (mu_brake_paved da fixture, 0.38, é próximo do antigo literal
         // hardcoded 0.40 — variação pequena).
-        assert!(d > 300.0 && d < 520.0,
-            "Distância LDG {d:.0} m fora do esperado (300–520 m)");
+        //
+        // Ciclo 12 (task 3, `old→new`): a rolagem de pouso passa a integrar
+        // arrasto e o alívio de sustentação sobre as rodas (spec §5) — mais
+        // longa por construção, mesmo padrão qualitativo da task 2 na
+        // decolagem. Janela alargada de (300, 520) para (300, 650) para
+        // cobrir o novo patamar da fixture sintética — não é um pin
+        // apertado contra o baseline real (esse vive em
+        // `tests/generic_engine.rs`, tolerância 1%).
+        assert!(d > 300.0 && d < 650.0,
+            "Distância LDG {d:.0} m fora do esperado (300–650 m)");
     }
 
     #[test]

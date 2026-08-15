@@ -109,14 +109,44 @@ pub struct WingSpec {
     ///
     /// Consumido por `agents::performance::excess_power_kw` (parâmetro
     /// `cd0_extra`) no segmento de SUBIDA da decolagem
-    /// (`takeoff_distance_50ft_m`) e no gradiente CS 23.65 em configuração
-    /// de decolagem (`best_climb_angle_ms`) — fecha a lacuna declarada desde
-    /// o ciclo 7 ("não existe modelo de flap na polar deste crate"). Não há
-    /// um campo `cd0_flap_ldg_extra` equivalente para o pouso: auditoria de
-    /// call sites (ciclo 8, task 1) não encontrou nenhum segmento de pouso
-    /// que consuma a polar de arrasto (rolagem é frenagem pura; aproximação
-    /// usa ângulo FIXO, não L/D) — ver docstring de `WingCfg::cd0_flap_delta`.
+    /// (`takeoff_distance_50ft_m`), no gradiente CS 23.65 em configuração
+    /// de decolagem (`best_climb_angle_ms`) e — desde o ciclo 12 — na
+    /// própria rolagem de decolagem via `agents::performance::
+    /// cd_ground_roll` — fecha a lacuna declarada desde o ciclo 7 ("não
+    /// existe modelo de flap na polar deste crate").
+    ///
+    /// HISTÓRICO `old→new` (ciclo 8 → ciclo 12): até o ciclo 11 esta
+    /// docstring afirmava que não havia um campo `cd0_flap_ldg_extra`
+    /// equivalente para o pouso, porque a auditoria de call sites do ciclo
+    /// 8 (task 1) não encontrou nenhum segmento de pouso que consumisse a
+    /// polar de arrasto — a rolagem de pouso era frenagem pura (`S_G =
+    /// V_ref²/(2gμ)`, sem termo de arrasto) e a aproximação sobre 15 m usava
+    /// um ângulo de aproximação FIXO, não uma razão L/D. Essa conclusão
+    /// valia então: nenhuma fórmula fechada daquele momento tinha onde
+    /// receber um incremento de CD0 de pouso. **Ela morre no ciclo 12**: a
+    /// rolagem de pouso passa a integrar a equação de movimento
+    /// (`landing_ground_roll_m`, spec `2026-08-15-ciclo12-solo-honesto`
+    /// §5), que consome a polar completa — a sustentação residual do flap
+    /// de pouso ALIVIA o peso sobre as rodas e PIORA a frenagem, e o
+    /// arrasto do flap CHEIO passa a ter, pela primeira vez, um call site
+    /// que o consome: `WingSpec::cd0_flap_ldg_extra` (abaixo). Ver
+    /// `WingCfg::cd0_flap_delta` para a mesma história do lado da
+    /// configuração.
     pub cd0_flap_to_extra: f64,
+    /// ΔCD0 do flap CHEIO (configuração de POUSO) — CAMPO NOVO (ciclo 12,
+    /// spec §5.3a). Diferente de `cd0_flap_to_extra` (fração PARCIAL,
+    /// `to_flap_fraction · cd0_flap_delta`): este é o delta CHEIO,
+    /// `[wing].cd0_flap_delta` sem fração nenhuma — a aeronave rola no pouso
+    /// com o flap TOTALMENTE deflexionado (decisão de projeto, spec §5.1:
+    /// modelar o flap MANTIDO durante toda a rolagem de frenagem, a
+    /// configuração em que CS 23 mede a distância de pouso desta classe).
+    ///
+    /// Consumido por `agents::performance::cd_ground_roll` (via
+    /// `landing_ground_roll_m`/`landing_distance_m`/
+    /// `landing_distance_50ft_m`) — primeiro consumidor do delta CHEIO
+    /// desde que `cd0_flap_delta` existe (ver docstring `old→new` de
+    /// `cd0_flap_to_extra` acima e de `WingCfg::cd0_flap_delta`).
+    pub cd0_flap_ldg_extra: f64,
     /// VS0 — velocidade de stall com flap (configuração de pouso), km/h.
     pub stall_speed_flaps_kmh: f64,
     /// VS1 — velocidade de stall em configuração limpa, km/h.

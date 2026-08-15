@@ -115,15 +115,28 @@ pub struct WingCfg {
     /// também o arrasto: um único dial de deployment para os três efeitos do
     /// flap PARCIAL de decolagem.
     ///
-    /// O delta CHEIO (pouso) NÃO tem, hoje, um call site que o consuma —
-    /// auditoria de `agents::performance` (ciclo 8, task 1): a rolagem de
-    /// solo de decolagem é o método ENERGÉTICO de Raymer (sem termo de
-    /// arrasto, por construção); a rolagem de pouso é dominada por frenagem
-    /// (sem polar); e a aproximação de pouso (`landing_distance_50ft_m`) usa
-    /// um ângulo FIXO (`[performance].approach_angle_deg`), não uma razão
-    /// L/D — nenhuma delas tem onde receber um incremento de CD0. Ver
-    /// docstring de `takeoff_ground_roll_m`/`landing_distance_50ft_m` para o
-    /// detalhe de cada segmento.
+    /// HISTÓRICO `old→new` (ciclo 8 → ciclo 12). Até o ciclo 11, o delta
+    /// CHEIO (pouso) NÃO tinha um call site que o consumisse — auditoria de
+    /// `agents::performance` (ciclo 8, task 1): a rolagem de solo de
+    /// decolagem era o método ENERGÉTICO de Raymer (sem termo de arrasto,
+    /// por construção); a rolagem de pouso era dominada por frenagem
+    /// (`S_G = V_ref²/(2gμ)`, sem polar); e a aproximação de pouso
+    /// (`landing_distance_50ft_m`) usava um ângulo FIXO
+    /// (`[performance].approach_angle_deg`), não uma razão L/D — nenhuma
+    /// delas tinha onde receber um incremento de CD0. Essa conclusão valia
+    /// para o modelo daquele momento.
+    ///
+    /// **Ela morre no ciclo 12** (spec `2026-08-15-ciclo12-solo-honesto`
+    /// §5.3a): a rolagem de pouso passa a integrar a equação de movimento
+    /// (`agents::performance::landing_ground_roll_m`), consumindo a polar
+    /// completa. O delta CHEIO ganha o seu primeiro consumidor real —
+    /// `WingSpec::cd0_flap_ldg_extra` = `cfg.wing.cd0_flap_delta` (SEM
+    /// fração, ao contrário de `cd0_flap_to_extra`: a rolagem de pouso é
+    /// modelada com o flap de pouso TOTALMENTE deflexionado do início ao
+    /// fim da frenagem, spec §5.1) — via `agents::performance::
+    /// cd_ground_roll`, a mesma fonte única de CD de solo que a rolagem de
+    /// decolagem (ciclo 12, task 2) e o balanço de rotação (ciclo 12, task
+    /// 4) também consomem.
     ///
     /// Faixa validada (0.005, 0.05) — `models::config::validate_aircraft`.
     pub cd0_flap_delta: f64,

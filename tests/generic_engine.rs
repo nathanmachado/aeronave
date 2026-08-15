@@ -1480,6 +1480,23 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // (`to_50ft_grass_m` ≤ 600 m) passa a REPROVAR (819 m > 600 m, por
     // ≈219 m), `validation_status` vira `FAIL`. Tolerâncias INALTERADAS
     // (1%).
+    //
+    // Campanha ciclo 12 (task 3, 2026-08-15) — rolagem de pouso por
+    // integração numérica (arrasto + alívio de sustentação explícitos,
+    // spec §5), substituindo `S_G = V_ref²/(2gμ)` (frenagem constante, sem
+    // arrasto nem alívio de peso sobre as rodas — ver docstring `old→new`
+    // de `agents::performance::landing_ground_roll_m`). Com o flap de
+    // pouso mantido deflexionado durante toda a rolagem (spec §5.1), a
+    // sustentação residual ALIVIA o peso sobre as rodas e PIORA a
+    // frenagem — o saldo é uma rolagem MAIOR. Só `ldg_50ft_m` (nesta
+    // tabela) se move — vx/vy/best_glide/glide_ratio/climb_gradient_pct/
+    // to_50ft_* são de subida/planeio/decolagem, intocados por esta task.
+    // Valor MEDIDO old→new:
+    //   ldg_50ft_m: 502.431095 → **582.341118**  (+15,90%)
+    // Isto é o RESULTADO esperado, não uma regressão — o check #24
+    // (`ldg_50ft_grass_m` ≤ 600 m) passa a REPROVAR também (646,437301 m >
+    // 600 m, por ≈46 m — pin do JSON golden-file vive em `tests/cli.rs`).
+    // Tolerâncias INALTERADAS (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
         ("vx_kmh",             perf.vx_kmh,             138.862358, 0.01),
         // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): 161.805734 (artefato
@@ -1491,7 +1508,7 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         ("climb_gradient_pct",  perf.climb_gradient_pct,  12.455553, 0.01),
         ("to_50ft_paved_m",     perf.to_50ft_paved_m,    651.258408, 0.01),
         ("to_50ft_grass_m",     perf.to_50ft_grass_m,    819.110978, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         502.431095, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         582.341118, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1585,16 +1602,27 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // tolerância alargada de "praticamente inalterado" (Task 4.7) para 1%
     // (Task 5.1/5.2/E6/E7 deslocam o MTOW, não a fórmula).
     // Campanha E10: `cl_max_flaps` 1,72→2,1 encurta o pouso — ver bloco
-    // acima. 395.838469 → **362.676982** (old→new, tolerância INALTERADA).
-    let landing_distance_pin = 362.676982;
+    // acima. 395.838469 → 362.676982 (old→new, tolerância INALTERADA).
+    // Campanha ciclo 12 (task 3, 2026-08-15): rolagem de pouso passa a
+    // integrar arrasto + alívio de sustentação (spec §5) — `landing_
+    // distance_m` continua "rolagem + 200m fixos" (estimativa legada,
+    // `landing_distance_m` MANTIDO, ver docstring `old→new` de
+    // `agents::performance::landing_distance_50ft_m`), mas a rolagem em si
+    // que ele soma agora é a integrada, não mais `S_G=V_ref²/(2gμ)`.
+    // Valor MEDIDO old→new: 362.676982 → **442.539441** (+22,02%).
+    let landing_distance_pin = 442.539441;
     assert!((perf.landing_distance_m - landing_distance_pin).abs()
                 < landing_distance_pin * 0.01,
-        "landing_distance_m {:.3} divergiu do pin pós-E10 {:.3}",
+        "landing_distance_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
         perf.landing_distance_m, landing_distance_pin);
 
     // Pouso sobre 15m deve exceder a estimativa legada de 200m fixos —
-    // segmentos adicionais (aproximação/flare) só somam distância.
-    // Intocado pelo ciclo 12, task 2 (pouso é a Task 3).
+    // segmentos adicionais (aproximação/flare) só somam distância. Relação
+    // preservada pelo ciclo 12, task 3 (ambos os lados consomem a MESMA
+    // rolagem integrada nova — `landing_distance_50ft_m` soma aproximação +
+    // flare + rolagem; `landing_distance_m` soma 200m fixos + a MESMA
+    // rolagem — 15/tan(3°)+flare > 200m para esta fixture, então a relação
+    // continua valendo, agora por uma margem um pouco menor).
     assert!(perf.ldg_50ft_m > perf.landing_distance_m,
         "Pouso sobre 15m ({:.1}m) deveria exceder a estimativa legada de 200m fixos ({:.1}m)",
         perf.ldg_50ft_m, perf.landing_distance_m);
