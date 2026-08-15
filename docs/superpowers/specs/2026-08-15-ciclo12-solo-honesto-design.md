@@ -107,11 +107,32 @@ estática calibrada de hoje é o ponto `V = 0` da nova curva.
 
 ### 2.2 A costura em V_LOF fica exposta, não escondida
 
-Em `V_LOF ≈ 35,6 m/s` o novo modelo dá ≈ 2.400 N e `thrust_available_n` dá
-≈ 3.300 N — **discontinuidade de ~28%** entre o fim da rolagem e o início
-do segmento de subida do mesmo cálculo de `takeoff_distance_50ft_m`.
+Em `V_LOF = 35,361 m/s` o novo modelo dá **2.324,7 N** e
+`thrust_available_n` dá **3.197,2 N** — **descontinuidade de 27,3%** entre o
+fim da rolagem e o início do segmento de subida do MESMO cálculo de
+`takeoff_distance_50ft_m` (ambos medidos, não estimados).
 
-Isto NÃO é mascarado. Os dois modelos têm domínios de validade disjuntos:
+### 2.3 Premissa calibrada DESTA spec: o 0,75 esticado para a curva inteira
+
+Levantada pela revisão de plano, contra a própria spec. `performance.rs`
+documenta explicitamente que `static_thrust_factor` (McCormick, 0,75) é
+calibrado **só para tração ESTÁTICA** e é ignorado no ramo de voo. A nova
+`thrust_ground_roll_n` o aplica como multiplicador plano em TODO
+`V ∈ [0, V_LOF]`.
+
+Isto é exatamente a classe de erro que o ciclo existe para caçar — uma
+constante calibrada sob uma hipótese que a mudança estica em silêncio — e
+está aqui declarada em vez de calada. Justificativa física: o fator corrige
+perdas de ponta de pá e rotação de esteira, que **não desaparecem** com
+velocidade de avanço baixa; a alternativa (fator 1,0 acima de V=0) criaria
+um degrau de +33% na tração logo depois da largada, muito pior. Direção do
+erro: se as perdas caírem com a velocidade, o modelo SUBESTIMA a tração na
+segunda metade da corrida, ou seja, é CONSERVADOR — a rolagem sai maior.
+Assumido e registrado, não escondido.
+
+### 2.4 Por que a costura não é mascarada
+
+Os dois modelos têm domínios de validade disjuntos:
 `static_thrust_factor = 0,75` é uma correção empírica (McCormick) calibrada
 para tração ESTÁTICA, e o polinômio é calibrado para `J` de cruzeiro.
 Nenhum dos dois é confiável no domínio do outro. A descontinuidade vira
@@ -283,17 +304,19 @@ estimada "**≲2 pp de MAC** no limite dianteiro". Este ciclo os implementa:
 
 ### 6.1 A estimativa de "≲2 pp" estava baixa
 
-Hand-check no baseline (`q_r = 776,0 Pa`, `L_g = 5.510 N`, `N = 9.767 N`,
-`D = 520 N`):
+Implementação de referência com as constantes MEDIDAS do pipeline
+(`V_r = 35,361 m/s`, `q_r = 765,87 Pa`, `L_g = 5.437,7 N`, `N = 9.639,5 N`,
+`D = 513,8 N`, `W = 15.077,1 N`, `MAC = 1,24632 m`):
 
-    μ·N·h_cg      = 0,04 · 9.767 · 0,92 = 359 N·m
-    D·(h_cg − h_D)= 520 · 0,92          = 479 N·m
-    total                                = 838 N·m
+    μ·N·h_cg      = 0,04 · 9.639,5 · 0,92 = 354,7 N·m
+    D·(h_cg − h_D)= 513,8 · 0,92          = 472,7 N·m
+    total                                  = 827,4 N·m
 
-O termo de tração que JÁ está no balanço vale `T(V_r)·Δz ≈ 3.327·0,20 =
-665 N·m`. **Os dois termos "desprezáveis" juntos são MAIORES que o termo
-mantido.** Deslocamento do limite dianteiro: `838/15.277 = 0,055 m`, ou
-≈4,5 pp de MAC — mais que o dobro do estimado.
+O termo de tração que JÁ está no balanço vale `T(V_r)·Δz = 3.197,2·0,20 =
+639,4 N·m`. **Os dois termos "desprezáveis" juntos são 29% MAIORES que o
+termo mantido.** Deslocamento do limite dianteiro: `827,4/15.077,1 =
+0,05488 m`, ou **4,40 pp de MAC** — mais que o dobro do estimado, levando o
+limite de 13,3546% para ≈17,76% de MAC.
 
 Não é erro do ciclo 10: a estimativa foi feita sem `CD_roll` explícito (o
 arrasto de solo com trem estendido e flap não existia no modelo) e sem
@@ -376,34 +399,84 @@ backlog novo propõe a remoção num MAJOR futuro.
 
 ---
 
-## 9. Números congelados (hand-check do chefe; divergência > 5% escala)
+## 9. Números congelados (divergência > 5% escala)
 
-| Grandeza | Hoje (`1e11998`) | Estimativa congelada |
-|---|---|---|
-| Rolagem TO pavimentada | 265,5 m | **≈ 492 m** |
-| Rolagem TO grama | 318,6 m | **≈ 653 m** |
-| `to_50ft_paved_m` | 420,372451 | ≈ 647 m |
-| `to_50ft_grass_m` | 473,469470 | **≈ 808 m** |
-| `to_distance_paved_m` | 398,227641 | ≈ 738 m |
-| `to_distance_grass_m` | 477,873169 | ≈ 980 m |
-| Rolagem pouso pavimentada | 162,7 m | ≈ 242 m |
-| Rolagem pouso grama | 216,9 m | ≈ 307 m |
-| `ldg_50ft_m` | 502,458299 | ≈ 582 m |
-| `ldg_50ft_grass_m` | 556,677173 | **≈ 646 m** |
-| `landing_distance_m` | 362,656622 | ≈ 442 m |
-| Limite dianteiro de rotação | 8,908% MAC | **+3,5 a +5,5 pp** |
+**Procedência:** a primeira versão desta tabela foi hand-check com
+constantes INFERIDAS, e a revisão de plano derrubou duas delas. Esta versão
+vem de (a) sondas contra o pipeline convergido para TODAS as constantes de
+entrada e (b) uma implementação de referência independente, em Python, do
+modelo das §2–§5. A referência valida-se sozinha: `T(0)` reproduz
+`3.740,09 N`, o valor medido do pipeline, com sete dígitos.
 
-Hipóteses do hand-check, para o revisor conferir: `P_eixo ≈ 150,1 kW`
-(retro-derivada da rolagem atual, autoconsistente com `T_static = 3.841 N`),
-`A = π·1,76²/4 = 2,4328 m²`, `V_LOF = 1,10·V_s_TO = 35,594 m/s`,
-`V_ref = 35,72 m/s`, `m_ldg = 1.407,4 kg`, Simpson com 4 intervalos.
+### 9.1 A armadilha da massa — leia antes de qualquer conta
+
+**`state.mtow_kg` = 1.537,389006 kg** é a massa que `PerformanceAgent::run`
+usa. **`wb.spec.mtow_kg` = 1.557,519935 kg** é o MTOW do cenário
+ESTRUTURAL, e é esse que aparece no bloco `weight` do `aircraft_spec.json`.
+São grandezas diferentes; a docstring de `SizedAircraft` avisa.
+
+**Tanto o chefe quanto o revisor de plano usaram a massa errada** (a do
+JSON) nos respectivos hand-checks, independentemente. É um erro de 1,3% na
+massa que vira 2,6% na rolagem. Se você for conferir qualquer número desta
+tabela, use 1.537,389006 kg para decolagem e 1.406,349006 kg para pouso.
+
+### 9.2 Constantes MEDIDAS do pipeline (não inferidas)
+
+| Constante | Valor medido |
+|---|---|
+| `state.mtow_kg` | 1.537,3890060038352 kg |
+| `m_ldg` = MTOW − 60%·combustível | 1.406,349006 kg |
+| `P_eixo` a `rpm_max_continuous` | 144,241 kW |
+| `T_static` (= `thrust_available_n(0)`) | 3.740,0919357761986 N |
+| `thrust_available_n(V_LOF)` (modelo atual) | 3.197,23 N |
+| `rho_sl` = `Isa::density_kgm3(0, 0)` | 1,2250122659906946 |
+| Área do disco `A` | 2,432849350939936 m² |
+| `V_LOF` = 1,10·V_s_TO | 35,361 m/s |
+| `V_ref` = 1,30·V_s | 35,723 m/s |
+| MAC | 1,2463161361039574 m |
+| `rotation_limit_pct_mac` HOJE | **13,354637155252162 % MAC** |
+
+`P_eixo` de 144,241 kW é o valor real de
+`shaft_power_kw(engine, rpm_max_continuous, 0, psru_efficiency)`. A primeira
+versão da spec dizia 150,1 kW, retro-derivada — errado.
+
+O limite de rotação de **13,3546% MAC** é o valor vigente pós-ciclo-10. A
+primeira versão da spec dizia 8,908%, que é o número do **ciclo 7**, três
+ciclos desatualizado.
+
+### 9.3 Tabela congelada
+
+| Grandeza | Hoje (`1e11998`) | Congelado | Δ |
+|---|---|---|---|
+| Rolagem TO pavimentada | 265,485094 | **496,4 m** | +87,0% |
+| Rolagem TO grama | 318,582113 | **664,2 m** | +108,5% |
+| `to_50ft_paved_m` | 420,372451 | **651,3 m** | +54,9% |
+| `to_50ft_grass_m` | 473,469470 | **819,1 m** | +73,0% |
+| `to_distance_paved_m` | 398,227641 | **744,6 m** | +87,0% |
+| `to_distance_grass_m` | 477,873169 | **996,3 m** | +108,5% |
+| Rolagem pouso pavimentada | 162,66 | **242,5 m** | +49,1% |
+| Rolagem pouso grama | 216,88 | **306,6 m** | +41,4% |
+| `ldg_50ft_m` | 502,458299 | **582,3 m** | +15,9% |
+| `ldg_50ft_grass_m` | 556,677173 | **646,4 m** | +16,1% |
+| `landing_distance_m` | 362,656622 | **442,5 m** | +22,0% |
+| Limite dianteiro de rotação | 13,354637 % MAC | **17,76 % MAC** | +4,40 pp |
+
+A referência confirmou a convergência do esquema: 200 → 400 intervalos muda
+a rolagem de decolagem em 1,8e-10 e a de pouso em 2,3e-09. O piso de 1e-3 da
+guarda §7.2 tem sete ordens de grandeza de folga.
 
 ## 10. Veredito esperado: REPROVADO
 
-| Check | Grandeza | Limite | Estimativa | Situação |
+| Check | Grandeza | Limite | Congelado | Situação |
 |---|---|---|---|---|
-| #23 | `to_50ft_grass_m` | 600 m | ≈ 808 m | **FAIL por ≈ 208 m** |
-| #24 | `ldg_50ft_grass_m` | 600 m | ≈ 646 m | **FAIL por ≈ 46 m** |
+| #23 | `to_50ft_grass_m` | 600 m | 819,1 m | **FAIL por ≈ 219 m** |
+| #24 | `ldg_50ft_grass_m` | 600 m | 646,4 m | **FAIL por ≈ 46 m** |
+
+Um terceiro check pode cair: o limite dianteiro de rotação recuando de
+13,35% para ≈17,8% de MAC ESTREITA o envelope de CG em 4,4 pp, e
+`cg_limit_fwd_pct_mac` acompanha. Se algum cenário de carga tiver CG à
+frente de 17,8%, `inside_envelope` vira `false`. Não predigo qual — a Task 4
+mede e reporta.
 
 `validation_status` deve virar **FAIL** com pelo menos 2 violações.
 

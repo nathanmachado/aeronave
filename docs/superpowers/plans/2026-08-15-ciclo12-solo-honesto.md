@@ -270,6 +270,33 @@ fn atrito_nunca_fica_negativo_quando_a_sustentacao_supera_o_peso() {
 }
 ```
 
+```rust
+/// Spec §7.6 — o ramo que a Task 1 (serde de +INFINITY) pressupõe
+/// existir em produção. No baseline real a tração sobra folgadamente
+/// (em V_LOF: T=2.324,7 N contra D+μN≈900 N), então este ramo NUNCA é
+/// exercitado sem um cenário adversarial construído de propósito. Sem
+/// este teste, um `if F <= 0 { return INFINITY }` esquecido — ou um
+/// NaN silencioso — passa despercebido.
+#[test]
+fn tracao_insuficiente_devolve_infinito_e_nao_numero_espurio() {
+    let (engine, state, wing) = fixture_baseline();
+    // Atrito absurdo: nenhuma tração desta célula acelera a aeronave.
+    let s = takeoff_ground_roll_m(
+        MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 5.0, 0.5, 0.75);
+    assert!(s.is_infinite(), "esperado +INFINITY, veio {s}");
+    assert!(!s.is_nan(), "NaN é o modo de falha silencioso a evitar");
+}
+```
+
+**Símbolos de teste que ainda não existem.** `fixture_baseline()`,
+`MTOW_PIN_KG` e `RHO_SL` não existem no repositório — são a forma que
+estes testes precisam. Defina-os localmente no módulo de teste (o padrão
+mais próximo é `setup()` em `performance.rs`, que usa a config sintética
+`config_teste()`; serve, porque nenhum destes testes precisa bater com os
+números congelados — todos são propriedades relacionais). **Não crie
+fixture nova em arquivo separado nem tente carregar o TOML real** só para
+isto. Mesma orientação vale para as Tasks 3 e 4.
+
 Os nomes `integra_rolagem_decolagem` / `takeoff_ground_roll_com_passos`
 são a forma que o teste PRECISA — extraia o integrador e o parâmetro de
 passos de modo que estes testes possam chamá-los (visibilidade
@@ -319,16 +346,29 @@ fatores de superfície 1,00/1,15–1,20/1,25.
 
 - [ ] **Step 9: Rodar a suíte INTEIRA, medir, atualizar pins**
 
-Números congelados desta task (divergência >5% ⟹ PARE e reporte):
+Números congelados desta task (divergência >5% ⟹ PARE e reporte). Vêm de
+uma implementação de referência independente com as constantes MEDIDAS do
+pipeline — ver spec §9, que lista as constantes e a armadilha da massa.
 
 | Grandeza | Hoje | Congelado |
 |---|---|---|
-| rolagem TO pavimentada | 265,5 m | ≈ 492 m |
-| rolagem TO grama | 318,6 m | ≈ 653 m |
-| `to_50ft_paved_m` | 420,372451 | ≈ 647 m |
-| `to_50ft_grass_m` | 473,469470 | ≈ 808 m |
-| `to_distance_paved_m` | 398,227641 | ≈ 738 m |
-| `to_distance_grass_m` | 477,873169 | ≈ 980 m |
+| rolagem TO pavimentada | 265,485094 | **496,4 m** |
+| rolagem TO grama | 318,582113 | **664,2 m** |
+| `to_50ft_paved_m` | 420,372451 | **651,3 m** |
+| `to_50ft_grass_m` | 473,469470 | **819,1 m** |
+| `to_distance_paved_m` | 398,227641 | **744,6 m** |
+| `to_distance_grass_m` | 477,873169 | **996,3 m** |
+
+**Armadilha da massa (spec §9.1).** A massa que `PerformanceAgent::run` usa
+é `state.mtow_kg` = **1.537,389006 kg**, NÃO os 1.557,519935 kg do bloco
+`weight` do JSON (esse é o MTOW do cenário ESTRUTURAL). O chefe E o revisor
+de plano erraram isto independentemente nos respectivos hand-checks. Se
+você conferir qualquer número acima à mão, use 1.537,389006 kg.
+
+Referência auxiliar para depurar: `T_static = 3.740,0919357761986 N`,
+`P_eixo = 144,241 kW`, `V_LOF = 35,361 m/s`. Se a sua `thrust_ground_roll_n`
+não devolver exatamente `3.740,0919...` em V=0, pare aí — o resto não
+importa até isso bater.
 
 - [ ] **Step 10: Regen, `verifica-ciclo.sh`, commit**
 
@@ -417,7 +457,28 @@ fn frenagem_melhor_encurta_a_rolagem_de_pouso() {
     let grama = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.30, 0.9225);
     assert!(grama > pav, "grama (μ menor) tem de dar rolagem maior: {grama} vs {pav}");
 }
+
+/// Espelho do teste de +INFINITY da Task 2, spec §7.6: se a
+/// desaceleração puder chegar a zero (sustentação alivia TODO o peso e
+/// não há arrasto), a rolagem não converge. Aqui o caminho é diferente
+/// do da decolagem — no pouso F é sempre ≥ D > 0 para CD > 0, então o
+/// cenário adversarial precisa de CD nulo. Se a sua implementação NÃO
+/// puder atingir esse estado, documente por quê no report em vez de
+/// forçar o teste; é um resultado válido e diferente do da decolagem.
+#[test]
+fn desaceleracao_nula_devolve_infinito_e_nao_numero_espurio() {
+    let (_engine, state, mut wing) = fixture_baseline();
+    wing.cd0 = 0.0;
+    wing.cd0_flap_ldg_extra = 0.0;
+    let s = landing_ground_roll_m(M_LDG_PIN_KG, RHO_SL, &wing, &state, 0.0, 0.0);
+    assert!(s.is_infinite() || s.is_nan() == false,
+            "sem arrasto e sem freio a rolagem não pode ser um número finito: {s}");
+}
 ```
+
+**Símbolos inexistentes:** `fixture_baseline()`, `M_LDG_PIN_KG`, `RHO_SL`
+— mesma orientação da Task 2 (defina localmente, padrão `setup()` de
+`performance.rs`).
 
 - [ ] **Step 2: Rodar; confirmar RED.**
 
@@ -452,11 +513,15 @@ arrasto**. O segmento de solo passa a consumir.
 
 | Grandeza | Hoje | Congelado |
 |---|---|---|
-| rolagem pouso pavimentada | 162,7 m | ≈ 242 m |
-| rolagem pouso grama | 216,9 m | ≈ 307 m |
-| `ldg_50ft_m` | 502,458299 | ≈ 582 m |
-| `ldg_50ft_grass_m` | 556,677173 | ≈ 646 m |
-| `landing_distance_m` | 362,656622 | ≈ 442 m |
+| rolagem pouso pavimentada | 162,66 | **242,5 m** |
+| rolagem pouso grama | 216,88 | **306,6 m** |
+| `ldg_50ft_m` | 502,458299 | **582,3 m** |
+| `ldg_50ft_grass_m` | 556,677173 | **646,4 m** |
+| `landing_distance_m` | 362,656622 | **442,5 m** |
+
+Massa de pouso do pipeline: **1.406,349006 kg** (`state.mtow_kg` − 60% do
+combustível, NÃO o MTOW estrutural do JSON — spec §9.1). `V_ref = 35,723 m/s`,
+`CL_roll_ldg = 0,9225`, `CD_roll_ldg = 0,082213`.
 
 - [ ] **Step 6: Regen, `verifica-ciclo.sh`, commit**
 
@@ -477,6 +542,9 @@ git commit -m "feat(performance): rolagem de pouso por integração com arrasto 
 - Modify: `src/models/aircraft_config.rs` + `src/models/specs.rs` — `z_drag_above_cg_m`.
 - Modify: `src/models/config.rs` — validação de faixa.
 - Modify: `config/aircraft/baseline_4seat.toml` — bloco `[wing]`.
+- Modify: `tests/generic_engine.rs:2000` — ÚNICO call site de
+  `rotation_fwd_limit_m`/`rotation_available_moment_nm` fora de
+  `trim_authority.rs` (localizado pela revisão de plano).
 - Modify: pins de limite de rotação e envelope.
 
 **Interfaces:**
@@ -511,6 +579,13 @@ fn termos_de_solo_recuam_o_limite_dianteiro_de_rotacao() {
 }
 ```
 
+**Símbolos inexistentes:** `momento_disponivel_pre_ciclo12`, `H_CG`,
+`limite_rot` — defina-os localmente no módulo de teste.
+`momento_disponivel_pre_ciclo12` é uma cópia local da fórmula ANTIGA
+(sem os dois termos novos), escrita à mão no teste; é isso que dá valor
+à prova de que os termos são aditivos. `limite_rot` é um fechamento
+sobre `rotation_fwd_limit_m` com os demais argumentos fixos.
+
 - [ ] **Step 2: Rodar; confirmar RED.**
 
 - [ ] **Step 3: Implementar**
@@ -540,7 +615,13 @@ medição desmente.
 
 - [ ] **Step 5: Rodar a suíte INTEIRA, medir, atualizar pins**
 
-Congelado: limite dianteiro de rotação 8,908% MAC → **+3,5 a +5,5 pp**.
+Congelado: limite dianteiro de rotação **13,354637% MAC → ≈17,76% MAC**
+(+4,40 pp). Referência para depurar (spec §6.1, medido):
+`V_r = 35,361 m/s`, `q_r = 765,87 Pa`, `L_g = 5.437,7 N`, `N = 9.639,5 N`,
+`D = 513,8 N`, `M_solo = 827,4 N·m`, `W = 15.077,1 N`, `MAC = 1,24632 m`.
+
+**Não use 8,908% como "hoje"** — esse é o número do ciclo 7, três ciclos
+desatualizado, e estava errado na primeira versão da spec.
 
 **`inside_envelope` pode virar `false` em algum cenário de carga.** Se
 virar, é achado honesto: registre qual cenário, com que margem, e
