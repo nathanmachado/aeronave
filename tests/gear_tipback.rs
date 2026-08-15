@@ -372,6 +372,24 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
 /// `prop_clearance_critical_m` ≈−0,00249 m → **+0,007367 m**. O nome do
 /// teste volta a ser literalmente verdadeiro — zero violações de trem E
 /// zero de hélice.
+///
+/// ATUALIZAÇÃO (ciclo 12, task 4, 2026-08-15) — `old→new`, O NOME FICA
+/// TECNICAMENTE IMPRECISO DE NOVO, NÃO RENOMEADO (mesmo precedente das TRÊS
+/// atualizações acima): os termos de solo do balanço de rotação (atrito +
+/// arrasto, spec `2026-08-15-ciclo12-solo-honesto` §6) apertam a margem de
+/// rotação NOMINAL de "Solo (piloto)"/"2 pax dianteiros" o bastante para o
+/// mundo de robustez `dianteiro` (±15% de massa estrutural) os flipar — 2
+/// violações de ROBUSTEZ NOVAS. A asserção correspondente, mais abaixo,
+/// muda de `robustez.is_empty()` para `assert_eq!(robustez.len(), 2, ...)`
+/// — ou seja, o teste passa a EXIGIR exatamente 2 violações de robustez
+/// para passar, o que contradiz literalmente a palavra "nem_de_robustez"
+/// no nome da função. Física honesta, não bug: os termos "deliberadamente
+/// desprezados" pelo ciclo 10 (estimativa "≲2 pp de MAC", medição real
+/// ≈4,40 pp — ver `old→new` em `agents::trim_authority::
+/// rotation_available_moment_nm`) finalmente cobram o preço que já
+/// deveriam cobrar. As demais asserções por check nomeado (tipback/tail-
+/// strike/carga de nariz/hélice) continuam todas verdadeiras — só a
+/// robustez, e com ela a contagem total, deixam de bater com o nome.
 #[test]
 fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
