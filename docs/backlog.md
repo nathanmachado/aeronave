@@ -96,18 +96,65 @@ verdadeiro — valores finais (já reportados acima): `vy_kmh`
 DISCOVERY, §4 ERRATUM da spec), `docs/aircraft_spec.schema.md` (campos
 `vy_kmh`/`rc_sl_ms`), `tests/generic_engine.rs` (pins old→new).
 
-## 4. Rolagem de decolagem/pouso sem termo de arrasto (método de energia)
+## 4. Rolagem de decolagem/pouso sem termo de arrasto (método de energia) — RESOLVIDO ciclo 12
 
-`takeoff_ground_roll_m`/`landing_ground_roll_m` usam o método ENERGÉTICO
-de Raymer (V²/2gμ ajustado por fator de tração/frenagem), que não inclui
-nenhum termo de arrasto aerodinâmico explícito — mesmo com o flap agora
-modelado na polar (`cd0_flap_to_extra`, ciclo 8), o segmento DOMINANTE da
-distância de decolagem/pouso continua sem custo de arrasto por construção
-do método. Corrigir exigiria trocar o método de rolagem por integração
-numérica (V, t) consumindo a polar completa segmento a segmento. Ponteiro:
-`agents::performance::takeoff_ground_roll_m`/`landing_ground_roll_m`
-(`src/agents/performance.rs`), `docs/aircraft_spec.schema.md` (bloco
-`performance`, linha `cd0_flap_to_extra`).
+**RESOLVIDO** (ciclo 12, tasks 2 e 3, 2026-08-15). `takeoff_ground_roll_m`/
+`landing_ground_roll_m` usavam o método ENERGÉTICO de Raymer (`V²/2gμ`
+ajustado por fator de tração/frenagem), que não incluía nenhum termo de
+arrasto aerodinâmico explícito — mesmo com o flap já modelado na polar
+(`cd0_flap_to_extra`, ciclo 8), o segmento DOMINANTE da distância de
+decolagem/pouso ficava sem custo de arrasto por construção do método.
+
+**Método novo:** integração numérica da equação de movimento em `V`
+(Simpson composto, 200 intervalos, convergência verificada — dobrar para
+400 intervalos muda o resultado em menos de 0,1%), consumindo a polar
+completa segmento a segmento:
+
+- **Decolagem** (`agents::performance::takeoff_ground_roll_m`, via
+  `integra_rolagem_decolagem_com_passos`): `S = ∫₀^{V_LOF} m·V/F_net(V) dV`,
+  `F_net(V) = T(V) − D(V) − μ_roll·max(0, W − L(V))`, com `T(V)` de
+  `thrust_ground_roll_n` (teoria de quantidade de movimento com velocidade
+  de avanço, spec §2), `D(V)`/`L(V)` da polar completa via `cd_ground_roll`
+  (CD0 + incremento de trem estendido + incremento de flap parcial de
+  decolagem + induzido).
+- **Pouso** (`agents::performance::landing_ground_roll_m`, via
+  `integra_rolagem_pouso_com_passos`): `S = ∫₀^{V_ref} m·V/F_dec(V) dV`,
+  `F_dec(V) = D(V) + μ_brake·max(0, W_ldg − L(V))` (arrasto e atrito de
+  frenagem SOMAM, ao contrário da decolagem), com `L(V)` do
+  `cl_ground_roll_landing` (CL de solo com flap CHEIO) e `D(V)` do
+  `cd_ground_roll` com o incremento de flap de pouso.
+
+**Método substituído (`old`):** ambos os segmentos usavam a fórmula
+energética fechada `S_G = V_ref²/(2·g·μ)` (ajustada por fator de
+tração/frenagem médio), que por construção não tem NENHUM termo de arrasto
+aerodinâmico — nem o CD0 de trem estendido, nem o induzido, nem o
+incremento de flap entravam na conta da rolagem, só no gradiente de subida
+posterior.
+
+**Tabela `old→new`, medida em `aircraft_spec.json`** (commit pré-ciclo-12
+`1e11998` vs HEAD atual, baseline real Toyota 1GD-FTV):
+
+| Campo (`performance.*`) | Old (`1e11998`) | New (ciclo 12) | Δ |
+|---|---|---|---|
+| `to_50ft_paved_m` | 420,372451 | 651,258408 | +54,92% |
+| `to_50ft_grass_m` | 473,469470 | 819,110978 | +73,00% |
+| `to_distance_paved_m` | 398,227641 | 744,556577 | +86,97% |
+| `to_distance_grass_m` | 477,873169 | 996,335432 | +108,49% |
+| `ldg_50ft_m` | 502,458299 | 582,341118 | +15,90% |
+| `ldg_50ft_grass_m` | 556,677173 | 646,437301 | +16,12% |
+| `landing_distance_m` | 362,656622 | 442,539441 | +22,03% |
+
+Consequência de gate: `to_50ft_grass_m` (819,11 m) excede a pista de 600 m
+da checagem #23 e `ldg_50ft_grass_m` (646,44 m) excede a de #24 —
+`validation_status` do baseline real vira `FAIL` (ver report da task 5 para
+o veredito completo). Não é regressão: o modelo passa a pagar o arrasto que
+sempre esteve fisicamente presente. Ponteiro: docstrings de
+`agents::performance::takeoff_ground_roll_m`/`landing_ground_roll_m`/
+`thrust_ground_roll_n`/`cl_ground_roll_landing` (`src/agents/
+performance.rs`), `docs/aircraft_spec.schema.md` (bloco `performance`,
+§5 e histórico v5.5), `tests/generic_engine.rs` (pins old→new),
+`docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md` (§2,
+§3, §5, §9 tabela congelada).
 
 ## 5. `+INFINITY` → `null` no JSON quando `rc ≤ 0` — RESOLVIDO ciclo 11
 
@@ -224,3 +271,177 @@ marcou como RESOLVIDO aqui por registro histórico.
 Ponteiro: `src/main.rs` (`fidelity.insert("trim"...)`), `src/agents/
 trim_authority.rs` (duas docstrings acima), commits `a7b561a`/`2d4fff7`/
 `a465e7b` (ciclo 10 fix wave).
+
+## 8. Unificar o modelo de tração (`thrust_ground_roll_n` × `thrust_available_n` divergem em `V_LOF`)
+
+Nomeado no ciclo 12 (task 2, spec §2.4) como fora de escopo, medido aqui
+(task 5). `agents::performance::thrust_ground_roll_n` (teoria de
+quantidade de movimento com velocidade de avanço, usada na rolagem) e
+`agents::performance::thrust_available_n` (disco atuador estático em
+V=0 + `prop_efficiency(J)` acima de V=0,5, usada em cruzeiro/subida/teto)
+são dois modelos de domínios de validade DISJUNTOS que nunca foram
+conciliados. Em V=0 as duas são algebricamente IDÊNTICAS (identidade
+provada e testada — `tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_no_
+baseline_real`), mas divergem ao longo da rolagem porque só uma delas paga
+o modelo de quantidade de movimento com avanço.
+
+**Medido no baseline real** (Toyota 1GD-FTV, HEAD atual, `V_LOF =
+1,10·V_s_TO = 35,360970 m/s`):
+
+| Função | `T(V_LOF)` medido |
+|---|---|
+| `thrust_ground_roll_n(V_LOF)` | 2.324,6885 N |
+| `thrust_available_n(V_LOF)` | 3.214,9867 N |
+| Divergência | −890,2982 N (**−27,69%**) |
+
+A rolagem de decolagem usa `thrust_ground_roll_n` do início ao fim (nunca
+faz costura com `thrust_available_n`), então este ciclo não introduz
+inconsistência NUM cálculo — mas os dois modelos descrevem a MESMA
+grandeza física (tração da hélice nesta velocidade) e devolvem números
+27,69% distintos, o que é uma descontinuidade de modelo, não de código.
+Unificar reabriria cruzeiro, teto de serviço, alcance e autonomia (todos
+consumidores de `thrust_available_n`/`prop_efficiency`), por isso fica
+fora de escopo deste ciclo. Ponteiro: docstrings de
+`agents::performance::thrust_ground_roll_n`/`thrust_available_n`
+(`src/agents/performance.rs`), spec §2.4 e §11 item 1
+(`docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md`).
+
+## 9. `prop_efficiency` com `η(0) = 0,58` — fisicamente errado por definição, janela de tração nula sem consumidor
+
+O polinômio `agents::propulsion::prop_efficiency` (`η = −0,15·J² + 0,39·J +
+0,58`, clampado em `[0, 0,86]`) é calibrado com dados de JavaProp na faixa
+de `J` de CRUZEIRO (`J ≈ 1,3–1,5`) — nessa faixa serve bem subida, cruzeiro
+e teto de serviço, os únicos consumidores de `thrust_available_n` no
+ramo de voo (`v_ms ≥ 0,5`). Mas por CONSTRUÇÃO `η(0) = 0,58`, enquanto por
+DEFINIÇÃO `η = T·V/P → 0` quando `V → 0` — o polinômio nunca foi calibrado
+para `J` próximo de zero e não tem por que valer ali.
+
+O defeito fica DORMENTE hoje porque `agents::propulsion::thrust_n` tem uma
+guarda `if v_ms < 1.0 { return 0.0 }` que zera a tração antes que o `η(0)`
+errado chegue a ser usado — mas essa guarda cria, por sua vez, uma janela
+de tração NULA em `V ∈ [0,5; 1,0)` m/s (`thrust_available_n` já entra no
+ramo de voo em V=0,5, calcula um `η` via `prop_efficiency`, e `thrust_n`
+zera o resultado por causa da guarda de V<1,0) — sem consumidor hoje
+porque nenhum código avalia `thrust_available_n` nesse intervalo estreito,
+mas sem justificativa física registrada até este ciclo.
+
+**Medido no baseline real:**
+
+| `V` (m/s) | `thrust_available_n(V)` medido |
+|---|---|
+| 0,7 | 0,0 N (janela nula, guarda de `thrust_n`) |
+| 1,0 | 84.843,5153 N (≈23× a tração estática de 3.740,09 N — salto artificial no limiar da guarda) |
+
+O salto em V=1,0 e a janela nula em `[0,5; 1,0)` seguem sem consumidor de
+produção (só a rolagem varre `V` continuamente perto de zero, e ela usa
+`thrust_ground_roll_n`, não este caminho). Corrigir exigiria recalibrar
+`prop_efficiency` com dados de `J` baixo (fora do escopo deste ciclo,
+reabre o mesmo território do item 8) ou substituir o modelo de tração de
+baixa velocidade por quantidade de movimento em todo o ramo de voo.
+Ponteiro: `agents::propulsion::prop_efficiency`/`thrust_n`
+(`src/agents/propulsion.rs`, linhas 47–61), docstring de
+`agents::performance::thrust_ground_roll_n` (`src/agents/performance.rs`),
+spec §11 item 2.
+
+## 10. `z_drag_above_cg_m` ainda não consumido por `cm_thrust_cruise`
+
+`[wing].z_drag_above_cg_m` foi criado neste ciclo (task 4, spec §6) para os
+termos de solo do balanço de ROTAÇÃO
+(`agents::trim_authority::rotation_available_moment_nm`, braço líquido
+`h_cg_m − z_drag_above_cg_m` do termo de arrasto de solo) — hoje o único
+consumidor. `agents::trim_authority::cm_thrust_cruise` (cruzeiro,
+`src/agents/trim_authority.rs` linha ~698) continua assumindo `z_D = 0`
+(centro de arrasto no mesmo datum do CG) por construção — a própria
+docstring da função (linhas ~670–697, anterior a este ciclo) já registrava
+essa aproximação como "exigiria campo novo (`z_drag_above_cg_m`) sem base
+no CAD atual". O campo agora EXISTE (default 0,0 no baseline, mesmo valor
+que a aproximação assumia implicitamente), mas não foi conectado a
+`cm_thrust_cruise` — ligar os dois é trabalho futuro, não decorre
+automaticamente da criação do campo. Direção do erro registrada na própria
+docstring da função: SUPERESTIMA `cm_thrust` nariz-abaixo em até ≈50% do
+valor calculado no pior caso plausível (`z_D` até ≈0,10 m), efeito
+ANTI-conservador ou conservador dependendo do sinal de `CL_h_trim`
+(depende do CG — ver docstring completa). Ponteiro: docstring de
+`agents::trim_authority::cm_thrust_cruise` (`src/agents/trim_authority.rs`,
+linhas ~670–706), docstring de
+`agents::trim_authority::rotation_available_moment_nm` (mesmo arquivo,
+linhas ~404–426, ciclo 12 task 4).
+
+## 11. Remoção de `to_distance_*`/`landing_distance_m` num bump MAJOR futuro
+
+Os campos `to_distance_paved_m`/`to_distance_grass_m` (rolagem de
+decolagem × fator ad hoc 1,5, aproximação de transição de Raymer) e
+`landing_distance_m` (rolagem de pouso + 200 m fixos de aproximação) são
+estimativas SIMPLIFICADAS legadas, mantidas lado a lado com os campos
+FÍSICOS `to_50ft_paved_m`/`to_50ft_grass_m`/`ldg_50ft_m`/`ldg_50ft_grass_m`
+(distância por segmentos sobre obstáculo de 15 m/50 ft). O fator 1,5 foi
+calibrado como razão `distância sobre 15m / rolagem` para o método
+ENERGÉTICO fechado que a rolagem usava antes deste ciclo (item 4, agora
+RESOLVIDO) — com a rolagem passando a integrar arrasto e atrito
+explicitamente, essa calibração ficou obsoleta.
+
+**Razão real medida** (baseline real, ciclo 12; registrada em
+`tests/generic_engine.rs`, comentário da task 2):
+
+    to_50ft_paved_m / rolagem_pavimentada = 651,258408 / 496,371051 ≈ 1,312
+
+abaixo do fator legado de 1,5. Consequência medida: `to_distance_paved_m`
+(= rolagem × 1,5 = 744,556577 m) passa a EXCEDER `to_50ft_paved_m`
+(651,258408 m) — a estimativa legada, calibrada para o método antigo, fica
+visivelmente inconsistente com o campo físico do MESMO JSON (a relação
+inverteu: antes `to_50ft_paved_m` sempre excedia `to_distance_paved_m`,
+ver asserção `old→new` em `tests/generic_engine.rs`,
+`golden_toyota_baseline_task_4_7_novos_campos_de_performance`).
+
+Remover `to_distance_*`/`landing_distance_m` é bump MAJOR de schema (fora
+de escopo deste ciclo — spec §12, política de versionamento). Os campos
+ficam por ora, com docstring avisando que os `*_50ft_*` são a referência
+física. Ponteiro: `docs/aircraft_spec.schema.md` (bloco `performance`,
+histórico v5.5), spec §8.1 e §11 item 4, `tests/generic_engine.rs`
+(comentário e asserção `old→new` citados acima).
+
+## 12. Efeito solo omitido na rolagem de solo — direção conservadora
+
+A rolagem de solo (decolagem e pouso, item 4) não modela o efeito solo
+(redução do arrasto induzido e aumento da sustentação por proximidade da
+asa ao chão). No baseline real, `h/b = h_cg_ground_m / span_m = 0,92/11,94
+≈ 0,077` — pelo fator de Wieselsberger, essa razão reduziria o induzido em
+≈40% e aumentaria a sustentação. As duas direções são FAVORÁVEIS à
+decolagem/pouso (menos arrasto para vencer, mas TAMBÉM menos peso nas
+rodas — o efeito líquido sobre a rolagem de pouso não é obviamente
+unidirecional, já que menos peso nas rodas piora a frenagem, mesmo
+mecanismo que o item central da task 3 deste ciclo). Omitir o efeito solo
+é, na direção do arrasto induzido, CONSERVADOR (a rolagem calculada é
+maior que a física). Registrado como aproximação assumida, não medido
+numericamente neste ciclo — quantificar exigiria implementar o fator de
+Wieselsberger (ou equivalente) na polar de solo, item de trabalho futuro.
+Ponteiro: spec §3.1 e §11 item 5
+(`docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md`),
+`agents::performance::cd_ground_roll` (`src/agents/performance.rs`).
+
+## 13. Pin órfão mascarado por tolerância — checagem de pins vs JSON regenerado em `verifica-ciclo.sh`
+
+Achado da revisão da Task 3 (ciclo 12): o pin de `ldg_50ft_m` em
+`tests/generic_engine.rs` ficou dessincronizado do `aircraft_spec.json`
+desde o ERRATUM do ciclo 11 (commit `8f92c55`) — pin `502,431095` contra
+JSON regenerado `502,458299`, desvio de 0,0054%. Sobreviveu quatro commits
+sem ser pego porque 0,0054% cabe folgadamente dentro da tolerância de 1%
+que os pins deste projeto usam para absorver ruído numérico legítimo
+(diferenças de compilador/plataforma, convergência de laço). A MESMA
+tolerância que absorve ruído numérico também absorve desatualização
+silenciosa de pin — o teste continua "verde" mesmo quando o número
+plantado no código já não é o que o pipeline produz.
+
+**Proposta:** seção nova em `scripts/verifica-ciclo.sh` que regenera o
+`aircraft_spec.json` (mesmo comando de regen da spec §12) e compara cada
+pin conhecido (`tests/generic_engine.rs`, `tests/cli.rs`,
+`tests/gear_tipback.rs`, `tests/schema_v4.rs`) contra o valor do JSON
+regenerado com uma tolerância MUITO mais apertada que a dos testes
+(ex.: 1e-4 relativo, não 1%) — reprovando o porteiro sempre que um pin
+divergir do JSON regenerado por mais que ruído numérico de compilação
+explica, mesmo quando o teste Rust correspondente continua passando dentro
+de 1%. Não implementado neste ciclo (a task que descobriu o achado era de
+revisão, não de execução). Ponteiro: `scripts/verifica-ciclo.sh`,
+`tests/generic_engine.rs` (linha do pin `ldg_50ft_m`, histórico
+`old→new` na tabela da task de pouso), commit `8f92c55` (ERRATUM ciclo
+11).
