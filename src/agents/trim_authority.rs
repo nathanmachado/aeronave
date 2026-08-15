@@ -56,6 +56,7 @@
 ///     autoridade de profundor, rotação de decolagem.
 ///   - Abbott & von Doenhoff, "Theory of Wing Sections" — Cm_ac quase nulo
 ///     da série NACA 230.
+use crate::agents::propulsion::FigureOfMerit;
 use crate::agents::weight_balance::{cg_pct_mac, WeightBalanceOutput};
 use crate::models::{
     aircraft_config::AircraftConfig,
@@ -269,6 +270,16 @@ pub fn rotation_speed_ms(weight_n: f64, rho: f64, s_w_m2: f64, cl_max_to: f64) -
 /// tração e um recuo AINDA MAIOR do limite dianteiro: a escolha atual é a
 /// menos pessimista das duas, e mudá-la teria que mudar a decolagem junto,
 /// não só este balanço.
+///
+/// `old→new` (ciclo 13, spec §6): `static_thrust_factor: f64` foi
+/// substituído por `fom: FigureOfMerit` — esta função agora chama a MESMA
+/// lei única de tração que `performance::takeoff_ground_roll_m` usa na
+/// rolagem (antes eram DUAS funções PARALELAS, `thrust_available_n` aqui e
+/// `thrust_ground_roll_n` na rolagem, que divergiam 27,69% em `Vr ≡ V_LOF`
+/// — a origem física do backlog #15). Com a mesma chamada dos dois lados, o
+/// resíduo de d'Alembert do balanço de rotação vai a ZERO por construção —
+/// ver o teste `tracao_do_momento_de_rotacao_e_identica_a_da_rolagem_no_
+/// mesmo_vr` em `tests/generic_engine.rs`.
 pub fn thrust_at_rotation_n(
     weight_n: f64,
     s_w_m2: f64,
@@ -276,7 +287,7 @@ pub fn thrust_at_rotation_n(
     engine: &EngineSpec,
     state: &AircraftState,
     isa_delta_c: f64,
-    static_thrust_factor: f64,
+    fom: FigureOfMerit,
 ) -> f64 {
     let rho_to = Isa::density_kgm3(0.0, isa_delta_c);
     let vr = rotation_speed_ms(weight_n, rho_to, s_w_m2, cl_max_to);
@@ -288,7 +299,7 @@ pub fn thrust_at_rotation_n(
         state.prop_diameter_m,
         0.0,
         isa_delta_c,
-        static_thrust_factor,
+        fom,
         state.psru_efficiency,
     )
 }
@@ -852,7 +863,7 @@ impl TrimAuthorityAgent {
         let x_rot_para_peso = |w_n: f64| -> f64 {
             let t_rot = thrust_at_rotation_n(
                 w_n, wing.area_m2, wing.cl_max_to, engine, state, req.isa_delta_c,
-                cfg.performance.static_thrust_factor,
+                state.figure_of_merit(),
             );
             rotation_fwd_limit_m(
                 w_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
@@ -879,7 +890,7 @@ impl TrimAuthorityAgent {
             // referência do limite único acima.
             let thrust_rot_n = thrust_at_rotation_n(
                 w_n, wing.area_m2, wing.cl_max_to, engine, state, req.isa_delta_c,
-                cfg.performance.static_thrust_factor,
+                state.figure_of_merit(),
             );
             let available = rotation_available_moment_nm(
                 w_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
@@ -1920,11 +1931,25 @@ mod tests {
         // fixture (+4,404 pp, 13,516→17,920) bate com a mesma ordem de
         // grandeza da medição do pipeline real (13,355→≈17,76%, +4,40 pp),
         // a mesma diferença residual do laço de convergência de sempre.
-        // Tolerância INALTERADA (±0,05 pp).
+        //
+        // ─── CICLO 13 (task 2): LEI ÚNICA DE TRAÇÃO ────────────────────────
+        //
+        // Pin `old→new` desta fixture: **17,920% → 16,481%** MAC (−1,439 pp,
+        // −8,03%). Não é afrouxamento arbitrário: `thrust_at_rotation_n`
+        // (ver docstring) passou a chamar a MESMA lei única de tração que a
+        // rolagem de decolagem usa (spec §2/§6) — antes, `T(Vr)` vinha do
+        // ramo de voo de `thrust_available_n` (polinômio `prop_efficiency`),
+        // que a spec §1.1 mede como violando o teto de quantidade de
+        // movimento em `V_LOF≡Vr` por 1,0372× — a lei nova é fisicamente
+        // MAIS FRACA nesse ponto de operação (FoM(J_LOF)≈0,78 < 1,0372),
+        // logo o momento nariz-abaixo da tração cai, o momento disponível
+        // sobra mais, e o limite dianteiro AVANÇA (recua menos) — direção
+        // prevista na spec §11 ("≈−1,4 pp"), confirmada aqui. Tolerância
+        // INALTERADA (±0,05 pp).
         assert!(
-            (trim.rotation_limit_pct_mac - 17.920).abs() < 0.05,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈17.920% ±0.05% — pin pós-ciclo-12 task 4, \
-             termos de solo do balanço de rotação)",
+            (trim.rotation_limit_pct_mac - 16.481).abs() < 0.05,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈16.481% ±0.05% — pin pós-ciclo-13, lei \
+             única de tração)",
             trim.rotation_limit_pct_mac
         );
 
@@ -1946,7 +1971,7 @@ mod tests {
             );
             let t_rot = thrust_at_rotation_n(
                 w_light_n, wing.area_m2, wing.cl_max_to, &engine, &state, req.isa_delta_c,
-                cfg.performance.static_thrust_factor,
+                state.figure_of_merit(),
             );
             println!("cenário mais leve = {mass_light_kg:.3} kg  Vr = {vr:.3} m/s  \
                       T(Vr) = {t_rot:.1} N  z_eixo = {z_axis:.3} m  \

@@ -635,17 +635,17 @@ pub struct PerformanceCfg {
     /// Coeficiente de atrito de ROLAGEM em grama firme de fazenda — ciclo
     /// 12, spec §4 (Gudmundsson cap. 17, faixa curta 0,05 / alta 0,10).
     pub mu_roll_grass: f64,
-    /// Fator empírico (McCormick) aplicado sobre a tração estática IDEAL de
-    /// Rankine-Froude (disco atuador) — a teoria de disco atuador
-    /// superestima a tração real por não modelar perdas de ponta de pá,
-    /// rotação de esteira e não-uniformidade da distribuição de carga.
-    ///
-    /// Ciclo 12 (spec §2.3): `agents::performance::thrust_ground_roll_n`
-    /// também consome este fator, agora esticado como multiplicador PLANO
-    /// em toda a faixa `V ∈ [0, V_LOF]` da rolagem — não mais só no ramo
-    /// estático (`V < 0,5 m/s`) de `thrust_available_n`. Premissa calibrada
-    /// esticada, declarada: ver docstring de `thrust_ground_roll_n`.
-    pub static_thrust_factor: f64,
+    // `old→new` (ciclo 13, spec §9.2): `pub static_thrust_factor: f64` foi
+    // REMOVIDO daqui — MIGROU para `[propeller].fom_static`. Deixou de ser
+    // um multiplicador plano aplicado só sobre a tração estática ideal (ou,
+    // no ciclo 12, esticado como fator PLANO sobre toda a rolagem via
+    // `thrust_ground_roll_n`, também apagada) e virou a âncora `J=0` de uma
+    // figura de mérito `FoM(J)` que governa a lei de tração única em
+    // qualquer velocidade (ver `agents::propulsion::FigureOfMerit`,
+    // `agents::performance::thrust_available_n`). Um TOML com
+    // `[performance].static_thrust_factor` é rejeitado por
+    // `check_static_thrust_factor_migration` (`models::config`), não
+    // silenciosamente ignorado.
     /// Tempo de rotação — do início da rotação até V_LOF, a V_LOF
     /// aproximadamente constante (s).
     pub rotation_time_s: f64,
@@ -982,7 +982,6 @@ pub mod test_fixtures {
                 // campos desta fixture).
                 mu_roll_paved: 0.045,
                 mu_roll_grass: 0.085,
-                static_thrust_factor: 0.72,
                 rotation_time_s: 1.2,
                 flare_time_s: 1.4,
                 approach_angle_deg: 3.2,

@@ -294,7 +294,12 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // perto do valor pré-task-2): 7.240119 → **7.239538 h** (old→new,
     // −0,008%; ainda dentro da tolerância larga do assert, 1e-3, mas
     // re-pinado por honestidade — mesmo padrão do comentário acima).
-    let endurance_pin_h = 7.239538;
+    // Ciclo 13 (task 2, lei única de tração): mesma causa (líquida) da
+    // autonomia em `golden_toyota_baseline_regressao_task_2_1` — MTOW
+    // convergido cai um fio, combustível de missão cai um fio mais (ver
+    // relatório da task para a decomposição subida/cruzeiro): 7,239538 →
+    // **7,3531379349 h** (old→new, +1,57%; tolerância INALTERADA, 1e-3).
+    let endurance_pin_h = 7.353_137_934_9;
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -330,7 +335,10 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // volta a ≈148 km/h, efeito líquido ≈zero (volta perto do valor
     // pré-task-2): 2.027,233242 → **2.027,070681 km** (old→new, −0,008%;
     // tolerância INALTERADA).
-    let range_pin_km = 2_027.070681;
+    // Ciclo 13 (task 2, lei única de tração): mesma causa da autonomia
+    // acima — 2.027,070681 → **2.058,878622 km** (old→new, +1,57%;
+    // tolerância INALTERADA).
+    let range_pin_km = 2_058.878622;
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -501,13 +509,20 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // volta a ≈148 km/h, efeito líquido ≈zero (volta perto do valor
     // pré-task-2): 24,205802 L (~10,2656%) → **23,965392 L (~10,1533%)**
     // (old→new, −0,99%; tolerâncias INALTERADAS).
-    let margem_pin_l = 23.965392;
+    // Ciclo 13 (task 2, lei única de tração): combustível de missão CAI
+    // (subida mais cara com FoM real + cruzeiro mais barato pelo achado do
+    // §3.2/§5, ver `golden_toyota_baseline_regressao_task_2_1` para a
+    // decomposição) — a margem, um RESÍDUO de dois números grandes, SOBE
+    // mais que proporcionalmente: 23,965392 L (~10,1533%) →
+    // **26,2862900805 L (~11,2472178417%)** (old→new, +9,69%). Tolerâncias
+    // INALTERADAS (0,1).
+    let margem_pin_l = 26.286_290_080_5;
     assert!((margem_l - margem_pin_l).abs() < 0.1,
-        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-ciclo-11-erratum \
+        "margem de combustível {margem_l:.4} L divergiu do valor medido pós-ciclo-13 \
          {margem_pin_l:.4} L");
-    assert!((margem_pct - 10.1533).abs() < 0.1,
-        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-11-erratum \
-         ~10,1533%");
+    assert!((margem_pct - 11.247_217_841_7).abs() < 0.1,
+        "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-13 \
+         ~11,2472%");
     assert!(margem_l > 0.0,
         "achado central pós-E7: com endurance_min_h reduzido, a missão cabe no tanque de 260 L \
          com folga confortável (margem {margem_l:.2} L)");
@@ -590,7 +605,7 @@ fn toyota_v_max_regressao_310kmh() {
     // — mantida como literal para não acoplar este pin de regressão ao
     // `mtow_guess_kg` do baseline (que poderia mudar por outros motivos).
     let v_max_ms = max_level_speed_ms(1_461.0, 2_500.0, 0.0, &wing, &state, &toyota,
-                                       cfg.performance.static_thrust_factor);
+                                       cfg.propeller.figure_of_merit());
     let v_max_kmh = v_max_ms * 3.6;
     println!("Toyota V_max nivelada = {v_max_kmh:.6} km/h");
 
@@ -610,7 +625,17 @@ fn toyota_v_max_regressao_310kmh() {
     // 303.259465 → **301.964596 km/h** (−1,29 km/h, −0,43%; tolerância
     // INALTERADA, 1 km/h). O CLmax de pouso 1,72→2,1 não entra em V_max
     // (regime limpo).
-    let v_max_pre_refactor_kmh = 301.964596;
+    //
+    // Ciclo 13 (task 2, lei única de tração — spec §2/§4): `prop_efficiency
+    // (J)` (polinômio) apagado, substituído por `FigureOfMerit`. Em V_max
+    // (rpm_rated=3400, J≈1,5611 — spec §1.1), a razão tração-real/tração-
+    // ideal do polinômio apagado era 0,8604 (JÁ abaixo do teto físico, spec
+    // §1.1: "não muda veredito"); a lei nova dá FoM(J=1,5611)≈0,8113 —
+    // AINDA MENOR (a âncora `fom_design`=0,8237 foi calibrada no J de
+    // CRUZEIRO, 1,875, não no de V_max) — ≈5,7% menos tração nesse ponto.
+    // `old→new`: 301.964596 → **294.3754282745 km/h** (−7,589 km/h,
+    // −2,51%). Tolerância INALTERADA (1 km/h).
+    let v_max_pre_refactor_kmh = 294.3754282745;
     assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
         "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pós-E10 \
          {v_max_pre_refactor_kmh:.2} km/h em mais de 1 km/h");
@@ -857,7 +882,21 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // volta a ≈148 km/h, efeito líquido ≈zero (MTOW convergido volta
     // praticamente ao valor pré-task-2): → **1.537,389006 kg** (MUITO
     // abaixo da tolerância de 0,5 kg, re-pinado por honestidade).
-    let mtow_convergido_kg = 1_537.389006;
+    //
+    // Ciclo 13 (task 2, lei única de tração): DOIS efeitos opostos que quase
+    // se cancelam -- ver o relatório da task para a decomposição completa.
+    // (a) `MissionAgent::run` passa a usar `state.figure_of_merit()` real no
+    // segmento de SUBIDA (antes `FigureOfMerit{1,1,x}`, justificativa
+    // "provavelmente inerte" MORTA sem ramos -- spec §2.1): combustível de
+    // subida sobe +44,26% (4,920→7,098 kg). (b) a eficiência de cruzeiro
+    // sobe 0,783881→0,791329 (achado companheiro: `fom_design` foi
+    // calibrada com um `u` de potência TOTAL disponível, spec §3.2, mas
+    // `search_cruise_rpm` inverte com um `u` de tração REQUERIDA, spec §5 --
+    // só coincidem se o motor operar exatamente na potência necessária, o
+    // que não é o caso aqui). Líquido: combustível de missão CAI (-0,98%),
+    // MTOW convergido cai um fio: 1.537,389006 → **1.535,4394512537 kg**
+    // (old→new, -1,950 kg, -0,127%). Tolerância INALTERADA (0,5 kg).
+    let mtow_convergido_kg = 1_535.439_451_253_7;
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
@@ -885,7 +924,13 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // `climb_rate_ms` corrigida — Vy volta a ≈148 km/h, efeito líquido
     // ≈zero (volta perto do valor pré-task-2): 7.240119 → **7.239538 h**
     // (old→new, −0,008%). Tolerância INALTERADA (1e-5).
-    let endurance_h = 7.239538;
+    //
+    // Ciclo 13 (task 2, lei única de tração): combustível de missão CAI
+    // levemente no líquido (subida mais cara, cruzeiro mais barato -- ver
+    // `mtow_convergido_kg` acima) -- mais horas com o mesmo tanque
+    // (informativo): 7,239538 -> **7,3531379349 h** (old->new, +1,569 kg
+    // combustível a menos, +1,57%). Tolerância INALTERADA (1e-5).
+    let endurance_h = 7.353_137_934_9;
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -914,7 +959,12 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // `climb_rate_ms` corrigida — efeito líquido ≈zero (volta perto do valor
     // pré-task-2): 32,319912 → **32,322504 L/h** (old→new, +0,008%).
     // Tolerância INALTERADA (5e-5).
-    let fc_lph = 32.322504;
+    //
+    // Ciclo 13 (task 2, lei única de tração): eficiência de cruzeiro sobe
+    // (achado do §3.2/§5, ver `mtow_convergido_kg` acima) -- menos potência
+    // requerida, menos consumo: 32,322504 -> **31,8231484397 L/h**
+    // (old->new, -1,54%). Tolerância INALTERADA (5e-5).
+    let fc_lph = 31.823_148_439_7;
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -994,7 +1044,7 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // `perf.v_cruise_kmh` em `main.rs` (agora com `design_mtow_kg`, não
     // mais `wb.spec.mtow_kg`).
     let v_max_ms = max_level_speed_ms(sized.state.mtow_kg, 2_500.0, 0.0, &sized.wing, &sized.state,
-                                       &toyota, cfg.performance.static_thrust_factor);
+                                       &toyota, cfg.propeller.figure_of_merit());
     let v_max_kmh = v_max_ms * 3.6;
     println!("golden: v_cruise_kmh={v_max_kmh:.6}");
     // Pré-Task-5.2: 308.752803 km/h (CD0 sem arrasto de refrigeração).
@@ -1041,7 +1091,18 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // `climb_rate_ms` corrigida — efeito líquido ≈zero (volta perto do
     // valor pré-task-2): 300.225472 → **300.220683 km/h** (old→new,
     // −0,005 km/h, −0,0016%; tolerância INALTERADA, 1e-3).
-    let v_max_pos_task_5_2_kmh = 300.220683;
+    //
+    // Ciclo 13 (task 2, lei única de tração — spec §2/§4): em Vx/Vy o
+    // polinômio apagado violava o teto de quantidade de movimento por até
+    // ~21% (spec §11); no ponto de V_max (J≈1,56, rpm_rated), a razão
+    // tração-real/tração-ideal do polinômio já era 0,8604 (abaixo do teto,
+    // spec §1.1), mas a FoM nova (calibrada no J de CRUZEIRO, não no de
+    // V_max) dá só ≈0,81 nesse ponto — MENOS tração, não mais. `old→new`:
+    // 300,220683 → **292,2280131801 km/h** (−7,993 km/h, −2,66%) — NA
+    // DIREÇÃO OPOSTA da projeção da spec §11 ("v_cruise_kmh (V máx) ...
+    // ≈+4%", confiança média) — achado: a projeção errou a direção.
+    // Tolerância INALTERADA (1e-3).
+    let v_max_pos_task_5_2_kmh = 292.228_013_180_1;
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-E10 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
@@ -1087,7 +1148,7 @@ fn vy_argmax_e_estritamente_interior_a_janela_de_busca() {
     let req    = baseline_mission();
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let sized  = size_aircraft(&cfg, &toyota, &req).unwrap();
-    let stf    = cfg.performance.static_thrust_factor;
+    let stf    = sized.state.figure_of_merit();
     let isa_delta_c = req.isa_delta_c;
     let mtow_kg = sized.state.mtow_kg;
 
@@ -1198,39 +1259,40 @@ fn vy_argmax_e_estritamente_interior_a_janela_de_busca() {
 //   to_50ft_paved_m:      385.688557 → 390.676592   (+1,29%)
 //   to_50ft_grass_m:      433.182649 → 438.723163   (+1,28%)
 //   ldg_50ft_m:           541.763571 → 543.197862   (+0,26%)
-/// Ciclo 12 (task 2, spec §2.1/§9.2) — a âncora que precisa bater ANTES de
-/// qualquer outro número da rolagem: `thrust_ground_roll_n(0.0, ...)`
-/// avaliada no baseline REAL (Toyota + `baseline_4seat.toml`) tem de
-/// reproduzir `thrust_available_n(0.0, ...)` — não por aproximação, por
-/// IDENTIDADE algébrica (spec §2.1: em V=0 a cúbica degenera em u³=K, e
-/// `T = 2ρA·K^(2/3) = (2ρA·P²)^(1/3)`, o mesmo `static_thrust_ideal_n` que
-/// já alimenta `thrust_available_n`). Valor MEDIDO no baseline real:
-/// **3.740,0919357761986 N** — bate com a constante medida da spec §9.2 a
-/// sete dígitos, mesma referência usada pela implementação de referência em
-/// Python que valida a tabela congelada inteira.
+/// IDENTIDADE ESTÁTICA DO BASELINE REAL (ciclo 13, spec §3.1 e §8.2).
+///
+/// `old→new` (ciclo 12 → ciclo 13, RENOMEADO de `tracao_de_rolagem_em_v_
+/// zero_e_identica_ao_estatico_no_baseline_real`): o ciclo 12 comparava DUAS
+/// funções PARALELAS (`thrust_ground_roll_n` — rolagem, quantidade de
+/// movimento com avanço — contra `thrust_available_n` — cruzeiro/subida) na
+/// mesma V=0, provando que coincidiam por identidade algébrica.
+/// `thrust_ground_roll_n` foi APAGADA neste ciclo — fundida em
+/// `thrust_available_n` (spec §2) — então a "identidade entre as duas" ficou
+/// TAUTOLÓGICA (é a mesma chamada dos dois lados). O que resta, e continua
+/// sendo uma guarda falseável de verdade, é que a lei NOVA reproduz o valor
+/// ESTÁTICO congelado: em V=0 a cúbica de Rankine-Froude degenera em
+/// `u³ = K` e `T = fom_static·(2ρA·P²)^(1/3)`, algebricamente o ramo
+/// estático de antes do ciclo 13. Este número NÃO muda com o ciclo 13 — se
+/// mover, algo além da tração mudou (potência de eixo, densidade, diâmetro
+/// ou PSRU).
 #[test]
-fn tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_no_baseline_real() {
+fn tracao_estatica_do_baseline_real_permanece_congelada() {
     let cfg    = baseline_state();
     let req    = baseline_mission();
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let sized  = size_aircraft(&cfg, &toyota, &req).unwrap();
     let state  = &sized.state;
+    let fom    = cfg.propeller.figure_of_merit();
 
-    let novo = aeronave::agents::performance::thrust_ground_roll_n(
-        0.0, &toyota, toyota.rpm_max_continuous, state.prop_diameter_m,
-        0.0, req.isa_delta_c, cfg.performance.static_thrust_factor, state.psru_efficiency);
-    let hoje = aeronave::agents::performance::thrust_available_n(
+    let t0 = aeronave::agents::performance::thrust_available_n(
         0.0, &toyota, toyota.rpm_max_continuous, state.psru_ratio, state.prop_diameter_m,
-        0.0, req.isa_delta_c, cfg.performance.static_thrust_factor, state.psru_efficiency);
-    println!("thrust_ground_roll_n(0)={novo:.10}N  thrust_available_n(0)={hoje:.10}N");
+        0.0, req.isa_delta_c, fom, state.psru_efficiency);
+    println!("thrust_available_n(0)={t0:.10}N");
 
-    // Congelado spec §9.2: 3.740,0919357761986 N.
+    // Congelado spec §9.2/§3.1: 3.740,0919357761986 N.
     let congelado = 3740.0919357761986;
-    assert!((novo - congelado).abs() < 1e-6,
-        "thrust_ground_roll_n(0) = {novo:.10} diverge do congelado {congelado:.10}");
-    let erro_rel = (novo - hoje).abs() / hoje;
-    assert!(erro_rel < 1e-9,
-        "identidade algébrica quebrada: novo={novo}, hoje={hoje}, erro_rel={erro_rel}");
+    assert!((t0 - congelado).abs() < 1e-6,
+        "thrust_available_n(0) = {t0:.10} diverge do congelado {congelado:.10}");
 }
 
 #[test]
@@ -1497,18 +1559,60 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // (`ldg_50ft_grass_m` ≤ 600 m) passa a REPROVAR também (646,437301 m >
     // 600 m, por ≈46 m — pin do JSON golden-file vive em `tests/cli.rs`).
     // Tolerâncias INALTERADAS (1%).
+    //
+    // ─── CICLO 13 (task 2, 2026-08-15) — LEI ÚNICA DE TRAÇÃO ────────────
+    //
+    // `T(V) = FoM(J)·T_ideal(V, P_eixo)` substitui os dois modelos que
+    // divergiam 27,69% em `Vr≡V_LOF` (spec §2, backlog #15). O polinômio
+    // apagado (`prop_efficiency`) violava o teto de quantidade de
+    // movimento em 4 dos 8 pontos de operação do baseline (spec §1.1) — a
+    // tração cai MUITO em Vx/no segmento de subida (J≈0,82, ≈21% a menos)
+    // e SOBE um pouco na rolagem pura (J baixo, FoM(J)≥0,75 sempre >
+    // constante 0,75 do modelo antigo de rolagem). Valores MEDIDOS
+    // old→new:
+    //   vx_kmh:             138.862358 → **138.7834005388**  (−0,06%,
+    //                       ruído de ponto flutuante — Vx é avaliado no
+    //                       piso da varredura 1,20·Vs_to, não muda de
+    //                       modelo de tração em si)
+    //   vy_kmh:             148.435393 → **167.2493152633**  (+12,68% —
+    //                       MAIOR mudança da tabela: o argmax de RC(V)
+    //                       desloca para uma V mais alta porque a forma da
+    //                       curva de tração mudou fundamentalmente, de um
+    //                       polinômio com pico em J≈1,3 para FoM(J)
+    //                       monótona não-decrescente até j_design)
+    //   best_glide_kmh:     173.245074 → **173.1465660519**  (−0,06%,
+    //                       planeio motor-cortado não consome tração —
+    //                       move só pelo MTOW convergido um fio menor)
+    //   glide_ratio:         15.921177 →  **15.9211771869**  (inalterado —
+    //                       L/Dmax não depende de MTOW nem de tração)
+    //   climb_gradient_pct:  12.455553 → **8.0158113538**  (−35,65% — RISCO
+    //                       CENTRAL do ciclo, spec §11: a tração em Vx cai
+    //                       ≈21% porque é exatamente ali que o polinômio
+    //                       mais infringia o teto físico. FLIPA PASS→FAIL
+    //                       contra o piso de 8,3% da CS 23.65 — não é
+    //                       regressão de código, é o polinômio deixando de
+    //                       mascarar o teto de quantidade de movimento)
+    //   to_50ft_paved_m:    651.258408 → **697.3079097575**  (+7,07%)
+    //   to_50ft_grass_m:    819.110978 → **848.9270189870**  (+3,64% — NA
+    //                       DIREÇÃO OPOSTA da projeção da spec §3.4
+    //                       (≈784,5 m, uma REDUÇÃO): a rolagem PURA de
+    //                       fato encolhe, mas o segmento de SUBIDA (V_climb
+    //                       ≈38,6 m/s, no regime de ≈21% menos tração)
+    //                       cresce mais que o suficiente para inverter o
+    //                       sinal do total — achado NOVO, a projeção da
+    //                       spec errou a direção, registrar no backlog)
+    //   ldg_50ft_m:         582.341118 → **581.9677435047**  (−0,06%,
+    //                       pouso não consome tração — move só pelo MTOW)
+    // Tolerâncias INALTERADAS (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             138.862358, 0.01),
-        // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): 161.805734 (artefato
-        // de busca, ver comentário acima) → 148.435393 (argmax real,
-        // estritamente interior à janela corrigida).
-        ("vy_kmh",              perf.vy_kmh,             148.435393, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     173.245074, 0.01),
-        ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,  12.455553, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    651.258408, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    819.110978, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         582.341118, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             138.7834005388, 0.01),
+        ("vy_kmh",              perf.vy_kmh,             167.2493152633, 0.01),
+        ("best_glide_kmh",      perf.best_glide_kmh,     173.1465660519, 0.01),
+        ("glide_ratio",         perf.glide_ratio,         15.9211771869, 0.01),
+        ("climb_gradient_pct",  perf.climb_gradient_pct,   8.0158113538, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    697.3079097575, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    848.9270189870, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         581.9677435047, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1517,19 +1621,32 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
             tol_frac * 100.0);
     }
 
-    // CS 23.65: gradiente mínimo de 8.3% para esta categoria — o baseline
-    // real passa com folga confortável.
+    // CS 23.65: gradiente mínimo de 8.3% para esta categoria.
     // Ciclo 8 (task 1): ~13,9%, gradiente com CL_max/CD0 de decolagem
     // consistentes (era ~15,1% no híbrido pré-task).
     // Ciclo 11 (task 1, 2026-08-10, fecha `docs/backlog.md` item 2):
     // `best_climb_angle_ms` passa a avaliar o gradiente no piso LEGAL da CS
     // 23.65 (1,2·V_s_to), não mais no piso antigo da varredura (1,05·V_s_to)
     // — o viés otimista remanescente nomeado no ciclo 8 fecha aqui. Gradiente
-    // real ~12,45% (ver tabela old→new acima) — segue acima do piso 8,3%,
-    // com margem menor (~4,15 p.p., não mais ~5,6 p.p.). Ver docstring de
-    // `best_climb_angle_com_piso` para o histórico completo.
-    assert!(perf.climb_gradient_pct >= 8.3,
-        "gradiente {:.2}% abaixo do mínimo CS 23.65 de 8.3%", perf.climb_gradient_pct);
+    // real ~12,45% — segue acima do piso 8,3%, com margem menor (~4,15 p.p.,
+    // não mais ~5,6 p.p.).
+    //
+    // `old→new` (ciclo 13, task 2 — ASSERÇÃO RELACIONAL QUE DEIXOU DE VALER,
+    // spec §11, RISCO CENTRAL DO CICLO, PREVISTO E NÃO CORRIGIDO). O
+    // polinômio `prop_efficiency` apagado violava o teto de quantidade de
+    // movimento em Vx/no segmento de subida por ≈21% (spec §1.1) — a folga
+    // de ~4,15 p.p. sobre o piso de 8,3% era sustentada por essa tração
+    // fisicamente impossível. Com a lei única, `climb_gradient_pct` cai
+    // 12,451844%→**8,015811%** — ABAIXO do piso. A relação `>= 8.3` NÃO É
+    // MAIS VERDADEIRA; a relação nova e verdadeira, viva, é `< 8.3` (gate
+    // CS 23.65 em FAIL — ver `validation_status`/`violations` no JSON,
+    // "Gradiente de subida" em `tests/cli.rs`). NÃO ajustar config para
+    // reabrir este gate (diretriz do ciclo).
+    assert!(perf.climb_gradient_pct < 8.3,
+        "gradiente {:.6}% deveria estar ABAIXO do mínimo CS 23.65 de 8.3% no baseline real \
+         pós-ciclo-13 (lei única de tração, spec §11) — se voltou a passar, algo na lei de \
+         tração regrediu para o comportamento antigo (que violava o teto físico em Vx)",
+        perf.climb_gradient_pct);
 
     // Ciclo 11 (task 1, backlog item 2): hand-check CONGELADO ANTES do run —
     // tolerância ±0,2 p.p. fixada antes de medir o pipeline real (docstring
@@ -1537,11 +1654,16 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // ≈12,4486% por extrapolação da tabela old→new do ciclo 8). Valor medido
     // 12,451844%, desvio de 0,0018 p.p. do hand-check — sem surpresa,
     // consistente com o pin acima.
-    let hand_check_esperado_pct = 12.45;
+    //
+    // Ciclo 13 (task 2): hand-check RE-CONGELADO no valor medido pós-lei-
+    // única (8,015811%, ver tabela old→new acima e spec §11 — a projeção
+    // do chefe era ≈7,9%, divergência de 0,116 p.p., bem dentro dos 5% de
+    // tolerância de projeção). Tolerância ±0,2 p.p. MANTIDA.
+    let hand_check_esperado_pct = 8.0158113538;
     let hand_check_tol_pp = 0.2;
     assert!((perf.climb_gradient_pct - hand_check_esperado_pct).abs() < hand_check_tol_pp,
-        "climb_gradient_pct = {:.6}% divergiu do hand-check congelado (ciclo 11, 1,2·Vs_to) de \
-         {hand_check_esperado_pct}% em mais de {hand_check_tol_pp} p.p.",
+        "climb_gradient_pct = {:.6}% divergiu do hand-check congelado (ciclo 13, lei única de \
+         tração) de {hand_check_esperado_pct}% em mais de {hand_check_tol_pp} p.p.",
         perf.climb_gradient_pct);
 
     // Tabela old→new (ver comentário acima) — `to_distance_*`/
@@ -1588,12 +1710,22 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // bump MAJOR futuro, não tratado aqui). Valores MEDIDOS old→new:
     //   to_distance_paved_m: 398.318846 → **744.556577**  (+86,94%)
     //   to_distance_grass_m: 477.982615 → **996.335432**  (+108,44%)
-    let to_distance_paved_novo_pin = 744.556577;
+    // Ciclo 13 (task 2, lei única de tração): `to_distance_m` continua
+    // "rolagem × 1,5" (mesma nota old→new acima) — a rolagem PURA em si
+    // encolhe um pouco (mais tração que o modelo antigo em J baixo, ver
+    // `takeoff_ground_roll_m`), mas o `×1,5` legado não modela o segmento
+    // de subida separadamente, então a queda de tração em Vx não aparece
+    // aqui (só em `to_50ft_*`, que integra o segmento de subida de
+    // verdade) — outra faceta da inconsistência já nomeada como item de
+    // backlog acima. Valores MEDIDOS old→new:
+    //   to_distance_paved_m: 744.556577 → **713.1623192711**  (−4,22%)
+    //   to_distance_grass_m: 996.335432 → **940.5909831152**  (−5,60%)
+    let to_distance_paved_novo_pin = 713.1623192711;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
         "to_distance_paved_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 996.335432;
+    let to_distance_grass_novo_pin = 940.5909831152;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
         "to_distance_grass_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
@@ -1610,7 +1742,10 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // `agents::performance::landing_distance_50ft_m`), mas a rolagem em si
     // que ele soma agora é a integrada, não mais `S_G=V_ref²/(2gμ)`.
     // Valor MEDIDO old→new: 362.676982 → **442.539441** (+22,02%).
-    let landing_distance_pin = 442.539441;
+    // Ciclo 13 (task 2): pouso não consome tração (confirmado na revisão
+    // de plano) — move só pelo MTOW convergido um fio menor: 442.539441 →
+    // **442.2032197371** (old→new, −0,08%).
+    let landing_distance_pin = 442.203_219_737_1;
     assert!((perf.landing_distance_m - landing_distance_pin).abs()
                 < landing_distance_pin * 0.01,
         "landing_distance_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
@@ -1865,9 +2000,14 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // `climb_rate_ms` corrigida — efeito líquido ≈zero (volta perto do
     // valor pré-task-2): 235,515548 → **235,754050 L** (old→new, +0,101%).
     // Tolerância INALTERADA (1e-2).
-    let necessario_pin_l = 235.754050;
+    // Ciclo 13 (task 2, lei única de tração): mesmo saldo líquido da
+    // decomposição em `golden_toyota_baseline_regressao_task_2_1` (subida
+    // mais cara com FoM real, cruzeiro mais barato pelo achado do §3.2/§5)
+    // — combustível exigido CAI um fio: 235,754050 → **233,428091 L**
+    // (old→new, −0,99%). Tolerância INALTERADA (1e-2).
+    let necessario_pin_l = 233.428091;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-11 task 2 {necessario_pin_l:.6} L");
+        "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-13 {necessario_pin_l:.6} L");
     assert!(necessario_l < cfg.fuel_system.capacity_l,
         "4ª reviravolta: a missão volta a exigir MENOS combustível do que os 240 L da mutação \
          sintética têm — {necessario_l:.2} L < {:.2} L", cfg.fuel_system.capacity_l);
@@ -1969,9 +2109,17 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // **351.868975 L** (old→new, +0,44%). Achado qualitativo
             // inalterado: ainda muito acima dos 260 L, motor muito fraco
             // demais para esta célula/missão.
-            let necessario_pin_l = 351.868975;
+            // Ciclo 13 (task 2, lei única de tração): o Rotax cruza num J
+            // bem mais baixo que o de calibração de `fom_design` (mesma
+            // causa do achado em `rotax_missao_ferry_gera_spec_completo_
+            // data_driven`, `tests/acceptance.rs`) — menos eficiência
+            // propulsiva, mais combustível exigido: 351,868975 →
+            // **380,154212 L** (old→new, +8,04%). Achado qualitativo
+            // INALTERADO: continua MUITO acima dos 260 L (~46,2%), motor
+            // muito fraco demais para esta célula/missão.
+            let necessario_pin_l = 380.154212;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
-                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-11 task 2 \
+                "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-13 \
                  {necessario_pin_l:.6} L");
         }
         other => panic!("esperava CombustivelInsuficiente para o Rotax, obtido: {other:?}"),
@@ -2041,7 +2189,11 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
     // eleva `ws_max_stall` de 1.967,0 para 2.401,6 N/m² — a asa segue muito
     // abaixo do teto de stall (a área recomendada cai de 7,54 para 6,96 m²,
     // reforçando o achado pré-existente de que 14,2 m² é generoso).
-    let ws_actual_esperado = 1_061.89;
+    // Ciclo 13 (task 2, lei única de tração): MTOW convergido cai um fio
+    // (ver `golden_toyota_baseline_regressao_task_2_1`, −1,950 kg) →
+    // ws_actual ≈ 1.061,89 → **1.060,4263872144 N/m²** (old→new, −0,14%;
+    // tolerância INALTERADA, 1 N/m²).
+    let ws_actual_esperado = 1_060.426_387_214_4;
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);
@@ -2131,7 +2283,7 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
         let w_n = mass_kg * G;
         let t_rot = thrust_at_rotation_n(
             w_n, wing.area_m2, wing.cl_max_to, &engine, &sized.state, req.isa_delta_c,
-            cfg.performance.static_thrust_factor,
+            cfg.propeller.figure_of_merit(),
         );
         let x = rotation_fwd_limit_m(
             w_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,

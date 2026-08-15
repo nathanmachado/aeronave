@@ -478,12 +478,11 @@ mu_brake_grass = 0.30      # frenagem em grama firme/terra compactada
 # Gudmundsson cap. 17.
 mu_roll_paved = 0.04       # rolagem livre, asfalto/concreto seco (faixa 0,03-0,05)
 mu_roll_grass = 0.08       # grama firme de fazenda (faixa curta 0,05 / alta 0,10)
-# Fator empírico (McCormick) sobre a tração estática ideal de Rankine-Froude
-# (disco atuador) — corrige a superestimativa por não modelar perdas de
-# ponta de pá/rotação de esteira. Ciclo 12: também usado por
-# `thrust_ground_roll_n` como multiplicador plano em toda a rolagem de
-# decolagem (spec §2.3), não mais só no ramo estático V<0,5 m/s.
-static_thrust_factor = 0.75
+# `old→new` (ciclo 13, spec §9.2): `static_thrust_factor` MIGROU para
+# `[propeller].fom_static` — deixou de ser um multiplicador plano só do
+# ramo estático e virou a âncora J=0 da figura de mérito FoM(J) que agora
+# governa a lei de tração única em toda a faixa de V (ver
+# agents::propulsion::FigureOfMerit, agents::performance::thrust_available_n).
 rotation_time_s = 1.0      # tempo de rotação até V_LOF, s
 flare_time_s = 1.5         # tempo de flare no pouso a V_ref, s
 approach_angle_deg = 3.0   # ângulo de aproximação padrão até 15m (50 ft)

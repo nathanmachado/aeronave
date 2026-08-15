@@ -1029,14 +1029,23 @@ mod tests {
         // permanente do usuário: "se uma decisão é perigosa, o modelo deve
         // FALHAR no ponto de perigo". Nenhuma config foi ajustada para
         // salvar este achado.
-        assert_eq!(violacoes_de_envelope.len(), 1,
-            "ciclo 12 (task 4): esperada EXATAMENTE 1 violação de envelope (cenário 'Solo \
-             (piloto)', que cruza para fora do limite dianteiro com os termos de solo no \
-             balanço de rotação) — obtido {:?}",
-            violacoes_de_envelope);
-        assert!(violacoes_de_envelope[0].contains("Solo (piloto)"),
-            "a violação de envelope esperada é a do cenário 'Solo (piloto)' (o CG mais \
-             dianteiro do baseline) — obtido {:?}",
+        //
+        // `old→new` (ciclo 13, spec §2/§6): a lei única de tração faz
+        // `thrust_at_rotation_n` chamar a MESMA função que a rolagem — o
+        // ramo de voo do polinômio apagado violava o teto de quantidade de
+        // movimento em `Vr≡V_LOF` por 1,0372× (spec §1.1); com a lei nova
+        // (fisicamente mais fraca nesse ponto), o momento nariz-abaixo da
+        // tração cai, o limite dianteiro de rotação AVANÇA (~17,9%→~16,5%
+        // MAC neste fixture, ver o hand-check gêmeo em
+        // `agents::trim_authority`), e a violação de envelope do cenário
+        // 'Solo (piloto)' (CG ≈16,5% MAC) DESAPARECE — o CG volta a ficar
+        // dentro (ou na borda) do envelope. Direção prevista na spec §11.
+        // Zero violações de envelope voltam a ser o veredito, como era
+        // antes do ciclo 12 task 4.
+        assert_eq!(violacoes_de_envelope.len(), 0,
+            "ciclo 13: a lei única de tração relaxa o limite de rotação o suficiente para a \
+             violação de envelope do cenário 'Solo (piloto)' (introduzida no ciclo 12 task 4) \
+             DESAPARECER de novo — obtido {:?}",
             violacoes_de_envelope);
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
             "o envelope continua FECHADO como faixa (fwd ≈17,9% < aft ≈43,5%) — só o cenário \

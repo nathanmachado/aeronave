@@ -209,8 +209,24 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // **991,3 kg** (+1,65%); fuel_required_l 71,0 → **71,4 L** (+0,56% —
     // dentro do ±1% do pin antigo, re-pinado mesmo assim por honestidade).
     // TOLERÂNCIAS INALTERADAS (±1%).
-    let mtow_expected = 991.3_f64;
-    let fuel_expected = 71.4_f64;
+    //
+    // Ciclo 13 (task 2, lei única de tração — spec §2/§4): `prop_efficiency
+    // (J)` (polinômio JavaProp) apagado, substituído por `FigureOfMerit`,
+    // retro-derivada do ponto de CRUZEIRO DO TOYOTA (J≈1,875, spec §3.2) —
+    // premissa calibrada declarada (spec §3.3). A missão ferry usa o MESMO
+    // conjunto hélice/PSRU (config da CÉLULA, `baseline_4seat.toml`) mas o
+    // Rotax cruza a J≈0,72, bem ABAIXO do ponto de calibração: medido,
+    // eta_cruzeiro cai de ≈0,7836 (polinômio no mesmo J) para **0,74475**
+    // (FoM(J=0,72)≈0,778, e eta=FoM·V/u < FoM por construção — spec §5) —
+    // -4,95% de eficiência propulsiva, mais potência requerida, mais
+    // combustível. `old→new`: mtow_mission_kg 991,3 → **994,067254 kg**
+    // (+0,28%); fuel_required_l 71,4 → **75,218966 L** (+5,35% — o maior
+    // deslocamento de pin do ciclo, fora do envelope de 5% da spec §11
+    // porque este pin NÃO está na tabela da spec §11, que só projeta o
+    // baseline Toyota; verificado por sonda direta — J baixo é a causa
+    // única, não há anomalia). TOLERÂNCIAS INALTERADAS (±1%).
+    let mtow_expected = 994.067254_f64;
+    let fuel_expected = 75.218966_f64;
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \
@@ -251,7 +267,12 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // estrutura mais pesada (dimensionada para o envelope, ver comentário
     // acima) consome um pouco mais de combustível para a mesma missão;
     // ainda MUITO acima do piso de 5% — nenhuma violação nova.
-    let fuel_margin_pct_expected = 72.71_f64;
+    // Ciclo 13 (task 2, lei única de tração): mais combustível requerido
+    // (ver comentário `mtow_expected`/`fuel_expected` acima, +5,35%) come
+    // parte da folga do tanque: 72,71% → **71,069629%** (old→new,
+    // −1,64 pp). Continua MUITO acima do piso de 5% — nenhuma violação
+    // nova.
+    let fuel_margin_pct_expected = 71.069629_f64;
     assert!((fuel_margin_pct - fuel_margin_pct_expected).abs() < 1.0,
         "margem de combustível ({fuel_margin_pct:.2}%) deveria estar próxima do pin honesto \
          ~{fuel_margin_pct_expected}% (mudou o comportamento do sizing? atualize o pin)");
