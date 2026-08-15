@@ -290,6 +290,34 @@ pub struct PropellerCfg {
     /// trem que ela sobrevoa. Valor do baseline (0,20 m) é uma ESTIMATIVA
     /// de geometria — validar no CAD (Fase 3).
     pub prop_plane_x_m: f64,
+    /// Figura de mérito da hélice em J=0 (ciclo 13, spec §3.1) — fator
+    /// empírico de McCormick sobre a tração estática ideal de disco atuador.
+    /// MIGRADO de `[performance].static_thrust_factor`: mudou de lugar porque
+    /// é propriedade da HÉLICE, não da política de performance, e porque
+    /// deixou de ser um multiplicador plano para virar a âncora J=0 de uma
+    /// curva (`FigureOfMerit`).
+    pub fom_static: f64,
+    /// Figura de mérito na razão de avanço de projeto da hélice (ciclo 13,
+    /// spec §3.2). Retro-derivada uma vez do polinômio JavaProp no ponto de
+    /// cruzeiro do baseline E12 — ver a premissa calibrada declarada em
+    /// `agents::propulsion::FigureOfMerit`.
+    pub fom_design: f64,
+    /// Razão de avanço de projeto da hélice (ciclo 13, spec §3.2). Acima
+    /// dela `FigureOfMerit::at` satura.
+    pub j_design: f64,
+}
+
+impl PropellerCfg {
+    /// Figura de mérito desta hélice a partir das três âncoras do TOML —
+    /// fonte única de verdade da curva `FoM(J)` (ciclo 13, spec §3). Todo
+    /// consumidor de tração chama isto em vez de ler os campos soltos.
+    pub fn figure_of_merit(&self) -> crate::agents::propulsion::FigureOfMerit {
+        crate::agents::propulsion::FigureOfMerit {
+            fom_static: self.fom_static,
+            fom_design: self.fom_design,
+            j_design:   self.j_design,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -820,6 +848,15 @@ pub mod test_fixtures {
                 // construção (ver `check_25_sem_violacao_na_fixture_
                 // padrao`).
                 prop_plane_x_m: 0.95,
+                // Figura de mérito da hélice (ciclo 13, spec §3). DELIBERADAMENTE
+                // DISTINTOS dos valores do baseline real (0.75/0.8237/1.8751) —
+                // mesma justificativa de "nenhum destes números coincide com o
+                // baseline real" usada nas demais seções desta fixture (spec §10
+                // item 4): um literal do baseline real plantado em teste sintético
+                // produz teste verde que não prova nada.
+                fom_static: 0.72,
+                fom_design: 0.80,
+                j_design:   1.60,
             },
             fuel_system: FuelSystemCfg { capacity_l: 220.0 },
             gear: GearCfg {

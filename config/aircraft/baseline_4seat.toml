@@ -164,6 +164,15 @@ ground_clearance_min_m = 0.23
 # do motor ([arms].engine_cg_m = 0.65 m). ESTIMATIVA de geometria — validar
 # no CAD (Fase 3).
 prop_plane_x_m = 0.20
+# Figura de mérito da hélice (ciclo 13, spec §3) — tração real / tração ideal
+# de disco atuador na mesma potência de eixo. Substitui o polinômio
+# `prop_efficiency` e o multiplicador plano `[performance].static_thrust_factor`.
+# fom_static: fator de McCormick em J=0 (era `static_thrust_factor = 0.75`).
+# fom_design/j_design: retro-derivados UMA VEZ do polinômio JavaProp no ponto
+# de cruzeiro do baseline E12, para que alcance e autonomia não se movam.
+fom_static = 0.75
+fom_design = 0.82370639457215544
+j_design   = 1.87514348025711675
 
 [fuel_system]
 # 260 L: dimensionado pela convergência de MTOW (Task 3.1) — no MTOW

@@ -780,6 +780,23 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.propeller.prop_plane_x_m
         )));
     }
+    require_positive("propeller.fom_static", cfg.propeller.fom_static)?;
+    require_positive("propeller.fom_design", cfg.propeller.fom_design)?;
+    require_positive("propeller.j_design",   cfg.propeller.j_design)?;
+    // Teto de quantidade de movimento (spec §1): a figura de mérito é uma
+    // FRAÇÃO da tração ideal. FoM > 1 significaria uma hélice produzindo mais
+    // empuxo que o disco atuador ideal na mesma potência — impossível.
+    for (nome, v) in [("propeller.fom_static", cfg.propeller.fom_static),
+                      ("propeller.fom_design", cfg.propeller.fom_design)] {
+        if v > 1.0 {
+            return Err(ConfigError::Validation(format!(
+                "configuração de aeronave inválida: {nome} = {v} excede 1,0 — a figura de \
+                 mérito é a fração da tração IDEAL de disco atuador que a hélice real \
+                 entrega, e passar de 1,0 violaria a conservação de quantidade de \
+                 movimento (ver agents::propulsion::FigureOfMerit)"
+            )));
+        }
+    }
 
     // [fuel_system]
     require_positive("fuel_system.capacity_l", cfg.fuel_system.capacity_l)?;
@@ -1598,6 +1615,9 @@ mod tests {
             tip_mach_max_cruise = 0.80
             ground_clearance_min_m = 0.23
             prop_plane_x_m = 0.20
+            fom_static = 0.72
+            fom_design = 0.80
+            j_design   = 1.60
             [fuel_system]
             capacity_l = 200.0
             [gear]

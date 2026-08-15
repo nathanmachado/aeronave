@@ -2176,3 +2176,20 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
         "o limite publicado ({:.6}%) deveria ser o MÁXIMO sobre os cenários, que neste modelo \
          cai no mais leve ({pct_leve:.6}%)", sized.trim.rotation_limit_pct_mac);
 }
+
+/// As três âncoras da figura de mérito vêm do TOML, nunca do código
+/// (política "nunca hardcodar dado de célula"). Valores do baseline real,
+/// spec ciclo 13 §3.2 — derivados uma vez do polinômio JavaProp no ponto de
+/// cruzeiro e congelados como propriedade da HÉLICE.
+#[test]
+fn baseline_declara_as_ancoras_da_figura_de_merito() {
+    let cfg = baseline_state();
+    assert_eq!(cfg.propeller.fom_static, 0.75);
+    assert_eq!(cfg.propeller.fom_design, 0.823_706_394_572_155_44);
+    assert_eq!(cfg.propeller.j_design,   1.875_143_480_257_116_75);
+
+    // O construtor da curva lê os três campos e nada mais.
+    let fom = cfg.propeller.figure_of_merit();
+    assert_eq!(fom.at(0.0), 0.75);
+    assert_eq!(fom.at(cfg.propeller.j_design), 0.823_706_394_572_155_44);
+}
