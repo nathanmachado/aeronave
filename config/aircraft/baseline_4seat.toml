@@ -170,8 +170,18 @@ prop_plane_x_m = 0.20
 # fom_static: fator de McCormick em J=0 (era `static_thrust_factor = 0.75`).
 # fom_design/j_design: retro-derivados UMA VEZ do polinômio JavaProp no ponto
 # de cruzeiro do baseline E12, para que alcance e autonomia não se movam.
+# `old→new` (ciclo 13, Task 3, ERRATUM §3.2.1): `fom_design` original
+# (0,82370639457215544) foi derivada com o `u` da POTÊNCIA DISPONÍVEL no
+# eixo em cruzeiro, não da TRAÇÃO requerida — os dois só coincidiriam com
+# folga de potência nula. Recalibrado por ponto fixo autoconsistente
+# (`p_req → BSFC → combustível → massa → arrasto → T → u → fom_design`,
+# rodando o pipeline completo a cada iteração) até `|Δfom_design| < 1e-9`:
+# convergiu em 7 iterações para 0,81597699924588796 (delta % = -0,9377%),
+# reproduzindo η_cruzeiro = 0,78388149656765982 (a âncora do polinômio
+# JavaProp apagado) com resíduo 0,000e0. Desvio vs a estimativa de 1ª ordem
+# do erratum (0,81595438786045016): +0,00277% — dentro do 0,1% esperado.
 fom_static = 0.75
-fom_design = 0.82370639457215544
+fom_design = 0.81597699924588796
 j_design   = 1.87514348025711675
 
 [fuel_system]

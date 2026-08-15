@@ -693,11 +693,22 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     // 167,93 kg, −2,29%) mais que o suficiente para compensar o aumento da
     // subida. Líquido: fuel_total_kg CAI (198,27→196,32 kg, −0,98%),
     // MTOW de missão cai um fio (1537,389→1535,439 kg, −0,13%), e a margem
-    // de combustível SOBE: 9,2175% → **10,1101115694%** (old→new,
-    // +0,893 pp). Tolerância INALTERADA (±0,1 pp).
-    assert!((fuel_margin_pct - 10.110_111_569_4).abs() < 0.1,
+    // de combustível SOBE: 9,2175% → 10,1101115694% (old→new, +0,893 pp).
+    //
+    // Ciclo 13 (task 3, ERRATUM §3.2.1 — recalibração autoconsistente de
+    // `fom_design`): a Task 2 tinha deixado `fom_design` no valor ERRADO
+    // (derivado com o `u` da potência DISPONÍVEL, não da tração requerida
+    // — ver achado companheiro acima). Corrigido por ponto fixo
+    // (0,82370639457215544→0,81597699924588796), η de cruzeiro volta de
+    // 0,791329 (errado) para 0,783881 (a âncora correta do polinômio
+    // apagado) — o combustível de cruzeiro SOBE de volta perto do valor
+    // pré-Task-2, revertendo a maior parte do ganho de margem que a Task 2
+    // media. Líquido: 10,1101115694% → **8,7855455145%** (old→new,
+    // −1,3246 pp). Continua bem acima do piso de 5%. Tolerância INALTERADA
+    // (±0,1 pp).
+    assert!((fuel_margin_pct - 8.785_545_514_5).abs() < 0.1,
         "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-13 \
-         ≈10.1101%");
+         ≈8.7855%");
     assert!(fuel_margin_pct >= 5.0,
         "achado honesto esperado (campanha E7): margem ({fuel_margin_pct:.2}%) deveria ficar NO \
          piso de 5% (min_fuel_margin_fraction) ou acima — resolvido por endurance_min_h 8h→7h");
