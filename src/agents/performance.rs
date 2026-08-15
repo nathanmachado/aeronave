@@ -1233,6 +1233,57 @@ mod tests {
         config_teste().propeller.figure_of_merit()
     }
 
+    // ─── Ciclo 13, spec §8.1/§8.4: guardas centrais, RED-FIRST ──────────────
+    //
+    // Escritas e RODADAS contra o modelo de HOJE (commit 1afe72f, antes da
+    // lei única) num checkout temporário, ANTES desta implementação —
+    // ambas FALHARAM: `sonda_red_tracao_nunca_excede_o_teto_de_quantidade_
+    // de_movimento` viu 360/1200 pontos violando o teto (pior razão
+    // T/T_ideal = 16,2371× em V=1 m/s, fixture sintética); `sonda_red_
+    // tracao_e_continua_em_toda_a_faixa` viu um degrau de 82.772,2 N entre
+    // V=0,99 e V=1,00 m/s. Ver o relatório da Task 2 para a saída literal
+    // completa. Implementada a lei única, as duas guardas abaixo passam a
+    // ser QUASE TAUTOLÓGICAS (spec §8.1: `T = FoM(J)·T_ideal` com
+    // `FoM ≤ 1` garantido em três camadas — validação de config, o
+    // `min(·, 1)` de `FigureOfMerit::at`, e o grampo — só podem falhar por
+    // bug dentro de `at()` ou de `thrust_ideal_momentum_n`). Continuam
+    // valendo por dois motivos que NÃO são "descobrir física agora": (1) a
+    // sonda RED documentada acima é a prova do defeito; (2) são a rede que
+    // pega uma FUTURA reintrodução de um modelo de tração paralelo — é
+    // exatamente como o projeto chegou aqui (backlog #15).
+    #[test]
+    fn tracao_nunca_excede_o_teto_de_quantidade_de_movimento() {
+        let (engine, state, _wing) = fixture_baseline();
+        let fom = fom_teste();
+        let rpm = engine.rpm_max_continuous;
+        let d = state.prop_diameter_m;
+        for i in 1..=1200 {
+            let v = i as f64 * 0.1;              // 0,1 .. 120,0 m/s
+            let t = thrust_available_n(v, &engine, rpm, state.psru_ratio, d,
+                                       0.0, 0.0, fom, state.psru_efficiency);
+            let teto = thrust_ideal_momentum_n(v, &engine, rpm, d, 0.0, 0.0,
+                                               state.psru_efficiency);
+            assert!(t <= teto * (1.0 + 1e-12),
+                    "V={v} m/s: T={t} N excede o teto ideal de {teto} N (razão {})",
+                    t / teto);
+        }
+    }
+
+    #[test]
+    fn tracao_e_continua_em_toda_a_faixa() {
+        let (engine, state, _wing) = fixture_baseline();
+        let fom = fom_teste();
+        let rpm = engine.rpm_max_continuous;
+        let d = state.prop_diameter_m;
+        let t_de = |v: f64| thrust_available_n(v, &engine, rpm, state.psru_ratio, d,
+                                               0.0, 0.0, fom, state.psru_efficiency);
+        for i in 0..10_000 {
+            let v = i as f64 * 0.01;
+            let salto = (t_de(v + 0.01) - t_de(v)).abs();
+            assert!(salto < 5.0, "degrau de {salto} N entre V={v} e V={}", v + 0.01);
+        }
+    }
+
     // ─── Ciclo 13, spec §2: lei única de tração (`thrust_available_n`) ──────
     //
     // `old→new`: os três testes abaixo pertenciam ao ciclo 12
