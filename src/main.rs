@@ -742,7 +742,21 @@ fn main() {
     fidelity.insert("wing".into(),
         "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)".into());
     fidelity.insert("propulsion".into(),
-        "semi-empirical (curvas de catálogo do motor + BSFC paramétrico)".into());
+        "semi-empirical (curvas de catálogo do motor + BSFC paramétrico). \
+         `prop_efficiency` mudou de ORIGEM no ciclo 13 (schema 5.6): era o polinômio \
+         `agents::propulsion::prop_efficiency` (η = −0,15·J² + 0,39·J + 0,58, JavaProp), \
+         APAGADO por violar o teto de quantidade de movimento em quatro dos oito pontos \
+         de operação do baseline; hoje é SAÍDA DERIVADA da lei única de tração \
+         T(V) = FoM(J)·T_ideal_momentum(V, P_eixo), obtida por inversão em forma FECHADA \
+         da quadrática do disco atuador em cruzeiro nivelado (T = arrasto conhecido, \
+         u = [V + √(V² + 2T/(ρA))]/2, η = FoM(J)·V/u — sem ponto fixo, sem iteração). \
+         O valor no baseline é IDÊNTICO ao do polinômio apagado por construção da âncora \
+         `[propeller].fom_design`, calibrada exatamente para isso. RESSALVA (backlog #21): \
+         a âncora preserva o PONTO de cruzeiro, não a missão inteira — o segmento de \
+         SUBIDA consome a curva FoM(J) completa, cuja forma linear entre as âncoras não \
+         foi calibrada para aquele regime, e `mission.fuel_climb_kg` subiu 46,31%. \
+         O efeito quase se cancela no total (`range_km`/`endurance_h` a −0,037%), o que \
+         torna o agregado enganosamente estável — ver backlog #21.".into());
     fidelity.insert("geometry".into(),
         "computed (derivado da configuração + WeightBalanceAgent)".into());
     fidelity.insert("empennage".into(),
