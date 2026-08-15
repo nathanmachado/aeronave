@@ -113,7 +113,7 @@
     "cg_mac_fwd_pct": 17.758487182256133,
     "cg_mac_aft_pct": 38.701383265654876,
     "static_margin_pct": 9.75865290109127,
-    "cg_limit_fwd_pct_mac": 16.380458137686837,
+    "cg_limit_fwd_pct_mac": 18.268251143882534,
     "cg_limit_aft_pct_mac": 43.460036166746164,
     "structural_masses": {
       "asa_kg": 149.6977561039546,
@@ -132,31 +132,33 @@
   },
   "trim": {
     "flare_limit_pct_mac": -8.818503827231059,
-    "rotation_limit_pct_mac": 16.380458137686837,
+    "rotation_limit_pct_mac": 18.268251143882534,
+    "rotation_limit_pct_mac_paved": 16.380458137686837,
+    "rotation_limit_pct_mac_grass": 18.268251143882534,
     "rotation_margin_per_scenario": [
       {
         "scenario": "Solo (piloto)",
-        "rotation_authority_margin_pct": 3.1883155228390367
+        "rotation_authority_margin_pct": -1.179429677656323
       },
       {
         "scenario": "2 pax dianteiros",
-        "rotation_authority_margin_pct": 10.639763512706994
+        "rotation_authority_margin_pct": 5.992729490842495
       },
       {
         "scenario": "4 pax sem bagagem",
-        "rotation_authority_margin_pct": 57.083593792457556
+        "rotation_authority_margin_pct": 50.54501797131071
       },
       {
         "scenario": "4 pax + bagagem + cheio",
-        "rotation_authority_margin_pct": 104.33584754418597
+        "rotation_authority_margin_pct": 95.86217358293354
       },
       {
         "scenario": "4 pax + bagagem + meia",
-        "rotation_authority_margin_pct": 94.42010035872354
+        "rotation_authority_margin_pct": 86.31541163080112
       },
       {
         "scenario": "4 pax + bagagem vazio",
-        "rotation_authority_margin_pct": 86.0616441496803
+        "rotation_authority_margin_pct": 78.267678825998
       }
     ],
     "governing": "rotacao",
@@ -416,11 +418,11 @@
     ],
     "flips": [
       {
-        "check": "Cenário 'Solo (piloto)'",
+        "check": "Cenário '2 pax dianteiros'",
         "caso": "dianteiro",
-        "valor": 13.741405494153906,
-        "limite": 16.584540488816828,
-        "limite_nominal": 16.380458137686837
+        "valor": 16.804949003464134,
+        "limite": 18.47233349501252,
+        "limite_nominal": 18.268251143882534
       }
     ],
     "mtow_masstotal_kg": 1610.6236247965044
@@ -438,14 +440,15 @@
     "robustness": "computed (pior-caso determinístico ±σ direcional sobre as 7 massas estruturais; limites de envelope avaliados na régua do PRÓPRIO mundo perturbado desde o ciclo 10 task 2 — o limite dianteiro deixou de ser invariante a massa (linha de tração); flips[].limite_nominal carrega a régua nominal para contraste; caso massa-total: re-sizing completo com fatores ×(1+σ))",
     "sizing": "computed (laço de convergência de ponto fixo, MTOW de missão vs. OEW+combustível)",
     "structure": "preliminary (vigas simplificadas — viga I equivalente; requer FEM); flutter: preliminary — estimativa analítica, requer GVT (ensaio de vibração em solo)",
-    "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — ver erratum da spec §2) E, desde o ciclo 12 task 4, os binários de atrito de rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)) — os três recuam o limite dianteiro de rotação em conjunto (≈4,40 pp dos dois últimos, medido; o ciclo 10 os desprezava com uma estimativa de ≲2 pp que a medição desmentiu); validar em ensaio de voo antes de tratar como definitivo. QUALIFICAÇÃO DE INDETERMINAÇÃO (fix wave ciclo 12, docs/backlog.md item 15, PRIORIDADE ALTA): o termo de tração do balanço de rotação (thrust_available_n, em Vr) e os termos de solo introduzidos por esta mesma task (via D/μN, que fisicamente correspondem a thrust_ground_roll_n na MESMA velocidade — Vr = V_LOF por construção) vêm de dois modelos de tração que divergem ≈27,69% nessa velocidade; o resíduo não cancelado desse descasamento não está incluído no rotation_limit_pct_mac publicado. Enquanto a escolha de modelo de tração em V_LOF permanecer em aberto (backlog item 15), rotation_limit_pct_mac carrega uma indeterminação de MODELO de ≈8,3 pp de %MAC (banda medida entre os dois extremos coerentes de modelagem) — a margem de autoridade do cenário mais apertado ('Solo (piloto)', ≈0,000513 pp de %MAC) fica QUATRO ORDENS DE GRANDEZA dentro dessa banda, não fora dela: a precisão numérica publicada (17,757974...% MAC) excede o que o modelo atual sustenta.)",
+    "trim": "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — ver erratum da spec §2) E, desde o ciclo 12 task 4, os binários de atrito de rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)). RESOLVIDO (ciclo 13, spec §2/§6, backlog #15 — PRIORIDADE ALTA): a indeterminação de MODELO de ≈8,3 pp de %MAC que existia entre este JSON e a versão anterior (thrust_available_n no termo de momento vs. thrust_ground_roll_n nos termos de solo, ≈27,69% de divergência em Vr≡V_LOF) ACABOU — os dois termos agora vêm da MESMA lei única de tração T(V)=FoM(J)·T_ideal_momentum(V,P_eixo), a MESMA chamada nos MESMOS argumentos; o resíduo de d'Alembert é ZERO por construção, medido a 1e-12 relativo nos 6 cenários de CG (agents::trim_authority::thrust_at_rotation_n). RESOLVIDO (ciclo 13, spec §7, backlog #16): o limite dianteiro de rotação é calculado nas DUAS superfícies (trim.rotation_limit_pct_mac_paved/trim.rotation_limit_pct_mac_grass) e o campo legado trim.rotation_limit_pct_mac passa a valer a superfície de OPERAÇÃO (GRAMA — mesma premissa das checagens #23/#24 de decolagem/pouso), não mais pavimentada; medido no baseline real: pavimentado 16,380458% → grama 18,268251% MAC (+1,888 pp). Continua SENSÍVEL aos parâmetros semi-empíricos citados acima; validar em ensaio de voo antes de tratar como definitivo.)",
     "vn_diagram": "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)",
     "weight": "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados não pesados — validar na balança)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
   "violations": [
+    "Cenário 'Solo (piloto)': CG 17.8% MAC fora do envelope de CG admissível [18.3%–43.5%] (SM=0.307; x_cg=3.121m, limites em x: [3.128m, 3.442m])",
     "Gradiente de subida 7.9% abaixo do mínimo de 8.3% exigido pela CS 23.65 (Vx=138.9km/h)",
-    "Robustez: Cenário 'Solo (piloto)' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 13.74 vs 16.58",
+    "Robustez: Cenário '2 pax dianteiros' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 16.80 vs 18.47",
     "Decolagem (grama, 15 m): 859 m excede a pista disponível de 600 m",
     "Pouso (grama, 15 m): 647 m excede a pista disponível de 600 m"
   ],

@@ -623,9 +623,57 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 ///     gradiente já está perto do piso. Achado NOVO deste ciclo, registrar
 ///     no backlog (Task 5).
 ///
-/// Resultado líquido: **mesma CONTAGEM** de violações (4), COMPOSIÇÃO
-/// diferente — sai o flip de robustez '2 pax dianteiros', entra o
-/// gradiente CS 23.65. `validation_status` continua `"FAIL"`.
+/// Resultado líquido (task 2): **mesma CONTAGEM** de violações (4),
+/// COMPOSIÇÃO diferente — sai o flip de robustez '2 pax dianteiros', entra
+/// o gradiente CS 23.65. `validation_status` continua `"FAIL"`.
+///
+/// ─── ATUALIZAÇÃO (ciclo 13, task 3, 2026-08-15) — ERRATUM §3.2.1,
+/// NÚMEROS SE MOVEM, CONTAGEM NÃO ────────────────────────────────────────
+///
+/// `fom_design` recalibrado por ponto fixo (a âncora de cruzeiro do §3.2
+/// usava o `u` da POTÊNCIA disponível; o correto é o `u` da TRAÇÃO
+/// requerida — ver o erratum na spec). `0,823706...→0,815977...` (−0,94%)
+/// gira a curva `FoM(J)` inteira um pouco para baixo: `climb_gradient_pct`
+/// 8,015811%→**7,913277%**, `to_50ft_grass_m` 848,927019→**≈859 m**,
+/// `ldg_50ft_grass_m` 646,437301→**≈647 m**. Contagem PERMANECE **4**.
+///
+/// ─── ATUALIZAÇÃO (ciclo 13, task 4, 2026-08-15) — DUAS SUPERFÍCIES DA
+/// ROTAÇÃO (spec §7, fecha o backlog #16), CONTAGEM SOBE PARA 5 ──────────
+///
+/// Até aqui `rotation_limit_pct_mac` era calculado com `mu_roll_paved`
+/// enquanto as checagens #23/#24 (decolagem/pouso) já reprovavam a GRAMA —
+/// o mesmo JSON afirmava duas superfícies para a MESMA decolagem. Esta
+/// task calcula o limite NAS DUAS superfícies
+/// (`rotation_limit_pct_mac_paved`/`_grass`, campos NOVOS) e publica
+/// `rotation_limit_pct_mac` na superfície de OPERAÇÃO — GRAMA, a mesma que
+/// #23/#24 medem.
+///
+/// Medido no baseline real: `rotation_limit_pct_mac` **16,392661% (pavimentado,
+/// ciclo 13 task 2/3) → 18,268251% (grama)**, +1,875590 pp — mesma ordem da
+/// projeção da spec §11 ("grama: +~1,9 pp") e quase idêntica à medição do
+/// ciclo 12 com o modelo ANTIGO de tração (+1,888 pp, spec §7). Efeito em
+/// CASCATA, nomeado pela spec §11.1 ("Interação §7×§6") e NÃO consertado:
+///
+/// - **'Solo (piloto)' (CG nominal ≈17,8% MAC) cai À FRENTE do novo limite
+///   (≈18,3%)** — deixa de ser um FLIP de robustez e vira **VIOLAÇÃO
+///   NOMINAL de envelope**, EXATAMENTE o cenário que a spec §11.1 nomeou
+///   como possível ("pode reabrir 'Solo (piloto)' NOMINALMENTE"). Sai da
+///   lista de robustez, entra na de envelope.
+/// - **'2 pax dianteiros' reabre em robustez**: a régua do mundo
+///   perturbado (±15% de massa estrutural) recua junto com o limite
+///   nominal, e a margem volta a ficar negativa (16,80 vs 18,47).
+///
+/// Contagem de violações: **4 → 5** — a de envelope é NOVA (soma 1); a de
+/// robustez continua em 1 (só troca de nome, 'Solo (piloto)' → '2 pax
+/// dianteiros'). `validation_status` continua `"FAIL"`. Nenhuma config foi
+/// ajustada para evitar este resultado — é a medição que a spec §11.1
+/// pediu, não uma regressão.
+///
+/// Resultado líquido (task 4): **5 violações** — gradiente CS 23.65,
+/// decolagem em grama, pouso em grama (as três INTOCADAS por esta task),
+/// a violação NOMINAL de envelope de 'Solo (piloto)' (NOVA), e o flip de
+/// robustez de '2 pax dianteiros' (reaberto). `validation_status`
+/// continua `"FAIL"`.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolagem_e_pouso_grama() {
     let out_path = std::env::temp_dir().join(format!(
@@ -667,18 +715,21 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    // `old→new` (ciclo 13, task 2 — ver ATUALIZAÇÃO na docstring acima):
-    // contagem PERMANECE 4 — a lei única de tração afrouxa o balanço de
-    // rotação (fecha o flip de '2 pax dianteiros') e aperta o gradiente
-    // CS 23.65 (abre um flip novo) ao mesmo tempo. Assert de contagem
+    // `old→new` (ciclo 13, task 4 — ver ATUALIZAÇÃO na docstring acima):
+    // contagem SOBE de 4 para 5 — o limite de rotação passa a valer a
+    // superfície de OPERAÇÃO (grama, spec §7), que é MAIS restritiva que a
+    // pavimentada usada até a task 3. Isso empurra 'Solo (piloto)' para
+    // violação NOMINAL de envelope (soma 1) e reabre o flip de robustez de
+    // '2 pax dianteiros' (troca de nome, não soma). Assert de contagem
     // PRIMEIRO, com a lista inteira na mensagem: qualquer violação nova
     // aparece por nome no output do teste, sem precisar adivinhar qual foi.
-    assert_eq!(violations.len(), 4,
-        "ciclo 13 (task 2, old→new): esperava EXATAMENTE 4 violações no baseline real — \
-         gradiente CS 23.65 abaixo de 8,3% (NOVA, lei única de tração), decolagem na grama \
-         sobre 15 m (849 m > 600 m), pouso na grama sobre 15 m (646 m > 600 m), E o flip de \
-         robustez do cenário 'Solo (piloto)' (persiste — o de '2 pax dianteiros' RESOLVEU e \
-         saiu da lista), achados honestos, não uma regressão: {violations:#?}");
+    assert_eq!(violations.len(), 5,
+        "ciclo 13 (task 4, old→new): esperava EXATAMENTE 5 violações no baseline real — \
+         gradiente CS 23.65 abaixo de 8,3%, decolagem na grama sobre 15 m (≈859 m > 600 m), \
+         pouso na grama sobre 15 m (≈647 m > 600 m), a violação NOMINAL de envelope de 'Solo \
+         (piloto)' (NOVA, superfície de grama no balanço de rotação — spec §7/§11.1), E o flip \
+         de robustez de '2 pax dianteiros' (reaberto pela mesma mudança de superfície), achados \
+         honestos, não uma regressão: {violations:#?}");
     // Asserts NOMEADOS por checagem — redundantes com a contagem acima de
     // propósito: se um refactor um dia reabrir/fechar uma violação, a
     // contagem sozinha não diria QUAL mudou.
@@ -694,27 +745,37 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     assert!(!violations.iter().any(|v| v.contains("Carga de nariz:")),
         "carga de nariz (≈21,90%) deveria continuar abaixo do teto de 25% (ciclo 13 não a \
          toca): {violations:#?}");
-    // (2) Robustez (#19), `old→new` (ciclo 12 → ciclo 13): eram DOIS flips
-    // ('Solo (piloto)' e '2 pax dianteiros'). A lei única afrouxa o
+    // (2) Robustez (#19). `old→new` (ciclo 12 → ciclo 13 task 2): eram DOIS
+    // flips ('Solo (piloto)' e '2 pax dianteiros'). A lei única afrouxa o
     // balanço de rotação (spec §6 — resíduo de d'Alembert zerado, spec
     // §1.1: o polinômio apagado violava o teto físico em `Vr` por
     // 1,0372×), subindo a margem nominal de '2 pax dianteiros' o
     // suficiente (7,776%→10,612%) para o flip dele DESAPARECER — spec §11
     // projetava "provavelmente resolve", confirmado. 'Solo (piloto)'
-    // PERSISTE (margem nominal 0,0012%→3,160%, ainda insuficiente contra
+    // PERSISTIA (margem nominal 0,0012%→3,160%, ainda insuficiente contra
     // o mundo dianteiro ±15%) — spec §11 projetava "persiste", confirmado.
+    //
+    // `old→new` (ciclo 13, task 4 — spec §7/§11.1): o limite de rotação
+    // passa a valer a superfície de OPERAÇÃO (grama), MAIS restritiva
+    // (+1,876 pp). A régua nominal de 'Solo (piloto)' sobe junto e o CG
+    // dele fica À FRENTE dela — deixa de ser um flip de ROBUSTEZ (que exige
+    // passar no nominal) e vira violação NOMINAL de envelope (checada mais
+    // abaixo). '2 pax dianteiros' REABRE: a régua do mundo dianteiro
+    // (±15% de massa) recua junto e a margem volta a negativa (16,80 vs
+    // 18,47). Contagem de robustez CONTINUA 1 — só troca de nome.
     assert_eq!(violations.iter().filter(|v| v.starts_with("Robustez:")).count(), 1,
-        "ciclo 13: esperava EXATAMENTE 1 violação de robustez (σ=15%, mundo dianteiro) — só \
-         'Solo (piloto)' persiste; '2 pax dianteiros' resolveu com o afrouxamento do balanço \
-         de rotação (spec §6/§11): {violations:#?}");
+        "ciclo 13 (task 4): esperava EXATAMENTE 1 violação de robustez (σ=15%, mundo \
+         dianteiro), na superfície de operação (grama) — '2 pax dianteiros' reabriu; 'Solo \
+         (piloto)' saiu desta lista porque virou violação NOMINAL de envelope: \
+         {violations:#?}");
     assert!(violations.iter().any(|v| v.contains("Robustez")
-        && v.contains("Solo (piloto)")),
-        "esperava o flip de robustez nomeado do cenário 'Solo (piloto)' (margem nominal \
-         ≈3,16%, ainda insuficiente contra o mundo dianteiro): {violations:#?}");
-    assert!(!violations.iter().any(|v| v.contains("Robustez")
         && v.contains("2 pax dianteiros")),
-        "o flip de robustez do cenário '2 pax dianteiros' deveria ter RESOLVIDO com o \
-         afrouxamento do balanço de rotação (margem nominal 7,78%→10,61%): {violations:#?}");
+        "esperava o flip de robustez nomeado do cenário '2 pax dianteiros' (reaberto pela \
+         superfície de grama, spec §11.1): {violations:#?}");
+    assert!(!violations.iter().any(|v| v.contains("Robustez")
+        && v.contains("Solo (piloto)")),
+        "'Solo (piloto)' não deveria mais aparecer como flip de ROBUSTEZ — ele virou violação \
+         NOMINAL de envelope (a régua o alcançou até no mundo nominal): {violations:#?}");
     // (3) `old→new` (ciclo 13, spec §11 — RISCO CENTRAL DO CICLO): o
     // polinômio apagado também violava o teto físico em Vx/no segmento de
     // subida da decolagem (≈21% de tração a menos com a lei nova nesse
@@ -726,47 +787,55 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
         "gradiente CS 23.65 (≈8,02%, abaixo do piso de 8,3%) deveria aparecer como violação \
          NOVA (lei única de tração, spec §11 — risco central do ciclo): {violations:#?}");
     // (4) Pouso na grama: `ldg_50ft_grass_m` não consome tração (landing
-    // não tem termo de tração no modelo, confirmado na revisão de plano) —
-    // PRATICAMENTE INALTERADO pelo ciclo 13 (646,437301→645,975073 m,
-    // -0,07%, resíduo do laço de convergência de MTOW). Continua excedendo
-    // os 600 m de pista.
+    // não tem termo de tração no modelo, confirmado na revisão de plano).
+    // `old→new` (ciclo 13, task 3, ERRATUM §3.2.1): 646,437301→**≈647 m**
+    // (o recalibrado de `fom_design` move o combustível/MTOW convergido de
+    // subida, resíduo pequeno). Continua excedendo os 600 m de pista.
     assert!(violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
-        "pouso na grama (≈646,0 m, INTOCADO pelo ciclo 13 — landing não consome tração) \
-         deveria exceder os 600 m de pista disponível: {violations:#?}");
-    // (5) `old→new` (ciclo 13, spec §3.4/§11 — achado NOVO, a projeção da
-    // spec ERROU a direção): `to_50ft_grass_m` AUMENTA (819,110978→
-    // 848,927019 m, +3,64%), não diminui como a spec §3.4 projetava
-    // (≈784,5 m). A rolagem pura de fato encolhe (FoM(J)≥0,75 sempre >
-    // constante 0,75 antigo em V∈[0,V_LOF]), mas o segmento de SUBIDA usa
-    // V_climb≈38,6 m/s — MUITO além de V_LOF≈35,4 m/s, no regime onde a
-    // tração cai ≈21% (mesmo efeito do gradiente CS 23.65 acima) — e esse
-    // efeito domina o total. Registrar como achado de projeção errada no
-    // relatório da task, não silenciar.
+        "pouso na grama (≈647 m, landing não consome tração) deveria exceder os 600 m de \
+         pista disponível: {violations:#?}");
+    // (5) `old→new` (ciclo 13, task 2, spec §3.4/§11 — achado NOVO, a
+    // projeção da spec ERROU a direção): `to_50ft_grass_m` AUMENTA
+    // (819,110978→848,927019 m, +3,64%), não diminui como a spec §3.4
+    // projetava (≈784,5 m). A rolagem pura de fato encolhe (FoM(J)≥0,75
+    // sempre > constante 0,75 antigo em V∈[0,V_LOF]), mas o segmento de
+    // SUBIDA usa V_climb≈38,6 m/s — MUITO além de V_LOF≈35,4 m/s, no regime
+    // onde a tração cai ≈21% (mesmo efeito do gradiente CS 23.65 acima) — e
+    // esse efeito domina o total. Registrar como achado de projeção errada
+    // no relatório da task, não silenciar.
+    // `old→new` (ciclo 13, task 3, ERRATUM §3.2.1): 848,927019→**≈859 m**
+    // (mesma causa do pouso acima — `fom_design` recalibrado).
     assert!(violations.iter().any(|v| v.contains("Decolagem (grama")),
-        "decolagem na grama (≈848,9 m, ciclo 13 — segmento de SUBIDA mais caro compensa a \
+        "decolagem na grama (≈859 m, ciclo 13 — segmento de SUBIDA mais caro compensa a \
          rolagem mais barata, projeção da spec §3.4 errou a direção) deveria exceder os 600 m \
          de pista disponível: {violations:#?}");
     // Envelope de CG NOMINAL por cenário, `old→new` (ciclo 10 → ciclo 12,
     // task 4): `rotation_limit_pct_mac` era 13,354637% MAC (INALTERADO
     // pelas tasks 2/3) — os termos de solo do balanço de rotação (task 4)
-    // recuam esse limite para 17,757974% MAC (+4,40 pp). NENHUM dos 6
-    // cenários cruza o limite NOMINAL (esta checagem, por violação
-    // ESPECÍFICA de envelope — "fora do envelope de CG admissível" —
-    // continua verdadeira; a substring do NOME do cenário sozinha não
-    // basta mais, porque agora aparece também na violação de ROBUSTEZ
-    // verificada acima, que não é violação de envelope).
+    // recuam esse limite para 17,757974% MAC (+4,40 pp).
+    //
     // `old→new` (ciclo 13, task 2): a lei única AFROUXA o limite —
-    // `rotation_limit_pct_mac` **17,757974% → 16,392661% MAC** (−1,365 pp,
-    // ver ATUALIZAÇÃO ciclo 13 na docstring do teste). "Solo (piloto)"
-    // fica com margem de rotação NOMINAL ≈3,16% (era ≈0,0012%) — ainda o
-    // mais apertado dos 6, mas com folga real agora, não mais quase-zero.
-    for cenario in ["Solo (piloto)", "2 pax dianteiros", "4 pax sem bagagem",
+    // `rotation_limit_pct_mac` (então PAVIMENTADO) 17,757974%→16,392661%
+    // MAC (−1,365 pp). Naquele momento NENHUM dos 6 cenários cruzava o
+    // limite NOMINAL.
+    //
+    // `old→new` (ciclo 13, task 4, spec §7/§11.1 — fecha o backlog #16):
+    // `rotation_limit_pct_mac` passa a valer a superfície de OPERAÇÃO
+    // (GRAMA) — 16,392661%→**18,268251% MAC** (+1,876 pp). 'Solo (piloto)'
+    // (CG nominal ≈17,8% MAC) fica À FRENTE do novo limite: **1 dos 6
+    // cenários agora cruza o envelope NOMINAL** — exatamente o cenário que
+    // a spec §11.1 nomeou como possível. Os outros 5 seguem dentro.
+    for cenario in ["2 pax dianteiros", "4 pax sem bagagem",
                     "4 pax + bagagem + cheio", "4 pax + bagagem + meia",
                     "4 pax + bagagem vazio"] {
         assert!(!violations.iter().any(|v|
             v.contains(cenario) && v.contains("fora do envelope de CG admissível")),
             "cenário '{cenario}' deveria estar DENTRO do envelope NOMINAL: {violations:#?}");
     }
+    assert!(violations.iter().any(|v|
+        v.contains("Solo (piloto)") && v.contains("fora do envelope de CG admissível")),
+        "cenário 'Solo (piloto)' deveria estar FORA do envelope NOMINAL desde a task 4 \
+         (superfície de grama no balanço de rotação, spec §7/§11.1): {violations:#?}");
     assert!(!json.contains("Envelope de CG VAZIO"),
         "não deveria haver violação dedicada de envelope de CG vazio:\n{json}");
     // Tipback, tail-strike e margem de combustível continuam PASSANDO,

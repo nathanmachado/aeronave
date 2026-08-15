@@ -412,6 +412,46 @@ pub fn thrust_at_rotation_n(
 /// rotação RECUA (`x_cg_rot` MAIOR); tração maior ⟹ idem. Passar
 /// `thrust_rot_n = 0,0` reproduz EXATAMENTE o modelo pré-ciclo-10.
 ///
+/// ─── `old→new`: O RESÍDUO DE d'ALEMBERT ERA NÃO-NULO (ciclo 12), E ZERO
+/// DESDE O CICLO 13 (fecha o backlog #15, PRIORIDADE ALTA) ──────────────
+///
+/// A cancelação `M_T + M_in = −T·Δz − D·h_cg − μN·h_cg` derivada acima só é
+/// EXATA se o `T` que entra no termo de momento (`thrust_rot_n`, avaliado
+/// em `Vr`) for O MESMO `T` que está implícito em `D`/`μN` via
+/// `m·aₓ = T − D − μN` da corrida — ou seja, a MESMA função de tração, no
+/// MESMO `Vr ≡ V_LOF`, do lado do SOLO. O ciclo 12 introduziu os termos de
+/// solo (`M_solo` abaixo) sem auditar essa premissa: `thrust_rot_n` vinha
+/// de `performance::thrust_available_n` (ramo de voo, polinômio
+/// `prop_efficiency`), enquanto o `T` implícito em `D`/`μN` vinha
+/// fisicamente de `performance::thrust_ground_roll_n` (quantidade de
+/// movimento com avanço) — os dois modelos, avaliados na MESMA `Vr ≡
+/// V_LOF`, divergiam **27,69%**. A porção `h_cg` do braço NÃO cancelava
+/// mais de verdade: sobrava um resíduo não contabilizado
+/// `(T_solo − T_momento)·h_cg`, medido em **−1.005,97 N·m** no cenário
+/// governante ("Solo (piloto)") — **−6,816 pp de MAC**, quase o QUÍNTUPLO
+/// da margem de autoridade publicada naquele momento (+0,000513 pp).
+/// `rotation_limit_pct_mac` ficava, na prática, INDETERMINADO entre
+/// ≈16,28% (resíduo zero, se `thrust_ground_roll_n` valesse nos dois
+/// termos) e ≈24,57% (resíduo somado, mantendo o polinômio no termo de
+/// momento) — e o segundo extremo excedia o teto de quantidade de
+/// movimento em `Vr` por 3,72% (spec ciclo 13 §1.2), portanto FISICAMENTE
+/// IMPOSSÍVEL, não uma escolha de modelagem em aberto.
+///
+/// O ciclo 13 (spec §2/§6) substitui os dois modelos por uma lei única
+/// `T(V) = FoM(J)·T_ideal_momentum(V, P_eixo)`. `thrust_at_rotation_n`
+/// (termo de momento) e a tração implícita em `D`/`μN` da rolagem (agora
+/// também `thrust_available_n`, a MESMA função) passam a ser a MESMA
+/// chamada nos MESMOS argumentos em `Vr ≡ V_LOF`. **O resíduo vai a ZERO
+/// POR CONSTRUÇÃO** — não por coincidência numérica, por identidade
+/// algébrica: os dois `T` do parágrafo acima deixaram de poder divergir.
+/// Medido nos 6 cenários de CG do baseline real (teste
+/// `tracao_do_momento_de_rotacao_e_identica_a_da_rolagem_no_mesmo_vr`,
+/// `tests/generic_engine.rs`): erro relativo **0e0** em todos, folga de
+/// 12 ordens de grandeza sobre a tolerância do teste (1e-12). A
+/// indeterminação de ≈8,3 pp de MAC (a diferença entre os dois extremos
+/// acima) DEIXOU DE EXISTIR — não foi escolhida, foi eliminada: com uma
+/// única lei de tração não há mais dois números para escolher entre.
+///
 /// ─── TERMOS DE SOLO (ciclo 12, task 4) ──────────────────────────────────
 ///
 /// `mu_roll`, `h_cg_m`, `cd_roll` e `z_drag_above_cg_m` implementam os dois
@@ -817,23 +857,34 @@ impl TrimAuthorityAgent {
 
         // Termos de SOLO do balanço de rotação (ciclo 12, task 4 — ver
         // "TERMOS DE SOLO" na docstring de `rotation_available_moment_nm`).
-        // `mu_roll_ground` usa a superfície PAVIMENTADA
-        // (`[performance].mu_roll_paved`) — a rotação é avaliada como um
-        // evento único de decolagem, não por par pavimentado/grama como as
-        // distâncias de `agents::performance`; pavimentada é a superfície
-        // menos conservadora das duas, mesma lógica de "menos pessimista"
-        // já usada para o rpm de tração em `thrust_at_rotation_n`.
         // `cd_roll_ground` reusa `agents::performance::cd_ground_roll` —
         // MESMA fonte única de CD de solo que a rolagem de decolagem (Task
         // 2) — com o flap PARCIAL de decolagem (`wing.cd0_flap_to_extra`),
-        // não o cheio de pouso: a rotação É uma manobra de decolagem.
-        let mu_roll_ground = cfg.performance.mu_roll_paved;
+        // não o cheio de pouso: a rotação É uma manobra de decolagem. O CD
+        // de solo em si não depende de `mu_roll`, então é calculado uma vez
+        // e reusado nas duas superfícies abaixo.
         let h_cg_ground = cfg.gear.h_cg_ground_m;
         let cd_roll_ground = crate::agents::performance::cd_ground_roll(
             wing, state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
         );
         let z_drag_above_cg = cfg.wing.z_drag_above_cg_m;
 
+        // `old→new` (ciclo 12 → ciclo 13, spec §7 — fecha o backlog #16).
+        // O comentário que estava aqui dizia que `mu_roll_ground` usava a
+        // superfície PAVIMENTADA "porque pavimentada é a superfície menos
+        // conservadora das duas, mesma lógica de 'menos pessimista' já
+        // usada para o rpm de tração em `thrust_at_rotation_n`". Essa
+        // escolha ficou insustentável quando o próprio ciclo 12 mediu que
+        // as checagens #23/#24 (`ConstraintChecker`) REPROVAM a decolagem/
+        // pouso em GRAMA: o mesmo JSON afirmava duas superfícies para a
+        // MESMA decolagem — pavimentada aqui, grama em #23/#24. Este ciclo
+        // calcula o limite dianteiro NAS DUAS superfícies e publica as
+        // duas (`TrimSpec::rotation_limit_pct_mac_paved`/`_grass`); o
+        // campo legado `rotation_limit_pct_mac` passa a valer o da
+        // superfície de OPERAÇÃO — GRAMA, a mesma que #23/#24 já medem e
+        // que o TOML de missão descreve ("grama/terra, pista de fazenda
+        // típica"). Ver `limite_para_superficie` abaixo.
+        //
         // Limite ÚNICO de rotação (ciclo 10, task 2) = **MÁXIMO** (o mais
         // restritivo) dos limites avaliados no peso de CADA cenário. Até o
         // ciclo 9 o limite era INVARIANTE ao peso e essa agregação não
@@ -846,8 +897,18 @@ impl TrimAuthorityAgent {
         // as duas coisas coincidem SE `x_cg_rot` for monotonicamente
         // decrescente em `W` — o que é verdade no modelo atual, mas depende
         // de `η(J)` da hélice e deixaria de valer em silêncio se a curva de
-        // eficiência ou a política de `Vr` mudassem. O máximo explícito é
-        // robusto POR CONSTRUÇÃO, sem depender dessa premissa.
+        // eficiência ou a política de `Vr` mudassem.
+        //
+        // `old→new` (ciclo 13): esse "deixaria de valer em silêncio" era
+        // uma premissa ANTECIPADA, não hipotética — este ciclo é
+        // exatamente o evento nomeado: a curva de eficiência da hélice foi
+        // substituída (polinômio `prop_efficiency` → `FigureOfMerit`, spec
+        // §2). A construção MAX explícita seguiu válida POR CONSTRUÇÃO,
+        // sem precisar de reprova nem de reescrita — não porque a
+        // monotonicidade sobreviveu por acaso (ela é reavaliada a cada
+        // chamada de `run`, com a curva nova, pelo `.fold(NEG_INFINITY,
+        // max)` abaixo), mas porque a agregação nunca dependeu dela para
+        // estar correta. É a defesa do ciclo 10 cobrando o prêmio dela.
         //
         // O resultado é uma ENVOLTÓRIA conservadora, CONSISTENTE com
         // `rotation_margin_per_scenario` abaixo: qualquer cenário com
@@ -860,7 +921,7 @@ impl TrimAuthorityAgent {
         // Ciclo 7 (task 1): `wing.cl_max_to` (flap PARCIAL de decolagem),
         // não `wing.cl_max` (flap de POUSO) — a Vr da rotação é coerente
         // com o `Cm_TO` de flap parcial usado no mesmo balanço.
-        let x_rot_para_peso = |w_n: f64| -> f64 {
+        let x_rot_para_peso = |w_n: f64, mu_roll_ground: f64| -> f64 {
             let t_rot = thrust_at_rotation_n(
                 w_n, wing.area_m2, wing.cl_max_to, engine, state, req.isa_delta_c,
                 state.figure_of_merit(),
@@ -874,14 +935,25 @@ impl TrimAuthorityAgent {
                 mu_roll_ground, h_cg_ground, cd_roll_ground, z_drag_above_cg,
             )
         };
-        let x_rot = wb.scenarios.iter()
-            .map(|sc| x_rot_para_peso(sc.total_mass_kg * G))
-            .fold(f64::NEG_INFINITY, f64::max);
-        let rotation_limit_pct = cg_pct_mac(x_rot, mac_le, mac);
+        let limite_para_superficie = |mu_roll_ground: f64| -> f64 {
+            let x_rot = wb.scenarios.iter()
+                .map(|sc| x_rot_para_peso(sc.total_mass_kg * G, mu_roll_ground))
+                .fold(f64::NEG_INFINITY, f64::max);
+            cg_pct_mac(x_rot, mac_le, mac)
+        };
+        let rotation_limit_pct_paved = limite_para_superficie(cfg.performance.mu_roll_paved);
+        let rotation_limit_pct_grass = limite_para_superficie(cfg.performance.mu_roll_grass);
+        // Superfície de OPERAÇÃO desta aeronave (spec §7): GRAMA — mesma
+        // premissa DECLARADA que gateia as checagens #23/#24.
+        let rotation_limit_pct = rotation_limit_pct_grass;
 
         // Margem de autoridade de rotação por cenário — diagnóstico
         // informativo na CG/peso REAIS de cada cenário (varia por
         // cenário, ao contrário do limite acima) — ver `ScenarioTrimLimit`.
+        // Ciclo 13 (spec §7): avaliada na superfície de OPERAÇÃO (grama),
+        // mesma premissa do limite único acima — antes usava
+        // `mu_roll_paved`.
+        let mu_roll_ground = cfg.performance.mu_roll_grass;
         let mut rotation_margin_per_scenario = Vec::with_capacity(wb.scenarios.len());
         for sc in &wb.scenarios {
             let w_n = sc.total_mass_kg * G;
@@ -986,6 +1058,8 @@ impl TrimAuthorityAgent {
         TrimSpec {
             flare_limit_pct_mac: flare_limit_pct,
             rotation_limit_pct_mac: rotation_limit_pct,
+            rotation_limit_pct_mac_paved: rotation_limit_pct_paved,
+            rotation_limit_pct_mac_grass: rotation_limit_pct_grass,
             rotation_margin_per_scenario,
             governing,
             cl_h_available: cl_avail,
@@ -1944,12 +2018,24 @@ mod tests {
         // MAIS FRACA nesse ponto de operação (FoM(J_LOF)≈0,78 < 1,0372),
         // logo o momento nariz-abaixo da tração cai, o momento disponível
         // sobra mais, e o limite dianteiro AVANÇA (recua menos) — direção
-        // prevista na spec §11 ("≈−1,4 pp"), confirmada aqui. Tolerância
-        // INALTERADA (±0,05 pp).
+        // prevista na spec §11 ("≈−1,4 pp"), confirmada aqui.
+        //
+        // ─── CICLO 13 (task 4): DUAS SUPERFÍCIES (fecha o backlog #16) ─────
+        //
+        // Pin `old→new` desta fixture: **16,481% → 18,356%** MAC (+1,875 pp).
+        // O valor acima (16,481%) era calculado com `mu_roll_paved` — o
+        // campo `rotation_limit_pct_mac` passou a valer a superfície de
+        // OPERAÇÃO (GRAMA, `mu_roll_grass`, spec §7), a mesma que as
+        // checagens #23/#24 já reprovam para esta aeronave. Mais atrito ⟹
+        // mais momento nariz-abaixo de solo ⟹ limite MAIS restritivo (%MAC
+        // maior) — mesma direção medida no pipeline real (spec §11: "grama:
+        // +~1,9 pp", confirmado em ≈+1,888 pp — ver
+        // `tests/generic_engine.rs::limite_de_rotacao_em_grama_e_mais_
+        // restritivo_que_em_pavimentado`). Tolerância INALTERADA (±0,05 pp).
         assert!(
-            (trim.rotation_limit_pct_mac - 16.481).abs() < 0.05,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈16.481% ±0.05% — pin pós-ciclo-13, lei \
-             única de tração)",
+            (trim.rotation_limit_pct_mac - 18.356).abs() < 0.05,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈18.356% ±0.05% — pin pós-ciclo-13 task 4, \
+             superfície de operação = grama)",
             trim.rotation_limit_pct_mac
         );
 
@@ -1986,6 +2072,12 @@ mod tests {
             // `x_sem_tracao` precisa levar os MESMOS termos de solo que a
             // produção usa — eles cancelam na diferença `x_com_tracao −
             // x_sem_tracao`, sobrando exatamente T·z/W, como antes.
+            //
+            // `old→new` (ciclo 13, task 4): `mu_roll_paved` → `mu_roll_grass`
+            // — `trim.rotation_limit_pct_mac` passou a valer a superfície de
+            // OPERAÇÃO (grama, spec §7); este hand-check precisa usar o
+            // MESMO `mu_roll` que produziu `x_com_tracao`, senão os termos
+            // de solo não cancelam mais na diferença.
             let cd_roll_ground = crate::agents::performance::cd_ground_roll(
                 &wing, &state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
             );
@@ -1994,7 +2086,7 @@ mod tests {
                 trim.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail, cfg.gear.x_main_m,
                 cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
                 cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, wb.mac_m, 0.0, 0.0,
-                cfg.performance.mu_roll_paved, cfg.gear.h_cg_ground_m, cd_roll_ground,
+                cfg.performance.mu_roll_grass, cfg.gear.h_cg_ground_m, cd_roll_ground,
                 cfg.wing.z_drag_above_cg_m,
             );
             let x_com_tracao = wb.mac_le_x_m + trim.rotation_limit_pct_mac / 100.0 * wb.mac_m;
@@ -2046,6 +2138,13 @@ mod tests {
         // pipeline REAL (não nesta fixture) em
         // `tests::rotation_limit_variacao_medida_na_faixa_de_pesos_dos_
         // cenarios`/report da task.
+        //
+        // `old→new` (ciclo 12 → ciclo 13, task 4 — spec §7): a margem por
+        // cenário passou a ser avaliada em `mu_roll_grass` (superfície de
+        // OPERAÇÃO), não `mu_roll_paved`. 'Solo (piloto)': −4,47% → **medido
+        // abaixo, ≈−5,44%** — MAIS negativo (grama tem mais atrito), mesma
+        // direção do limite único. Continua a única margem negativa; os
+        // demais cenários seguem positivos.
         let margens: Vec<(&str, f64)> = trim.rotation_margin_per_scenario.iter()
             .map(|sc| (sc.scenario.as_str(), sc.rotation_authority_margin_pct))
             .collect();

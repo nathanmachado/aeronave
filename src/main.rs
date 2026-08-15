@@ -345,9 +345,16 @@ fn main() {
     // — o momento da linha de tração (T(Vr(W))·z_eixo) não é proporcional a
     // W, ver agents::trim_authority::rotation_fwd_limit_m. O número ÚNICO
     // reportado passa a ser o MÁXIMO dos limites por cenário.
+    //
+    // Ciclo 13 (task 4, spec §7 — fecha o backlog #16): o limite passa a
+    // ser calculado nas DUAS superfícies (pavimentado/grama) e o número
+    // ÚNICO publicado vale a de OPERAÇÃO (grama) — mesma premissa das
+    // checagens #23/#24.
     println!("  Limite de ROTAÇÃO (decolagem, número único = MÁXIMO sobre os cenários — \
-              depende do peso desde a linha de tração, ver derivação no código): {:.2}% MAC",
-             trim.rotation_limit_pct_mac);
+              depende do peso desde a linha de tração, ver derivação no código): {:.2}% MAC \
+              (pavimentado={:.2}%  grama={:.2}%, publicado=grama — superfície de OPERAÇÃO)",
+             trim.rotation_limit_pct_mac, trim.rotation_limit_pct_mac_paved,
+             trim.rotation_limit_pct_mac_grass);
     println!("  Manobra que GOVERNA o limite dianteiro: {}", trim.governing);
     println!("  Margem de autoridade de rotação por cenário (diagnóstico, na CG/peso REAIS de \
               cada um — negativo = autoridade insuficiente):");
@@ -904,7 +911,49 @@ fn main() {
     // de %MAC" ficou FALSA — medição real (spec `2026-08-15-ciclo12-solo-
     // honesto` §6.1) deu ≈4,40 pp, mais que o dobro, e os dois termos JÁ
     // ESTÃO no balanço desde este ciclo (`agents::trim_authority::
-    // rotation_available_moment_nm`). Reescrita, não corrigida em silêncio.
+    // rotation_available_moment_nm`).
+    //
+    // `old→new` (ciclo 12 → ciclo 13, task 4, spec §7/§8.6 — fecha os
+    // backlogs #15 e #16). O texto anterior declarava uma INDETERMINAÇÃO de
+    // MODELO de ≈8,3 pp de %MAC em `rotation_limit_pct_mac`, origem: o
+    // termo de MOMENTO da tração vinha de `thrust_available_n` (ramo de
+    // voo, polinômio `prop_efficiency`) enquanto os termos de SOLO (D/μN)
+    // vinham fisicamente de `thrust_ground_roll_n`, e os dois modelos
+    // divergiam ≈27,69% na MESMA velocidade (`Vr ≡ V_LOF`). **Essa
+    // indeterminação ACABOU.** O ciclo 13 substitui os dois modelos por uma
+    // lei única `T(V) = FoM(J)·T_ideal_momentum(V, P_eixo)` (ancorada na
+    // tração estática de McCormick e na eficiência de cruzeiro do
+    // polinômio apagado) — `thrust_at_rotation_n` (termo de momento) e a
+    // tração implícita nos termos de solo da rolagem passam a ser a MESMA
+    // chamada da MESMA função nos MESMOS argumentos em `Vr ≡ V_LOF`. O
+    // resíduo de d'Alembert `(T_solo − T_momento)·z_eixo` vai a ZERO POR
+    // CONSTRUÇÃO — medido a 1e-12 relativo nos 6 cenários de CG (teste
+    // `tracao_do_momento_de_rotacao_e_identica_a_da_rolagem_no_mesmo_vr`,
+    // erro relativo obtido: 0e0 nos 6). `rotation_limit_pct_mac` deixou de
+    // carregar QUALQUER indeterminação de modelo de tração.
+    //
+    // SEGUNDA MUDANÇA, DE SUPERFÍCIE (spec §7, fecha o backlog #16): o
+    // balanço de rotação era avaliado só em `mu_roll_paved` enquanto as
+    // checagens #23/#24 já reprovavam a decolagem/pouso desta aeronave em
+    // GRAMA — o mesmo JSON afirmava duas superfícies para a MESMA
+    // decolagem. Agora o limite é calculado nas DUAS superfícies
+    // (`trim.rotation_limit_pct_mac_paved`/`trim.rotation_limit_pct_mac_grass`,
+    // campos NOVOS deste ciclo) e `trim.rotation_limit_pct_mac` (campo
+    // legado) passa a valer a de OPERAÇÃO — GRAMA, a mesma premissa que
+    // #23/#24 já usam. Medido no baseline real: pavimentado 16,380458% →
+    // grama 18,268251% MAC (+1,888 pp — mais atrito, mais momento
+    // nariz-abaixo de solo, limite mais recuado). Esta mudança RECUA o
+    // limite dianteiro publicado e faz o cenário 'Solo (piloto)' cruzar
+    // para violação NOMINAL de envelope de CG (não é regressão: é a mesma
+    // superfície física da decolagem, agora consistente nos dois lugares
+    // que a avaliam).
+    //
+    // O QUE CONTINUA preliminar/sensível, sem relação com #15/#16: Cm_ac/
+    // Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc`
+    // por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a
+    // `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0,05
+    // residual, ver `trim.sensitivity`); requer validação em ensaio de voo
+    // antes de tratar o limite dianteiro como definitivo.
     fidelity.insert("trim".into(),
         "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
          cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a \
@@ -912,22 +961,21 @@ fn main() {
          trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 \
          task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — \
          ver erratum da spec §2) E, desde o ciclo 12 task 4, os binários de atrito de \
-         rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)) — os três recuam o \
-         limite dianteiro de rotação em conjunto (≈4,40 pp dos dois últimos, medido; o ciclo \
-         10 os desprezava com uma estimativa de ≲2 pp que a medição desmentiu); validar em \
-         ensaio de voo antes de tratar como definitivo. QUALIFICAÇÃO DE INDETERMINAÇÃO (fix \
-         wave ciclo 12, docs/backlog.md item 15, PRIORIDADE ALTA): o termo de tração do \
-         balanço de rotação (thrust_available_n, em Vr) e os termos de solo introduzidos por \
-         esta mesma task (via D/μN, que fisicamente correspondem a thrust_ground_roll_n na \
-         MESMA velocidade — Vr = V_LOF por construção) vêm de dois modelos de tração que \
-         divergem ≈27,69% nessa velocidade; o resíduo não cancelado desse descasamento não \
-         está incluído no rotation_limit_pct_mac publicado. Enquanto a escolha de modelo de \
-         tração em V_LOF permanecer em aberto (backlog item 15), rotation_limit_pct_mac \
-         carrega uma indeterminação de MODELO de ≈8,3 pp de %MAC (banda medida entre os dois \
-         extremos coerentes de modelagem) — a margem de autoridade do cenário mais apertado \
-         ('Solo (piloto)', ≈0,000513 pp de %MAC) fica QUATRO ORDENS DE GRANDEZA dentro dessa \
-         banda, não fora dela: a precisão numérica publicada (17,757974...% MAC) excede o que \
-         o modelo atual sustenta.)".into());
+         rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)). RESOLVIDO (ciclo 13, \
+         spec §2/§6, backlog #15 — PRIORIDADE ALTA): a indeterminação de MODELO de ≈8,3 pp de \
+         %MAC que existia entre este JSON e a versão anterior (thrust_available_n no termo de \
+         momento vs. thrust_ground_roll_n nos termos de solo, ≈27,69% de divergência em \
+         Vr≡V_LOF) ACABOU — os dois termos agora vêm da MESMA lei única de tração \
+         T(V)=FoM(J)·T_ideal_momentum(V,P_eixo), a MESMA chamada nos MESMOS argumentos; o \
+         resíduo de d'Alembert é ZERO por construção, medido a 1e-12 relativo nos 6 cenários de \
+         CG (agents::trim_authority::thrust_at_rotation_n). RESOLVIDO (ciclo 13, spec §7, \
+         backlog #16): o limite dianteiro de rotação é calculado nas DUAS superfícies \
+         (trim.rotation_limit_pct_mac_paved/trim.rotation_limit_pct_mac_grass) e o campo legado \
+         trim.rotation_limit_pct_mac passa a valer a superfície de OPERAÇÃO (GRAMA — mesma \
+         premissa das checagens #23/#24 de decolagem/pouso), não mais pavimentada; medido no \
+         baseline real: pavimentado 16,380458% → grama 18,268251% MAC (+1,888 pp). Continua \
+         SENSÍVEL aos parâmetros semi-empíricos citados acima; validar em ensaio de voo antes \
+         de tratar como definitivo.)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {

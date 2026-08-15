@@ -2410,7 +2410,13 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
     // `z_axis` acima). `cd_roll` reusa `agents::performance::
     // cd_ground_roll`, fonte única de CD de solo (Task 2), com o flap
     // PARCIAL de decolagem.
-    let mu_roll = cfg.performance.mu_roll_paved;
+    //
+    // `old→new` (ciclo 13, task 4 — spec §7): `mu_roll_paved` →
+    // `mu_roll_grass`. `TrimAuthorityAgent::run` passou a publicar
+    // `rotation_limit_pct_mac` na superfície de OPERAÇÃO (grama) — este
+    // hand-check precisa usar o MESMO `mu_roll` para reproduzir
+    // `sized.trim.rotation_limit_pct_mac` na asserção final abaixo.
+    let mu_roll = cfg.performance.mu_roll_grass;
     let h_cg = cfg.gear.h_cg_ground_m;
     let cd_roll = cd_ground_roll(
         wing, &sized.state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
@@ -2535,4 +2541,91 @@ fn rpm_de_cruzeiro_do_baseline_permanece_2640() {
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let sized = size_aircraft(&cfg, &engine, &req).expect("baseline real deveria convergir");
     assert_eq!(sized.prop.engine_rpm_cruise, 2640.0);
+}
+
+/// RESÍDUO DE d'ALEMBERT ZERO — fecha o backlog #15 (PRIORIDADE ALTA).
+///
+/// A identidade que dá o braço `prop_axis_above_cg_m` (e não `h_cg + offset`)
+/// ao momento de tração cancela a porção `h_cg` contra o termo inercial
+/// `m·aₓ·h_cg` **porque o mesmo `T` aparece nos dois lados de
+/// `m·aₓ = T − D − μN`**. O ciclo 12 quebrou isso: o termo de momento usava
+/// `thrust_available_n` (ramo de voo, polinômio `prop_efficiency`) enquanto
+/// `D`/`μN` vinham do modelo de solo (`thrust_ground_roll_n`), cujo `T` na
+/// MESMA velocidade era 27,69% menor — resíduo de −1.005,97 N·m
+/// (−6,816 pp de MAC) no cenário governante ("Solo (piloto)").
+///
+/// Com a lei única do ciclo 13 os dois são a MESMA chamada da MESMA função,
+/// com o MESMO rpm (`engine.rpm_max_continuous`, auditado — ver
+/// `agents::trim_authority::thrust_at_rotation_n`). `Vr ≡ V_LOF` é
+/// identidade algébrica, não coincidência: `VR_OVER_VS0 = 1.1` sobre
+/// `Vs0_TO` (`trim_authority.rs:82`) é a mesma fórmula que `v_lof` em
+/// `performance::takeoff_ground_roll_com_passos` (`performance.rs`).
+#[test]
+fn tracao_do_momento_de_rotacao_e_identica_a_da_rolagem_no_mesmo_vr() {
+    use aeronave::models::atmosphere::Isa;
+
+    const G: f64 = 9.807;
+
+    let cfg = baseline_state();
+    let state = AircraftState::from_config(&cfg);
+    let req = baseline_mission();
+    let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized = size_aircraft(&cfg, &engine, &req).expect("baseline converge");
+    let wing = &sized.wing;
+    let fom = cfg.propeller.figure_of_merit();
+
+    for sc in &sized.wb.scenarios {
+        let w_n = sc.total_mass_kg * G;
+        // Tração usada no termo de MOMENTO do balanço de rotação.
+        let t_momento = aeronave::agents::trim_authority::thrust_at_rotation_n(
+            w_n, wing.area_m2, wing.cl_max_to, &engine, &state, req.isa_delta_c, fom);
+        // Tração que o modelo de SOLO enxerga na MESMA velocidade.
+        // `Vr ≡ V_LOF = 1,10·√(2W/(ρ·S·CL_max_TO))` — identidade algébrica
+        // entre `VR_OVER_VS0` (trim_authority.rs) e `v_lof`
+        // (performance.rs), não coincidência numérica.
+        let rho = Isa::density_kgm3(0.0, req.isa_delta_c);
+        let v_lof = 1.10 * (2.0 * w_n / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
+        let t_rolagem = aeronave::agents::performance::thrust_available_n(
+            v_lof, &engine, engine.rpm_max_continuous, state.psru_ratio,
+            state.prop_diameter_m, 0.0, req.isa_delta_c, fom, state.psru_efficiency);
+
+        let erro_rel = (t_momento - t_rolagem).abs() / t_momento;
+        println!("cenário '{}': T_momento={t_momento:.4} N  T_rolagem={t_rolagem:.4} N  \
+                   erro_rel={erro_rel:e}", sc.name);
+        assert!(erro_rel < 1e-12,
+                "cenário '{}': momento={t_momento} N, solo={t_rolagem} N, \
+                 erro_rel={erro_rel} — o resíduo do backlog #15 voltou",
+                sc.name);
+    }
+}
+
+/// SUPERFÍCIE DA ROTAÇÃO (ciclo 13, spec §7 — fecha o backlog #16).
+///
+/// O ciclo 12 avaliava o balanço de rotação em `mu_roll_paved` enquanto as
+/// checagens #23/#24 reprovavam a GRAMA — o mesmo JSON afirmava duas
+/// superfícies para a MESMA decolagem. Agora as duas são computadas e
+/// publicadas, e o gate usa a de operação (GRAMA, premissa declarada na
+/// spec §7: é a superfície que #23/#24 já medem e que o TOML de missão
+/// descreve).
+///
+/// Atrito maior ⟹ mais momento contrário à rotação ⟹ limite dianteiro mais
+/// RECUADO (maior %MAC). Direção falseável, independente do valor.
+#[test]
+fn limite_de_rotacao_em_grama_e_mais_restritivo_que_em_pavimentado() {
+    let cfg = baseline_state();
+    let req = baseline_mission();
+    let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized = size_aircraft(&cfg, &engine, &req).expect("baseline converge");
+    let spec = &sized.trim;
+
+    println!("rotation_limit_pct_mac_paved = {:.6}%  rotation_limit_pct_mac_grass = {:.6}%  \
+               delta = {:.6} pp",
+              spec.rotation_limit_pct_mac_paved, spec.rotation_limit_pct_mac_grass,
+              spec.rotation_limit_pct_mac_grass - spec.rotation_limit_pct_mac_paved);
+
+    assert!(spec.rotation_limit_pct_mac_grass > spec.rotation_limit_pct_mac_paved,
+            "grama {} deveria ser MAIOR que pavimentado {}",
+            spec.rotation_limit_pct_mac_grass, spec.rotation_limit_pct_mac_paved);
+    assert_eq!(spec.rotation_limit_pct_mac, spec.rotation_limit_pct_mac_grass,
+               "o campo legado tem que valer a superfície de OPERAÇÃO (grama)");
 }

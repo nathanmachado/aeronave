@@ -450,7 +450,34 @@ pub struct TrimSpec {
     /// rotation_fwd_limit_m`). Para a margem de autoridade REAL por
     /// cenário (exata, na CG/peso de cada um), ver
     /// `rotation_margin_per_scenario`.
+    ///
+    /// `old→new` (ciclo 13, spec §7 — fecha o backlog #16). Antes deste
+    /// ciclo este campo era calculado com `[performance].mu_roll_paved`,
+    /// enquanto as checagens #23/#24 (`ConstraintChecker`) já reprovavam a
+    /// decolagem/pouso em GRAMA — o mesmo JSON afirmava duas superfícies
+    /// para a MESMA decolagem. Agora as duas superfícies são calculadas
+    /// (`rotation_limit_pct_mac_paved`/`rotation_limit_pct_mac_grass`
+    /// abaixo) e este campo passa a valer o da superfície de OPERAÇÃO —
+    /// GRAMA, a mesma que #23/#24 medem e que o TOML de missão descreve
+    /// ("grama/terra, pista de fazenda típica"). Mudança de VALOR e de
+    /// SIGNIFICADO do campo (spec §9.1).
     pub rotation_limit_pct_mac: f64,
+    /// Limite dianteiro de rotação (%MAC) avaliado com
+    /// `[performance].mu_roll_paved` — pista pavimentada. Campo NOVO do
+    /// ciclo 13 (spec §7, fecha o backlog #16): antes só a superfície
+    /// pavimentada era calculada (e publicada, em silêncio, no campo
+    /// `rotation_limit_pct_mac`); agora as DUAS superfícies são publicadas
+    /// explicitamente, e o consumidor decide qual olhar. Atrito menor ⟹
+    /// menos momento nariz-abaixo de solo ⟹ limite MENOS restritivo
+    /// (%MAC menor) que `rotation_limit_pct_mac_grass`.
+    pub rotation_limit_pct_mac_paved: f64,
+    /// Limite dianteiro de rotação (%MAC) avaliado com
+    /// `[performance].mu_roll_grass` — grama/terra, a superfície de
+    /// OPERAÇÃO desta aeronave (spec §7). É o valor que
+    /// `rotation_limit_pct_mac` publica desde este ciclo. Atrito maior ⟹
+    /// mais momento nariz-abaixo de solo ⟹ limite MAIS restritivo (%MAC
+    /// maior) que `rotation_limit_pct_mac_paved`.
+    pub rotation_limit_pct_mac_grass: f64,
     /// Margem de autoridade de rotação avaliada na CG/peso reais de cada
     /// cenário do `WeightBalanceAgent` — ver `ScenarioTrimLimit`.
     /// Diagnóstico informativo/falseável, NÃO usado para calcular
