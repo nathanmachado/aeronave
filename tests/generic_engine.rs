@@ -1599,14 +1599,15 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         "Pouso sobre 15m ({:.1}m) deveria exceder a estimativa legada de 200m fixos ({:.1}m)",
         perf.ldg_50ft_m, perf.landing_distance_m);
 
-    // HISTÓRICO — ASSERT MORTO, `old→new` (ciclo 12, task 2, spec §8.1): até
-    // este ciclo, `to_50ft_paved_m` (física por segmentos) SEMPRE excedia
-    // `to_distance_paved_m` (estimativa legada "rolagem × 1,5") — a asserção
-    // dizia isso ("TO sobre 15m deveria exceder a estimativa ground-roll×1.5").
-    // O fator ad hoc 1,5 de Raymer foi calibrado como razão
-    // `distância sobre 15m / rolagem` para o método ENERGÉTICO fechado
-    // (sem arrasto). Com a rolagem agora integrada (arrasto+atrito
-    // explícitos), a razão REAL medida cai para
+    // HISTÓRICO, `old→new` (ciclo 12, task 2, spec §8.1) — a relação
+    // INVERTEU, a asserção é REESCRITA, não deletada: até este ciclo,
+    // `to_50ft_paved_m` (física por segmentos) SEMPRE excedia
+    // `to_distance_paved_m` (estimativa legada "rolagem × 1,5") — a
+    // asserção antiga dizia isso ("TO sobre 15m deveria exceder a
+    // estimativa ground-roll×1.5"). O fator ad hoc 1,5 de Raymer foi
+    // calibrado como razão `distância sobre 15m / rolagem` para o método
+    // ENERGÉTICO fechado (sem arrasto). Com a rolagem agora integrada
+    // (arrasto+atrito explícitos), a razão REAL medida cai para
     // `to_50ft_paved_m/rolagem_paved = 651,258408/496,371051 ≈ 1,312` —
     // abaixo de 1,5. `to_distance_paved_m` (= rolagem × 1,5 = 744,556577)
     // passa a EXCEDER `to_50ft_paved_m` (651,258408): a estimativa legada,
@@ -1614,9 +1615,14 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // campo físico do MESMO JSON — exatamente a inconsistência que a spec
     // previu (§8.1) e registrou como item de backlog (remoção de
     // `to_distance_*` num bump MAJOR futuro; os campos ficam, com docstring
-    // avisando que `*_50ft_*` é a referência física). A asserção morre
-    // aqui — não é mais verdadeira por construção, e forçá-la de volta
-    // esconderia o achado.
+    // avisando que `*_50ft_*` é a referência física). A relação NOVA é
+    // codificada abaixo — sem ela o projeto perderia cobertura de uma
+    // invariante sem ganhar a da relação que passou a valer.
+    assert!(perf.to_distance_paved_m > perf.to_50ft_paved_m,
+        "ciclo 12: a estimativa legada ground-roll×1,5 ({:.1}m) deveria EXCEDER a física \
+         segmentada sobre 15m ({:.1}m) — razão medida to_50ft/rolagem ≈1,312, abaixo do fator \
+         legado 1,5 (ver comentário acima)",
+        perf.to_distance_paved_m, perf.to_50ft_paved_m);
 }
 
 /// Achado da revisão da Task 3.1 (checagem de aceite rodando a cada

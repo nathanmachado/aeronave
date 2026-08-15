@@ -158,6 +158,23 @@ pub fn thrust_ground_roll_n(
     let disk_area = std::f64::consts::PI * (prop_diam_m / 2.0).powi(2);
     let k = p_w / (2.0 * rho * disk_area);
 
+    // Guarda (Fix round 1 do report da task — achado do revisor): a spec
+    // §2 assume `K > 0`. Se `K ≤ 0` (potência de eixo nula/negativa) E
+    // `V = 0` ao mesmo tempo, `u₀ = V + K^(1/3) = 0` e a primeira iteração
+    // de Newton calcula `f/fp = 0/0` — NaN SILENCIOSO, o modo de falha que
+    // este projeto não aceita (o padrão é falhar no ponto de perigo, não
+    // devolver um número que não é número). INALCANÇÁVEL hoje:
+    // `psru_efficiency > 0` é validado em `models::config` (`require_
+    // positive("propeller.psru_efficiency", ...)`) e `engine.power_kw_at`
+    // é positiva para qualquer rpm válida — `K` nunca chega a zero pelo
+    // caminho de produção. Se essa validação algum dia relaxar (ex.: motor
+    // "desligado" modelado com P=0), sem esta guarda a rolagem devolveria
+    // NaN em vez de `+INFINITY`/pane explícita — fisicamente correto seria
+    // tração nula (sem potência, o disco atuador não produz empuxo).
+    if k <= 0.0 {
+        return 0.0;
+    }
+
     // Newton a partir de u0 = V + K^(1/3) — em V=0, f(u0) = u0³ − K = 0
     // exatamente (converge em 1 iteração, prova a identidade do spec §2.1).
     let mut u = v_ms + k.cbrt();
@@ -1109,6 +1126,23 @@ mod tests {
         assert!(t36 > 0.0, "tração tem de ser positiva em V_LOF: {t36}");
     }
 
+    /// Fix round 1 do report da task (achado do revisor) — guarda de NaN.
+    /// `K = P_eixo/(2ρA) ≤ 0` com `V = 0` faz a primeira iteração de Newton
+    /// calcular `0/0`. Este cenário é INALCANÇÁVEL pelo caminho de
+    /// produção (`psru_efficiency > 0` é validado em `models::config`),
+    /// mas chamar a função pura diretamente com `psru_efficiency = 0.0`
+    /// (fora da config validada, de propósito) prova a guarda: sem ela,
+    /// este teste veria NaN.
+    #[test]
+    fn tracao_de_rolagem_nao_produz_nan_quando_potencia_de_eixo_e_nula() {
+        let (engine, state, _wing) = fixture_baseline();
+        let t = thrust_ground_roll_n(
+            0.0, &engine, engine.rpm_max_continuous, state.prop_diameter_m,
+            0.0, 0.0, 0.75, 0.0 /* psru_efficiency=0 ⟹ P_eixo=0 ⟹ K=0 */);
+        assert!(!t.is_nan(), "K=0 com V=0 não pode devolver NaN: {t}");
+        assert_eq!(t, 0.0, "sem potência de eixo, a tração devolvida deve ser exatamente zero: {t}");
+    }
+
     // ─── Ciclo 12 (task 2), spec §3/§7: integrador de rolagem ───────────────
 
     /// Spec §7.1 — prova contra fechada analítica, não contra pin: com
@@ -1138,8 +1172,17 @@ mod tests {
         assert!(dif_rel < 1e-3, "não convergido: 200={s_200}, 400={s_400}, dif={dif_rel}");
     }
 
-    /// Spec §7.3 — monotonicidades ESTRITAS. Cada uma é falseável: se o
-    /// sinal de um termo estiver trocado, uma delas quebra.
+    /// Spec §7.3 — monotonicidades ESTRITAS: μ maior ⟹ rolagem maior; peso
+    /// maior ⟹ rolagem maior. Cada uma é falseável: se o sinal de um termo
+    /// estiver trocado, uma delas quebra. As outras duas exigidas pela spec
+    /// (CD0 maior ⟹ maior; tração maior ⟹ menor) vivem em
+    /// `rolagem_de_decolagem_aumenta_estritamente_com_cd0_maior` e
+    /// `rolagem_de_decolagem_cai_estritamente_com_tracao_maior` — Fix round
+    /// 1 do report da task (o plano só cobriu duas das quatro; achado do
+    /// revisor: trocar o sinal do arrasto em `F_net` fazia os 27 testes
+    /// locais de `performance.rs` passarem mesmo assim, inclusive este —
+    /// só o pin de 1% de `tests/generic_engine.rs` e um flip de robustez,
+    /// em outro arquivo, pegavam o bug).
     #[test]
     fn rolagem_de_decolagem_responde_no_sentido_certo_a_cada_termo() {
         let (engine, state, wing) = fixture_baseline();
@@ -1147,6 +1190,43 @@ mod tests {
             mass, RHO_SL, &wing, &state, &engine, 0.0, mu, 0.5, 0.75);
         assert!(roll(0.08, MTOW_PIN_KG) > roll(0.04, MTOW_PIN_KG), "atrito maior ⟹ rolagem maior");
         assert!(roll(0.04, MTOW_PIN_KG) > roll(0.04, MTOW_PIN_KG * 0.8), "peso maior ⟹ rolagem maior");
+    }
+
+    /// Spec §7.3 (Fix round 1) — CD0 maior ⟹ mais arrasto ⟹ rolagem maior.
+    /// Falseável sozinha: se o sinal do termo de arrasto em `F_net` for
+    /// trocado (arrasto SOMADO em vez de SUBTRAÍDO), CD0 maior passa a dar
+    /// F_net MAIOR ⟹ rolagem MENOR — esta asserção quebra na hora. Muda só
+    /// `wing.cd0`, resto da config fixo.
+    #[test]
+    fn rolagem_de_decolagem_aumenta_estritamente_com_cd0_maior() {
+        let (engine, state, mut wing) = fixture_baseline();
+        let roll_baixo = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, 0.75);
+        wing.cd0 += 0.05; // CD0 bem maior — resto da fixture intacto
+        let roll_alto = takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, 0.75);
+        assert!(roll_alto > roll_baixo,
+            "CD0 maior deveria dar rolagem ESTRITAMENTE maior (mais arrasto): \
+             roll(cd0 baixo)={roll_baixo}, roll(cd0 alto)={roll_alto}");
+    }
+
+    /// Spec §7.3 (Fix round 1) — tração maior ⟹ mais força líquida ⟹
+    /// rolagem menor. Varia `static_thrust_factor` (parâmetro direto de
+    /// `takeoff_ground_roll_m`, entra em `thrust_ground_roll_n` como
+    /// multiplicador plano — spec §2.3), resto da config fixo. Falseável
+    /// sozinha: se o sinal do termo de tração em `F_net` for trocado
+    /// (tração SUBTRAÍDA em vez de SOMADA), tração maior passaria a dar
+    /// F_net MENOR ⟹ rolagem MAIOR — esta asserção quebra na hora.
+    #[test]
+    fn rolagem_de_decolagem_cai_estritamente_com_tracao_maior() {
+        let (engine, state, wing) = fixture_baseline();
+        let roll = |stf: f64| takeoff_ground_roll_m(
+            MTOW_PIN_KG, RHO_SL, &wing, &state, &engine, 0.0, 0.04, 0.5, stf);
+        let roll_tracao_baixa = roll(0.60);
+        let roll_tracao_alta  = roll(0.90);
+        assert!(roll_tracao_baixa > roll_tracao_alta,
+            "tração maior (static_thrust_factor maior) deveria dar rolagem ESTRITAMENTE menor: \
+             roll(stf=0.60)={roll_tracao_baixa}, roll(stf=0.90)={roll_tracao_alta}");
     }
 
     /// Spec §7.4 — se a sustentação superar o peso antes de V_LOF, o
