@@ -780,6 +780,30 @@ fn main() {
     // provada e testada), mas divergem ≈27,69% em V_LOF (medido: 2.324,69 N
     // vs 3.214,99 N no baseline real) — domínios de validade disjuntos
     // nunca conciliados.
+    //
+    // `old→new` (ciclo 12 → ciclo 13, tasks 2/3, spec §1/§2/§4 — fecha os
+    // backlogs #8 e #9). Os dois modelos do parágrafo anterior
+    // (`thrust_ground_roll_n` na rolagem, `thrust_available_n` com o
+    // polinômio `prop_efficiency` em cruzeiro/subida/teto) foram FUNDIDOS
+    // numa lei única `T(V) = FoM(J)·T_ideal_momentum(V, P_eixo)`, ancorada
+    // na tração estática de McCormick (J=0) e na eficiência de cruzeiro do
+    // polinômio apagado (J=j_design). `thrust_ground_roll_n`, `prop_efficiency`
+    // e `thrust_n` foram APAGADAS — a divergência de 27,69% em V_LOF deixou
+    // de existir por construção (backlog #8, RESOLVIDO). O polinômio
+    // apagado violava o teto físico de conservação de quantidade de
+    // movimento em 4 dos 8 pontos de operação medidos do baseline (backlog
+    // #9, RESOLVIDO) — dois deles alimentavam gates que PASSAVAM (Vx →
+    // gradiente CS 23.65; V_LOF → balanço de rotação, ver `fidelity.trim`).
+    // Consequência medida: a tração de voo cai nesses dois pontos (a lei
+    // nova é mais conservadora que o polinômio ali), então
+    // `climb_gradient_pct` cai de 12,451842% para 7,913277% e FLIPA de PASS
+    // para FAIL contra o mínimo de 8,3% (CS 23.65) — não é regressão do
+    // modelo, é o polinômio deixando de mascarar uma tração fisicamente
+    // impossível. `to_50ft_grass_m` sobe de 819,110978 m para 858,593425 m
+    // (segue REPROVANDO #23) porque o segmento de SUBIDA da decolagem
+    // (`V_climb = 1,20·Vs_to`, acima de `V_LOF`) opera na faixa de J onde a
+    // tração caiu mais. Ver spec `2026-08-15-ciclo13-tracao-unificada` §1.1
+    // e §11.1.
     fidelity.insert("performance".into(),
         "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de \
          decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na \
@@ -792,9 +816,11 @@ fn main() {
          (CD0 + trem estendido + incremento de flap + induzido) segmento a segmento — medido: \
          to_50ft_paved_m +54,92%, to_50ft_grass_m +73,00%, ldg_50ft_m +15,90%, ldg_50ft_grass_m \
          +16,12% no baseline real; checagens #23/#24 (pista de grama, 600 m) passam a REPROVAR \
-         (819,11 m e 646,44 m); descontinuidade de ≈27,69% entre o modelo de tração da rolagem \
-         (thrust_ground_roll_n) e o de cruzeiro/subida (thrust_available_n) em V_LOF, medida e \
-         registrada como backlog item 8, fora de escopo; a aproximação de pouso (segmento de \
+         (819,11 m e 646,44 m); `old→new` (ciclo 12 → ciclo 13, backlog item 8: RESOLVIDO) — a \
+         descontinuidade de ≈27,69% entre o modelo de tração da rolagem (thrust_ground_roll_n, \
+         APAGADA) e o de cruzeiro/subida (thrust_available_n) em V_LOF deixou de existir: os dois \
+         viraram a MESMA lei única T(V)=FoM(J)·T_ideal_momentum(V,P_eixo) (ver comentário acima); \
+         a aproximação de pouso (segmento de \
          APROXIMAÇÃO antes do toque, ângulo fixo de 3°, não L/D) continua sem consumir a polar, \
          por construção — não afetada por esta task; Vy/teto de serviço (climb_rate_ms) usam \
          referência de estol LIMPA \
@@ -868,19 +894,20 @@ fn main() {
          rolagem por integração; `git show 1e11998:aircraft_spec.json` (pré-ciclo-12) \
          tem `validation_status: \"PASS\"`, `violations: []`, `robustness.flips: []`. \
          A folga crítica de hélice em si (+0,00737 m) não \
-         mudou desde o ciclo 11. Achado companheiro (docs/backlog.md item 9, fora \
-         de escopo): `agents::propulsion::prop_efficiency` — o polinômio de \
-         eficiência da hélice usado por `thrust_available_n` (cruzeiro/subida/ \
-         teto) — devolve η(0) = 0,58 por construção, quando por definição \
-         η = T·V/P → 0 quando V → 0; medido no baseline real, `thrust_available_n` \
-         salta de 0 N em V=0,7 m/s (janela nula da guarda de thrust_n) para \
-         84.843,52 N em V=1,0 m/s — descontinuidade sem física por trás, sem \
-         consumidor de produção hoje porque nenhum código varre essa faixa \
-         estreita com este modelo (a rolagem usa thrust_ground_roll_n, quantidade \
-         de movimento com avanço, não este). Ver \
-         docstring de PropellerSpec::prop_clearance_critical_m e \
+         mudou desde o ciclo 11. `old→new` (ciclo 12 → ciclo 13, spec §2/§4, docs/backlog.md \
+         item 9: RESOLVIDO): o parágrafo anterior registrava `agents::propulsion::prop_efficiency` \
+         — o polinômio de eficiência da hélice usado por `thrust_available_n` (cruzeiro/subida/ \
+         teto) — devolvendo η(0) = 0,58 por construção (quando por definição η = T·V/P → 0 \
+         quando V → 0), com `thrust_available_n` saltando de 0 N em V=0,7 m/s (janela nula da \
+         guarda de thrust_n) para 84.843,52 N em V=1,0 m/s. O polinômio `prop_efficiency` e a \
+         função `thrust_n` foram APAGADAS; a lei única `T(V) = FoM(J)·T_ideal_momentum(V,P_eixo)` \
+         não tem ramo de velocidade nem guarda de V<1,0 — η → 0 quando V → 0 por CONSTRUÇÃO da \
+         cúbica de Rankine-Froude (u → K^(1/3) finito quando V → 0), então o salto e a janela \
+         nula deixaram de existir. Ver \
+         docstring de PropellerSpec::prop_clearance_critical_m, \
+         agents::propulsion::FigureOfMerit e \
          docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO \
-         ciclo 10; item 9, prop_efficiency, aberto ciclo 12). Requer mapa de \
+         ciclo 10; item 9, RESOLVIDO ciclo 13). Requer mapa de \
          desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \

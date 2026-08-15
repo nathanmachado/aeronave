@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.5
+# `aircraft_spec.json` — contrato do schema v5.6
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -843,6 +843,74 @@ documentação a ser corrigido, não um comportamento aceitável.
   - Nenhuma tolerância de teste foi afrouxada em nenhuma das mudanças
     acima — só pins re-centrados old→new com a MESMA tolerância. Ver
     `tests/generic_engine.rs` para os pins honestos completos.
+- **v5.6** (ciclo13-tracao-unificada, 2026-08-15 — bump **MINOR**, DUAS
+  exceções registradas, mesmo padrão da v5.2/v5.3/v5.4/v5.5). Fecha
+  `docs/backlog.md` #8 (unificar o modelo de tração), #9 (`prop_efficiency`
+  com η(0)=0,58 e janela nula), #15 (PRIORIDADE ALTA — inconsistência de
+  tração no balanço de rotação) e #16 (assimetria de superfície da
+  rotação).
+  - **Campos ADICIONADOS (MINOR puro)**: `trim.rotation_limit_pct_mac_paved`
+    e `trim.rotation_limit_pct_mac_grass` (ambos f64, %MAC) — o limite
+    dianteiro de rotação calculado nas DUAS superfícies (ver §4 abaixo).
+  - **Exceção registrada 1 — mudança de ORIGEM sem mudança de tipo**:
+    `propulsion.prop_efficiency` mantém nome, tipo (f64) e faixa, mas deixa
+    de vir do polinômio JavaProp `η = −0,15·J²+0,39·J+0,58` (APAGADO — via
+    `agents::propulsion::prop_efficiency`) e passa a ser DERIVADO por
+    inversão em forma fechada da lei única de tração `T(V) =
+    FoM(J)·T_ideal_momentum(V, P_eixo)` (`η = FoM(J)·V/u`, spec ciclo13
+    §5). No baseline real o valor é **idêntico por construção da âncora**
+    (`fom_design` foi retro-derivada exatamente para reproduzir
+    `η_poly(j_design)` no ponto de cruzeiro) — `prop_efficiency`
+    **0,7838814965676598 → 0,7838814965676598** (inalterado, guarda de
+    regressão `eficiencia_de_cruzeiro_reproduz_a_ancora_do_polinomio_
+    apagado` em `tests/generic_engine.rs`), então NENHUM consumidor de JSON
+    quebra. A mudança é de PROVENIÊNCIA, não de contrato.
+  - **Exceção registrada 2 — mudança de VALOR e de SIGNIFICADO**:
+    `trim.rotation_limit_pct_mac` (campo legado, nome/tipo/unidade
+    inalterados) passa a valer a superfície de OPERAÇÃO — **GRAMA**, a
+    mesma premissa que as checagens #23/#24 (decolagem/pouso) já usam —
+    em vez de PAVIMENTADO. Medido no baseline real: pavimentado
+    **16,380458137686837%** → grama **18,268251143882534%** MAC
+    (+1,887793 pp). Ver §4 (bloco `trim`) para a derivação completa.
+  - **Mecanismo físico (spec ciclo13 §1/§2)**: os dois modelos de tração
+    que o projeto mantinha desde sempre — `agents::performance::
+    thrust_ground_roll_n` (quantidade de movimento com velocidade de
+    avanço, usado só na rolagem) e `agents::performance::
+    thrust_available_n` (disco atuador estático + polinômio
+    `prop_efficiency(J)`, usado em cruzeiro/subida/teto/rotação) —
+    divergiam **27,69%** em `V_LOF` (backlog #8). O polinômio apagado
+    violava o teto físico de conservação de quantidade de movimento
+    (`T_real ≤ T_ideal`) em **4 dos 8** pontos de operação medidos do
+    baseline, **2** deles alimentando gates que PASSAVAM (`Vx` → gradiente
+    CS 23.65; `V_LOF` → balanço de rotação — backlog #9). Os dois modelos
+    foram fundidos numa lei única `T(V) = FoM(J)·T_ideal_momentum(V,
+    P_eixo)`, ancorada na tração estática de McCormick (`fom_static=0,75`,
+    J=0) e na eficiência de cruzeiro do polinômio apagado
+    (`fom_design=0,81597699924588796`, convergida por ponto fixo — ver
+    ERRATUM da spec §3.2.1 —, J=`j_design=1,87514348025711675`). O
+    resíduo de d'Alembert do balanço de rotação (backlog #15,
+    PRIORIDADE ALTA) — `(T_solo − T_momento)·z_eixo`, que chegava a
+    **−1.005,97 N·m (−6,816 pp de MAC)** no cenário governante — vai a
+    **ZERO por construção**, medido a **1e-12 relativo** nos 6 cenários de
+    CG.
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON):
+    `[performance].static_thrust_factor` foi REMOVIDO e substituído por
+    `[propeller].fom_static`/`fom_design`/`j_design` — carregar um TOML com
+    o campo antigo produz erro de migração NOMEADO (`check_static_thrust_
+    factor_migration`), não default silencioso.
+  - **Consequência de veredito** (não é regressão do modelo — é o
+    polinômio deixando de mascarar tração fisicamente impossível):
+    `climb_gradient_pct` cai de **12,451842% para 7,913277%** e FLIPA de
+    PASS para FAIL contra o mínimo de 8,3% (CS 23.65); a superfície de
+    grama na rotação faz o cenário 'Solo (piloto)' cruzar para violação
+    NOMINAL de envelope de CG. `validation_status` continua `"FAIL"`, com
+    **5** violações (era 4 antes deste ciclo). Ver `docs/backlog.md` #8/#9/
+    #15/#16 (RESOLVIDOS, com a medição completa) e spec
+    `docs/superpowers/specs/2026-08-15-ciclo13-tracao-unificada-design.md`
+    §1/§2/§3/§6/§7/§9/§11.1.
+  - Nenhuma tolerância de teste foi afrouxada — só pins re-centrados
+    old→new com a MESMA tolerância. Ver `tests/generic_engine.rs` para os
+    pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -888,13 +956,13 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | Bloco | Fidelidade típica (Task 6.1) | Análise posterior recomendada se `preliminary` |
 |---|---|---|
 | `wing` | semi-empirical (polar por build-up: CD0 por componente + Oswald empírico) | — |
-| `propulsion` | semi-empirical (curvas de catálogo do motor + BSFC paramétrico) | — |
+| `propulsion` | semi-empirical (curvas de catálogo do motor + BSFC paramétrico); **ciclo 13 (`old→new`, fecha `docs/backlog.md` #8/#9)**: `prop_efficiency` deixa de ser lido de um polinômio JavaProp calibrado só em J de cruzeiro (`η(0)=0,58` fisicamente errado, salto de 84.843,5 N em V=1,0 m/s) e passa a ser DERIVADO por inversão fechada da lei única de tração `T(V)=FoM(J)·T_ideal_momentum(V,P_eixo)` — mesmo valor no baseline por construção da âncora, mas a origem muda (ver v5.6 em §1) | — |
 | `geometry` | computed (derivado da configuração + `WeightBalanceAgent`) | — |
 | `empennage` | preliminary (coeficiente de volume, Raymer Tab. 6.4) | VLM/CFD para eficiência real de downwash/sidewash |
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
 | `weight` | **v4.5**: semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — as 7 massas estruturais (`weight.structural_masses`) vêm de equações semi-empíricas de componente, mas o hardware/instalação (aviônicos, bateria, cabos etc.) ainda é estimativa de catálogo/projeto, não massa medida; erros aqui se propagam para MTOW/estrutura/trem de pouso |
-| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação CONSIDERA o binário da linha de TRAÇÃO (braço `prop_axis_above_cg_m`, pós-cancelamento do termo inercial de d'Alembert — ciclo 10 task 2) **e**, desde o ciclo 12 task 4, os binários de atrito de rolamento (`μ_roll·N·h_cg`) e de arrasto de solo (`D·(h_cg−z_drag_above_cg_m)`) — `old→new`: a v5.3 os desprezava com uma estimativa de "≲2 pp de %MAC" que a medição real desta task DESMENTIU (≈4,40 pp medido, mais que o dobro, os dois termos somados são 29% MAIORES que o termo de tração já no balanço); ambos IMPLEMENTADOS neste ciclo, limite dianteiro de rotação recua de 13,3546% para ≈17,76% MAC no baseline real) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
-| `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); **ciclo 12 tasks 2/3 (`old→new`, fecha `docs/backlog.md` item 4)**: rolagem de solo de decolagem E de pouso passam do método ENERGÉTICO fechado (Raymer, `V_ref²/2gμ`, sem termo de arrasto por construção) para integração numérica consumindo a polar completa segmento a segmento — medido: `to_50ft_paved_m` +54,92%, `to_50ft_grass_m` +73,00%, `ldg_50ft_m` +15,90%, `ldg_50ft_grass_m` +16,12% no baseline real (ver v5.5 em §1); a aproximação de pouso (segmento antes do toque, ângulo fixo) SEGUE sem termo de arrasto por construção, não afetada; **ciclo 11 task 1**: `climb_gradient_pct` avaliado no piso LEGAL da norma (1,2·Vs_to, referência típica da CS 23.65 ≥1,2·Vs1), não mais no piso de varredura 1,05·Vs_to (viés otimista removido, `docs/backlog.md` item 2); **ciclo 11 task 2**: Vy/teto de serviço usam referência de estol LIMPA (`wing.cl_max_clean`) e polar limpa, janela de busca [1,05;2,00]·Vs com guarda de argmax interior (`docs/backlog.md` item 3) | Mapa de desempenho de hélice real do fabricante para refinar a polar de subida; ver `docs/backlog.md` item 8 (unificação do modelo de tração, descontinuidade ≈27,69% medida em V_LOF entre `thrust_ground_roll_n` e `thrust_available_n`) |
+| `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação CONSIDERA o binário da linha de TRAÇÃO (braço `prop_axis_above_cg_m`, pós-cancelamento do termo inercial de d'Alembert — ciclo 10 task 2) **e**, desde o ciclo 12 task 4, os binários de atrito de rolamento (`μ_roll·N·h_cg`) e de arrasto de solo (`D·(h_cg−z_drag_above_cg_m)`) — `old→new`: a v5.3 os desprezava com uma estimativa de "≲2 pp de %MAC" que a medição real desta task DESMENTIU (≈4,40 pp medido, mais que o dobro, os dois termos somados são 29% MAIORES que o termo de tração já no balanço); ambos IMPLEMENTADOS neste ciclo, limite dianteiro de rotação recua de 13,3546% para ≈17,76% MAC no baseline real); **ciclo 13 (`old→new`, fecha `docs/backlog.md` #15 PRIORIDADE ALTA e #16)**: o termo de MOMENTO da tração e os termos de SOLO passam a vir da MESMA lei única de tração (antes divergiam ≈27,69% em `Vr≡V_LOF`, indeterminação de ≈8,3 pp de %MAC) — resíduo de d'Alembert ZERO por construção, medido a 1e-12 relativo nos 6 cenários; o limite é calculado nas DUAS superfícies (`rotation_limit_pct_mac_paved`/`_grass`, campos novos) e o campo legado `rotation_limit_pct_mac` passa a valer GRAMA (superfície de operação, mesma premissa de #23/#24) — pavimentado 16,380458% → grama 18,268251% MAC (+1,888 pp) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
+| `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); **ciclo 12 tasks 2/3 (`old→new`, fecha `docs/backlog.md` item 4)**: rolagem de solo de decolagem E de pouso passam do método ENERGÉTICO fechado (Raymer, `V_ref²/2gμ`, sem termo de arrasto por construção) para integração numérica consumindo a polar completa segmento a segmento — medido: `to_50ft_paved_m` +54,92%, `to_50ft_grass_m` +73,00%, `ldg_50ft_m` +15,90%, `ldg_50ft_grass_m` +16,12% no baseline real (ver v5.5 em §1); a aproximação de pouso (segmento antes do toque, ângulo fixo) SEGUE sem termo de arrasto por construção, não afetada; **ciclo 11 task 1**: `climb_gradient_pct` avaliado no piso LEGAL da norma (1,2·Vs_to, referência típica da CS 23.65 ≥1,2·Vs1), não mais no piso de varredura 1,05·Vs_to (viés otimista removido, `docs/backlog.md` item 2); **ciclo 11 task 2**: Vy/teto de serviço usam referência de estol LIMPA (`wing.cl_max_clean`) e polar limpa, janela de busca [1,05;2,00]·Vs com guarda de argmax interior (`docs/backlog.md` item 3); **ciclo 13 (`old→new`, fecha `docs/backlog.md` #8/#9)**: a tração de rolagem (`thrust_ground_roll_n`) e a de cruzeiro/subida/teto (`thrust_available_n`, polinômio `prop_efficiency`) — que divergiam ≈27,69% em `V_LOF` — foram fundidas na lei única `T(V)=FoM(J)·T_ideal_momentum(V,P_eixo)`; o polinômio apagado violava o teto de conservação de quantidade de movimento em 4 dos 8 pontos de operação medidos, 2 alimentando gates que PASSAVAM (`Vx`→gradiente CS 23.65; `V_LOF`→rotação) — consequência medida: `climb_gradient_pct` **12,451842% → 7,913277%**, FLIPA de PASS para FAIL contra o mínimo de 8,3%; `to_50ft_grass_m` **819,110978 → 858,593425 m** (segue REPROVANDO #23) | Mapa de desempenho de hélice real do fabricante para refinar a polar de subida |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
 | `landing_gear` | preliminary (dimensionamento estático de cargas) | Análise dinâmica de pouso/afundamento |
@@ -985,7 +1053,7 @@ esperado na saída atual do pipeline**.
 | `bsfc_cruise_gkwh` | f64 | g/kWh | Consumo específico em cruzeiro |
 | `endurance_h` | f64 | h | **INFORMATIVO** — autonomia a tanque cheio/consumo constante; NÃO é o gate de autonomia do projeto (ver `mission.block_time_h`) |
 | `range_km` | f64 | km | **INFORMATIVO** — mesma ressalva; ver `mission.range_no_wind_km` |
-| `prop_efficiency` | f64 | — | Eficiência de hélice em cruzeiro |
+| `prop_efficiency` | f64 | — | Eficiência de hélice em cruzeiro. **`old→new` (v5.6, ciclo 13, exceção de schema registrada em §1)**: mesmo nome/tipo/faixa, mas muda de ORIGEM — antes lido do polinômio JavaProp `η=−0,15·J²+0,39·J+0,58` (APAGADO), agora DERIVADO por inversão fechada de `T(V)=FoM(J)·T_ideal_momentum(V,P_eixo)` (`η=FoM(J)·V/u`). No baseline real o valor é IDÊNTICO por construção da âncora (`0,7838814965676598`, inalterado) |
 | `thrust_cruise_n` | f64 | N | Tração em cruzeiro |
 | `p_req_cruise_kw` / `p_shaft_cruise_kw` | f64 | kW | Potência requerida / disponível em cruzeiro |
 | `cruise_feasible` | bool | — | `p_req ≤ p_shaft` no ponto de cruzeiro escolhido |
@@ -1176,8 +1244,10 @@ Ver a re-derivação completa (em português) na docstring de
 | Campo | Tipo | Unidade | Descrição |
 |---|---|---|---|
 | `flare_limit_pct_mac` | f64 | %MAC | Limite dianteiro de flare — número único, independe do peso |
-| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único, MÁXIMO dos limites por cenário (envoltória conservadora; DEPENDE do peso desde o ciclo 10 task 2, momento da linha de tração — ver acima) |
-| `rotation_margin_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Diagnóstico informativo POR CENÁRIO — margem de autoridade de rotação avaliada na CG/peso REAIS de cada cenário (essa sim varia por cenário) — NÃO usado para calcular `rotation_limit_pct_mac`/`inside_envelope` |
+| `rotation_limit_pct_mac` | f64 | %MAC | Limite dianteiro de rotação — número único, MÁXIMO dos limites por cenário (envoltória conservadora; DEPENDE do peso desde o ciclo 10 task 2, momento da linha de tração — ver acima). **`old→new` (v5.6, ciclo 13, exceção de schema registrada em §1)**: mesmo nome/tipo/unidade, mas muda de VALOR **e** de SIGNIFICADO — passa de valer a superfície PAVIMENTADA para valer a de OPERAÇÃO (**GRAMA**, mesma premissa das checagens #23/#24). É idêntico a `rotation_limit_pct_mac_grass` |
+| `rotation_limit_pct_mac_paved` | f64 (**novo v5.6**) | %MAC | Limite dianteiro de rotação avaliado com `[performance].mu_roll_paved` — publicado a título informativo/comparativo, NÃO é o que o gate de envelope de CG usa |
+| `rotation_limit_pct_mac_grass` | f64 (**novo v5.6**) | %MAC | Limite dianteiro de rotação avaliado com `[performance].mu_roll_grass` — a superfície de OPERAÇÃO (spec ciclo13 §7); idêntico a `rotation_limit_pct_mac` |
+| `rotation_margin_per_scenario` | array de objeto (`ScenarioTrimLimit`) | — | Diagnóstico informativo POR CENÁRIO — margem de autoridade de rotação avaliada na CG/peso REAIS de cada cenário (essa sim varia por cenário), agora sobre a superfície de GRAMA (ciclo 13) — NÃO usado para calcular `rotation_limit_pct_mac`/`inside_envelope` |
 | `governing` | string (`"flare"` \| `"rotacao"`) | — | Qual dos dois limites ÚNICOS é maior (mais restritivo) |
 | `cl_h_available` | f64 | — | CL_h disponível — `-cl_h_max_down·(1−trim_margin)` |
 | `sensitivity` | objeto (`TrimSensitivity`) | — | Limites de flare recomputados a `cl_h_max_down ± 0,05` E a `elevator_deflection_max_deg ± 2°` |
@@ -1224,24 +1294,36 @@ palpite de config (0,95, inalterado desde a task refino-ciclo2).
 **13,354637% MAC** (ciclo 10, task 2, momento da linha de tração,
 +4,82 pp) → **17,757974% MAC** (ciclo 12, task 4, termos de solo,
 +4,403 pp — mais que o dobro da estimativa "≲2 pp" que o ciclo 10
-registrava) — o valor publicado HOJE no baseline real. A ROTAÇÃO CONTINUA
+registrava) → **18,268251% MAC** (ciclo 13, superfície de GRAMA na
+rotação — o valor pavimentado do ciclo 12 era 16,380458% MAC, +1,888 pp
+ao trocar de superfície; ver `rotation_limit_pct_mac_paved`/`_grass`
+acima) — o valor publicado HOJE no baseline real. A ROTAÇÃO CONTINUA
 governando o limite dianteiro (mais restritiva que a FLARE) — não mais a
 ≈10,95% MAC intermediária de quando só a autoridade calculada (sem a
 linha de tração) estava em vigor — e continua ATRÁS do limite traseiro
 (**43,460036% MAC**, antes citado como "≈43,46%"): **envelope de CG
-FECHADO**.
+FECHADO** (o limite dianteiro segue atrás do traseiro). `old→new`
+(ciclo 12 → ciclo 13): o limite dianteiro subiu (recuou) o bastante para
+que o CG NOMINAL do cenário 'Solo (piloto)' (17,758487% MAC, invariante a
+esta mudança) fique À FRENTE dele — o cenário cruza para **violação
+NOMINAL** de envelope de CG (não mais só sob perturbação de robustez, ver
+`robustness.flips` abaixo). Não é regressão: é a MESMA superfície física
+da decolagem, agora avaliada de forma consistente nos dois lugares que a
+medem (rotação e checagens #23/#24).
 
 As margens de autoridade de rotação por cenário
 (`trim.rotation_margin_per_scenario` no JSON) também mudaram:
 **≈+26% a +207%** (refino-ciclo2, todos os 6 cenários folgados) →
-**+0,0011863088529595282% a +100,57072320379189%** (HOJE, ciclo 12) — a
-margem do cenário mais apertado ('Solo (piloto)') caiu de folga ampla
-para **essencialmente zero**: +0,0011863088529595282% de momento,
-equivalente a ≈0,000513 pp de %MAC (≈6,4 micrômetros de CG) — ver
-`docs/backlog.md` (entrada "Achados da task 4 — recuo do limite de
-rotação e margem residual") para o registro completo desta margem,
-incluindo a checagem de estabilidade numérica (tolerância de convergência
-0,5 kg → 1e-9 kg muda o resultado só no 9º/10º dígito).
+**+0,0011863088529595282% a +100,57072320379189%** (ciclo 12) →
+**−1,179429677656323% a +95,86217358293354%** (ciclo 13) — a margem do
+cenário mais apertado ('Solo (piloto)') cruzou de essencialmente zero
+(+0,0011863088529595282%, ciclo 12) para NEGATIVA (−1,179429677656323%,
+ciclo 13): déficit de autoridade de rotação nominal, consistente com a
+violação de envelope de CG acima. Ver `docs/backlog.md` (entrada "Achados
+da task 4 — recuo do limite de rotação e margem residual", ciclo 12, e a
+entrada #15/#16 RESOLVIDAS, ciclo 13) para o registro completo, incluindo
+a checagem de estabilidade numérica do ciclo 12 (tolerância de
+convergência 0,5 kg → 1e-9 kg muda o resultado só no 9º/10º dígito).
 
 A **flare** também mudou desde refino-ciclo2: **≈−16,29% MAC** (então) →
 **−8,818504% MAC** (HOJE) — segue NEGATIVA (fisicamente "antes do bordo

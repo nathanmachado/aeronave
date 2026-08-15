@@ -1499,7 +1499,7 @@ pub struct ElectricalSpec {
 /// MESMA tolerância. Ver `docs/aircraft_spec.schema.md` §5 e
 /// `tests/schema_v4.rs`/`tests/generic_engine.rs` para os pins honestos
 /// completos.
-pub const SCHEMA_VERSION: &str = "5.5";
+pub const SCHEMA_VERSION: &str = "5.6";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
