@@ -2060,14 +2060,25 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
 /// dianteiro de rotação ENTRE OS EXTREMOS DE PESO dos cenários de carga,
 /// com a tração avaliada na `Vr(W)` de cada um.
 ///
-/// Resultado MEDIDO: **≈1,4621 pp de MAC** entre o cenário mais leve
-/// (1.207,5 kg → 13,3546% MAC) e o mais pesado (1.557,5 kg → 11,8926%).
-/// É pequeno em valor absoluto, mas **não é ruído** — é ~29× a tolerância
-/// dos pins de `agents::trim_authority` (±0,05 pp), o que descarta
-/// tratá-lo como "quase-invariante" e manter a prova antiga de
-/// cancelamento com uma tolerância medida. Por isso a docstring de
-/// `rotation_fwd_limit_m` foi re-derivada e o limite único publicado virou
-/// o MÁXIMO sobre os cenários, não uma constante.
+/// Resultado MEDIDO (ciclo 10): **≈1,4621 pp de MAC** entre o cenário mais
+/// leve (1.207,5 kg → 13,3546% MAC NAQUELE ciclo) e o mais pesado
+/// (1.557,5 kg → 11,8926%). É pequeno em valor absoluto, mas **não é
+/// ruído** — é ~29× a tolerância dos pins de `agents::trim_authority`
+/// (±0,05 pp), o que descarta tratá-lo como "quase-invariante" e manter a
+/// prova antiga de cancelamento com uma tolerância medida. Por isso a
+/// docstring de `rotation_fwd_limit_m` foi re-derivada e o limite único
+/// publicado virou o MÁXIMO sobre os cenários, não uma constante.
+///
+/// `old→new` (ciclo 10 → ciclo 12, task 4): os termos de SOLO recuam os
+/// DOIS extremos pela MESMA quantidade (≈+4,40 pp) — leve:
+/// 13,3546%→**17,7580%**, pesado: 11,8926%→**16,2959%** — porque `M_solo`
+/// é, como a parte puramente aerodinâmica (e ao contrário do termo de
+/// tração), PROPORCIONAL a `W` (`q_r ∝ W`, e `μ_roll`/`cd_roll` são
+/// constantes de configuração, não funções de `W`): a VARIAÇÃO entre os
+/// extremos fica **EXATAMENTE INALTERADA em 1,4621 pp** — confirmação
+/// limpa de que só o termo de tração (não-proporcional a `W`) é a origem
+/// física da morte da invariância, mesmo com os termos de solo somados.
+/// Tolerância do pin abaixo INALTERADA (±50% de 1,4621 pp).
 ///
 /// (Com o braço ERRADO sobre o solo, de uma versão intermediária desta
 /// task, esta mesma variação valia ≈8,2 pp — 5,6× maior, na mesma
@@ -2081,6 +2092,7 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
 /// já checa com `T` fixa, aqui com `T = T(Vr(W))` variando junto.
 #[test]
 fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
+    use aeronave::agents::performance::cd_ground_roll;
     use aeronave::agents::trim_authority::{
         rotation_fwd_limit_m, thrust_at_rotation_n,
     };
@@ -2103,6 +2115,17 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
     // corrida acelerada — ver `agents::trim_authority::
     // rotation_available_moment_nm`).
     let z_axis = cfg.propeller.prop_axis_above_cg_m;
+    // Ciclo 12 (task 4): termos de SOLO — MESMOS valores de produção que
+    // `TrimAuthorityAgent::run` usa (constantes através do peso, como
+    // `z_axis` acima). `cd_roll` reusa `agents::performance::
+    // cd_ground_roll`, fonte única de CD de solo (Task 2), com o flap
+    // PARCIAL de decolagem.
+    let mu_roll = cfg.performance.mu_roll_paved;
+    let h_cg = cfg.gear.h_cg_ground_m;
+    let cd_roll = cd_ground_roll(
+        wing, &sized.state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
+    );
+    let z_drag_above_cg = cfg.wing.z_drag_above_cg_m;
 
     let limite_pct_para = |mass_kg: f64| -> f64 {
         let w_n = mass_kg * G;
@@ -2115,6 +2138,7 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
             sized.trim.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail,
             cfg.gear.x_main_m, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
             cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac, t_rot, z_axis,
+            mu_roll, h_cg, cd_roll, z_drag_above_cg,
         );
         cg_pct_mac(x, wb.mac_le_x_m, mac)
     };

@@ -337,16 +337,49 @@ pub fn thrust_at_rotation_n(
 ///              = − T·Δz  − D·h_cg − μN·h_cg
 ///
 /// A porção `h_cg` do braço da tração **CANCELA EXATAMENTE** contra o termo
-/// inercial. Sobra `−T·Δz` (o braço sobre o CG) mais dois termos de SOLO,
-/// deliberadamente DESPREZADOS neste modelo:
-///   - `−μ·N·h_cg` (atrito de rolagem no contato), e
-///   - `−D·h_cg` — mais precisamente `−D·(h_cg − h_D)`, já que o arrasto
-///     age no centro aerodinâmico de arrasto, não no CG; `h_D ≈ h_cg` numa
-///     célula convencional, o que encolhe ainda mais o termo.
-/// Magnitude estimada dos dois juntos no baseline: **≲2 pp de MAC** no
-/// limite dianteiro — uma ordem de grandeza abaixo do termo mantido, e
-/// ambos vão na mesma direção (nariz-abaixo), ou seja, desprezá-los é
-/// ANTI-conservador por ≲2 pp. Registrado aqui, não escondido.
+/// inercial. Sobra `−T·Δz` (o braço sobre o CG) mais dois termos de SOLO:
+///   - `−μ_roll·N·h_cg` (atrito de rolagem no contato), e
+///   - `−D·(h_cg − h_D)`, já que o arrasto age no centro aerodinâmico de
+///     arrasto, não no CG (`h_D = [wing].z_drag_above_cg_m`, default 0,0 —
+///     braço CHEIO `h_cg`, caso CONSERVADOR).
+///
+/// ─── ESTIMATIVA `old→new` (ciclo 10 → ciclo 12, task 4) ────────────────
+///
+/// O ciclo 10 declarava os dois termos acima "deliberadamente DESPREZADOS",
+/// com magnitude estimada em "**≲2 pp de MAC**" — uma ordem de grandeza
+/// abaixo do termo de tração mantido. **Essa estimativa estava ERRADA.**
+/// Medição de referência com as constantes REAIS do pipeline (`V_r =
+/// 35,361 m/s`, `q_r = 765,87 Pa`, `L_g = 5.437,7 N`, `N = W − L_g =
+/// 9.639,5 N`, `D = 513,8 N`, `W = 15.077,1 N`, `MAC = 1,24632 m`,
+/// `μ_roll = [performance].mu_roll_paved = 0,04`, `h_cg =
+/// [gear].h_cg_ground_m = 0,92 m`, `h_D = 0,0`):
+///
+///   μ_roll·N·h_cg       = 0,04 · 9.639,5 · 0,92        ≈   354,7 N·m
+///   D·(h_cg − h_D)       = 513,8 · (0,92 − 0,0)          ≈   472,7 N·m
+///   total (M_solo)                                       ≈   827,4 N·m
+///
+/// contra `T(Vr)·Δz = 3.197,2 · 0,20 ≈ 639,4 N·m` do termo de tração já no
+/// balanço. **Os dois termos "desprezáveis" juntos são 29% MAIORES que o
+/// termo mantido**, não uma ordem de grandeza menores. Deslocamento medido
+/// do limite dianteiro: `827,4/15.077,1 ≈ 0,05488 m`, ou **≈4,40 pp de
+/// MAC** — mais que o DOBRO da estimativa do ciclo 10 — levando o limite
+/// publicado de 13,3546% para ≈17,76% de MAC (baseline real).
+///
+/// Por que a estimativa do ciclo 10 ficou baixa: foi feita SEM `CD_roll`
+/// explícito (o arrasto de solo com trem estendido e flap parcial não
+/// existia como termo neste modelo até o ciclo 12, task 2 —
+/// `agents::performance::cd_ground_roll`) e SEM campo de `μ_roll` (não
+/// havia `[performance].mu_roll_paved`/`mu_roll_grass` — ciclo 12, spec
+/// §4). Sem esses dois números medíveis, a estimativa foi um palpite
+/// qualitativo ("h_D ≈ h_cg encolhe ainda mais o termo", "uma ordem de
+/// grandeza abaixo"). Isso explica a origem do erro, mas não o desculpa: o
+/// texto do ciclo 10 afirmava um NÚMERO («≲2 pp») que esta medição
+/// desmente — por isso esta seção é reescrita com o valor medido, não
+/// silenciosamente corrigida.
+///
+/// Ambos os termos vão na mesma direção (nariz-abaixo) do termo de tração —
+/// desprezá-los, como o ciclo 10 fazia, era ANTI-conservador por ≈4,40 pp,
+/// não ≲2 pp. Ambos IMPLEMENTADOS neste ciclo (spec §6, ciclo 12 task 4).
 ///
 /// Referência: balanço de rotação padrão de Gudmundsson ("General Aviation
 /// Aircraft Design", cap. 16/17 — rotação de decolagem) e Roskam
@@ -367,6 +400,30 @@ pub fn thrust_at_rotation_n(
 /// (`z_axis_m` maior) ⟹ MENOS momento disponível ⟹ limite dianteiro de
 /// rotação RECUA (`x_cg_rot` MAIOR); tração maior ⟹ idem. Passar
 /// `thrust_rot_n = 0,0` reproduz EXATAMENTE o modelo pré-ciclo-10.
+///
+/// ─── TERMOS DE SOLO (ciclo 12, task 4) ──────────────────────────────────
+///
+/// `mu_roll`, `h_cg_m`, `cd_roll` e `z_drag_above_cg_m` implementam os dois
+/// termos derivados acima (`M_solo = −μ_roll·N·h_cg − D·(h_cg −
+/// z_drag_above_cg_m)`, com `N = max(0, weight_n − l_g)` e `D = q_r·
+/// s_w_m2·cd_roll`). AMBOS nariz-ABAIXO — SUBTRAEM do momento disponível,
+/// mesmo sentido do termo de tração. `cd_roll` é
+/// `agents::performance::cd_ground_roll(wing, state, cl_ground_rotation,
+/// wing.cd0_flap_to_extra)` — flap PARCIAL de DECOLAGEM (a rotação É uma
+/// manobra de decolagem), calculado pelo chamador (`TrimAuthorityAgent::
+/// run`) e passado como escalar para não duplicar a soma do CD aqui.
+/// `h_cg_m` é `[gear].h_cg_ground_m`; `z_drag_above_cg_m` é
+/// `[wing].z_drag_above_cg_m` (default 0,0, caso CONSERVADOR — braço CHEIO).
+///
+/// Properties ESTRITAS cobertas nos testes: `mu_roll` maior ⟹ limite
+/// RECUA; `h_cg_m` maior ⟹ RECUA (mais braço para o mesmo atrito); `D`
+/// maior (via `cd_roll`) ⟹ RECUA; `z_drag_above_cg_m` maior ⟹ braço LÍQUIDO
+/// `(h_cg_m − z_drag_above_cg_m)` MENOR ⟹ limite AVANÇA (sentido OPOSTO aos
+/// três anteriores — é o único dos quatro parâmetros novos que avança o
+/// limite quando aumenta). Passar `mu_roll = 0,0` e `cd_roll = 0,0`
+/// reproduz EXATAMENTE o modelo pré-ciclo-12 (mesmo padrão do
+/// `thrust_rot_n = 0,0` acima, que reproduz o pré-ciclo-10) — prova de que
+/// os termos são ADITIVOS.
 ///
 /// `CL_max_TO` (ciclo 7, task 1) é o CLmax do flap PARCIAL de DECOLAGEM
 /// (`WingSpec::cl_max_to` = `cl_max_clean + to_flap_fraction·(cl_max_flaps
@@ -407,15 +464,26 @@ pub fn rotation_available_moment_nm(
     mac_m: f64,
     thrust_rot_n: f64,
     z_axis_m: f64,
+    mu_roll: f64,
+    h_cg_m: f64,
+    cd_roll: f64,
+    z_drag_above_cg_m: f64,
 ) -> f64 {
     let q_r = VR_OVER_VS0 * VR_OVER_VS0 * weight_n / (s_w_m2 * cl_max_to);
     let f_h = q_r * s_h_m2 * eta_h * cl_h_max_down * (1.0 - trim_margin);
     let l_g = q_r * s_w_m2 * cl_ground_rotation;
     let cm_to = cm_ac + to_flap_fraction * cm_flap_delta;
+    // Ciclo 12 (task 4) — termos de SOLO, ambos nariz-ABAIXO (ver "TERMOS
+    // DE SOLO" acima). `N` travado em zero: se a sustentação de solo já
+    // superar o peso, o atrito não pode virar negativo.
+    let n_ground = (weight_n - l_g).max(0.0);
+    let d_roll_n = q_r * s_w_m2 * cd_roll;
+    let m_solo = -mu_roll * n_ground * h_cg_m - d_roll_n * (h_cg_m - z_drag_above_cg_m);
     f_h * (x_ac_tail_m - x_main_m)
         + l_g * (x_main_m - x_ac_wing_m)
         + cm_to * q_r * s_w_m2 * mac_m
         - thrust_rot_n * z_axis_m
+        + m_solo
 }
 
 /// Limite dianteiro de rotação (m do datum, NÃO %MAC) — balanço de
@@ -499,11 +567,15 @@ pub fn rotation_fwd_limit_m(
     mac_m: f64,
     thrust_rot_n: f64,
     z_axis_m: f64,
+    mu_roll: f64,
+    h_cg_m: f64,
+    cd_roll: f64,
+    z_drag_above_cg_m: f64,
 ) -> f64 {
     let moment_nm = rotation_available_moment_nm(
         weight_n, s_w_m2, cl_max_to, s_h_m2, eta_h, cl_h_max_down, trim_margin, x_ac_tail_m,
         x_main_m, cl_ground_rotation, x_ac_wing_m, cm_ac, to_flap_fraction, cm_flap_delta,
-        mac_m, thrust_rot_n, z_axis_m,
+        mac_m, thrust_rot_n, z_axis_m, mu_roll, h_cg_m, cd_roll, z_drag_above_cg_m,
     );
     x_main_m - moment_nm / weight_n
 }
@@ -732,6 +804,25 @@ impl TrimAuthorityAgent {
         // `rotation_available_moment_nm`.
         let z_axis = cfg.propeller.prop_axis_above_cg_m;
 
+        // Termos de SOLO do balanço de rotação (ciclo 12, task 4 — ver
+        // "TERMOS DE SOLO" na docstring de `rotation_available_moment_nm`).
+        // `mu_roll_ground` usa a superfície PAVIMENTADA
+        // (`[performance].mu_roll_paved`) — a rotação é avaliada como um
+        // evento único de decolagem, não por par pavimentado/grama como as
+        // distâncias de `agents::performance`; pavimentada é a superfície
+        // menos conservadora das duas, mesma lógica de "menos pessimista"
+        // já usada para o rpm de tração em `thrust_at_rotation_n`.
+        // `cd_roll_ground` reusa `agents::performance::cd_ground_roll` —
+        // MESMA fonte única de CD de solo que a rolagem de decolagem (Task
+        // 2) — com o flap PARCIAL de decolagem (`wing.cd0_flap_to_extra`),
+        // não o cheio de pouso: a rotação É uma manobra de decolagem.
+        let mu_roll_ground = cfg.performance.mu_roll_paved;
+        let h_cg_ground = cfg.gear.h_cg_ground_m;
+        let cd_roll_ground = crate::agents::performance::cd_ground_roll(
+            wing, state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
+        );
+        let z_drag_above_cg = cfg.wing.z_drag_above_cg_m;
+
         // Limite ÚNICO de rotação (ciclo 10, task 2) = **MÁXIMO** (o mais
         // restritivo) dos limites avaliados no peso de CADA cenário. Até o
         // ciclo 9 o limite era INVARIANTE ao peso e essa agregação não
@@ -769,6 +860,7 @@ impl TrimAuthorityAgent {
                 cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
                 cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac,
                 t_rot, z_axis,
+                mu_roll_ground, h_cg_ground, cd_roll_ground, z_drag_above_cg,
             )
         };
         let x_rot = wb.scenarios.iter()
@@ -795,6 +887,7 @@ impl TrimAuthorityAgent {
                 cfg.gear.x_main_m, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
                 cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac,
                 thrust_rot_n, z_axis,
+                mu_roll_ground, h_cg_ground, cd_roll_ground, z_drag_above_cg,
             );
             let required = w_n * (cfg.gear.x_main_m - sc.x_cg_m);
             let margin_pct = (available - required) / required * 100.0;
@@ -1065,7 +1158,7 @@ mod tests {
 
         let x_rot = rotation_fwd_limit_m(
             W_AERO_TESTE_N, s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.5, -0.30, mac, 0.0, 0.0,
+            -0.008, 0.5, -0.30, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
         println!("x_cg_rot = {x_rot:.4} m (esperado ≈3.3976 m)");
         assert!((x_rot - 3.3976).abs() < 0.02, "x_cg_rot = {x_rot:.4} (esperado ≈3.3976 ±0.02m)");
@@ -1103,7 +1196,7 @@ mod tests {
             let w_n = mass_kg * G;
             let m = rotation_available_moment_nm(
                 w_n, s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-                -0.008, 0.5, -0.30, mac, 0.0, 0.0,
+                -0.008, 0.5, -0.30, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             );
             x_main - m / w_n
         };
@@ -1158,11 +1251,11 @@ mod tests {
 
         let m_sem = rotation_available_moment_nm(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, 0.0, 0.0,
+            -0.008, 0.35, -0.30, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
         let m_com = rotation_available_moment_nm(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, t_n, z_axis,
+            -0.008, 0.35, -0.30, mac, t_n, z_axis, 0.0, 0.0, 0.0, 0.0,
         );
         println!("M_sem={m_sem:.4} N·m  M_com={m_com:.4} N·m  Δ={:.4} N·m", m_com - m_sem);
         assert!(((m_sem - m_com) - m_t_esperado).abs() < 1e-9,
@@ -1171,11 +1264,11 @@ mod tests {
 
         let x_sem = rotation_fwd_limit_m(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, 0.0, 0.0,
+            -0.008, 0.35, -0.30, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
         let x_com = rotation_fwd_limit_m(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, t_n, z_axis,
+            -0.008, 0.35, -0.30, mac, t_n, z_axis, 0.0, 0.0, 0.0, 0.0,
         );
         let delta_esperado_m = m_t_esperado / w_n;
         println!("x_sem={x_sem:.6}m  x_com={x_com:.6}m  Δ={:.6}m (esperado {delta_esperado_m:.6}m)",
@@ -1205,7 +1298,7 @@ mod tests {
 
         let x_para_z = |z: f64| rotation_fwd_limit_m(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, 4_000.0, z,
+            -0.008, 0.35, -0.30, mac, 4_000.0, z, 0.0, 0.0, 0.0, 0.0,
         );
 
         let x_baixo = x_para_z(Z_TESTE_ARBITRARIO_M);          // braço arbitrário
@@ -1231,7 +1324,7 @@ mod tests {
 
         let x_para_t = |t: f64| rotation_fwd_limit_m(
             w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.35, -0.30, mac, t, Z_TESTE_ARBITRARIO_M,
+            -0.008, 0.35, -0.30, mac, t, Z_TESTE_ARBITRARIO_M, 0.0, 0.0, 0.0, 0.0,
         );
 
         let x_t3000 = x_para_t(3_000.0);
@@ -1279,6 +1372,7 @@ mod tests {
         let x_para_w = |mass_kg: f64| rotation_fwd_limit_m(
             mass_kg * G, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5,
             x_ac_wing, -0.008, 0.35, -0.30, mac, 4_000.0, Z_TESTE_ARBITRARIO_M,
+            0.0, 0.0, 0.0, 0.0,
         );
 
         let x_leve = x_para_w(1193.4);
@@ -1335,7 +1429,7 @@ mod tests {
 
         let x_fechado = rotation_fwd_limit_m(
             w_n, s_w, cl_max_to, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.008, 0.5, -0.30, mac, t_rot, z_axis,
+            -0.008, 0.5, -0.30, mac, t_rot, z_axis, 0.0, 0.0, 0.0, 0.0,
         );
 
         println!("independente={x_independente:.9}m  fechado={x_fechado:.9}m");
@@ -1347,6 +1441,119 @@ mod tests {
         // mão aqui (mesma fórmula, caminho separado).
         let vr_fn = rotation_speed_ms(w_n, RHO_SL, s_w, cl_max_to);
         assert!((vr_fn - vr).abs() < 1e-12, "Vr(fn)={vr_fn:.12} vs Vr(mão)={vr:.12}");
+    }
+
+    // ─── CICLO 12 (task 4): termos de SOLO (atrito + arrasto) ─────────────
+    //
+    // Ver "TERMOS DE SOLO" na docstring de `rotation_available_moment_nm`
+    // para a derivação: `M_solo = −μ_roll·N·h_cg − D·(h_cg −
+    // z_drag_above_cg_m)`, `N = max(0, W − L_g)`, `D = q_r·S_w·cd_roll`,
+    // ambos nariz-ABAIXO.
+
+    /// Braço CG↔solo ARBITRÁRIO de teste — mesma disciplina de
+    /// `Z_TESTE_ARBITRARIO_M` (NÃO é o `[gear].h_cg_ground_m` de produção,
+    /// ≈0,92 m; só um valor de sensibilidade para as properties abaixo).
+    const H_CG: f64 = 0.90;
+
+    /// Cópia LOCAL, escrita à mão, do balanço PRÉ-ciclo-12 (sem os termos de
+    /// solo — bit-a-bit igual ao corpo de `rotation_available_moment_nm`
+    /// antes desta task). Dá valor à prova de aditividade logo abaixo: se
+    /// `rotation_available_moment_nm(..., mu_roll=0, h_cg, cd_roll=0,
+    /// z_drag=0)` não bater EXATAMENTE com esta cópia independente, os
+    /// termos novos mexeram em algo que já estava correto.
+    #[allow(clippy::too_many_arguments)]
+    fn momento_disponivel_pre_ciclo12(
+        weight_n: f64, s_w_m2: f64, cl_max_to: f64, s_h_m2: f64, eta_h: f64,
+        cl_h_max_down: f64, trim_margin: f64, x_ac_tail_m: f64, x_main_m: f64,
+        cl_ground_rotation: f64, x_ac_wing_m: f64, cm_ac: f64, to_flap_fraction: f64,
+        cm_flap_delta: f64, mac_m: f64, thrust_rot_n: f64, z_axis_m: f64,
+    ) -> f64 {
+        let q_r = VR_OVER_VS0 * VR_OVER_VS0 * weight_n / (s_w_m2 * cl_max_to);
+        let f_h = q_r * s_h_m2 * eta_h * cl_h_max_down * (1.0 - trim_margin);
+        let l_g = q_r * s_w_m2 * cl_ground_rotation;
+        let cm_to = cm_ac + to_flap_fraction * cm_flap_delta;
+        f_h * (x_ac_tail_m - x_main_m)
+            + l_g * (x_main_m - x_ac_wing_m)
+            + cm_to * q_r * s_w_m2 * mac_m
+            - thrust_rot_n * z_axis_m
+    }
+
+    /// Spec §6.3 — passar `mu_roll = 0,0` e `cd_roll = 0,0` reproduz
+    /// EXATAMENTE o modelo pré-ciclo-12. Mesmo padrão do ciclo 10
+    /// (`thrust_rot_n = 0,0` reproduzia o pré-ciclo-10 — ver
+    /// `momento_da_linha_de_tracao_hand_check_com_literais`) — é a prova de
+    /// que os termos novos são ADITIVOS e não mexeram no que já estava
+    /// certo.
+    #[test]
+    fn termos_de_solo_nulos_reproduzem_o_modelo_pre_ciclo_12() {
+        let mac = 1.2463161361039574;
+        let s_h = 2.5809129985152786;
+        let s_w = 14.2;
+        let x_ac_wing = 2.90 + 0.25 * mac;
+        let x_ac_tail = 2.90 + 0.25 * mac + 4.80;
+        let x_main = 3.66;
+        let w_n = 1400.0 * G;
+
+        let m_novo = rotation_available_moment_nm(
+            w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
+            -0.008, 0.35, -0.30, mac, 4_000.0, Z_TESTE_ARBITRARIO_M,
+            0.0 /*mu_roll*/, H_CG, 0.0 /*cd_roll*/, 0.0,
+        );
+        let m_antigo = momento_disponivel_pre_ciclo12(
+            w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
+            -0.008, 0.35, -0.30, mac, 4_000.0, Z_TESTE_ARBITRARIO_M,
+        );
+        println!("m_novo={m_novo:.9} N·m  m_antigo={m_antigo:.9} N·m");
+        assert!((m_novo - m_antigo).abs() < 1e-9,
+            "com mu_roll=0 e cd_roll=0 o momento disponível deveria ser IDÊNTICO ao modelo \
+             pré-ciclo-12: novo={m_novo:.9} antigo={m_antigo:.9}");
+    }
+
+    /// Spec §6.3 — os dois termos NOVOS são nariz-ABAIXO: SUBTRAEM do
+    /// momento disponível, o limite dianteiro RECUA (percentual de MAC
+    /// MAIOR — aqui medido em metros do datum, mesma direção). Falseável em
+    /// cada variável separadamente: `mu_roll` maior ⟹ recua; `h_cg` maior
+    /// ⟹ recua (mais); `z_drag_above_cg_m` maior ⟹ braço LÍQUIDO
+    /// `(h_cg−z_drag_above_cg_m)` MENOR ⟹ limite AVANÇA (sentido OPOSTO aos
+    /// dois anteriores).
+    #[test]
+    fn termos_de_solo_recuam_o_limite_dianteiro_de_rotacao() {
+        let mac = 1.2463161361039574;
+        let s_h = 2.5809129985152786;
+        let s_w = 14.2;
+        let x_ac_wing = 2.90 + 0.25 * mac;
+        let x_ac_tail = 2.90 + 0.25 * mac + 4.80;
+        let x_main = 3.66;
+        let w_n = 1400.0 * G;
+        let cd_roll_teste = 0.08; // arrasto de solo arbitrário, NÃO nulo —
+                                  // sem ele o termo de arrasto desaparece e
+                                  // a property de z_drag_above_cg_m não tem
+                                  // o que medir.
+
+        let limite_rot = |mu_roll: f64, h_cg: f64, z_drag: f64| rotation_fwd_limit_m(
+            w_n, s_w, 1.6775, s_h, 0.90, 1.0577, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
+            -0.008, 0.35, -0.30, mac, 4_000.0, Z_TESTE_ARBITRARIO_M,
+            mu_roll, h_cg, cd_roll_teste, z_drag,
+        );
+
+        let base = limite_rot(0.00, H_CG, 0.0);
+        let com_atrito = limite_rot(0.04, H_CG, 0.0);
+        let com_h_cg_maior = limite_rot(0.04, H_CG * 1.5, 0.0);
+        let com_z_drag = limite_rot(0.04, H_CG, 0.10);
+        println!("base={base:.6}m  com_atrito={com_atrito:.6}m  \
+                  com_h_cg_maior={com_h_cg_maior:.6}m  com_z_drag={com_z_drag:.6}m");
+
+        assert!(com_atrito > base,
+            "atrito de solo (mu_roll: 0,00→0,04) deveria RECUAR o limite dianteiro (x maior): \
+             base={base:.6}m com_atrito={com_atrito:.6}m");
+        assert!(com_h_cg_maior > com_atrito,
+            "CG mais alto (h_cg: {H_CG:.2}→{:.2}) deveria RECUAR ainda mais o limite (braço \
+             maior para o MESMO atrito/arrasto): com_atrito={com_atrito:.6}m \
+             com_h_cg_maior={com_h_cg_maior:.6}m", H_CG * 1.5);
+        assert!(com_z_drag < com_atrito,
+            "centro de arrasto mais alto (z_drag_above_cg_m: 0,00→0,10) encolhe o braço \
+             LÍQUIDO do termo de arrasto e deveria AVANÇAR o limite (x MENOR) — sentido OPOSTO \
+             ao atrito/h_cg: com_atrito={com_atrito:.6}m com_z_drag={com_z_drag:.6}m");
     }
 
     // ─── FIX 2 (importante): correção de sinal de Cm_TO ──────────────────
@@ -1369,11 +1576,11 @@ mod tests {
         // cm_ac controla o sinal de Cm_TO aqui.
         let x_positivo = rotation_fwd_limit_m(
             W_AERO_TESTE_N, s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            0.04, 0.0, 0.0, mac, 0.0, 0.0,
+            0.04, 0.0, 0.0, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
         let x_negativo = rotation_fwd_limit_m(
             W_AERO_TESTE_N, s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, x_main, 0.5, x_ac_wing,
-            -0.04, 0.0, 0.0, mac, 0.0, 0.0,
+            -0.04, 0.0, 0.0, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
 
         println!("x_cg_rot(cm=+0.04)={x_positivo:.4}  x_cg_rot(cm=-0.04)={x_negativo:.4}");
@@ -1418,6 +1625,7 @@ mod tests {
                 cfg.stability.trim_margin,
                 x_ac_tail, x_main, cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
                 cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, mac, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
             );
             (wing.cl_max_to, x)
         };
@@ -1475,11 +1683,11 @@ mod tests {
 
         let x_rot_frente = rotation_fwd_limit_m(
             W_AERO_TESTE_N, s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, 3.50, 0.5, x_ac_wing,
-            -0.008, 0.5, -0.30, mac, 0.0, 0.0,
+            -0.008, 0.5, -0.30, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
         let x_rot_atras = rotation_fwd_limit_m(
             W_AERO_TESTE_N, s_w, 1.72, s_h, 0.90, 0.85, 0.10, x_ac_tail, 4.20, 0.5, x_ac_wing,
-            -0.008, 0.5, -0.30, mac, 0.0, 0.0,
+            -0.008, 0.5, -0.30, mac, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         );
 
         println!("x_cg_rot(x_main=3.50)={x_rot_frente:.4}  x_cg_rot(x_main=4.20)={x_rot_atras:.4}");
@@ -1689,15 +1897,34 @@ mod tests {
         // `rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios`.
         //
         // Tolerância INALTERADA (±0,05 pp — mesma disciplina do aperto do
-        // ciclo 8, task 2, §4). Valor do pipeline REAL (que converge o MTOW,
-        // ao contrário desta fixture): 13,355% — mesma ordem, diferença
-        // residual do laço de convergência, como nos demais pins daqui.
+        // ciclo 8, task 2, §4). Valor do pipeline REAL pós-ciclo-10 (que
+        // converge o MTOW, ao contrário desta fixture): 13,355% — mesma
+        // ordem, diferença residual do laço de convergência, como nos
+        // demais pins daqui.
         //
         // Histórico dos pins anteriores preservado no comentário acima.
+        //
+        // ─── CICLO 12 (task 4): TERMOS DE SOLO (atrito + arrasto) ─────────
+        //
+        // Pin `old→new` desta fixture: **13,516% → 17,920%** MAC (+4,40 pp,
+        // Campanha ciclo 12). NÃO é afrouxamento: são os dois termos de
+        // solo do balanço de rotação (`−μ_roll·N·h_cg −
+        // D·(h_cg−z_drag_above_cg_m)`) que o ciclo 10 declarava
+        // "deliberadamente DESPREZADOS" com estimativa "≲2 pp de MAC" — ver
+        // a reescrita `old→new` dessa estimativa na docstring de
+        // `rotation_available_moment_nm` ("ESTIMATIVA old→new"). Medição de
+        // referência no baseline REAL (não nesta fixture, spec §6.1/§9):
+        // os dois termos somam ≈827,4 N·m contra ≈639,4 N·m do termo de
+        // tração já no balanço — 29% MAIORES que o termo mantido —,
+        // deslocando o limite em ≈4,40 pp. O deslocamento medido NESTA
+        // fixture (+4,404 pp, 13,516→17,920) bate com a mesma ordem de
+        // grandeza da medição do pipeline real (13,355→≈17,76%, +4,40 pp),
+        // a mesma diferença residual do laço de convergência de sempre.
+        // Tolerância INALTERADA (±0,05 pp).
         assert!(
-            (trim.rotation_limit_pct_mac - 13.516).abs() < 0.05,
-            "rotation_limit_pct_mac = {:.3} (esperado ≈13.516% ±0.05% — pin pós-ciclo-10 task 2, \
-             linha de tração com o braço sobre o CG)",
+            (trim.rotation_limit_pct_mac - 17.920).abs() < 0.05,
+            "rotation_limit_pct_mac = {:.3} (esperado ≈17.920% ±0.05% — pin pós-ciclo-12 task 4, \
+             termos de solo do balanço de rotação)",
             trim.rotation_limit_pct_mac
         );
 
@@ -1727,11 +1954,23 @@ mod tests {
 
             let x_ac_wing = cfg.wing.le_root_x_m + 0.25 * wb.mac_m;
             let x_ac_tail = x_ac_wing + emp.arm_h_m;
+            // Ciclo 12 (task 4): `trim.rotation_limit_pct_mac` (x_com_tracao
+            // abaixo) agora inclui TAMBÉM os termos de SOLO (atrito +
+            // arrasto), não só a linha de tração. Para isolar SÓ o efeito da
+            // tração neste hand-check (nome do teste, "SEM tração"),
+            // `x_sem_tracao` precisa levar os MESMOS termos de solo que a
+            // produção usa — eles cancelam na diferença `x_com_tracao −
+            // x_sem_tracao`, sobrando exatamente T·z/W, como antes.
+            let cd_roll_ground = crate::agents::performance::cd_ground_roll(
+                &wing, &state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
+            );
             let x_sem_tracao = rotation_fwd_limit_m(
                 w_light_n, wing.area_m2, wing.cl_max_to, emp.s_horizontal_m2, emp.eta_h,
                 trim.cl_h_max_down, cfg.stability.trim_margin, x_ac_tail, cfg.gear.x_main_m,
                 cfg.stability.cl_ground_rotation, x_ac_wing, cfg.wing.cm_ac,
                 cfg.stability.to_flap_fraction, cfg.wing.cm_flap_delta, wb.mac_m, 0.0, 0.0,
+                cfg.performance.mu_roll_paved, cfg.gear.h_cg_ground_m, cd_roll_ground,
+                cfg.wing.z_drag_above_cg_m,
             );
             let x_com_tracao = wb.mac_le_x_m + trim.rotation_limit_pct_mac / 100.0 * wb.mac_m;
             let delta_medido = x_com_tracao - x_sem_tracao;
@@ -1756,24 +1995,47 @@ mod tests {
              ({:.2}%) — envelope de CG fechado no baseline real pós-refino-ciclo2",
             trim.rotation_limit_pct_mac, wb.spec.cg_limit_aft_pct_mac);
 
-        // Margens de autoridade de rotação por cenário — TODAS POSITIVAS.
+        // Margens de autoridade de rotação por cenário.
         //
         // Ciclo 10 (task 2): a linha de tração come uma fatia REAL das
         // margens (o cenário mais apertado, "Solo (piloto)", cai de +21,6%
-        // para +10,5% no pipeline real), mas NENHUMA fica negativa — a
-        // aeronave continua rotacionando em todos os cenários de carga.
-        // (Uma versão intermediária desta task, com o braço ERRADO sobre o
-        // solo, punha Solo em −45% e 2 pax em −34%; o ERRATUM da spec §2
-        // corrigiu o braço e o achado alarmante desapareceu com ele. Ver
-        // `rotation_available_moment_nm` para a derivação de d'Alembert.)
+        // para +10,5% no pipeline real), mas NENHUMA ficava negativa nesta
+        // fixture — a aeronave continuava rotacionando em todos os cenários
+        // de carga. (Uma versão intermediária daquela task, com o braço
+        // ERRADO sobre o solo, punha Solo em −45% e 2 pax em −34%; o
+        // ERRATUM da spec §2 corrigiu o braço e o achado alarmante
+        // desapareceu com ele. Ver `rotation_available_moment_nm` para a
+        // derivação de d'Alembert.)
+        //
+        // `old→new` (ciclo 10 → ciclo 12, task 4) — ACHADO HONESTO NOVO,
+        // NÃO corrigido: os termos de solo (atrito + arrasto) comem MAIS
+        // uma fatia real da margem de TODOS os cenários (o mesmo M_solo
+        // subtraído do momento disponível em cada peso), e desta vez o
+        // cenário "Solo (piloto)" — já o mais apertado — cruza para
+        // NEGATIVO: **+3,26% (pré-ciclo-12, medido nesta fixture antes
+        // desta task) → −4,47%**. Este NÃO é um bug a esconder nem uma
+        // tolerância a alargar: é exatamente o tipo de achado que a spec do
+        // ciclo 12 pede para registrar, não maquiar ("se uma decisão é
+        // perigosa, o modelo deve FALHAR no ponto de perigo"). TODOS os
+        // demais cenários permanecem POSITIVOS. Ver o mesmo achado no
+        // pipeline REAL (não nesta fixture) em
+        // `tests::rotation_limit_variacao_medida_na_faixa_de_pesos_dos_
+        // cenarios`/report da task.
         let margens: Vec<(&str, f64)> = trim.rotation_margin_per_scenario.iter()
             .map(|sc| (sc.scenario.as_str(), sc.rotation_authority_margin_pct))
             .collect();
         println!("margens de rotação por cenário: {margens:?}");
         for (nome, margem) in &margens {
+            if *nome == "Solo (piloto)" {
+                assert!(*margem < 0.0,
+                    "cenário 'Solo (piloto)': achado honesto do ciclo 12 (task 4) — a margem \
+                     deveria ter cruzado para NEGATIVA com os termos de solo no balanço — \
+                     obtido {margem:.2}%");
+                continue;
+            }
             assert!(*margem > 0.0,
-                "cenário '{nome}': margem de autoridade de rotação deveria ser POSITIVA no \
-                 baseline real pós-ciclo-10 task 2 — obtido {margem:.2}%");
+                "cenário '{nome}': margem de autoridade de rotação deveria continuar POSITIVA \
+                 mesmo com os termos de solo do ciclo 12 — obtido {margem:.2}%");
         }
 
         // Arrasto de trim em cruzeiro (Task 4, refino-ciclo2) — hand-check

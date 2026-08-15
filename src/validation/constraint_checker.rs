@@ -947,6 +947,18 @@ mod tests {
     /// fixture que de fato representa a pergunta do nome do teste. Os
     /// DEMAIS testes deste módulo (violações ISOLADAS, com campos
     /// sobrescritos à mão) continuam com `motor_generico_teste()` intocado.
+    ///
+    /// `old→new` (ciclo 10 → ciclo 12, task 4) — **o nome deste teste fica
+    /// parcialmente impreciso, mantido por continuidade histórica.** Os
+    /// termos de SOLO do balanço de rotação (spec §6) recuam o limite
+    /// dianteiro mais ≈4,40 pp (≈13,4%→≈17,9% MAC). O envelope como FAIXA
+    /// continua FECHADO (fwd < aft — não vira o caso degenerado "Envelope
+    /// de CG VAZIO"), mas o cenário "Solo (piloto)" (CG mais dianteiro do
+    /// baseline, ≈16,5% MAC) passa a ficar À FRENTE do novo limite —
+    /// **1 violação NOVA, esperada e não corrigida** (ver o assert
+    /// reescrito `old→new` mais abaixo). "Sem violação" deixa de ser
+    /// literalmente verdadeiro para o baseline completo; continua verdadeiro
+    /// para a pergunta original do teste (envelope fechado vs. vazio).
     #[test]
     fn envelope_de_cg_fechado_sem_violacao_no_baseline_real() {
         let toml = std::fs::read_to_string(
@@ -993,23 +1005,43 @@ mod tests {
             .collect();
         println!("violações de envelope = {violacoes_de_envelope:?}");
         // RE-CONFIRMADO (ciclo 10, task 2 — momento da linha de tração):
-        // ZERO violações de envelope CONTINUA sendo o veredito. O limite
-        // dianteiro de rotação recua de 8,533% para ≈13,4% MAC (o custo
-        // físico da linha de tração, `T(Vr)·prop_axis_above_cg_m`), mas o
-        // CG mais dianteiro do baseline está em 17,9% MAC — ainda 4,5 pp
-        // atrás do novo limite. Uma versão intermediária desta task usava o
-        // braço ERRADO (altura sobre o SOLO, 1,12 m em vez do offset
-        // eixo↔CG de 0,20 m, sem o cancelamento inercial de d'Alembert) e
-        // punha o limite em 35,5%, reabrindo 3 cenários; o ERRATUM da spec
-        // §2 corrigiu o braço e a reabertura desapareceu com ele. Ver
+        // ZERO violações de envelope era o veredito NAQUELE ciclo. O limite
+        // dianteiro de rotação recuava de 8,533% para ≈13,4% MAC (o custo
+        // físico da linha de tração, `T(Vr)·prop_axis_above_cg_m`), e o CG
+        // mais dianteiro do baseline (17,9% MAC) ficava ainda 4,5 pp atrás
+        // do limite. Uma versão intermediária daquela task usava o braço
+        // ERRADO (altura sobre o SOLO, 1,12 m em vez do offset eixo↔CG de
+        // 0,20 m, sem o cancelamento inercial de d'Alembert) e punha o
+        // limite em 35,5%, reabrindo 3 cenários; o ERRATUM da spec §2
+        // corrigiu o braço e a reabertura desapareceu com ele. Ver
         // `agents::trim_authority::rotation_available_moment_nm`.
-        assert!(violacoes_de_envelope.is_empty(),
-            "achado honesto (ciclo 5, RE-CONFIRMADO no ciclo 10 task 2): com a fixture \
-             reconvergida, NÃO deveria haver nenhuma violação de envelope — o recuo do limite \
-             de rotação pela linha de tração (≈+5 pp) não alcança o CG mais dianteiro: {:?}",
-            report.violations);
+        //
+        // `old→new` (ciclo 10 → ciclo 12, task 4) — ACHADO HONESTO NOVO,
+        // NÃO corrigido: os termos de SOLO do balanço de rotação (atrito +
+        // arrasto, spec §6) recuam o limite dianteiro mais ≈4,40 pp, de
+        // ≈13,4% para ≈17,9% MAC — e o CG mais dianteiro do baseline
+        // (cenário "Solo (piloto)", ≈16,5% MAC) que antes tinha 4,5 pp de
+        // folga agora fica À FRENTE do novo limite. **1 violação NOVA de
+        // envelope** (cenário "Solo (piloto)"), a somar às 2 violações de
+        // pista já registradas nas Tasks 2/3. Isto NÃO é regressão nem bug
+        // de implementação — é o modelo finalmente cobrando um termo de
+        // momento que já deveria estar cobrando desde o ciclo 10. Diretriz
+        // permanente do usuário: "se uma decisão é perigosa, o modelo deve
+        // FALHAR no ponto de perigo". Nenhuma config foi ajustada para
+        // salvar este achado.
+        assert_eq!(violacoes_de_envelope.len(), 1,
+            "ciclo 12 (task 4): esperada EXATAMENTE 1 violação de envelope (cenário 'Solo \
+             (piloto)', que cruza para fora do limite dianteiro com os termos de solo no \
+             balanço de rotação) — obtido {:?}",
+            violacoes_de_envelope);
+        assert!(violacoes_de_envelope[0].contains("Solo (piloto)"),
+            "a violação de envelope esperada é a do cenário 'Solo (piloto)' (o CG mais \
+             dianteiro do baseline) — obtido {:?}",
+            violacoes_de_envelope);
         assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
-            "o envelope continua FECHADO (fwd ≈13,4% < aft ≈43,5%): {:?}", report.violations);
+            "o envelope continua FECHADO como faixa (fwd ≈17,9% < aft ≈43,5%) — só o cenário \
+             'Solo (piloto)' fica fora dele, não é o caso degenerado de envelope vazio: {:?}",
+            report.violations);
 
         let cheio = wb.scenarios.iter().find(|s| s.name == "4 pax + bagagem + cheio")
             .expect("cenário '4 pax + bagagem + cheio' deveria existir nos scenarios");

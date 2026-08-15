@@ -140,6 +140,24 @@ pub struct WingCfg {
     ///
     /// Faixa validada (0.005, 0.05) — `models::config::validate_aircraft`.
     pub cd0_flap_delta: f64,
+    /// Offset vertical entre o CENTRO DE ARRASTO (resultante de arrasto da
+    /// aeronave) e o CG (m, positivo = centro de arrasto ACIMA do CG) —
+    /// ciclo 12, spec §6.2. Default `0.0` (braço CHEIO `h_cg`, caso
+    /// CONSERVADOR: `h_D > 0` encolheria o braço líquido `h_cg − h_D` do
+    /// termo de arrasto de solo). Faixa plausível numa célula convencional
+    /// (asa baixa/média, motor no nariz): 0–0,10 m — o centro de arrasto
+    /// fica alguns centímetros ACIMA do CG. Faixa validada `[0.0, 0.30]`
+    /// (`models::config::validate_aircraft`).
+    ///
+    /// Consumido por `agents::trim_authority::rotation_available_moment_nm`
+    /// (braço líquido `h_cg − z_drag_above_cg_m` do termo de arrasto de
+    /// solo no balanço de rotação). A docstring de `cm_thrust_cruise` já
+    /// registrava a necessidade deste campo desde o ciclo 10 (aproximação
+    /// `z_D = 0` do arrasto de CRUZEIRO) — este ciclo cria o campo, mas
+    /// **NÃO** o pluga em `cm_thrust_cruise`: fazê-lo mudaria `CL_h_trim`,
+    /// `cd_trim`, cruzeiro/alcance/autonomia — cascata fora de escopo,
+    /// registrada no backlog como consumidor pendente.
+    pub z_drag_above_cg_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -736,6 +754,13 @@ pub mod test_fixtures {
                 // "nenhum destes números coincide com o baseline real" usada
                 // nas demais seções desta fixture (ciclo 8, task 1).
                 cd0_flap_delta: 0.020,
+                // Distinto do baseline real (0.0) — ciclo 12, task 4. Valor
+                // não-nulo DELIBERADO nesta fixture (dentro da faixa
+                // plausível 0–0.10m) para que os testes que exercitam o
+                // termo de arrasto de solo do balanço de rotação, se algum
+                // dia usarem `config_teste()` em vez de literais próprios,
+                // não fiquem mascarados pelo caso degenerado `h_D=0`.
+                z_drag_above_cg_m: 0.05,
             },
             fuselage: FuselageCfg {
                 length_m: 8.0,

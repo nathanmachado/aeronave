@@ -595,6 +595,16 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.wing.cd0_flap_delta
         )));
     }
+    // Ciclo 12 (task 4): offset vertical centro-de-arrasto↔CG — faixa
+    // plausível [0.0, 0.30] numa célula convencional (spec §6.2).
+    require_finite("wing.z_drag_above_cg_m", cfg.wing.z_drag_above_cg_m)?;
+    if cfg.wing.z_drag_above_cg_m < 0.0 || cfg.wing.z_drag_above_cg_m > 0.30 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: wing.z_drag_above_cg_m deve estar em \
+             [0.0, 0.30] (valor: {})",
+            cfg.wing.z_drag_above_cg_m
+        )));
+    }
 
     // [fuselage]
     require_positive("fuselage.length_m", cfg.fuselage.length_m)?;
@@ -1560,6 +1570,7 @@ mod tests {
             cm_ac = -0.008
             cm_flap_delta = -0.30
             cd0_flap_delta = 0.015
+            z_drag_above_cg_m = 0.0
             [fuselage]
             length_m = 7.5
             cabin_width_m = 1.1
@@ -2164,6 +2175,32 @@ mod tests {
     #[test]
     fn rejeita_cd0_flap_delta_nao_finito() {
         let toml = aircraft_toml_valido().replace("cd0_flap_delta = 0.015", "cd0_flap_delta = nan");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("finito"), "{err}");
+    }
+
+    // ─── [wing] z_drag_above_cg_m (ciclo 12, task 4) ─────────────────────────
+
+    #[test]
+    fn rejeita_z_drag_above_cg_m_negativo() {
+        let toml = aircraft_toml_valido()
+            .replace("z_drag_above_cg_m = 0.0", "z_drag_above_cg_m = -0.01");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.z_drag_above_cg_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_z_drag_above_cg_m_acima_da_faixa() {
+        let toml = aircraft_toml_valido()
+            .replace("z_drag_above_cg_m = 0.0", "z_drag_above_cg_m = 0.31");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("wing.z_drag_above_cg_m"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_z_drag_above_cg_m_nao_finito() {
+        let toml = aircraft_toml_valido()
+            .replace("z_drag_above_cg_m = 0.0", "z_drag_above_cg_m = nan");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("finito"), "{err}");
     }

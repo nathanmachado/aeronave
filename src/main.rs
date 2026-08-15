@@ -842,16 +842,23 @@ fn main() {
     // JSON, ±2°, além do ±0.05 residual em `cl_h_max_down`) — requer
     // validação em ensaio de voo antes de tratar o limite dianteiro como
     // definitivo.
+    // `old→new` (ciclo 10 → ciclo 12, task 4): a frase "ainda DESPREZA o
+    // binário de atrito de rolamento e de arrasto; residual estimado ≲2 pp
+    // de %MAC" ficou FALSA — medição real (spec `2026-08-15-ciclo12-solo-
+    // honesto` §6.1) deu ≈4,40 pp, mais que o dobro, e os dois termos JÁ
+    // ESTÃO no balanço desde este ciclo (`agents::trim_authority::
+    // rotation_available_moment_nm`). Reescrita, não corrigida em silêncio.
     fidelity.insert("trim".into(),
         "preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; \
          cl_h_max_down_calc por geometria DATCOM/Nelson (τ(c_e/c), ajuste empírico); SENSÍVEL a \
          elevator_deflection_max_deg (±2°) e a cl_h_max_down (±0.05 residual), ver \
          trim.sensitivity; rotação CONSIDERA o binário da linha de TRAÇÃO desde o ciclo 10 \
          task 2 (braço prop_axis_above_cg_m, pós-cancelamento do termo inercial de d'Alembert — \
-         ver erratum da spec §2), mas ainda DESPREZA o binário de atrito de rolamento \
-         (μ_roll·N·h_cg) e de arrasto (D·(h_cg−h_D)); residual estimado ≲2 pp de %MAC, \
-         ANTI-conservador (subestima o limite dianteiro de rotação); validar em ensaio de voo \
-         antes de tratar como definitivo)".into());
+         ver erratum da spec §2) E, desde o ciclo 12 task 4, os binários de atrito de \
+         rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)) — os três recuam o \
+         limite dianteiro de rotação em conjunto (≈4,40 pp dos dois últimos, medido; o ciclo \
+         10 os desprezava com uma estimativa de ≲2 pp que a medição desmentiu); validar em \
+         ensaio de voo antes de tratar como definitivo)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {

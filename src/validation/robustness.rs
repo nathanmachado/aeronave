@@ -1100,21 +1100,46 @@ mod tests {
     }
 
     /// Envelope/nariz no mundo massa-total: fixture com `arms.pax_rear_m`
-    /// deslocado (5.75→6.2, achado por sonda numérica) até o cenário "4 pax
-    /// sem bagagem" ficar DENTRO do envelope nominal mas perto do limite
-    /// TRASEIRO — o mundo +σ re-convergido (MTOW maior desloca o CG desse
-    /// cenário para TRÁS, ≈37,35%) cruza esse limite, gerando o flip
-    /// nomeado "Cenário '4 pax sem bagagem'" caso "massa-total".
+    /// deslocado até o cenário "4 pax sem bagagem" ficar DENTRO do envelope
+    /// nominal mas perto do limite TRASEIRO — o mundo +σ re-convergido
+    /// (MTOW maior desloca o CG desse cenário para TRÁS) cruza esse limite,
+    /// gerando o flip nomeado "Cenário '4 pax sem bagagem'" caso
+    /// "massa-total".
     /// Fixture folgada (`config_teste()` intacta, sem o ajuste): NENHUM
     /// cenário passa no nominal (`inside_envelope` sempre `false` nessa
     /// fixture sintética — o envelope nominal nunca abraça a faixa de CG
     /// carregado dela, achado da sonda), logo nenhum flip de "Cenário" é
     /// sequer POSSÍVEL — confirmado abaixo, não só assumido.
     ///
+    /// `old→new` (ciclo 10 → ciclo 12, task 4) — RECALIBRAÇÃO de fixture,
+    /// mesma disciplina das mutações de `elevator_chord_frac` alhures neste
+    /// repositório (não é a config de PRODUÇÃO sendo ajustada para salvar
+    /// um veredito — é o dial SINTÉTICO desta fixture de teste sendo
+    /// re-sondado depois que a física mudou). Os termos de solo do balanço
+    /// de rotação (spec §6) recuam o limite dianteiro de `config_teste()`
+    /// tanto (+5,4 pp, de 34,097% para 39,534% MAC — MAIS que na fixture do
+    /// baseline real, porque `[gear].h_cg_ground_m` desta fixture sintética
+    /// é 1,03 m, MAIOR que os 0,92 m do baseline real, e o termo de atrito
+    /// escala com `h_cg`) que ele ULTRAPASSA o limite traseiro (36,415%
+    /// MAC, invariante — não depende dos termos novos): o envelope nominal
+    /// de `config_teste()` intacta fica VAZIO para QUALQUER `pax_rear_m`
+    /// (fwd/aft não dependem desse campo). Sonda numérica: `[gear].
+    /// h_cg_ground_m` reduzido para 0,30 m (LOCAL a este teste, NÃO
+    /// alterado em `config_teste()` — os demais testes deste arquivo e de
+    /// `tests/gear_tipback.rs` continuam com 1,03 m) reabre o envelope
+    /// (fwd=35,558% < aft=36,415%, folga 0,857 pp), e `pax_rear_m`
+    /// 6,2→**6,30** (era 5,75→6,2 antes desta task) volta a colocar "4 pax
+    /// sem bagagem" perto do limite TRASEIRO (cg≈36,027%, folga 0,388 pp).
     #[test]
     fn envelope_no_mundo_massa_total_flipa_quando_marginal() {
         let mut cfg = config_teste();
-        cfg.arms.pax_rear_m = 6.2;
+        // Ciclo 12 (task 4): `h_cg_ground_m` reduzido LOCALMENTE nesta
+        // fixture de teste — ver "old→new" acima — para reabrir o envelope
+        // nominal de `config_teste()` depois que os termos de solo do
+        // balanço de rotação o fecharam com o valor padrão (1,03 m) da
+        // fixture. `pax_rear_m` recalibrado no mesmo espírito.
+        cfg.gear.h_cg_ground_m = 0.30;
+        cfg.arms.pax_rear_m = 6.30;
         let n = nominal_pipeline(cfg);
         let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")
             .expect("fixture deveria ter o cenário '4 pax sem bagagem'");
@@ -1340,28 +1365,35 @@ mod tests {
     /// funciona).
     ///
     /// Mesma fixture de `envelope_no_mundo_massa_total_flipa_quando_marginal`
-    /// (`arms.pax_rear_m` 5.75→6.2, achado por sonda numérica): desloca o
-    /// cenário "4 pax sem bagagem" para DENTRO do envelope nominal
-    /// (cg≈34,97%, entre fwd≈34,10% e aft≈36,41%). Sob o conjunto
-    /// adversarial DIANTEIRO (`caso="dianteiro"`, as 7 massas estruturais
-    /// dianteiras ×(1+σ), as traseiras ×(1−σ)) o cenário some para
-    /// cg≈31,72% — à FRENTE do limite dianteiro nominal (34,10%), gerando
-    /// o flip. A régua contra a qual esse flip é medido (`fwd_limit_p_pct_mac`
-    /// em `evaluate_world`) NÃO é a nominal: o momento da linha de tração
-    /// faz `rotation_limit_pct_mac` responder ao peso dos cenários, e as
-    /// massas estruturais do mundo dianteiro mudam a massa de TODOS os
-    /// cenários (via OEW) — a régua recalculada sobe para ≈34,41%, ~0,32pp
-    /// ATRÁS da régua nominal (≈34,10%). Uma regressão que voltasse a
-    /// comparar contra `wb_nominal.spec.cg_limit_fwd_pct_mac` produziria o
-    /// MESMO flip (mesmo `valor`, mesmo `check`), só com `limite` errado —
-    /// por isso o teste reconstrói a régua do mundo independentemente (via
+    /// (achado por sonda numérica): desloca o cenário "4 pax sem bagagem"
+    /// para DENTRO do envelope nominal. Sob o conjunto adversarial
+    /// DIANTEIRO (`caso="dianteiro"`, as 7 massas estruturais dianteiras
+    /// ×(1+σ), as traseiras ×(1−σ)) o cenário some para À FRENTE do limite
+    /// dianteiro nominal, gerando o flip. A régua contra a qual esse flip é
+    /// medido (`fwd_limit_p_pct_mac` em `evaluate_world`) NÃO é a nominal:
+    /// o momento da linha de tração faz `rotation_limit_pct_mac` responder
+    /// ao peso dos cenários, e as massas estruturais do mundo dianteiro
+    /// mudam a massa de TODOS os cenários (via OEW) — a régua recalculada
+    /// diverge da régua nominal. Uma regressão que voltasse a comparar
+    /// contra `wb_nominal.spec.cg_limit_fwd_pct_mac` produziria o MESMO
+    /// flip (mesmo `valor`, mesmo `check`), só com `limite` errado — por
+    /// isso o teste reconstrói a régua do mundo independentemente (via
     /// `WeightBalanceAgent`/`TrimAuthorityAgent` no MESMO conjunto
     /// adversarial `m_fwd`, não uma cópia do número) e compara com
     /// `flip.limite`, não só com um pin numérico solto.
+    ///
+    /// `old→new` (ciclo 10 → ciclo 12, task 4) — MESMA recalibração de
+    /// fixture de `envelope_no_mundo_massa_total_flipa_quando_marginal`
+    /// (ver o `old→new` completo lá): `[gear].h_cg_ground_m` LOCAL a 0,30 m
+    /// e `arms.pax_rear_m` 6,2→6,30, porque os termos de solo do balanço de
+    /// rotação fecham o envelope nominal de `config_teste()` intacta
+    /// (fwd>aft) — nenhum `pax_rear_m` reabriria sozinho, já que ele não
+    /// move fwd/aft.
     #[test]
     fn regua_do_mundo_dianteiro_diverge_da_nominal_no_flip_de_cenario() {
         let mut cfg = config_teste();
-        cfg.arms.pax_rear_m = 6.2;
+        cfg.gear.h_cg_ground_m = 0.30;
+        cfg.arms.pax_rear_m = 6.30;
         let n = nominal_pipeline(cfg);
 
         let sc_marginal = n.wb.scenarios.iter().find(|s| s.name == "4 pax sem bagagem")

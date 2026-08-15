@@ -59,6 +59,13 @@ cm_flap_delta = -0.30
 # call site de pouso que consuma o delta CHEIO (auditoria de
 # agents::performance, ver docstring de WingCfg::cd0_flap_delta).
 cd0_flap_delta = 0.015
+# Offset vertical centro-de-arrasto↔CG (m, positivo = acima do CG) — ciclo
+# 12, spec §6.2. 0.0 é o caso CONSERVADOR (braço CHEIO h_cg no termo de
+# arrasto de solo do balanço de rotação, agents::trim_authority::
+# rotation_available_moment_nm) — não medido no CAD desta célula. Faixa
+# plausível 0-0,10 m; validar no CAD (Fase 3), mesma disciplina de
+# prop_axis_above_cg_m/prop_plane_x_m.
+z_drag_above_cg_m = 0.0
 
 [fuselage]
 length_m = 8.2
