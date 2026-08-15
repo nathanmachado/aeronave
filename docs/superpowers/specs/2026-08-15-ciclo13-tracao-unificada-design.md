@@ -66,14 +66,36 @@ próprio código por sonda: `ρ_sl = 1,22501226599069457`,
 | rolagem | 20,0 | 0,4243 | **1,3417** ❌ |
 | **V_LOF ≡ Vr** | 35,361 | 0,7502 | **1,0372** ❌ |
 | **Vx** (138,87 km/h) | 38,575 | 0,8184 | **1,0095** ❌ |
-| **teto 5200 m, em Vy** | 41,232 | 0,8748 | **1,0049** ❌ |
-| Vy (148,44 km/h) | 41,232 | 0,8748 | 0,9908 |
+| Vy (148,44 km/h), nível do mar | 41,232 | 0,8748 | 0,9908 |
+| teto 5200 m, no Vy real de lá | 48,241 | 1,0235 | 0,9313 |
 | cruzeiro 280 km/h | 77,778 | 1,8751 | 0,8237 |
-| V máx 300,2 km/h | 83,395 | 2,0106 | 0,7895 |
+| V máx | 83,395 | 1,5611 | 0,8604 |
 
-**Cinco dos oito pontos violam o teto físico, e três deles alimentam gates que
-hoje PASSAM** (gradiente CS 23.65 via Vx; teto de serviço; balanço de rotação
-via V_LOF).
+**Quatro dos oito pontos violam o teto físico, e dois deles alimentam gates que
+hoje PASSAM** (gradiente CS 23.65 via Vx; balanço de rotação via V_LOF). Os
+outros dois violadores estão na rolagem de decolagem, cujo gate já REPROVA.
+
+**`old→new` (correção da revisão de plano, antes de qualquer código).** Duas
+linhas desta tabela estavam medidas com metodologia errada na primeira versão
+desta spec, e a revisão de plano as recomputou contra as funções REAIS de
+produção:
+
+- **V máx**: a spec usava `J = 2,0106`, derivado de `prop_rpm_cruise` (2640 rpm
+  de motor). Mas `agents::performance::max_level_speed_ms` usa
+  `engine.rpm_rated` = **3400 rpm** (`performance.rs:1020`). Com o rpm certo,
+  `J = 1,5611` e a razão é **0,8604**, não 0,7895. Não muda veredito (já estava
+  abaixo de 1).
+- **Teto de serviço**: a spec reusava o `Vy` de NÍVEL DO MAR (41,232 m/s) na
+  altitude do teto. Mas `service_ceiling_m` é chamado com `mass_mid`
+  (≈35% do combustível queimado, `performance.rs:1112`), e o `Vy` real a 5200 m
+  com essa massa é **48,241 m/s**, `J = 1,0235` — razão **0,9313**, que **NÃO
+  viola o teto**. A afirmação de que o teto de serviço era alimentado por uma
+  tração impossível era FALSA e foi retirada.
+
+A conclusão do ciclo não depende dessas duas linhas: rolagem, `V_LOF` e `Vx`
+seguem violando, e são exatamente os pontos que alimentam o backlog #15 e o
+gate de gradiente. Mas o número errado não pode virar registro permanente de
+backlog, então fica corrigido aqui antes de a Task 5 escrevê-lo.
 
 ### §1.2 — Consequência para o backlog #15
 
@@ -145,8 +167,25 @@ impl FigureOfMerit {
 }
 ```
 
+**Onde a curva mora (correção da revisão de plano).** A primeira versão desta
+spec dizia apenas "troque o parâmetro". A revisão mediu o estrago: os AGENTES
+(`PropulsionAgent::run`, `MissionAgent::run`, `PerformanceAgent::run`) **não
+recebem `cfg`**, então um parâmetro novo neles quebraria 12+ call sites em
+`src/orchestrator.rs`, `src/main.rs`, `tests/gear_tipback.rs` e
+`tests/schema_v4.rs` — vários deles fora de qualquer lista de arquivos do
+plano original.
+
+Solução adotada: **as três âncoras viajam em `AircraftState`**, exatamente como
+`psru_ratio`, `psru_efficiency` e `prop_diameter_m` já viajam.
+`AircraftState::from_config` passa a copiá-las, e `AircraftState` ganha
+`pub fn figure_of_merit(&self) -> FigureOfMerit`. Como todo agente já recebe
+`state: &AircraftState`, **nenhuma assinatura de agente muda**. Só as funções
+de baixo nível trocam o parâmetro, e numa razão 1:1 (mesma aridade).
+
 Assinaturas afetadas — trocar `static_thrust_factor: f64` por
-`fom: FigureOfMerit`, e **acrescentar `psru_ratio: f64` onde faltar**:
+`fom: FigureOfMerit`, e **acrescentar `psru_ratio: f64` onde faltar**. São
+**13 funções** (12 em `performance.rs` + `trim_authority::thrust_at_rotation_n`)
+e ≈55 call sites:
 
 - `performance::thrust_available_n` (já tem `psru_ratio`)
 - `performance::excess_power_kw`
@@ -210,6 +249,19 @@ Computado com os valores exatos do código (V_cr = 280/3,6 = 77,7̄ m/s,
 
 **Cruzeiro, consumo, alcance e autonomia ficam inalterados por construção.**
 Esta é a razão de escolher esta âncora e não o pico do polinômio.
+
+**A âncora tem uma dependência que ela não controla** (achado da revisão de
+plano). `j_design` só coincide com o `J` de cruzeiro real enquanto
+`search_cruise_rpm` continuar escolhendo **2640 rpm**. Essa escolha é o
+argmin de BSFC entre os rpms que entregam a potência requerida — e este ciclo
+muda justamente como a potência requerida é calculada (§5). Se o rpm ótimo
+mudar, `J_cruzeiro ≠ j_design`, `FoM(J_cruzeiro) ≠ fom_design`, e a
+preservação de alcance/autonomia deixa de ser exata.
+
+Isso NÃO torna a guarda §8.3 tautológica — ao contrário, é exatamente o que
+ela pega. **A task de cruzeiro DEVE reportar explicitamente o `engine_rpm`
+escolhido**, e um valor diferente de 2640 é gatilho de escalação, não um
+detalhe.
 
 ### §3.3 — Premissa calibrada, DECLARADA (padrão do projeto, 6ª ocorrência)
 
@@ -366,8 +418,21 @@ também na fixture sintética:
     assert!(T(V) <= T_ideal(V) * (1.0 + 1e-12))
 
 **Escrever este teste PRIMEIRO, contra a `thrust_available_n` de HOJE, e
-demonstrar que ele FALHA** em pelo menos os cinco pontos do §1.1. Só então
-implementar. Este é o teste que provaria o defeito que 496 testes não pegaram.
+demonstrar que ele FALHA** — na varredura contínua ele falha já perto de
+V=0,5 m/s, bem antes dos quatro pontos nomeados do §1.1. Só então implementar.
+
+**Honestidade sobre o que esta guarda vira DEPOIS do ciclo** (mesma ressalva
+que o §8.3, achado da revisão de plano). Implementada a lei nova,
+`thrust_available_n` e `thrust_ideal_momentum_n` chamam a MESMA cúbica, e
+`T = FoM(J)·T_ideal` com `FoM ≤ 1` garantido em três camadas (validação de
+config, o `min(·, 1)` de `FigureOfMerit::at`, e o grampo). O teste passa a ser
+quase tautológico: só pode falhar por bug dentro de `at()`.
+
+Ele continua valendo por dois motivos, e nenhum é "descobrir física agora":
+(1) o valor dele é ser RED contra o código de hoje — é a prova documental do
+defeito; (2) ele é a rede que pega uma FUTURA reintrodução de modelo de tração
+paralelo, que é exatamente como o projeto chegou aqui. Guarda de arquitetura,
+não de física. Registrar isso no comentário do teste, não deixar implícito.
 
 ### §8.2 — Identidade estática
 
@@ -514,7 +579,14 @@ task deve tunar config para evitar qualquer item abaixo.
 | `v_cruise_kmh` (V máx) | 300,22 km/h | ≈+4% | média |
 | **`climb_gradient_pct`** | 12,451842% | **≈7,9% — gate é ≥8,3%** | **BAIXA — pode flipar PASS→FAIL** |
 | `rc_sl_ms` | 4,999905 | ≈3,4 (gate ≥1,5) | média |
-| `service_ceiling_m` | 5.200 m | cai (gate ≥3.000) | baixa |
+| `service_ceiling_m` | 5.200 m | cai, porém MENOS que o previsto na 1ª versão desta spec (gate ≥3.000) | baixa |
+
+**Correção da projeção do teto** (mesma origem do `old→new` do §1.1): a versão
+anterior desta tabela dizia "cai bastante" supondo que o ponto de operação do
+teto violasse o limite físico em 1,0049. Medido corretamente, ele está em
+**0,9313** — ou seja, o polinômio ali já era conservador. `FoM` no `J` real
+daquele ponto (1,0235) vale ≈0,790, então a tração de subida no teto cai
+≈15%, não ≈22%. O teto ainda desce; menos do que eu projetei.
 | Superfície da rotação (§7) | pavimentado | grama: **+~1,9 pp**, pode reabrir 'Solo (piloto)' NOMINALMENTE | média |
 
 **O gradiente CS 23.65 é o risco central deste ciclo.** A tração cai ≈21% em

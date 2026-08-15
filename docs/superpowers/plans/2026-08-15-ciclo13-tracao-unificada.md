@@ -56,9 +56,29 @@ Copiadas literalmente da spec §13. Valem para TODA task.
 | `src/agents/trim_authority.rs` | `thrust_at_rotation_n` passa a chamar a lei única; balanço de rotação nas DUAS superfícies |
 | `src/models/aircraft_config.rs` | `PropellerCfg` ganha 3 campos; `PerformanceCfg` perde `static_thrust_factor` |
 | `src/models/config.rs` | validação dos 3 campos + guarda de migração |
+| `src/models/aircraft_state.rs` | `AircraftState` carrega as 3 âncoras (ver abaixo) |
 | `src/models/specs.rs` | `SCHEMA_VERSION` 5.6; `TrimSpec` ganha 2 campos |
-| `config/aircraft/*.toml` | migração dos campos |
+| `src/agents/weight_balance.rs:1153` | `trim_sintetico()` monta `TrimSpec` campo a campo, SEM `..Default::default()` — para de compilar quando `TrimSpec` cresce |
+| `src/orchestrator.rs:401`, `src/main.rs:432`, `src/agents/mission.rs:287,455,589,616` | call sites dos agentes |
+| `tests/gear_tipback.rs:407,661`, `tests/schema_v4.rs:74` | call sites de `PerformanceAgent::run` |
+| `config/aircraft/baseline_4seat.toml` | migração dos campos (é o ÚNICO TOML de aeronave — conferido) |
 | `docs/aircraft_spec.schema.md`, `docs/backlog.md` | contrato e backlog |
+
+### DECISÃO DE ARQUITETURA: as âncoras viajam em `AircraftState`
+
+**Achado da revisão de plano, correção obrigatória.** Os AGENTES
+(`PropulsionAgent::run`, `MissionAgent::run`, `PerformanceAgent::run`) **não
+recebem `cfg`**. Um parâmetro `fom` novo neles quebraria 12+ call sites em
+`orchestrator.rs`, `main.rs`, `gear_tipback.rs` e `schema_v4.rs`.
+
+Em vez disso, `AircraftState` passa a carregar `fom_static`, `fom_design` e
+`j_design` — exatamente como já carrega `psru_ratio`, `psru_efficiency` e
+`prop_diameter_m` — e ganha `pub fn figure_of_merit(&self) -> FigureOfMerit`.
+**Nenhuma assinatura de agente muda.** Só as 13 funções de baixo nível trocam
+`static_thrust_factor: f64` por `fom: FigureOfMerit`, numa razão 1:1.
+
+Onde o plano diz "`cfg.propeller.figure_of_merit()`", leia
+"`state.figure_of_merit()`" sempre que `state` estiver à mão.
 
 ---
 
@@ -333,19 +353,56 @@ fom_design = 0.82370639457215544
 j_design   = 1.87514348025711675
 ```
 
-- [ ] **Passo 11: replique nos demais TOMLs de aeronave**
+- [ ] **Passo 11: `AircraftState` carrega as âncoras**
 
-Run: `ls config/aircraft/`. Para cada arquivo, adicione o mesmo bloco. Se
-algum tiver `[performance].static_thrust_factor` diferente de 0,75, use ESSE
-valor como `fom_static` daquele arquivo (e registre no relatório) — nunca
-uniformize valores entre células diferentes sem dizer.
+Em `src/models/aircraft_state.rs`, acrescente os 3 campos e copie-os em
+`AircraftState::from_config` (siga exatamente o padrão de `psru_ratio` /
+`psru_efficiency` / `prop_diameter_m`, que já fazem esse trajeto). Adicione:
 
-- [ ] **Passo 12: atualize a fixture sintética** — `src/models/aircraft_config.rs:948`
-      tem `static_thrust_factor: 0.72`. A fixture precisa dos 3 campos novos.
-      Use `fom_static: 0.72` (preserva o valor da fixture), `fom_design: 0.82`,
-      `j_design: 1.9`. **Não copie os números do baseline real para a fixture**
-      — spec §10 item 4. Procure também o TOML sintético embutido em
-      `src/models/config.rs:1646` e acrescente os campos lá.
+```rust
+impl AircraftState {
+    /// Figura de mérito da hélice instalada (ciclo 13, spec §2.2). Mora no
+    /// estado, e não num parâmetro solto, porque TODO agente já recebe
+    /// `&AircraftState` — assim nenhuma assinatura de agente muda quando o
+    /// modelo de tração muda. Mesmo trajeto de `psru_ratio`/`prop_diameter_m`.
+    pub fn figure_of_merit(&self) -> crate::agents::propulsion::FigureOfMerit {
+        crate::agents::propulsion::FigureOfMerit {
+            fom_static: self.fom_static,
+            fom_design: self.fom_design,
+            j_design:   self.j_design,
+        }
+    }
+}
+```
+
+Confira se `AircraftState` tem construtores além de `from_config` (ex.: em
+fixtures de teste) — todos precisam dos campos.
+
+**`config/aircraft/` tem exatamente UM arquivo** (`baseline_4seat.toml`) —
+conferido pela revisão de plano. Não há "demais TOMLs" para replicar. Se
+`ls config/aircraft/` mostrar outro, aí sim replique, usando o
+`static_thrust_factor` DAQUELE arquivo como seu `fom_static` (nunca uniformize
+valores entre células diferentes sem dizer no relatório).
+
+- [ ] **Passo 12: atualize as fixtures sintéticas** — `src/models/aircraft_config.rs:948`
+      tem `static_thrust_factor: 0.72`. Use **exatamente** estes valores, que
+      são deliberadamente diferentes dos do baseline real (spec §10 item 4 — um
+      literal do baseline real dentro de fixture sintética produz teste verde
+      que não prova nada):
+
+```rust
+    fom_static: 0.72,   // preserva o valor que a fixture já usava
+    fom_design: 0.80,
+    j_design:   1.60,
+```
+
+      Faça o mesmo no TOML sintético embutido em `src/models/config.rs:1646`:
+
+```toml
+fom_static = 0.72
+fom_design = 0.80
+j_design   = 1.60
+```
 
 - [ ] **Passo 13: rode a suíte inteira**
 
@@ -654,28 +711,58 @@ pub fn thrust_available_n(
       reescrito contra a função nova — não apague, spec §8.7.
 
 - [ ] **Passo 6: apague `prop_efficiency` e `thrust_n`** de
-      `src/agents/propulsion.rs`. A Task 3 conserta `search_cruise_rpm`; até
-      lá, **use um `todo!()` explícito ali com comentário apontando a Task 3**,
-      ou implemente já a inversão fechada se for natural. Diga no relatório
-      qual caminho escolheu. `advance_ratio` e `prop_rpm` FICAM.
+      `src/agents/propulsion.rs`, **e implemente a inversão fechada de cruzeiro
+      JÁ NESTA TASK** (spec §5, código no Passo 3 da Task 3 — execute-o aqui).
+      `advance_ratio` e `prop_rpm` FICAM.
+
+> **Correção obrigatória da revisão de plano.** A primeira versão deste plano
+> oferecia `todo!()` como alternativa, adiando a inversão para a Task 3. Isso
+> está PROIBIDO: `search_cruise_rpm` é chamada por `PropulsionAgent::run`, que
+> é chamada direta ou indiretamente (via `size_aircraft`) por **quase toda a
+> suíte**. Um `todo!()` ali compila e depois entra em `panic!` em centenas de
+> testes — não "alguns pins quebram", como o Passo 10 sugeria. Apagar
+> `prop_efficiency` e restaurar `search_cruise_rpm` é **uma unidade atômica**.
+> A Task 3 continua existindo, mas como VERIFICAÇÃO de regressão de cruzeiro e
+> missão, não como implementação.
 
 - [ ] **Passo 7: troque `static_thrust_factor: f64` por `fom: FigureOfMerit`**
-      em todas as ~40 assinaturas. Comando para achar todas:
+      nas **13 funções** que têm o parâmetro (12 em `performance.rs` +
+      `trim_authority::thrust_at_rotation_n`) e nos ≈55 call sites. Achar tudo:
 
 ```bash
-grep -rn "static_thrust_factor" --include=*.rs src/ | wc -l
+grep -rn "static_thrust_factor" --include=*.rs src/ tests/
 ```
 
-Onde faltar `psru_ratio` na cadeia de chamada, acrescente. **Exceção a
-conferir:** `landing_ground_roll_m`/`landing_distance_50ft_m` — a rolagem de
-pouso NÃO tem termo de tração. Se não consomem tração, **não mude a
-assinatura delas**; diga isso no relatório.
+Onde faltar `psru_ratio` na cadeia, acrescente. Onde `state` estiver à mão,
+use `state.figure_of_merit()` (Task 1, Passo 11) em vez de propagar mais um
+parâmetro. **Exceção a conferir:**
+`landing_ground_roll_m`/`landing_distance_50ft_m` — a revisão de plano
+confirmou que **NÃO consomem tração**. Não mude a assinatura delas.
 
-**Atenção a `src/agents/mission.rs:287`**, que hoje passa
-`static_thrust_factor = 1.0` literal com um comentário dizendo ser "parâmetro
-exigido pela assinatura". Com a lei nova, FoM=1,0 significa disco IDEAL — o
-teto físico, não um valor neutro. Descubra o que aquela chamada realmente
-precisa, corrija, e **reporte como achado** se o 1,0 estava mascarando algo.
+**Atenção a `src/agents/mission.rs:287` e `:589`** — hoje passam
+`static_thrust_factor = 1.0` literal, justificado como "provadamente inerte"
+porque só afetava o ramo `v < 0.5` que `climb_rate_ms` nunca varre.
+
+> **Essa justificativa MORRE neste ciclo.** Sem ramos, `fom.at(j)` é avaliado
+> em TODA velocidade, e `FoM = 1,0` significa **disco atuador IDEAL, sem
+> perda nenhuma** — o teto físico, não um valor neutro. Traduzir o `1.0` para
+> `FigureOfMerit{1.0, 1.0, x}` por inércia faria o cálculo de subida da MISSÃO
+> (combustível de subida, que alimenta o laço de convergência de MTOW) usar
+> uma hélice perfeita. Seria regressão física SILENCIOSA — compila, roda, e
+> só apareceria como um pin de `range_km`/`fuel_total_kg` estranho.
+>
+> `MissionAgent::run` recebe `state`: use `state.figure_of_merit()`.
+> **Reporte a diferença numérica que isso causa** — é achado, não detalhe.
+
+- [ ] **Passo 7b: conserte os call sites dos AGENTES.** Mesmo com as âncoras em
+      `AircraftState`, confira e atualize (a revisão de plano enumerou):
+      `src/orchestrator.rs:401`, `src/main.rs:432`,
+      `src/agents/mission.rs:455,616`, `src/agents/performance.rs:1208`,
+      `src/agents/trim_authority.rs:1797,2239,2284`,
+      `tests/gear_tipback.rs:407,661`, `tests/schema_v4.rs:74`.
+      **`src/main.rs` compila dentro de `cargo test`** (não há `[[bin]]`
+      separado no `Cargo.toml`) — deixá-lo desatualizado quebra a suíte
+      inteira, não só o binário.
 
 - [ ] **Passo 8: remova `[performance].static_thrust_factor` e adicione a guarda
       de migração** — em `src/models/config.rs`, no mesmo padrão de
@@ -737,9 +824,16 @@ git commit -m "feat(performance): lei única de tração T(V) = FoM(J)·T_ideal"
 
 ---
 
-## Task 3 — Cruzeiro: inversão em forma fechada, η derivada
+## Task 3 — Cruzeiro: verificação da âncora e da regressão de missão
 
 **Tier declarado: JULGAMENTO (Sonnet 5).**
+
+> **Escopo revisado após a revisão de plano.** A IMPLEMENTAÇÃO da inversão
+> fechada foi movida para a Task 2, Passo 6 (deixá-la para cá tornaria
+> `search_cruise_rpm` um `todo!()` que faria centenas de testes entrarem em
+> pânico). Esta task agora **verifica** o que a Task 2 implementou, e responde
+> à pergunta que a spec §3.2 deixou aberta: o rpm de cruzeiro escolhido
+> continua sendo 2640?
 
 **Files:**
 - Modify: `src/agents/propulsion.rs` (`search_cruise_rpm` ~linha 118–140,
@@ -784,11 +878,35 @@ fn eficiencia_de_cruzeiro_reproduz_a_ancora_do_polinomio_apagado() {
 > mesma regra da tabela da Task 2). `baseline_state()`, `baseline_mission()`,
 > `config_path()` e os agentes já estão importados lá.
 
-- [ ] **Passo 2: rode e confirme que falha** (a Task 2 deixou `search_cruise_rpm`
-      quebrada ou com `todo!()`).
+- [ ] **Passo 2: rode.** Se a Task 2 fez o trabalho dela, este teste JÁ PASSA.
+      Se falhar, é achado real da Task 2 — reporte o valor medido e a
+      diferença antes de mexer em qualquer coisa.
 
-- [ ] **Passo 3: implemente a inversão fechada** em `search_cruise_rpm`,
-      substituindo `let eta = prop_efficiency(j);` e o cálculo de `p_req_kw`:
+- [ ] **Passo 2b: reporte o rpm de cruzeiro escolhido — RISCO NOMEADO NA SPEC §3.2**
+
+`j_design` só coincide com o `J` de cruzeiro real enquanto `search_cruise_rpm`
+escolher **2640 rpm**. Essa escolha é o argmin de BSFC entre os rpms que
+entregam a potência requerida — e a Task 2 mudou exatamente como a potência
+requerida é calculada. Escreva:
+
+```rust
+/// O rpm de cruzeiro escolhido é a premissa silenciosa da âncora de
+/// `fom_design` (spec §3.2). Se o argmin de BSFC mudar de 2640, `J_cruzeiro`
+/// sai de `j_design` e a preservação de alcance/autonomia deixa de ser exata.
+/// Este pin existe para que isso NUNCA aconteça em silêncio.
+#[test]
+fn rpm_de_cruzeiro_do_baseline_permanece_2640() {
+    /* ... PropulsionAgent::run no baseline real ... */
+    assert_eq!(prop.engine_rpm_cruise, 2640.0);
+}
+```
+
+Se o rpm mudou: **PARE e escale.** Não recalibre `j_design` para o novo ponto
+— isso seria mover o alvo para acertar o tiro.
+
+- [ ] **Passo 3: confira a inversão fechada que a Task 2 implementou.** Ela
+      deve ter substituído `let eta = prop_efficiency(j);` e o cálculo de
+      `p_req_kw` por:
 
 ```rust
         // Ciclo 13 (spec §5): em cruzeiro nivelado a tração exigida é
@@ -803,7 +921,13 @@ fn eficiencia_de_cruzeiro_reproduz_a_ancora_do_polinomio_apagado() {
         // `p_req = drag·V/(eta·1000)`. O caminho novo é mais robusto: não
         // depende de η ser positivo para não divergir, porque η é SAÍDA.
         let disk_area = std::f64::consts::PI * (prop_diameter_m / 2.0).powi(2);
-        let rho = Isa::density_kgm3(altitude_m, 0.0);
+        // `isa_delta_c` é PARÂMETRO NOVO de `search_cruise_rpm` (achado da
+        // revisão de plano): a densidade da inversão tem que ser a MESMA que
+        // gerou `drag_n`, senão a identidade T = arrasto não fecha. Hoje todas
+        // as missões têm isa_delta_c = 0,0, então hardcodar seria inofensivo E
+        // errado — bug latente para a primeira missão com ISA ≠ 0, e violação
+        // da política "nunca hardcodar dado de missão".
+        let rho = Isa::density_kgm3(altitude_m, isa_delta_c);
         let u = (v_cruise_ms
                  + (v_cruise_ms * v_cruise_ms + 2.0 * drag_n / (rho * disk_area)).sqrt())
                 / 2.0;
@@ -816,9 +940,9 @@ fn eficiencia_de_cruzeiro_reproduz_a_ancora_do_polinomio_apagado() {
         };
 ```
 
-> **Confira o `isa_delta_c`:** o código de hoje usa `Isa::density_kgm3` em
-> vários pontos com o delta da missão. Descubra qual é o delta correto neste
-> escopo e use-o — não assuma 0,0 se a função tiver acesso ao valor real.
+> **`search_cruise_rpm` não recebe `isa_delta_c` hoje** — acrescente à
+> assinatura e passe `req.isa_delta_c` do único chamador
+> (`PropulsionAgent::run`), que já o tem.
 
 - [ ] **Passo 4: rode e confirme que a âncora passa**
 
@@ -849,6 +973,9 @@ git commit -m "feat(propulsion): cruzeiro por inversão fechada do disco atuador
 - Modify: `src/agents/trim_authority.rs` (`thrust_at_rotation_n` 272–292;
   bloco de superfície ~809–814; `rotation_limit_pct_mac` ~853, ~880)
 - Modify: `src/models/specs.rs` (`TrimSpec`: 2 campos novos)
+- Modify: `src/agents/weight_balance.rs:1153` — `trim_sintetico()` monta
+  `TrimSpec { ... }` campo a campo **sem `..Default::default()`**, então PARA
+  DE COMPILAR quando `TrimSpec` cresce. Achado da revisão de plano.
 - Modify: `src/main.rs` (`fidelity.trim`, ~linha 920)
 - Test: `src/agents/trim_authority.rs` (`mod tests`), `tests/generic_engine.rs`
 
@@ -1049,11 +1176,38 @@ NOMINAL em grama (spec §11 avisa que pode). Isso é resultado.
       - **#19** — o cruzeiro opera em J = 1,875 enquanto o polinômio apagado
         tinha pico em J = 1,30 (η 0,8335 contra 0,7839): ≈6% de eficiência
         propulsiva na mesa. Decisão de projeto de hélice/PSRU.
+      - **#20** — `agents::performance::max_level_speed_ms` avalia a
+        velocidade máxima com `engine.rpm_rated` (3400) enquanto
+        `PropulsionAgent` opera o cruzeiro em 2640 rpm. São dois pontos de
+        operação de motor diferentes no mesmo JSON, e a divergência só
+        apareceu porque a revisão de plano do ciclo 13 recomputou a razão de
+        avanço nos dois. Não é erro (V máx é potência máxima por definição),
+        mas nunca foi declarado. Documentar ou reconciliar.
+
+      **Registre no #15 o número CORRIGIDO** (spec §1.1, bloco `old→new`):
+      **quatro** dos oito pontos violam o teto, **dois** deles alimentando
+      gates que passavam. A primeira versão da spec dizia "cinco" e "três",
+      incluindo o teto de serviço — medição errada, corrigida antes de virar
+      registro permanente.
 
 - [ ] **Passo 6: `fidelity.*` em `src/main.rs`.** Os textos de `propeller`,
       `performance` e `trim` descrevem o modelo de tração ANTIGO em vários
       pontos (linhas ~771, ~789, ~865, ~920). **Reescreva todos.** Um texto que
       mente dentro do JSON de produção é achado de revisão, não detalhe.
+
+- [ ] **Passo 6b: varredura final de texto morto.** O ciclo 11 deixou DOIS
+      textos mentindo dentro do JSON de produção, e este ciclo toca `fidelity`
+      em pelo menos 4 pontos espalhados entre as Tasks 2, 4 e 5. Rode:
+
+```bash
+grep -rn "static_thrust_factor\|prop_efficiency\|thrust_ground_roll_n\|thrust_n(" \
+     --include=*.rs src/ | grep -v "^src/models/specs.rs.*pub prop_efficiency"
+grep -rni "polinômio\|javaprop\|disco atuador estático\|0,58\|84.843" src/main.rs
+```
+
+Toda ocorrência remanescente em comentário, docstring ou string de `fidelity`
+tem que descrever o modelo NOVO ou estar num bloco `old→new` explícito.
+Ocorrência que descreve o modelo antigo como se fosse o vigente é ACHADO.
 
 - [ ] **Passo 7: `scripts/verifica-ciclo.sh`**
 
