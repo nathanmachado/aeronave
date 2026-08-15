@@ -1,6 +1,6 @@
 {
-  "schema_version": "5.4",
-  "revision": "5.4",
+  "schema_version": "5.5",
+  "revision": "5.5",
   "validation_status": "PASS",
   "wing": {
     "span_m": 11.94,
