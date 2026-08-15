@@ -1736,6 +1736,28 @@ mod tests {
         assert!(cl > 0.50, "flap cheio tem de dar MAIS CL que o parcial de decolagem");
     }
 
+    /// Achado da task 5 (report do ciclo 12): o hand-check acima só cobre os
+    /// literais do BASELINE REAL, plantados numa cópia LOCAL de `wing` —
+    /// nenhum teste deste módulo asserta `cl_ground_roll_landing` contra os
+    /// literais da própria fixture SINTÉTICA `config_teste()`
+    /// (`cl_max_flaps = 1,65`, `cl_max_clean = 1,40`, ver
+    /// `src/models/aircraft_config.rs`), que é o `wing`/`state` que TODOS os
+    /// outros testes deste arquivo usam via `setup()`/`fixture_baseline()`.
+    /// Hand-check com os literais REAIS da fixture sintética (`stability.
+    /// cl_ground_rotation = 0,55`, `stability.to_flap_fraction = 0,5`,
+    /// `wing.cl_max_flaps = 1,65`, `wing.cl_max_clean = 1,40`):
+    ///
+    ///   CL_roll_ldg = cl_ground_rotation + (1 − to_flap_fraction)
+    ///                 · (cl_max_flaps − cl_max_clean)
+    ///               = 0,55 + (1 − 0,5)·(1,65 − 1,40)
+    ///               = 0,55 + 0,5·0,25 = 0,675
+    #[test]
+    fn cl_de_rolagem_de_pouso_hand_check_da_fixture_sintetica() {
+        let (state, wing, _prop, _engine, _req, _perf_cfg) = setup();
+        let cl = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        assert!((cl - 0.675).abs() < 1e-9, "cl={cl}, esperado 0,675");
+    }
+
     /// Convergência (spec §7.2), mesma exigência da Task 2: dobrar os
     /// passos muda o resultado em menos de 0,1%.
     #[test]
