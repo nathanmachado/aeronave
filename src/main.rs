@@ -751,14 +751,46 @@ fn main() {
     // atualizada — o híbrido "CL de estol flapado + polar limpa" nomeado
     // como pré-existente/fora de escopo foi RESOLVIDO pela task 2 deste
     // ciclo (docs/backlog.md item 3).
+    // `old→new` (ciclo 8 → ciclo 12, tasks 2/3, backlog item 4, RESOLVIDO):
+    // a frase "a rolagem de solo de decolagem (método energético de Raymer)
+    // ... não consome a polar, por construção — sem incremento de arrasto
+    // ali" ficou FALSA. A rolagem de decolagem E de pouso agora integram a
+    // equação de movimento em V (Simpson composto, 200 intervalos),
+    // consumindo CD0+induzido+incremento de flap segmento a segmento — ver
+    // spec `2026-08-15-ciclo12-solo-honesto` §2/§3/§5. Medido no baseline
+    // real (`aircraft_spec.json` atual): `to_50ft_paved_m` 420,372451 →
+    // 651,258408 m (+54,92%), `to_50ft_grass_m` 473,469470 → 819,110978 m
+    // (+73,00%), `ldg_50ft_m` 502,458299 → 582,341118 m (+15,90%),
+    // `ldg_50ft_grass_m` 556,677173 → 646,437301 m (+16,12%) — consequência
+    // de gate: `to_50ft_grass_m`/`ldg_50ft_grass_m` passam a EXCEDER os
+    // 600 m de pista disponível (checagens #23/#24), `validation_status`
+    // vira "FAIL". Não é regressão: o modelo passa a pagar o arrasto que
+    // sempre esteve fisicamente presente. A descontinuidade companheira
+    // (fora de escopo, docs/backlog.md item 8): a tração usada nesta
+    // integração (`thrust_ground_roll_n`, quantidade de movimento com
+    // avanço) e a tração de cruzeiro/subida/teto (`thrust_available_n`,
+    // `prop_efficiency(J)`) são IDÊNTICAS em V=0 (identidade algébrica
+    // provada e testada), mas divergem ≈27,69% em V_LOF (medido: 2.324,69 N
+    // vs 3.214,99 N no baseline real) — domínios de validade disjuntos
+    // nunca conciliados.
     fidelity.insert("performance".into(),
         "computed (equações de desempenho em forma fechada, atmosfera ISA padrão); CL de \
          decolagem (cl_max_to) interpolado JUNTO com o incremento de arrasto de flap parcial na \
          polar (ciclo 8, task 1: cd0_flap_to_extra = to_flap_fraction·cd0_flap_delta, semi-\
          empírico Raymer cap. 12/Hoerner) no segmento de SUBIDA da decolagem e no gradiente CS \
-         23.65; a rolagem de solo de decolagem (método energético de Raymer) e a aproximação de \
-         pouso (ângulo fixo, não L/D) não consomem a polar, por construção — sem incremento de \
-         arrasto ali; Vy/teto de serviço (climb_rate_ms) usam referência de estol LIMPA \
+         23.65; a rolagem de solo de decolagem E de pouso (old→new, ciclo 12 tasks 2/3, \
+         docs/backlog.md item 4: RESOLVIDO) passam de método ENERGÉTICO fechado (Raymer, \
+         V_ref²/2gμ, sem termo de arrasto por construção) para integração numérica da equação \
+         de movimento em V (Simpson composto, 200 intervalos), consumindo a polar completa \
+         (CD0 + trem estendido + incremento de flap + induzido) segmento a segmento — medido: \
+         to_50ft_paved_m +54,92%, to_50ft_grass_m +73,00%, ldg_50ft_m +15,90%, ldg_50ft_grass_m \
+         +16,12% no baseline real; checagens #23/#24 (pista de grama, 600 m) passam a REPROVAR \
+         (819,11 m e 646,44 m); descontinuidade de ≈27,69% entre o modelo de tração da rolagem \
+         (thrust_ground_roll_n) e o de cruzeiro/subida (thrust_available_n) em V_LOF, medida e \
+         registrada como backlog item 8, fora de escopo; a aproximação de pouso (segmento de \
+         APROXIMAÇÃO antes do toque, ângulo fixo de 3°, não L/D) continua sem consumir a polar, \
+         por construção — não afetada por esta task; Vy/teto de serviço (climb_rate_ms) usam \
+         referência de estol LIMPA \
          (wing.cl_max_clean, não mais o CL_max flapado do ciclo 11 task 2, docs/backlog.md \
          item 3) e polar limpa (cd0_extra = 0.0, config EN-ROUTE), com janela de busca do argmax \
          de RC(V) em [1,05;2,00]·Vs e guarda de argmax estritamente interior (evita o artefato \
@@ -766,7 +798,8 @@ fn main() {
          23.65 (climb_gradient_pct) avaliado no piso LEGAL da norma desde o ciclo 11, task 1 \
          (1,2·Vs_to, não mais o piso da varredura em 1,05·Vs_to — fecha o viés otimista \
          remanescente nomeado no ciclo 8, docs/backlog.md item 2); ver docstring de \
-         agents::performance::best_climb_angle_com_piso e agents::performance::climb_rate_ms"
+         agents::performance::best_climb_angle_com_piso, agents::performance::climb_rate_ms, \
+         agents::performance::takeoff_ground_roll_m e agents::performance::landing_ground_roll_m"
             .into());
     fidelity.insert("vn_diagram".into(),
         "computed (CS 23.333/.335/.337/.341, fórmulas fechadas)".into());
@@ -813,10 +846,27 @@ fn main() {
          ANTI-conservador. Fix wave ciclo 11 (2026-08-10): a checagem #25 \
          ESTEVE FAIL do ciclo 9 ao ciclo 10 — desde o baseline E12 (trem de \
          nariz recuado, x_nose_m 1,30→1,20) ela PASSA, com folga crítica \
-         +0,00737 m (`validation_status: PASS`, `violations: []`). Ver \
+         +0,00737 m. `old→new` (ciclo 11 → ciclo 12): a esta altura o texto dizia \
+         `validation_status: PASS`, `violations: []` — verdade NAQUELE momento (só a \
+         checagem #25 pendia), mas ficaria FALSO sem reescrita: desde o ciclo 12 \
+         (tasks 2/3, ground roll por integração, docs/backlog.md item 4) \
+         `validation_status` do baseline real vira `FAIL` com 4 violações — 2 de \
+         robustez de massa estrutural e 2 de pista de grama (#23/#24) — TODAS \
+         não relacionadas à hélice; a checagem #25 (esta seção) CONTINUA PASSANDO, \
+         sem violação própria. A folga crítica de hélice em si (+0,00737 m) não \
+         mudou desde o ciclo 11. Achado companheiro (docs/backlog.md item 9, fora \
+         de escopo): `agents::propulsion::prop_efficiency` — o polinômio de \
+         eficiência da hélice usado por `thrust_available_n` (cruzeiro/subida/ \
+         teto) — devolve η(0) = 0,58 por construção, quando por definição \
+         η = T·V/P → 0 quando V → 0; medido no baseline real, `thrust_available_n` \
+         salta de 0 N em V=0,7 m/s (janela nula da guarda de thrust_n) para \
+         84.843,52 N em V=1,0 m/s — descontinuidade sem física por trás, sem \
+         consumidor de produção hoje porque nenhum código varre essa faixa \
+         estreita com este modelo (a rolagem usa thrust_ground_roll_n, quantidade \
+         de movimento com avanço, não este). Ver \
          docstring de PropellerSpec::prop_clearance_critical_m e \
          docs/backlog.md (item 1, RESOLVIDO ciclo 9; item 6, RESOLVIDO \
-         ciclo 10). Requer mapa de \
+         ciclo 10; item 9, prop_efficiency, aberto ciclo 12). Requer mapa de \
          desempenho de hélice real do fabricante)".into());
     fidelity.insert("mission".into(),
         "computed (segmentos táxi/subida/cruzeiro/descida + equação de Breguet, \
