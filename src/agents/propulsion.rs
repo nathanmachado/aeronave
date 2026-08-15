@@ -258,6 +258,51 @@ impl PropulsionAgent {
     }
 }
 
+// ─── FIGURA DE MÉRITO DA HÉLICE ──────────────────────────────────────────────
+
+/// Figura de mérito da hélice: tração REAL sobre tração IDEAL de disco
+/// atuador na mesma potência de eixo (ciclo 13, spec §3).
+///
+///   FoM(J) = fom_static + (fom_design − fom_static)·min(J/j_design, 1)
+///
+/// Por definição `FoM ≤ 1` — uma hélice não produz mais tração que o disco
+/// atuador ideal absorvendo a mesma potência (conservação de quantidade de
+/// movimento, spec §1). Esta é a grandeza que substitui o polinômio
+/// `prop_efficiency` apagado neste ciclo: aquele violava o teto físico em 5
+/// dos 8 pontos de operação do baseline (spec §1.1).
+///
+/// As duas âncoras são propriedades da HÉLICE, vindas de `[propeller]` do
+/// TOML — nunca hardcodadas aqui.
+///   - `fom_static` (J=0): fator de McCormick, ≈0,75. Reproduz a tração
+///     estática de hoje por IDENTIDADE algébrica (spec §3.1).
+///   - `fom_design` (J=`j_design`): retro-derivada UMA VEZ do polinômio
+///     JavaProp no ponto de cruzeiro do baseline, o que preserva
+///     cruzeiro/alcance/autonomia por construção (spec §3.2).
+///
+/// PREMISSA CALIBRADA DECLARADA (spec §3.3): `j_design` foi derivada de
+/// `prop_rpm_cruise`, que era SAÍDA da busca de rpm. Congelada em config, ela
+/// NÃO se reajusta se a velocidade de cruzeiro, a razão de PSRU ou o diâmetro
+/// mudarem — a âncora fica obsoleta em silêncio. Item de backlog nomeado.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FigureOfMerit {
+    pub fom_static: f64,
+    pub fom_design: f64,
+    pub j_design: f64,
+}
+
+impl FigureOfMerit {
+    /// Figura de mérito na razão de avanço `j`. Grampeada em `fom_design`
+    /// acima de `j_design` (extrapolar levaria FoM > 1) e em `fom_static`
+    /// abaixo de zero (J negativo não é alcançável, mas não pode virar NaN).
+    pub fn at(&self, j: f64) -> f64 {
+        if !(j > 0.0) {
+            return self.fom_static;   // cobre j ≤ 0 e j NaN
+        }
+        let t = (j / self.j_design).min(1.0);
+        self.fom_static + (self.fom_design - self.fom_static) * t
+    }
+}
+
 // ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -265,6 +310,74 @@ mod tests {
     use super::*;
     use crate::models::engine::test_fixtures::{motor_generico_teste as engine_teste,
                                                  motor_generico_fraco_teste as engine_fraco_teste};
+
+    /// Âncoras da figura de mérito — spec ciclo 13 §3. Os dois valores são
+    /// EXATOS por construção da curva, não aproximados: `at(0)` devolve
+    /// `fom_static` e `at(j_design)` devolve `fom_design` sem interpolação.
+    #[test]
+    fn figura_de_merito_reproduz_as_ancoras_exatamente() {
+        let fom = FigureOfMerit {
+            fom_static: 0.75,
+            fom_design: 0.823_706_394_572_155_44,
+            j_design:   1.875_143_480_257_116_75,
+        };
+        assert_eq!(fom.at(0.0), 0.75);
+        assert_eq!(fom.at(1.875_143_480_257_116_75), 0.823_706_394_572_155_44);
+    }
+
+    /// Grampo acima de `j_design` (spec §3): a curva satura, não extrapola.
+    /// Extrapolar linearmente levaria FoM acima de 1,0 em J alto — violaria o
+    /// teto de quantidade de movimento que este ciclo inteiro existe para impor.
+    #[test]
+    fn figura_de_merito_satura_acima_do_j_de_projeto() {
+        let fom = FigureOfMerit { fom_static: 0.75, fom_design: 0.82, j_design: 1.9 };
+        assert_eq!(fom.at(1.9), 0.82);
+        assert_eq!(fom.at(3.8), 0.82);
+        assert_eq!(fom.at(50.0), 0.82);
+    }
+
+    /// FoM é uma FRAÇÃO da tração ideal — nunca pode passar de 1,0 nem chegar a
+    /// zero com âncoras válidas. Guarda falseável do teto físico (spec §8.5).
+    #[test]
+    fn figura_de_merito_fica_estritamente_dentro_de_zero_e_um() {
+        let fom = FigureOfMerit {
+            fom_static: 0.75,
+            fom_design: 0.823_706_394_572_155_44,
+            j_design:   1.875_143_480_257_116_75,
+        };
+        for i in 0..=1000 {
+            let j = i as f64 * 0.01;
+            let v = fom.at(j);
+            assert!(v > 0.0 && v <= 1.0, "FoM({j}) = {v} fora de (0, 1]");
+        }
+    }
+
+    /// Monotonicidade não-decrescente (spec §8.5): as pás vão saindo do estol
+    /// conforme a razão de avanço sobe; a figura de mérito não pode PIORAR com J
+    /// dentro da faixa de projeto.
+    #[test]
+    fn figura_de_merito_e_monotonica_nao_decrescente() {
+        let fom = FigureOfMerit {
+            fom_static: 0.75,
+            fom_design: 0.823_706_394_572_155_44,
+            j_design:   1.875_143_480_257_116_75,
+        };
+        let mut anterior = fom.at(0.0);
+        for i in 1..=1000 {
+            let atual = fom.at(i as f64 * 0.01);
+            assert!(atual >= anterior, "FoM caiu em J={}", i as f64 * 0.01);
+            anterior = atual;
+        }
+    }
+
+    /// J negativo não é fisicamente alcançável neste modelo (V ≥ 0), mas se
+    /// chegar aqui a curva devolve o valor estático — nunca extrapola para baixo
+    /// de `fom_static`, nunca NaN. Guarda de robustez, não de física.
+    #[test]
+    fn figura_de_merito_com_j_negativo_devolve_o_estatico() {
+        let fom = FigureOfMerit { fom_static: 0.75, fom_design: 0.82, j_design: 1.9 };
+        assert_eq!(fom.at(-1.0), 0.75);
+    }
 
     #[test]
     fn prop_rpm_correto() {
