@@ -1,7 +1,7 @@
 {
   "schema_version": "5.5",
   "revision": "5.5",
-  "validation_status": "PASS",
+  "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
     "area_m2": 14.2,
@@ -190,8 +190,8 @@
     "rc_sl_ms": 4.999904667293841,
     "rc_cruise_alt_ms": 4.544519960916836,
     "service_ceiling_m": 5200.0,
-    "to_distance_paved_m": 398.2276410494807,
-    "to_distance_grass_m": 477.8731692593768,
+    "to_distance_paved_m": 744.5565768095555,
+    "to_distance_grass_m": 996.3354319423928,
     "landing_distance_m": 362.6566215019111,
     "range_km": 2027.070681255655,
     "endurance_h": 7.239538147341625,
@@ -200,8 +200,8 @@
     "best_glide_kmh": 173.25645368960977,
     "glide_ratio": 15.921177186890732,
     "climb_gradient_pct": 12.451842484809621,
-    "to_50ft_paved_m": 420.3724511070893,
-    "to_50ft_grass_m": 473.46946991368674,
+    "to_50ft_paved_m": 651.2584082804725,
+    "to_50ft_grass_m": 819.1109783690307,
     "ldg_50ft_m": 502.4582990603992,
     "ldg_50ft_grass_m": 556.6771728943696
   },
@@ -434,7 +434,9 @@
     "weight": "semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados não pesados — validar na balança)",
     "wing": "semi-empirical (polar por build-up: CD0 por componente + Oswald empírico)"
   },
-  "violations": [],
+  "violations": [
+    "Decolagem (grama, 15 m): 819 m excede a pista disponível de 600 m"
+  ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
   ]

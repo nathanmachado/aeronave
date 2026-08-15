@@ -1097,6 +1097,25 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             cfg.performance.mu_brake_grass
         )));
     }
+    // Ciclo 12 (task 2, spec §4): atrito de ROLAGEM (livre, sem frenagem) —
+    // substitui `surface_factor` no caminho de decolagem. Faixa (0.0, 0.5),
+    // mesmo padrão dos demais coeficientes de atrito físicos deste bloco.
+    require_finite("performance.mu_roll_paved", cfg.performance.mu_roll_paved)?;
+    if cfg.performance.mu_roll_paved <= 0.0 || cfg.performance.mu_roll_paved >= 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.mu_roll_paved deve estar em \
+             (0.0, 0.5) (valor: {})",
+            cfg.performance.mu_roll_paved
+        )));
+    }
+    require_finite("performance.mu_roll_grass", cfg.performance.mu_roll_grass)?;
+    if cfg.performance.mu_roll_grass <= 0.0 || cfg.performance.mu_roll_grass >= 0.5 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.mu_roll_grass deve estar em \
+             (0.0, 0.5) (valor: {})",
+            cfg.performance.mu_roll_grass
+        )));
+    }
     require_positive("performance.static_thrust_factor", cfg.performance.static_thrust_factor)?;
     if cfg.performance.static_thrust_factor > 1.0 {
         return Err(ConfigError::Validation(format!(
@@ -1611,6 +1630,8 @@ mod tests {
             [performance]
             mu_brake_paved = 0.40
             mu_brake_grass = 0.30
+            mu_roll_paved = 0.04
+            mu_roll_grass = 0.08
             static_thrust_factor = 0.75
             rotation_time_s = 1.0
             flare_time_s = 1.5
@@ -2564,6 +2585,22 @@ mod tests {
         let toml = aircraft_toml_valido().replace("mu_brake_grass = 0.30", "mu_brake_grass = 0.90");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("performance.mu_brake_grass"), "{err}");
+    }
+
+    // ─── [performance] (ciclo 12, task 2: mu_roll_paved/mu_roll_grass) ─────
+
+    #[test]
+    fn rejeita_mu_roll_paved_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("mu_roll_paved = 0.04", "mu_roll_paved = 0.6");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.mu_roll_paved"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_mu_roll_grass_fora_da_faixa() {
+        let toml = aircraft_toml_valido().replace("mu_roll_grass = 0.08", "mu_roll_grass = 0.0");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("performance.mu_roll_grass"), "{err}");
     }
 
     #[test]

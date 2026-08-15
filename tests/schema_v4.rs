@@ -72,7 +72,7 @@ fn build_baseline_report() -> AircraftReport {
     );
 
     let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
-                                      &cfg.performance);
+                                      &cfg.performance, cfg.stability.cl_ground_rotation);
 
     // Ciclo 3 (oew-parametrico): massas estruturais COMPUTADAS
     // (`agents::mass_model` via `SizedAircraft::structural_masses`) —

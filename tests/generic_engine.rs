@@ -1198,6 +1198,41 @@ fn vy_argmax_e_estritamente_interior_a_janela_de_busca() {
 //   to_50ft_paved_m:      385.688557 → 390.676592   (+1,29%)
 //   to_50ft_grass_m:      433.182649 → 438.723163   (+1,28%)
 //   ldg_50ft_m:           541.763571 → 543.197862   (+0,26%)
+/// Ciclo 12 (task 2, spec §2.1/§9.2) — a âncora que precisa bater ANTES de
+/// qualquer outro número da rolagem: `thrust_ground_roll_n(0.0, ...)`
+/// avaliada no baseline REAL (Toyota + `baseline_4seat.toml`) tem de
+/// reproduzir `thrust_available_n(0.0, ...)` — não por aproximação, por
+/// IDENTIDADE algébrica (spec §2.1: em V=0 a cúbica degenera em u³=K, e
+/// `T = 2ρA·K^(2/3) = (2ρA·P²)^(1/3)`, o mesmo `static_thrust_ideal_n` que
+/// já alimenta `thrust_available_n`). Valor MEDIDO no baseline real:
+/// **3.740,0919357761986 N** — bate com a constante medida da spec §9.2 a
+/// sete dígitos, mesma referência usada pela implementação de referência em
+/// Python que valida a tabela congelada inteira.
+#[test]
+fn tracao_de_rolagem_em_v_zero_e_identica_ao_estatico_no_baseline_real() {
+    let cfg    = baseline_state();
+    let req    = baseline_mission();
+    let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
+    let sized  = size_aircraft(&cfg, &toyota, &req).unwrap();
+    let state  = &sized.state;
+
+    let novo = aeronave::agents::performance::thrust_ground_roll_n(
+        0.0, &toyota, toyota.rpm_max_continuous, state.prop_diameter_m,
+        0.0, req.isa_delta_c, cfg.performance.static_thrust_factor, state.psru_efficiency);
+    let hoje = aeronave::agents::performance::thrust_available_n(
+        0.0, &toyota, toyota.rpm_max_continuous, state.psru_ratio, state.prop_diameter_m,
+        0.0, req.isa_delta_c, cfg.performance.static_thrust_factor, state.psru_efficiency);
+    println!("thrust_ground_roll_n(0)={novo:.10}N  thrust_available_n(0)={hoje:.10}N");
+
+    // Congelado spec §9.2: 3.740,0919357761986 N.
+    let congelado = 3740.0919357761986;
+    assert!((novo - congelado).abs() < 1e-6,
+        "thrust_ground_roll_n(0) = {novo:.10} diverge do congelado {congelado:.10}");
+    let erro_rel = (novo - hoje).abs() / hoje;
+    assert!(erro_rel < 1e-9,
+        "identidade algébrica quebrada: novo={novo}, hoje={hoje}, erro_rel={erro_rel}");
+}
+
 #[test]
 fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     let cfg    = baseline_state();
@@ -1205,7 +1240,8 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let sized  = size_aircraft(&cfg, &toyota, &req).unwrap();
     let perf = PerformanceAgent::run(&sized.state, &sized.wing, &sized.prop, sized.state.mtow_kg,
-                                      &toyota, &req, &cfg.performance);
+                                      &toyota, &req, &cfg.performance,
+                                      cfg.stability.cl_ground_rotation);
 
     println!(
         "vx={:.6}km/h vy={:.6}km/h v_bg={:.6}km/h ld_max={:.6} gradiente={:.6}% \
@@ -1425,6 +1461,25 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // pin desta tabela se move além da tolerância de 1% já vigente (vx_kmh/
     // best_glide_kmh/glide_ratio/climb_gradient_pct/to_50ft_*/ldg_50ft_m
     // não consomem `climb_rate_ms`/Vy).
+    //
+    // Campanha ciclo 12 (task 2, 2026-08-15) — rolagem de decolagem por
+    // integração numérica (arrasto+atrito explícitos, spec
+    // `2026-08-15-ciclo12-solo-honesto`), substituindo o método energético
+    // fechado de Raymer (sem termo de arrasto — ver docstring `old→new` de
+    // `agents::performance::takeoff_ground_roll_m`). `surface_factor`
+    // (1,00/1,20) sai do caminho de decolagem, substituído por
+    // `mu_roll_paved=0,04`/`mu_roll_grass=0,08` explícitos (spec §4) — a
+    // corrida agora paga arrasto e atrito de verdade, o segmento DOMINANTE
+    // da distância de decolagem. Só os pins de DECOLAGEM se movem
+    // (`to_50ft_paved_m`/`to_50ft_grass_m`) — vx/vy/best_glide/glide_ratio/
+    // climb_gradient_pct/ldg_50ft_m são de subida/planeio/pouso, intocados
+    // por esta task (pouso é a Task 3). Valores MEDIDOS old→new:
+    //   to_50ft_paved_m:    420.264215 → **651.258408**  (+54,96%)
+    //   to_50ft_grass_m:    473.347286 → **819.110978**  (+73,05%)
+    // Isto é o RESULTADO esperado, não uma regressão — o check #23
+    // (`to_50ft_grass_m` ≤ 600 m) passa a REPROVAR (819 m > 600 m, por
+    // ≈219 m), `validation_status` vira `FAIL`. Tolerâncias INALTERADAS
+    // (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
         ("vx_kmh",             perf.vx_kmh,             138.862358, 0.01),
         // ERRATUM ciclo 11 §2 (rodada 2, 2026-08-10): 161.805734 (artefato
@@ -1434,8 +1489,8 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         ("best_glide_kmh",      perf.best_glide_kmh,     173.245074, 0.01),
         ("glide_ratio",         perf.glide_ratio,         15.921177, 0.01),
         ("climb_gradient_pct",  perf.climb_gradient_pct,  12.455553, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    420.264215, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    473.347286, 0.01),
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    651.258408, 0.01),
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    819.110978, 0.01),
         ("ldg_50ft_m",          perf.ldg_50ft_m,         502.431095, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
@@ -1508,15 +1563,23 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //   **362.676982** (-8,38%). É esta melhora que fecha o check #24
     //   (pouso na grama sobre 15 m: 605 → 557 m, pista de 600 m).
     // Tolerâncias INALTERADAS (1%).
-    let to_distance_paved_novo_pin = 398.318846;
+    // Campanha ciclo 12 (task 2, 2026-08-15): mesma rolagem integrada da
+    // tabela old→new acima (`to_50ft_*`) — `to_distance_*` continua
+    // "rolagem × 1,5" (estimativa legada, ver §8.1 da spec: a razão real
+    // cai de 1,5 para ≈1,32 com a rolagem integrada, ficando visivelmente
+    // inconsistente com `to_50ft_*` — item de backlog para remoção num
+    // bump MAJOR futuro, não tratado aqui). Valores MEDIDOS old→new:
+    //   to_distance_paved_m: 398.318846 → **744.556577**  (+86,94%)
+    //   to_distance_grass_m: 477.982615 → **996.335432**  (+108,44%)
+    let to_distance_paved_novo_pin = 744.556577;
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
-        "to_distance_paved_m {:.3} divergiu do pin pós-E10 {:.3}",
+        "to_distance_paved_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 477.982615;
+    let to_distance_grass_novo_pin = 996.335432;
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
-        "to_distance_grass_m {:.3} divergiu do pin pós-E10 {:.3}",
+        "to_distance_grass_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
         perf.to_distance_grass_m, to_distance_grass_novo_pin);
     // landing_distance_m: pequena variação refletindo o MTOW convergido —
     // tolerância alargada de "praticamente inalterado" (Task 4.7) para 1%
@@ -1529,15 +1592,31 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         "landing_distance_m {:.3} divergiu do pin pós-E10 {:.3}",
         perf.landing_distance_m, landing_distance_pin);
 
-    // Decolagem/pouso sobre 15m devem exceder as estimativas ground-roll-
-    // based simplificadas — segmentos adicionais (rotação/subida,
-    // aproximação/flare) só somam distância.
-    assert!(perf.to_50ft_paved_m > perf.to_distance_paved_m,
-        "TO sobre 15m ({:.1}m) deveria exceder a estimativa ground-roll×1.5 ({:.1}m)",
-        perf.to_50ft_paved_m, perf.to_distance_paved_m);
+    // Pouso sobre 15m deve exceder a estimativa legada de 200m fixos —
+    // segmentos adicionais (aproximação/flare) só somam distância.
+    // Intocado pelo ciclo 12, task 2 (pouso é a Task 3).
     assert!(perf.ldg_50ft_m > perf.landing_distance_m,
         "Pouso sobre 15m ({:.1}m) deveria exceder a estimativa legada de 200m fixos ({:.1}m)",
         perf.ldg_50ft_m, perf.landing_distance_m);
+
+    // HISTÓRICO — ASSERT MORTO, `old→new` (ciclo 12, task 2, spec §8.1): até
+    // este ciclo, `to_50ft_paved_m` (física por segmentos) SEMPRE excedia
+    // `to_distance_paved_m` (estimativa legada "rolagem × 1,5") — a asserção
+    // dizia isso ("TO sobre 15m deveria exceder a estimativa ground-roll×1.5").
+    // O fator ad hoc 1,5 de Raymer foi calibrado como razão
+    // `distância sobre 15m / rolagem` para o método ENERGÉTICO fechado
+    // (sem arrasto). Com a rolagem agora integrada (arrasto+atrito
+    // explícitos), a razão REAL medida cai para
+    // `to_50ft_paved_m/rolagem_paved = 651,258408/496,371051 ≈ 1,312` —
+    // abaixo de 1,5. `to_distance_paved_m` (= rolagem × 1,5 = 744,556577)
+    // passa a EXCEDER `to_50ft_paved_m` (651,258408): a estimativa legada,
+    // calibrada para o método antigo, fica visivelmente inconsistente com o
+    // campo físico do MESMO JSON — exatamente a inconsistência que a spec
+    // previu (§8.1) e registrou como item de backlog (remoção de
+    // `to_distance_*` num bump MAJOR futuro; os campos ficam, com docstring
+    // avisando que `*_50ft_*` é a referência física). A asserção morre
+    // aqui — não é mais verdadeira por construção, e forçá-la de volta
+    // esconderia o achado.
 }
 
 /// Achado da revisão da Task 3.1 (checagem de aceite rodando a cada

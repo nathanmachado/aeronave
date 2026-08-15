@@ -379,6 +379,7 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     let mut propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
         &sized.state, wing, prop, sized.state.mtow_kg, &engine, &req, &cfg.performance,
+        cfg.stability.cl_ground_rotation,
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();
@@ -485,9 +486,27 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // última violação restante (hélice, #25) FECHA — `x_nose_m` 1,30→1,20
     // reduz o fator de amplificação do pivô (≈1,46610→≈1,40650) o
     // suficiente para virar a folga crítica positiva. Contagem 1 → **0**.
-    assert_eq!(report.violations.len(), 0,
-        "campanha E12 nariz-only: esperava ZERO violações no baseline real (a última, hélice/\
-         #25, fecha com x_nose_m 1,30→1,20) — obteve: {:?}", report.violations);
+    //
+    // ATUALIZAÇÃO (ciclo 12, task 2, 2026-08-15 — old→new, O TESTE VOLTA A
+    // REPORTAR VIOLAÇÃO, DE PROPÓSITO): a rolagem de decolagem passa de
+    // método energético fechado (sem arrasto/atrito) para integração
+    // numérica consumindo a polar completa (spec
+    // `2026-08-15-ciclo12-solo-honesto`) — o segmento DOMINANTE da
+    // distância de decolagem finalmente paga arrasto e atrito, e a pista de
+    // fazenda de 600 m deixa de caber: `to_50ft_grass_m` 473,469470 m →
+    // **819,110978 m** (medido), estourando `req.runway_available_m`
+    // (600 m) por ≈219 m. Isto NÃO é regressão de código — é o modelo
+    // finalmente dizendo a verdade sobre operar 1.537 kg numa pista de
+    // grama de 600 m (diretriz permanente do usuário: "se uma decisão é
+    // perigosa, o modelo deve FALHAR no ponto de perigo"). Contagem
+    // 0 → **1**, a violação nomeada abaixo.
+    assert_eq!(report.violations.len(), 1,
+        "ciclo 12 (task 2): esperava EXATAMENTE 1 violação no baseline real — a decolagem na \
+         grama sobre 15 m (819 m) passa a exceder a pista de 600 m, achado honesto da rolagem \
+         integrada (ver comentário acima), não uma regressão: {:?}", report.violations);
+    assert!(report.violations.iter().any(|v| v.contains("Decolagem (grama, 15 m)")),
+        "a única violação esperada é a de decolagem na grama sobre 15 m: {:?}",
+        report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de
@@ -565,7 +584,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     let mut propeller = aeronave::agents::propeller::PropellerAgent::run(&cfg, &engine, &sized.prop, &req);
     let perf = aeronave::agents::performance::PerformanceAgent::run(
         &sized.state, &sized.wing, &sized.prop, sized.state.mtow_kg, &engine, &req,
-        &cfg.performance,
+        &cfg.performance, cfg.stability.cl_ground_rotation,
     );
     let electrical = aeronave::agents::electrical::ElectricalAgent::run(&cfg);
     let gear = gear_real();

@@ -785,7 +785,7 @@ mod tests {
         let wb = sized.wb;
         let mut propeller = PropellerAgent::run(&cfg, &engine, &prop, &req);
         let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
-                                          &cfg.performance);
+                                          &cfg.performance, cfg.stability.cl_ground_rotation);
         let mission = sized.mission;
         let electrical = ElectricalAgent::run(&cfg);
         // Task 2 (refino-ciclo2): CG mais dianteiro/traseiro REAIS dos

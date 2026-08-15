@@ -501,7 +501,8 @@ impl RobustnessAgent {
                 // passasse a depender de `sigma`).
                 let perf_p = crate::agents::performance::PerformanceAgent::run(
                     &sized_p.state, &sized_p.wing, &sized_p.prop,
-                    sized_p.state.mtow_kg, engine, req, &cfg_p.performance);
+                    sized_p.state.mtow_kg, engine, req, &cfg_p.performance,
+                    cfg_p.stability.cl_ground_rotation);
                 // Pista (Ciclo 6, task 2/3): mesma comparação de
                 // `ConstraintChecker::verify` #23/#24 (`perf.{to_50ft_grass,
                 // ldg_50ft_grass}_m > req.runway_available_m` é violação,
@@ -708,7 +709,7 @@ mod tests {
         let prop = sized.prop;
         let mission = sized.mission;
         let perf = PerformanceAgent::run(&state, &wing, &prop, state.mtow_kg, &engine, &req,
-                                          &cfg.performance);
+                                          &cfg.performance, cfg.stability.cl_ground_rotation);
         let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
         let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
         let gear = LandingGearAgent::run(
@@ -824,6 +825,15 @@ mod tests {
     /// (desenhada só para o caso "traseiro") agora produz 2 flips de
     /// Tipback, não 1: "traseiro" (achado original) e "massa-total"
     /// (achado honesto desta task — não forçado, apenas verificado).
+    ///
+    /// Ciclo 12 (task 2, `old→new`): a rolagem de decolagem passa a integrar
+    /// arrasto e atrito explícitos (spec `2026-08-15-ciclo12-solo-honesto`)
+    /// — na fixture sintética a distância sobre 15 m na grama cresce o
+    /// bastante para que o mundo massa-total (peso ainda maior que o
+    /// nominal) estoure `req.runway_available_m` (700 m) pela primeira vez,
+    /// mesmo nesta config que não mexe em nada de decolagem — achado
+    /// honesto colateral, não forçado. Contagem 2 → **3** flips: os dois de
+    /// Tipback (inalterados) mais "Decolagem (grama, 15 m)"/massa-total.
     #[test]
     fn config_marginal_gera_flip_nomeado() {
         let n0 = nominal_pipeline(config_teste());
@@ -836,6 +846,9 @@ mod tests {
         assert!(n.gear.tipback_angle_deg >= n.cfg.gear.tipback_min_deg,
             "pré-condição do teste: tipback nominal ({:.3}) deveria passar por pouco o piso \
              marginal ({:.3})", n.gear.tipback_angle_deg, n.cfg.gear.tipback_min_deg);
+        assert!(n.perf.to_50ft_grass_m <= n.req.runway_available_m,
+            "pré-condição do teste: decolagem nominal na grama ({:.1} m) deveria passar dentro \
+             da pista ({:.1} m)", n.perf.to_50ft_grass_m, n.req.runway_available_m);
 
         let out = RobustnessAgent::run(
             &n.cfg, &n.engine, &n.req, &n.state, &n.wing, &n.emp, &n.masses, &n.wb, &n.gear,
@@ -843,11 +856,14 @@ mod tests {
         );
         println!("flips={:?}", out.flips);
 
-        assert_eq!(out.flips.len(), 2,
-            "esperava exatamente 2 flips (Tipback/traseiro + Tipback/massa-total): {:?}",
-            out.flips);
-        for flip in &out.flips {
-            assert_eq!(flip.check, "Tipback");
+        let flips_tipback: Vec<_> = out.flips.iter().filter(|f| f.check == "Tipback").collect();
+        let flips_decolagem: Vec<_> = out.flips.iter()
+            .filter(|f| f.check == "Decolagem (grama, 15 m)").collect();
+        assert_eq!(out.flips.len(), flips_tipback.len() + flips_decolagem.len(),
+            "só esperava flips de Tipback ou de Decolagem (grama, 15 m): {:?}", out.flips);
+        assert_eq!(flips_tipback.len(), 2,
+            "esperava exatamente 2 flips de Tipback (traseiro + massa-total): {:?}", out.flips);
+        for flip in &flips_tipback {
             assert!(flip.caso == "traseiro" || flip.caso == "massa-total",
                 "caso inesperado para o flip de Tipback: {}", flip.caso);
             assert!(flip.valor < flip.limite,
@@ -855,6 +871,14 @@ mod tests {
                 flip.valor, flip.limite);
             assert!((flip.limite - n.cfg.gear.tipback_min_deg).abs() < 1e-9);
         }
+        // Ciclo 12 (task 2): achado colateral honesto — ver docstring acima.
+        assert_eq!(flips_decolagem.len(), 1,
+            "esperava exatamente 1 flip de Decolagem (grama, 15 m), caso massa-total (achado \
+             colateral do ciclo 12, task 2): {:?}", out.flips);
+        assert_eq!(flips_decolagem[0].caso, "massa-total");
+        assert!(flips_decolagem[0].valor > flips_decolagem[0].limite,
+            "valor ({}) deveria exceder o limite ({}) — é isso que caracteriza o flip de \
+             decolagem", flips_decolagem[0].valor, flips_decolagem[0].limite);
     }
 
     /// Tanque apertado (`fuel_system.capacity_l = 172.0`, achado por sonda
@@ -1184,6 +1208,28 @@ mod tests {
                     .unwrap_or_else(|| panic!("cenário '{nome_cenario}' do flip não existe no nominal"));
                 assert!(sc.inside_envelope,
                     "flip do cenário '{nome_cenario}' só deveria existir se ele passava no nominal");
+            } else if flip.check == "Decolagem (grama, 15 m)" {
+                // Ciclo 12 (task 2): a rolagem de decolagem integrada
+                // (arrasto+atrito explícitos) alonga bastante a distância
+                // sobre 15 m na fixture sintética — o mundo massa-total
+                // (peso ainda maior) passa a estourar `runway_available_m`
+                // com alguma frequência, algo que nunca acontecia com o
+                // método energético de Raymer. Propriedade preservada:
+                // o flip só pode existir se o nominal passava.
+                assert!(n.perf.to_50ft_grass_m <= n.req.runway_available_m,
+                    "flip de Decolagem (grama, 15 m) só deveria existir se o nominal passava");
+            } else if flip.check == "Pouso (grama, 15 m)" {
+                assert!(n.perf.ldg_50ft_grass_m <= n.req.runway_available_m,
+                    "flip de Pouso (grama, 15 m) só deveria existir se o nominal passava");
+            } else if flip.check == "Razão de subida" {
+                assert!(n.perf.rc_sl_ms >= RC_SL_MIN_MS,
+                    "flip de Razão de subida só deveria existir se o nominal passava");
+            } else if flip.check == "Velocidade de cruzeiro" {
+                assert!(n.perf.v_cruise_kmh >= n.req.cruise_speed_min_kmh,
+                    "flip de Velocidade de cruzeiro só deveria existir se o nominal passava");
+            } else if flip.check == "Teto de serviço" {
+                assert!(n.perf.service_ceiling_m >= SERVICE_CEILING_MIN_M,
+                    "flip de Teto de serviço só deveria existir se o nominal passava");
             } else {
                 panic!("check de flip desconhecido: {}", flip.check);
             }

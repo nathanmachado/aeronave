@@ -508,8 +508,33 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// tail-strike/margem de combustível) continuam com os MESMOS números —
 /// `x_nose_m` só afeta o #25 e o CG dos cenários mais dianteiros de forma
 /// mensurável, verificados pelos asserts abaixo.
+///
+/// ─── ATUALIZAÇÃO (ciclo 12, task 2, 2026-08-15) — O TESTE VOLTA A `FAIL`,
+/// DE PROPÓSITO ───────────────────────────────────────────────────────────
+///
+/// A rolagem de decolagem passa de método energético fechado de Raymer
+/// (sem termo de arrasto nem de atrito explícitos — ver docstring `old→new`
+/// de `agents::performance::takeoff_ground_roll_m`) para integração
+/// numérica da equação de movimento consumindo a polar completa (spec
+/// `2026-08-15-ciclo12-solo-honesto`). O segmento DOMINANTE da distância de
+/// decolagem finalmente paga arrasto (`cd_ground_roll`) e atrito de
+/// rolagem explícito (`mu_roll_grass=0,08`, substituindo o antigo
+/// `surface_factor=1,20` que contava a grama sem separar atrito de
+/// arrasto). Medido: `to_50ft_grass_m` 473,469470 m → **819,110978 m**
+/// (+73,0%), estourando `req.runway_available_m` (600 m) por ≈219 m —
+/// checagem #23 REPROVA pela primeira vez. `validation_status` volta a
+/// `"FAIL"` com **EXATAMENTE 1 violação** — a de decolagem na grama.
+/// Nenhum outro achado muda (hélice/#25, carga de nariz, robustez,
+/// tipback/tail-strike/margem de combustível, pouso na grama): a rolagem de
+/// pouso e o balanço de rotação são as Tasks 3/4 deste ciclo, fora do
+/// escopo desta task. **Isto não é regressão** — é o modelo passando a
+/// dizer a verdade sobre operar esta célula numa pista de fazenda de
+/// 600 m (diretriz permanente do usuário: "se uma decisão é perigosa, o
+/// modelo deve FALHAR no ponto de perigo"). O ciclo 13 decide o que fazer
+/// a respeito (mais potência, mais asa, pista maior, ou aceitar operação
+/// só pavimentada) — não esta task.
 #[test]
-fn engine_padrao_explicito_com_out_tempfile_reporta_pass_honesto_e12_narizonly() {
+fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolagem_grama() {
     let out_path = std::env::temp_dir().join(format!(
         "aeronave_cli_test_engine_padrao_explicito_{}.json",
         std::process::id()
@@ -536,59 +561,63 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_pass_honesto_e12_narizonly()
     let json = std::fs::read_to_string(&out_path)
         .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", out_path.display()));
     assert!(json.contains("Toyota 1GD-FTV"), "JSON de saída deveria conter 'Toyota 1GD-FTV':\n{json}");
-    // Campanha E12 "nariz-only" (ver a ATUALIZAÇÃO na docstring):
-    // validation_status vira PASS — a checagem #25 (folga crítica de
-    // hélice), única violação restante desde o ciclo 9, fecha com o nariz
-    // avançado (x_nose_m 1,30→1,20). Primeiro PASS do baseline com o
-    // modelo completo.
-    assert!(json.contains("\"validation_status\": \"PASS\""),
-        "JSON de saída deveria reportar validation_status PASS (campanha E12 nariz-only — ver \
-         comentário acima):\n{json}");
+    // Ciclo 12 (task 2, `old→new`, ver a ATUALIZAÇÃO na docstring):
+    // validation_status VOLTA a FAIL — a rolagem de decolagem integrada
+    // (arrasto+atrito explícitos) estoura a pista de grama de 600 m
+    // (checagem #23). Não é regressão: é o achado que este ciclo existe
+    // para produzir.
+    assert!(json.contains("\"validation_status\": \"FAIL\""),
+        "JSON de saída deveria reportar validation_status FAIL (ciclo 12, task 2 — rolagem de \
+         decolagem integrada estoura a pista de grama, ver comentário acima):\n{json}");
     let spec: serde_json::Value = serde_json::from_str(&json)
         .expect("saída deveria ser JSON válido");
     let violations: Vec<String> = spec["violations"].as_array()
         .expect("violations deveria ser um array presente")
         .iter().map(|v| v.as_str().unwrap_or_default().to_string()).collect();
-    // Contagem 1 → **0** (E12 nariz-only fecha a última violação restante,
-    // checagem #25). Assert de contagem PRIMEIRO, com a lista inteira na
-    // mensagem: qualquer violação nova aparece por nome no output do
-    // teste, sem precisar adivinhar qual foi.
-    assert_eq!(violations.len(), 0,
-        "campanha E12 nariz-only: esperava ZERO violações no baseline real (a última, \
-         checagem #25 de hélice, fecha com x_nose_m 1,30→1,20) — ver o comentário acima: \
-         {violations:#?}");
+    // Contagem 0 → **1** (ciclo 12, task 2: decolagem na grama sobre 15 m
+    // estoura os 600 m de pista disponível). Assert de contagem PRIMEIRO,
+    // com a lista inteira na mensagem: qualquer violação nova aparece por
+    // nome no output do teste, sem precisar adivinhar qual foi.
+    assert_eq!(violations.len(), 1,
+        "ciclo 12 (task 2): esperava EXATAMENTE 1 violação no baseline real — a decolagem na \
+         grama sobre 15 m (819 m > 600 m), achado honesto da rolagem integrada (ver comentário \
+         acima), não uma regressão: {violations:#?}");
     // Asserts NOMEADOS por checagem — redundantes com a contagem acima de
-    // propósito: se um refactor um dia reabrir uma violação, a contagem
-    // sozinha não diria QUAL regrediu.
+    // propósito: se um refactor um dia reabrir/fechar uma violação, a
+    // contagem sozinha não diria QUAL mudou.
     //
-    // (#25) Folga crítica de hélice: ≈−0,00249 m (ciclo 10) → ≈+0,007367 m
-    // (E12), a checagem #25 fecha pela primeira vez.
+    // (#25) Folga crítica de hélice: continua FECHADA desde a E12
+    // nariz-only (≈+0,007367 m) — INTOCADA pelo ciclo 12, task 2.
     assert!(!violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
-        "folga crítica de hélice (≈+0,007367 m, checagem #25) deveria estar FECHADA desde a \
-         campanha E12 nariz-only (x_nose_m 1,30→1,20): {violations:#?}");
-    // (1) Carga de nariz: 28,6% (E7) → 22,77% (E10) → ≈21,90% (E12, o \
-    // nariz avançado dilui um pouco mais), abaixo do teto de 25%.
+        "folga crítica de hélice (≈+0,007367 m, checagem #25) deveria continuar FECHADA (ciclo \
+         12, task 2 não a toca): {violations:#?}");
+    // (1) Carga de nariz: continua abaixo do teto de 25% (≈21,90%) —
+    // INTOCADA pelo ciclo 12, task 2.
     assert!(!violations.iter().any(|v| v.contains("Carga de nariz:")),
-        "carga de nariz (≈21,90%) deveria estar abaixo do teto de 25% desde a E10 \
-         (x_nose_m 1,40→1,30→1,20 + bateria de 53 kg a 7,80 m): {violations:#?}");
-    // (2/3) Robustez (#19): CONTINUA ZERO flips. Os cenários 'Solo
-    // (piloto)' e '2 pax dianteiros' seguem com folga suficiente sobre a
-    // régua do pior mundo dianteiro (o limite de rotação não se move com
-    // x_nose_m — só o CG dos cenários, que avança um pouco e ainda sobra
-    // folga).
+        "carga de nariz (≈21,90%) deveria continuar abaixo do teto de 25% (ciclo 12, task 2 não \
+         a toca): {violations:#?}");
+    // (2/3) Robustez (#19): CONTINUA ZERO flips — INTOCADA pelo ciclo 12,
+    // task 2.
     assert!(!violations.iter().any(|v| v.starts_with("Robustez:")),
-        "esperava ZERO violações de robustez (σ=15%) — ZERO desde a campanha E10 e ZERO ainda \
-         na E12 nariz-only: {violations:#?}");
-    // (4) Pouso na GRAMA sobre 15 m: continua dentro dos 600 m da pista de
-    // fazenda (x_nose_m não afeta VS0/distância de pouso).
-    assert!(!violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
-        "pouso na grama (≈556,7 m, inalterado pela E12) deveria caber nos 600 m: \
+        "esperava ZERO violações de robustez (σ=15%) — INTOCADA pelo ciclo 12, task 2: \
          {violations:#?}");
-    // A decolagem na grama continua PASSANDO (x_nose_m não afeta a
-    // decolagem — mesma distância ≈473,5 m sobre 15 m da E10/ciclo 10).
-    assert!(!violations.iter().any(|v| v.contains("Decolagem (grama")),
-        "decolagem na grama (≈473,5 m, inalterada pela E12) deveria continuar dentro dos \
-         600 m: {violations:#?}");
+    // (4) Pouso na GRAMA sobre 15 m: continua dentro dos 600 m — o pouso é
+    // a Task 3 deste ciclo, fora do escopo desta task (ainda usa o método
+    // energético fechado/frenagem constante).
+    assert!(!violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "pouso na grama (≈556,7 m, INTOCADO pela task 2 — o método muda só na Task 3 deste \
+         ciclo) deveria caber nos 600 m: {violations:#?}");
+    // (5) HISTÓRICO — ASSERT MORTO, `old→new` (ciclo 12, task 2): até este
+    // ciclo, a decolagem na grama sempre PASSAVA (≈473,5 m sobre 15 m,
+    // método energético sem arrasto). Com a rolagem integrada
+    // (arrasto+atrito explícitos), `to_50ft_grass_m` sobe para 819,1 m —
+    // EXCEDE os 600 m da pista. Esta é agora a ÚNICA violação do baseline
+    // real, já verificada pela contagem/lista acima; o assert antigo
+    // ("decolagem na grama continua PASSANDO") morre aqui, não é mais
+    // verdadeiro por construção.
+    assert!(violations.iter().any(|v| v.contains("Decolagem (grama")),
+        "decolagem na grama (819,1 m, ciclo 12 — rolagem integrada) deveria exceder os 600 m \
+         de pista disponível: {violations:#?}");
     // Envelope de CG por cenário: NENHUM dos 6 cenários fora do envelope
     // admissível. `rotation_limit_pct_mac` fica em 13,354637% MAC
     // (INALTERADO — x_nose_m não entra na régua de TrimAuthorityAgent); o
