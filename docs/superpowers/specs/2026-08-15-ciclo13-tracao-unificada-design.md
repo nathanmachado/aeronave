@@ -239,13 +239,67 @@ Computado com os valores exatos do código (V_cr = 280/3,6 = 77,7̄ m/s,
 `prop_rpm_cruise = 1414,0332083556507`, `P_eixo_cr = 122,887229388 kW`,
 `ρ_cr = 0,95685612333150516`):
 
+### §3.2.1 — ERRATUM: a derivação acima usa o `u` ERRADO
+
+**Achado da Task 2, confirmado por medição. Este erratum corrige um erro do
+chefe, não da implementação.**
+
+A fórmula do §3.2 avalia `u` com `P_eixo_cr` = **potência DISPONÍVEL** no
+eixo a 2640 rpm (122,887229388 kW). Mas em cruzeiro nivelado a hélice não
+absorve tudo que o motor oferece: ela produz `T = arrasto` e absorve só o que
+isso custa (`p_req_cruise_kw` = 117,9 kW, ≈4,2% de folga). A velocidade
+induzida é fixada pela TRAÇÃO, não pela potência ofertada — que é exatamente
+como o §5 inverte. Os dois `u` só coincidiriam com folga de potência nula.
+
+| | `u` (m/s) | η_ideal |
+|---|---|---|
+| §3.2 original — base POTÊNCIA disponível | 81,72925779 | 0,95165158572651209 |
+| **correto — base TRAÇÃO requerida** | **≈80,96** | **0,96069278899658828** |
+
+Divergência: **0,950%** — e ela propaga inteira para `fom_design`.
+
+**O problema de fundo, que vale registrar como o 7º "premissa calibrada" do
+projeto.** `η(J)` do polinômio é função de `J` SOZINHO. Mas a eficiência real
+de uma hélice depende de `J` **e** do carregamento de disco (`T/(ρAV²)`).
+Converter um η indexado só por `J` numa figura de mérito **exige escolher um
+ponto de operação**, e escolhas diferentes dão respostas diferentes. O §3.2
+escolheu uma por acidente, não por argumento.
+
+**Ponto de operação adotado:** o de CRUZEIRO como o modelo o calcula —
+base tração, o mesmo do §5. Assim a âncora amarra onde ela precisa amarrar.
+
+**Ponto fixo, e como resolvê-lo.** Mudar `fom_design` muda `p_req` → BSFC →
+combustível → massa → arrasto → `T` → `u` → `fom_design`. A sensibilidade é
+de segunda ordem (uma mudança de 0,94% em `fom_design` move a massa ≈0,13%);
+**itere até `|Δfom_design| < 1e-9` e reporte quantas iterações levou.**
+
 | Grandeza | Valor |
 |---|---|
-| `j_design` | **1,87514348025711675** |
+| `j_design` | **1,87514348025711675** (inalterado) |
+| η_poly(j_design) — o alvo | 0,78388149656765982 |
+| η_ideal (base tração, 1ª iteração) | 0,96069278899658828 |
+| **`fom_design` corrigido, 1ª ordem** | **≈0,81595438786045016** (−0,9411%) |
+
+O valor convergido é o que a Task 3 mede. Se ele divergir mais de 0,1% da
+estimativa de 1ª ordem acima, **escalar** — significa que o ponto fixo é mais
+forte do que este erratum supõe.
+
+**Efeito colateral PREVISTO, não conserte.** Baixar `fom_design` em 0,94%
+gira a curva `FoM(J)` INTEIRA para baixo (a âncora J=0 fica fixa). Logo a
+tração cai um pouco em toda a faixa acima de J=0, e **subida e decolagem
+pioram marginalmente**: o gradiente CS 23.65 deve cair de 8,0158% para
+≈7,95% (segue REPROVANDO o gate de 8,3%) e `to_50ft_grass_m` deve subir um
+pouco acima dos 848,93 m medidos na Task 2. As duas direções são esperadas.
+
+### §3.2.2 — Tabela original (SUPERSEDIDA pelo §3.2.1, mantida para registro)
+
+| Grandeza | Valor |
+|---|---|
+| `j_design` | 1,87514348025711675 |
 | η_poly(j_design) | 0,78388149656765982 |
-| u no disco | 81,72925779175839978 m/s |
-| η_ideal | 0,95165158572651209 |
-| **`fom_design`** | **0,82370639457215544** |
+| u no disco (base POTÊNCIA — ERRADO) | 81,72925779175839978 m/s |
+| η_ideal (ERRADO) | 0,95165158572651209 |
+| `fom_design` (ERRADO) | 0,82370639457215544 |
 
 **Cruzeiro, consumo, alcance e autonomia ficam inalterados por construção.**
 Esta é a razão de escolher esta âncora e não o pico do polinômio.
@@ -602,6 +656,48 @@ seja, **'Solo (piloto)' virando violação NOMINAL**. Medir e reportar, não
 escolher a superfície que dá o número bonito.
 
 ---
+
+## §11.1 — MEDIDO na Task 2 (o placar da projeção do §11)
+
+Estado após a Task 2, com `fom_design` ainda no valor ERRADO do §3.2.2 — a
+Task 3 recalibra e todos estes números se movem um pouco. Registrado aqui
+para que as Tasks 4 e 5 não trabalhem a partir de uma projeção velha.
+
+| Grandeza | Projetado (§11) | Medido | Placar |
+|---|---|---|---|
+| `rotation_limit_pct_mac` | ≈16,4% | **16,392661%** | acerto quase exato |
+| Margem 'Solo (piloto)' | ≈+1,4 pp | **+3,16 pp** | subestimei ≈2,3× |
+| Robustez '2 pax dianteiros' | resolve | **resolveu** | ✅ |
+| Robustez 'Solo (piloto)' | persiste | **persiste** (13,74 vs 16,60) | ✅ |
+| Violação de envelope de CG | — | **1 → 0** | efeito não previsto, favorável |
+| `climb_gradient_pct` | ≈7,9%, pode flipar | **8,015811%, FLIPOU** | ✅ |
+| `rc_sl_ms` | ≈3,4 | **3,505920** | ✅ |
+| `service_ceiling_m` | cai pouco | **5200 → 4800** | ✅ |
+| `to_50ft_grass_m` | ≈784,5 m (CAI) | **848,927019 m (SUBIU)** | ❌ **errei a direção** |
+| `v_cruise_kmh` | ≈+4% | **−2,66%** (292,228013) | ❌ **errei a direção** |
+| `range`/`endurance`/`fc` | inalterados | **+1,57% / +1,57% / −1,54%** | ❌ consequência do §3.2.1 |
+| `vy_kmh` | não projetado | **148,44 → 167,25 km/h** (+12,68%) | argmax interior confirmado |
+
+### Por que a projeção de decolagem errou a DIREÇÃO
+
+A tabela do §3.4 varreu formas de `FoM(J)` medindo só a **rolagem**, mantendo
+o segmento aéreo congelado em 154,89 m. Isso era estruturalmente incompleto:
+o segmento aéreo contém a SUBIDA até 15 m, avaliada em `V_climb = 1,20·Vs_to`
+— acima de `V_LOF`, portanto no regime onde a tração cai ≈21%. A rolagem de
+fato encolheu; o segmento de subida encareceu mais do que isso, e domina.
+
+**Lição de método, não de física:** varrer um parâmetro sobre um subconjunto
+dos segmentos e extrapolar para o total é o mesmo erro de classe que a
+"premissa calibrada" — uma conta válida sob uma hipótese (o resto não se
+mexe) que a própria mudança quebra. O §3.4 fica no registro como errado.
+
+### Por que `v_cruise_kmh` errou a direção
+
+Mesma origem do `old→new` do §1.1: projetei `+4%` a partir de `J = 2,0106`,
+que vem do rpm de CRUZEIRO. `max_level_speed_ms` usa `engine.rpm_rated`
+(3400 rpm), onde `J = 1,5611` — e ali o polinômio antigo estava perto do
+próprio pico (η ≈ 0,823), portanto era OTIMISTA, não pessimista. Corrigi a
+tabela do §1.1 e esqueci de propagar a correção para a projeção do §11.
 
 ## §12 — Fora de escopo
 
