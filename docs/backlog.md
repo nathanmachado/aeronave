@@ -23,7 +23,11 @@ CAD). Achado confirmado: no baseline E10 real, fator ≈ 1,46610,
 checagem #25 REPROVA o baseline real desde este ciclo (1 violação nomeada,
 `validation_status: FAIL`) — decisão de projeto (mover a hélice/trem, ou
 aceitar a folga negativa até validação em CAD/ensaio) fica para revisão
-humana; este ciclo mede, não tuna. Ponteiro: docstring de
+humana; este ciclo mede, não tuna. `old→new` (ciclo 9 → ciclo 11): a
+checagem #25 REPROVOU do ciclo 9 ao ciclo 10 — desde o baseline E12
+(`x_nose_m` 1,30→1,20, trem de nariz recuado) ela **PASSA**, com folga
+crítica `prop_clearance_critical_m = +0,007367 m`. O texto acima descreve
+o veredito NAQUELE momento (ciclo 9), não o estado atual. Ponteiro: docstring de
 `PropellerSpec::prop_clearance_critical_m` (`src/models/specs.rs`,
 histórico old→new completo), checagem #25 em
 `validation::constraint_checker::ConstraintChecker::verify`,
@@ -99,11 +103,18 @@ DISCOVERY, §4 ERRATUM da spec), `docs/aircraft_spec.schema.md` (campos
 ## 4. Rolagem de decolagem/pouso sem termo de arrasto (método de energia) — RESOLVIDO ciclo 12
 
 **RESOLVIDO** (ciclo 12, tasks 2 e 3, 2026-08-15). `takeoff_ground_roll_m`/
-`landing_ground_roll_m` usavam o método ENERGÉTICO de Raymer (`V²/2gμ`
-ajustado por fator de tração/frenagem), que não incluía nenhum termo de
+`landing_ground_roll_m` usavam métodos ENERGÉTICOS fechados sem termo de
 arrasto aerodinâmico explícito — mesmo com o flap já modelado na polar
 (`cd0_flap_to_extra`, ciclo 8), o segmento DOMINANTE da distância de
 decolagem/pouso ficava sem custo de arrasto por construção do método.
+`old→new` (correção de descrição, fix wave ciclo 12): o texto acima dizia
+que "ambos os segmentos usavam o método ENERGÉTICO de Raymer (`V²/2gμ`)"
+— FALSO para a decolagem. `git show 1e11998:src/agents/performance.rs`
+mostra `takeoff_ground_roll_m` como `w*w / (G*rho*wing.area_m2*cl_to*
+t_avg)` — SEM coeficiente de atrito nenhum, um método de EMPUXO MÉDIO
+distinto. A fórmula `V_ref²/(2·g·μ)` era usada SÓ no pouso
+(`landing_ground_roll_m`). Ver detalhe correto na tabela `Método
+substituído` abaixo.
 
 **Método novo:** integração numérica da equação de movimento em `V`
 (Simpson composto, 200 intervalos, convergência verificada — dobrar para
@@ -124,12 +135,17 @@ completa segmento a segmento:
   `cl_ground_roll_landing` (CL de solo com flap CHEIO) e `D(V)` do
   `cd_ground_roll` com o incremento de flap de pouso.
 
-**Método substituído (`old`):** ambos os segmentos usavam a fórmula
-energética fechada `S_G = V_ref²/(2·g·μ)` (ajustada por fator de
-tração/frenagem médio), que por construção não tem NENHUM termo de arrasto
-aerodinâmico — nem o CD0 de trem estendido, nem o induzido, nem o
-incremento de flap entravam na conta da rolagem, só no gradiente de subida
-posterior.
+**Método substituído (`old`):** `old→new` (correção de descrição, fix
+wave ciclo 12) — os dois segmentos usavam fórmulas ENERGÉTICAS fechadas
+DIFERENTES, não a mesma. **Pouso** (`landing_ground_roll_m`, verificado em
+`1e11998`): `S_G = V_ref²/(2·g·μ)` (ajustada por fator de frenagem médio).
+**Decolagem** (`takeoff_ground_roll_m`, verificado em
+`git show 1e11998:src/agents/performance.rs`): `S_G = w²/(G·ρ·área·
+cl_to·T_médio)` — método de EMPUXO MÉDIO, **sem coeficiente de atrito
+nenhum** (μ não entrava na fórmula da decolagem). As duas fórmulas, por
+construções distintas, não tinham NENHUM termo de arrasto aerodinâmico —
+nem o CD0 de trem estendido, nem o induzido, nem o incremento de flap
+entravam na conta da rolagem, só no gradiente de subida posterior.
 
 **Tabela `old→new`, medida em `aircraft_spec.json`** (commit pré-ciclo-12
 `1e11998` vs HEAD atual, baseline real Toyota 1GD-FTV):
@@ -214,7 +230,10 @@ fração do curso já consumida pela compressão estática) corrige isso:
 ≈−0,00249 m (ciclo 10)** — honestamente ANTI-conservador (a correção
 AUMENTA a folga calculada), mas fiel à letra da norma. `validation_status`
 do baseline real PERMANECE `"FAIL"` com a MESMA 1 violação nomeada
-(checagem #25) — só o NÚMERO da violação muda, não o veredito.
+(checagem #25) — só o NÚMERO da violação muda, não o veredito. `old→new`
+(ciclo 10 → ciclo 11): esse veredito era válido no ciclo 10 — desde o
+baseline E12 (`x_nose_m` 1,30→1,20) a checagem #25 **PASSA**
+(`prop_clearance_critical_m = +0,007367 m`); ver item 1 acima.
 
 Nota relacionada, sinal OPOSTO e pequena, NÃO resolvida por esta task
 (item independente, permanece nomeado): o disco da hélice também não é
@@ -249,10 +268,15 @@ textos descrevendo o modelo ANTES do erratum não foram atualizados junto
 backlog). Fix wave reescreveu todos:
 
 1. **`fidelity.trim` em `src/main.rs`** (linha ~836): era *"desconsidera
-   binário tração/arrasto/inércia"*, hoje **"inclui binário de TRAÇÃO
-   `−T(Vr)·prop_axis_above_cg_m` no balanço; desconsidera termos de SOLO
-   (residual ≈ μ_roll·(W−L_g)·h_cg, ≲2 pp)"** — reflete o comportamento real
-   (tração incluída, solo desprezado).
+   binário tração/arrasto/inércia"*, hoje (na época, ciclo 10) **"inclui
+   binário de TRAÇÃO `−T(Vr)·prop_axis_above_cg_m` no balanço; desconsidera
+   termos de SOLO (residual ≈ μ_roll·(W−L_g)·h_cg, ≲2 pp)"** — refletia o
+   comportamento real NAQUELE momento (tração incluída, solo desprezado).
+   `old→new` (ciclo 10 → ciclo 12): esta descrição ficou DESATUALIZADA — a
+   task 4 deste ciclo IMPLEMENTOU os termos de solo (`src/main.rs:901`
+   atual já diz o contrário: "os três recuam o limite dianteiro de rotação
+   em conjunto"). Não é mais o texto vigente; ver `fidelity.trim` corrente
+   e §1/§4 (bloco `trim`) de `docs/aircraft_spec.schema.md`.
 2. **Docstring `momento_da_linha_de_tracao_hand_check_com_literais`** em
    `src/agents/trim_authority.rs` (linha ~1108): era *"z_eixo = 1,12 m
    (h_cg_ground 0,92 + offset 0,20 do E10)"* (descrição pré-erratum),
@@ -295,13 +319,23 @@ o modelo de quantidade de movimento com avanço.
 | Divergência | −890,2982 N (**−27,69%**) |
 
 A rolagem de decolagem usa `thrust_ground_roll_n` do início ao fim (nunca
-faz costura com `thrust_available_n`), então este ciclo não introduz
-inconsistência NUM cálculo — mas os dois modelos descrevem a MESMA
-grandeza física (tração da hélice nesta velocidade) e devolvem números
-27,69% distintos, o que é uma descontinuidade de modelo, não de código.
-Unificar reabriria cruzeiro, teto de serviço, alcance e autonomia (todos
-consumidores de `thrust_available_n`/`prop_efficiency`), por isso fica
-fora de escopo deste ciclo. Ponteiro: docstrings de
+faz costura com `thrust_available_n`) — mas os dois modelos descrevem a
+MESMA grandeza física (tração da hélice nesta velocidade) e devolvem
+números 27,69% distintos, o que é uma descontinuidade de modelo, não de
+código. `old→new` (fix wave ciclo 12, este próprio ciclo falsificou a
+frase acima): "este ciclo não introduz inconsistência NUM cálculo" —
+FALSO. A task 4 (item de backlog dedicado, "INCONSISTÊNCIA DE MODELO DE
+TRAÇÃO NO BALANÇO DE ROTAÇÃO", prioridade ALTA, abaixo) INTRODUZ uma
+inconsistência de cálculo real: o balanço de `rotation_available_moment_nm`
+usa `thrust_at_rotation_n` (via `thrust_available_n`) no termo de momento
+enquanto os termos de solo, adicionados por esta mesma task, usam o
+modelo de solo (`thrust_ground_roll_n`, implícito em `D`/`μN` calculados
+com a física de solo) NA MESMA VELOCIDADE (`Vr = V_LOF`, por construção
+— ver item dedicado) — um resíduo `(T_solo − T_momento)·h_cg` não
+cancelado, de magnitude comparável ao próprio termo corrigido por este
+ciclo. Unificar reabriria cruzeiro, teto de serviço, alcance e autonomia
+(todos consumidores de `thrust_available_n`/`prop_efficiency`), por isso
+fica fora de escopo deste ciclo. Ponteiro: docstrings de
 `agents::performance::thrust_ground_roll_n`/`thrust_available_n`
 (`src/agents/performance.rs`), spec §2.4 e §11 item 1
 (`docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md`).
@@ -445,3 +479,153 @@ revisão, não de execução). Ponteiro: `scripts/verifica-ciclo.sh`,
 `tests/generic_engine.rs` (linha do pin `ldg_50ft_m`, histórico
 `old→new` na tabela da task de pouso), commit `8f92c55` (ERRATUM ciclo
 11).
+
+## 14. Achados da task 4 — recuo do limite de rotação e margem residual (registro, fix wave ciclo 12)
+
+A task 4 (termos de solo do balanço de rotação, ver item 4/RESOLVIDO acima
+sobre "≲2 pp") implementou a correção mas não registrou os próprios
+achados numéricos no backlog — só no código/schema. Registro aqui, medido
+no baseline real (HEAD, `aircraft_spec.json`):
+
+- **Recuo do limite dianteiro de rotação**: `rotation_limit_pct_mac`
+  **13,354637% → 17,757974% MAC (+4,403 pp)**, causado pelos dois termos
+  de solo (`μ_roll·N·h_cg` e `D·(h_cg−z_drag_above_cg_m)`) somados ao
+  balanço de `agents::trim_authority::rotation_available_moment_nm`.
+- **Margem do cenário 'Solo (piloto)'** (`rotation_authority_margin_pct`
+  em `trim.rotation_margin_per_scenario`): **+0,0011863088529595282%** de
+  momento — essencialmente ZERO, equivalente a **≈0,000513 pp de %MAC**
+  (≈6,4 micrômetros de posição de CG). Este é o cenário mais apertado dos
+  6 e o que governa `rotation_limit_pct_mac` (o MÁXIMO por cenário).
+  Confirmada ESTÁVEL: apertar a tolerância de convergência do laço de
+  MTOW de 0,5 kg para 1e-9 kg muda o resultado só no 9º/10º dígito
+  significativo — não é ruído de convergência disfarçado de margem real.
+- **As 2 violações de robustez criadas por este ciclo** (ver item 5 desta
+  lista, "prioridade ALTA", para o achado central relacionado): com a
+  margem nominal de 'Solo (piloto)' praticamente em zero, o pior-caso
+  direcional de robustez (`RobustnessAgent`, `±15%` nas massas
+  estruturais) empurra o limite de rotação PARA CIMA no mundo perturbado
+  (`limite = 18,094655% MAC` contra `limite_nominal = 17,757974% MAC`) e
+  os cenários 'Solo (piloto)' e '2 pax dianteiros' FLIPAM de PASS para
+  FAIL — `robustness.flips` tem 2 entradas, ambas NOVAS deste ciclo
+  (`git show 1e11998:aircraft_spec.json` tinha `robustness.flips: []`).
+
+Ponteiro: docstring de
+`agents::trim_authority::rotation_available_moment_nm` (seção "TERMOS DE
+SOLO", `src/agents/trim_authority.rs`), `docs/aircraft_spec.schema.md`
+(bloco `trim`, parágrafo "Baseline real"), `aircraft_spec.json`
+(`trim.rotation_limit_pct_mac`, `trim.rotation_margin_per_scenario`,
+`robustness.flips`).
+
+## 15. PRIORIDADE ALTA — inconsistência do modelo de tração no balanço de rotação (erro de spec, indeterminação ≈8,3 pp de MAC)
+
+Achado central da revisão final de branch do ciclo 12, erro de
+especificação (não de implementação da task — a task seguiu a spec à
+risca). **Não resolvido nesta wave** — resolver exige decidir qual modelo
+de tração vale em `V_LOF`, o que reabre cruzeiro, teto de serviço,
+alcance e autonomia (mesmo território do item 8 acima, "Unificar o modelo
+de tração"). Decisão de usuário.
+
+**O mecanismo:** a derivação de d'Alembert em
+`agents::trim_authority::rotation_available_moment_nm` (ver docstring,
+seção "POR QUE O BRAÇO É SOBRE O CG") cancela a porção `h_cg` do braço da
+tração contra o termo inercial `m·aₓ·h_cg` **porque o mesmo símbolo `T`
+aparece nos dois lados da equação de movimento da corrida**:
+`m·aₓ = T − D − μN`. Essa álgebra pressupõe que o `T` do termo de momento
+e o `T` (implícito em `D`/`μN`, via `aₓ`) do termo inercial sejam O MESMO
+número.
+
+A task 4 QUEBROU essa premissa: manteve no termo de momento
+`T = thrust_at_rotation_n(Vr)` → `agents::performance::thrust_available_n`
+(disco atuador + `prop_efficiency(J)`), enquanto `D` e `μN`, agora
+explícitos no balanço (termos de solo da task 4), vêm do modelo de solo
+— cujo próprio modelo de tração NA MESMA VELOCIDADE é
+`agents::performance::thrust_ground_roll_n` (quantidade de movimento com
+avanço), **27,69% menor** (ver item 8 acima, tabela medida em `V_LOF`).
+
+**`Vr` e `V_LOF` são a MESMA velocidade por construção**, não uma
+coincidência aproximada: `VR_OVER_VS0 = 1.1` sobre
+`Vs0_TO = √(2W/(ρ·S_w·CL_max_TO))` (`trim_authority.rs:81`,
+`rotation_speed_ms`) é ALGEBRICAMENTE IDÊNTICO a
+`v_lof = 1.10·√(2W/(ρ·area_m2·cl_max_to))` (`performance.rs:672`,
+`takeoff_ground_roll_com_passos`) — mesma fórmula, mesmos símbolos.
+
+**Resíduo não cancelado `(T_solo − T_momento)·h_cg`, medido por
+cenário** (T no momento via `thrust_at_rotation_n`; T no modelo de solo
+via `thrust_ground_roll_n`; ambos em `Vr = V_LOF` do cenário):
+
+| Cenário | T no momento (N) | T no modelo de solo (N) | Resíduo (N·m) | Resíduo (pp de MAC) |
+|---|---|---|---|---|
+| Solo (piloto) | 3.557,89 | 2.464,44 | −1.005,97 | **−6,816** |
+| 2 pax dianteiros | 3.430,42 | 2.415,05 | −934,15 | −5,801 |
+| 4 pax sem bagagem | 3.269,28 | 2.348,30 | −847,30 | −4,692 |
+| 4 pax + bagagem + cheio | 3.197,46 | 2.316,94 | −810,08 | −4,255 |
+
+**O ciclo corrigiu um erro de +4,403 pp (item 14 acima) e abriu um erro
+de −6,816 pp na MESMA equação, na MESMA direção (nariz-abaixo)** — o novo
+erro é MAIOR que o corrigido.
+
+**Consequência:** `rotation_limit_pct_mac` é INDETERMINADO entre dois
+extremos coerentes de modelagem:
+- **≈16,28% MAC**: usar `thrust_ground_roll_n` nos DOIS termos (momento e
+  solo) — resíduo ZERO por construção, mas abandona `thrust_available_n`
+  no termo de momento.
+- **≈24,57% MAC**: manter o polinômio `thrust_available_n` no termo de
+  momento e SOMAR o resíduo faltante ao balanço de solo.
+
+O valor PUBLICADO hoje, **17,757974%**, fica perto da ponta OTIMISTA
+(menor recuo) dessa banda — não é um meio-termo, é um dos dois modelos
+parcialmente aplicado. **Banda de indeterminação ≈8,3 pp de MAC**, contra
+uma margem publicada no cenário mais apertado ('Solo (piloto)') de
+**0,000513 pp** (item 14 acima) — a indeterminação de modelo é ~4 ordens
+de grandeza MAIOR que a margem que ela deveria estar testando.
+
+Isto FALSIFICA uma afirmação escrita neste próprio ciclo: ver `old→new`
+no item 8 acima ("este ciclo não introduz inconsistência NUM cálculo" —
+introduz, via a task 4).
+
+**A resolução NÃO é desta fix wave** — escolher qual modelo de tração
+vale em `V_LOF` é decisão de projeto/usuário, e reabre cruzeiro, teto,
+alcance e autonomia. Ver também item 9 do JSON (`fidelity.trim`, fix wave
+ciclo 12) para a qualificação de indeterminação publicada. Ponteiro:
+docstring de `agents::trim_authority::rotation_available_moment_nm`
+(seção "POR QUE O BRAÇO É SOBRE O CG" e "TERMOS DE SOLO"),
+`agents::trim_authority::rotation_speed_ms`/`VR_OVER_VS0`
+(`trim_authority.rs:81`), `agents::performance::
+takeoff_ground_roll_com_passos` (`performance.rs:672`, `v_lof`), item 8
+acima (`thrust_ground_roll_n` × `thrust_available_n`, divergência
+medida).
+
+## 16. Assimetria de superfície entre a rotação e a decolagem/pouso (`mu_roll_paved` vs. grama, decisão de usuário)
+
+`agents::trim_authority` avalia o balanço de rotação com
+`mu_roll_ground = cfg.performance.mu_roll_paved` (ver
+`trim_authority.rs:809-814`), documentando a escolha como "pavimentada é
+a superfície menos conservadora das duas, mesma lógica de 'menos
+pessimista' já usada para o rpm de tração em `thrust_at_rotation_n`". Mas
+este mesmo ciclo (item 4/RESOLVIDO acima) mediu que a pista de GRAMA de
+600 m é INVIÁVEL para este baseline (`to_50ft_grass_m`/`ldg_50ft_grass_m`
+excedem os 600 m — checagens #23/#24 REPROVAM).
+
+**Medido com `μ` de grama (`mu_roll_grass = 0,08`) no lugar de
+`mu_roll_paved` no balanço de rotação:**
+
+| | Pavimentado (publicado) | Grama |
+|---|---|---|
+| `rotation_limit_pct_mac` | 17,7580% | **19,6458%** |
+| Margem 'Solo (piloto)' | +0,0012% | **−4,3666%** (violação NOMINAL, não só sob perturbação de robustez) |
+
+As duas metades deste ciclo descrevem operações em superfícies
+DIFERENTES: a task 2/3 (pista) já trata a grama como referência de gate
+(#23/#24 reprovam em grama), mas a task 4 (rotação) continua avaliando o
+evento de rotação em pavimento — a MESMA decolagem, modelada com duas
+superfícies distintas em dois pontos do mesmo pipeline. Se a pista real
+de operação for de grama (consistente com #23/#24 já reprovando em
+grama), a margem de 'Solo (piloto)' fica NEGATIVA no caso NOMINAL (sem
+nem precisar da perturbação de robustez do item 15/item 5).
+
+**Não resolvido nesta wave** — decisão de qual superfície a rotação deve
+assumir (ou se deve reportar as duas) é de projeto/usuário. Ponteiro:
+`agents::trim_authority` (`trim_authority.rs:809-814`, comentário
+"pavimentada é a superfície menos conservadora das duas"),
+`config/aircraft/baseline_4seat.toml` (`[performance].mu_roll_paved`/
+`mu_roll_grass`).
