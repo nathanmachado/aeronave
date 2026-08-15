@@ -849,11 +849,18 @@ fn main() {
          +0,00737 m. `old→new` (ciclo 11 → ciclo 12): a esta altura o texto dizia \
          `validation_status: PASS`, `violations: []` — verdade NAQUELE momento (só a \
          checagem #25 pendia), mas ficaria FALSO sem reescrita: desde o ciclo 12 \
-         (tasks 2/3, ground roll por integração, docs/backlog.md item 4) \
-         `validation_status` do baseline real vira `FAIL` com 4 violações — 2 de \
-         robustez de massa estrutural e 2 de pista de grama (#23/#24) — TODAS \
+         `validation_status` do baseline real vira `FAIL` com 4 violações — TODAS \
          não relacionadas à hélice; a checagem #25 (esta seção) CONTINUA PASSANDO, \
-         sem violação própria. A folga crítica de hélice em si (+0,00737 m) não \
+         sem violação própria. `old→new` (proveniência corrigida, fix wave ciclo 12): \
+         a frase acima (antes desta reescrita) atribuía as 4 violações a \"tasks 2/3, \
+         ground roll por integração\" — FALSO para 2 delas. Medido (task 4 desligada, \
+         tasks 2/3 intactas): restam apenas 2 violações — só #23 e #24 (pista de \
+         GRAMA), essas sim causadas pelas tasks 2/3. As outras 2 (Robustez: cenários \
+         'Solo (piloto)' e '2 pax dianteiros') são causadas pela TASK 4 (termos de \
+         solo do balanço de rotação) — NOVAS deste ciclo, sem relação alguma com a \
+         rolagem por integração; `git show 1e11998:aircraft_spec.json` (pré-ciclo-12) \
+         tem `validation_status: \"PASS\"`, `violations: []`, `robustness.flips: []`. \
+         A folga crítica de hélice em si (+0,00737 m) não \
          mudou desde o ciclo 11. Achado companheiro (docs/backlog.md item 9, fora \
          de escopo): `agents::propulsion::prop_efficiency` — o polinômio de \
          eficiência da hélice usado por `thrust_available_n` (cruzeiro/subida/ \
@@ -908,7 +915,19 @@ fn main() {
          rolamento (μ_roll·N·h_cg) e de arrasto de solo (D·(h_cg−h_D)) — os três recuam o \
          limite dianteiro de rotação em conjunto (≈4,40 pp dos dois últimos, medido; o ciclo \
          10 os desprezava com uma estimativa de ≲2 pp que a medição desmentiu); validar em \
-         ensaio de voo antes de tratar como definitivo)".into());
+         ensaio de voo antes de tratar como definitivo. QUALIFICAÇÃO DE INDETERMINAÇÃO (fix \
+         wave ciclo 12, docs/backlog.md item 15, PRIORIDADE ALTA): o termo de tração do \
+         balanço de rotação (thrust_available_n, em Vr) e os termos de solo introduzidos por \
+         esta mesma task (via D/μN, que fisicamente correspondem a thrust_ground_roll_n na \
+         MESMA velocidade — Vr = V_LOF por construção) vêm de dois modelos de tração que \
+         divergem ≈27,69% nessa velocidade; o resíduo não cancelado desse descasamento não \
+         está incluído no rotation_limit_pct_mac publicado. Enquanto a escolha de modelo de \
+         tração em V_LOF permanecer em aberto (backlog item 15), rotation_limit_pct_mac \
+         carrega uma indeterminação de MODELO de ≈8,3 pp de %MAC (banda medida entre os dois \
+         extremos coerentes de modelagem) — a margem de autoridade do cenário mais apertado \
+         ('Solo (piloto)', ≈0,000513 pp de %MAC) fica QUATRO ORDENS DE GRANDEZA dentro dessa \
+         banda, não fora dela: a precisão numérica publicada (17,757974...% MAC) excede o que \
+         o modelo atual sustenta.)".into());
 
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {
