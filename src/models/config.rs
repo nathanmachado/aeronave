@@ -2681,6 +2681,41 @@ mod tests {
         assert!(err.to_string().contains("performance.static_thrust_factor"), "{err}");
     }
 
+    /// Ciclo 13: a guarda do TETO DE QUANTIDADE DE MOVIMENTO na validação de
+    /// config precisa ser falseável. Sem este teste ela é código que nunca
+    /// dispara — e uma guarda que não consegue reprovar não é guarda.
+    /// `FoM > 1` significaria uma hélice produzindo mais empuxo que o disco
+    /// atuador ideal na mesma potência de eixo.
+    #[test]
+    fn rejeita_figura_de_merito_acima_de_um() {
+        for (campo, linha_antiga, linha_nova) in [
+            ("propeller.fom_static", "fom_static = 0.72", "fom_static = 1.4"),
+            ("propeller.fom_design", "fom_design = 0.80", "fom_design = 1.4"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains(campo), "{campo}: {err}");
+            assert!(err.to_string().contains("quantidade de movimento"),
+                    "a mensagem tem que dizer POR QUE é impossível: {err}");
+        }
+    }
+
+    /// As três âncoras têm que ser estritamente positivas — `j_design ≤ 0`
+    /// faria `FigureOfMerit::at` dividir por zero ou inverter o sinal da
+    /// interpolação em silêncio.
+    #[test]
+    fn rejeita_ancoras_da_figura_de_merito_nao_positivas() {
+        for (campo, linha_antiga, linha_nova) in [
+            ("propeller.fom_static", "fom_static = 0.72", "fom_static = 0.0"),
+            ("propeller.fom_design", "fom_design = 0.80", "fom_design = -0.5"),
+            ("propeller.j_design",   "j_design   = 1.60", "j_design   = 0.0"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains(campo), "{campo}: {err}");
+        }
+    }
+
     #[test]
     fn rejeita_rotation_time_s_nao_positivo() {
         let toml = aircraft_toml_valido().replace("rotation_time_s = 1.0", "rotation_time_s = -1.0");

@@ -268,8 +268,11 @@ impl PropulsionAgent {
 /// Por definição `FoM ≤ 1` — uma hélice não produz mais tração que o disco
 /// atuador ideal absorvendo a mesma potência (conservação de quantidade de
 /// movimento, spec §1). Esta é a grandeza que substitui o polinômio
-/// `prop_efficiency` apagado neste ciclo: aquele violava o teto físico em 5
-/// dos 8 pontos de operação do baseline (spec §1.1).
+/// `prop_efficiency` apagado neste ciclo: aquele violava o teto físico em
+/// QUATRO dos oito pontos de operação do baseline (spec §1.1) — rolagem a
+/// V=10 (2,1432x) e V=20 (1,3417x), `V_LOF` (1,0372x) e `Vx` (1,0095x).
+/// Os dois últimos alimentam gates que PASSAVAM: o balanço de rotação e o
+/// gradiente CS 23.65.
 ///
 /// As duas âncoras são propriedades da HÉLICE, vindas de `[propeller]` do
 /// TOML — nunca hardcodadas aqui.
