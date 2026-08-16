@@ -217,7 +217,20 @@ fn literais(codigo: &str) -> Vec<Literal> {
                     && (c[p as usize - 1] == '<' || c[p as usize - 1] == '>')));
 
         if !tolerancia {
-            let texto: String = c[inicio_real..k].iter().collect();
+            // Passo 0b (ciclo 15, revisão da Task 1): o laço de casas decimais
+            // consome `_` como dígito de legibilidade, então para `2.0895_f64`
+            // ele avança até o `_` antes do sufixo de tipo e para SÓ aí — o
+            // texto colhido fica "2.0895_", com sublinhado pendurado. Não é bug
+            // funcional (`casa_na_precisao` remove os `_` antes de comparar),
+            // mas `_f64` é o padrão DOMINANTE nos pins reais deste repositório,
+            // então toda mensagem de falha sairia com esse sublinhado sobrando.
+            // Aparar o(s) `_` final(is) aqui resolve na origem, sem tocar
+            // `casa_na_precisao` nem a contagem de casas (que já ignora `_`).
+            let texto: String = c[inicio_real..k]
+                .iter()
+                .collect::<String>()
+                .trim_end_matches('_')
+                .to_string();
             let casas = texto
                 .split('.')
                 .nth(1)
@@ -301,6 +314,20 @@ fn cobranca_e_semantica_nao_tipografica() {
     // por linha, e portanto sem ambiguidade.
     let b = cobrados(&mascara_arquivo("        (\"vy_kmh\", perf.vy_kmh, 167.4067945716, 0.01),")[0]);
     assert_eq!(b.iter().map(|l| l.texto.as_str()).collect::<Vec<_>>(), vec!["167.4067945716"]);
+}
+
+#[test]
+fn fronteira_de_quatro_casas_e_cobrada() {
+    // fronteira exata: 4 casas, linha SEM assert. É a forma de
+    // control_surfaces.rs:44 (`let esperado_span = 2.0895_f64;`), e dois pins
+    // reais dependem dela. Trocar `>= 4` por `> 4` deixaria os dois escaparem
+    // em silêncio — e nenhum dos 28 testes originais pegava essa mutação.
+    let f = cobrados(&mascara_arquivo("    let esperado_span = 2.0895_f64;")[0]);
+    assert_eq!(f.iter().map(|l| l.texto.as_str()).collect::<Vec<_>>(), vec!["2.0895"]);
+
+    // e 3 casas fora de assert continua NÃO sendo cobrado
+    let g = cobrados(&mascara_arquivo("    let x = 1.234;")[0]);
+    assert!(g.is_empty());
 }
 
 #[derive(Debug, Clone, PartialEq)]
