@@ -614,7 +614,7 @@ cobrados + 1 vinculado voluntário + 23 isentos.**
 | `control_surfaces.rs:79` | `1.165835` | `control_surfaces.elevator.area_m2` |
 | `control_surfaces.rs:80` | `0.459899` | `control_surfaces.rudder.area_m2` |
 | `control_surfaces.rs:138` | `0.0` | `control_surfaces.elevator.start_m` |
-| `empennage.rs:42` † | `3.134` | `empennage.s_horizontal_m2` |
+| `empennage.rs:41` † | `3.134` | `empennage.s_horizontal_m2` |
 | `gear_tipback.rs:182` | `16.7940` | `landing_gear.tipback_angle_deg` |
 | `gear_tipback.rs:216` | `13.1865` | `landing_gear.tail_strike_margin_deg` |
 | `gear_tipback.rs:277` | `21.8973` | `landing_gear.nose_load_max_pct` |
@@ -655,9 +655,41 @@ cobrados + 1 vinculado voluntário + 23 isentos.**
 | `vn_diagram.rs:101` | `-1.52` | `vn_diagram.n_lim_neg` |
 | `vn_diagram.rs:105` | `3.59` | `vn_diagram.n_gust_vc` — **§7.4** |
 
-† `empennage.rs:42` **não é cobrado** pela regra (3 casas, linha sem `assert`).
+† `empennage.rs:41` **não é cobrado** pela regra (3 casas, linha sem `assert`).
 É um pin real e recebe marcador **voluntariamente** — marcar mais do que a regra
 exige é sempre permitido; marcar menos, nunca.
+
+**ADENDO da implementação (Task 2) — a permissão acima era impossível de
+exercer.** `confere_vinculos` filtrava os candidatos por `cobrados()`, de modo
+que um marcador voluntário reprovava SEMPRE, com "a linha não tem literal
+cobrado", ainda que apontasse para um valor perfeitamente correto. Escrevi uma
+permissão sem rodar a regra que a concede. Corrigido com um fallback para
+`literais()` apenas quando `cobrados()` vem vazio; os ramos de 0 e de 2+
+literais seguem idênticos, então a detecção de ambiguidade não foi tocada.
+
+Provado por mutação nos dois sentidos, sobre os arquivos reais:
+
+| variante | vinculados | falhas |
+|---|---|---|
+| com fallback (real) | 48 | 0 |
+| sem fallback | 47 | 1 — só `empennage.rs:41` |
+| `literais()` SEMPRE, sem `cobrados()` | 40 | **8 — todas AMBÍGUO** |
+
+A terceira linha é a que importa: sem o filtro de cobrança, as oito linhas da
+tabela de `generic_engine.rs:1735-1742` viram ambíguas, porque cada uma carrega
+o pin **e** a fração de tolerância `0.01`. O `cobrados` no caminho de vínculo
+não é decorativo — invertê-lo quebra oito pins reais.
+
+**Interação a registrar.** Com a fronteira de cobrança mutada de `>= 4` para
+`> 4`, os pins de 4 casas de `control_surfaces.rs:44-45` **continuam passando**,
+porque caem no fallback e são achados por outro caminho. Os dois mecanismos se
+cobrem, e o efeito é que a proteção daquela fronteira ficou inteiramente
+concentrada no teste unitário `fronteira_de_quatro_casas_e_cobrada`. Quem apagar
+esse teste não verá nada quebrar, e o buraco silencioso volta.
+
+Redundância entre mecanismos parece robustez; quando ela **esconde** a falha de
+um deles, é o contrário. Dois componentes que se cobrem só aumentam a segurança
+enquanto se sabe que ambos ainda funcionam.
 
 **46 dos 48 batem.** Os dois que não são os da §7.4, e continuam sendo as duas
 únicas mudanças de literal autorizadas.
