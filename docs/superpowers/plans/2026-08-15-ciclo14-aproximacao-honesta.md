@@ -88,8 +88,11 @@ não toque em `landing_distance_50ft_m`.
 grep -rn "cd_ground_roll" --include=*.rs src/ tests/
 ```
 
-São 6 call sites em `src/` (rolagem de decolagem, rolagem de pouso, balanço de
-rotação) mais docstrings. Acrescente à docstring da função:
+São **4 chamadas reais em `src/`** (`performance.rs:661` e `:886`,
+`trim_authority.rs:867` e `:2081`) mais **1 em `tests/generic_engine.rs:2421`**,
+mais docstrings — contagem corrigida pela revisão de plano (a 1ª versão dizia
+"6 em src/", que contava menções em comentário). O compilador pega qualquer
+identificador esquecido. Acrescente à docstring da função:
 
 ```rust
 /// `old→new` (ciclo 14, spec §2.4): esta função chamava-se `cd_ground_roll`.
@@ -286,6 +289,37 @@ fn segmento_aereo_de_pouso_fecha_os_quinze_metros() {
     assert!(fechamento.abs() < 1e-9, "as alturas não fecham 15 m: {fechamento}");
 }
 
+/// O ARCO É MESMO UM ARCO (ciclo 14 — guarda acrescentada após a revisão de
+/// plano). O teste de "fechamento" acima é TAUTOLÓGICO: `s_air` foi DEFINIDO
+/// como `(15−h)/tan γ`, então a identidade fecha por construção e só pega
+/// erro de sinal ou typo. Esta aqui não fecha por construção.
+///
+/// O flare é um arco de círculo de raio `R`, tangente à rampa no início e
+/// HORIZONTAL no fim. Para qualquer ponto desse arco vale, exatamente:
+///
+///     s_flare² + (R − h_flare)² = R²
+///
+/// `h` e `s` entram por caminhos independentes (`R(1−cos γ)` e `R sin γ`), e
+/// a identidade de Pitágoras os amarra. Trocar seno por cosseno, errar o
+/// sinal do `1−cos`, ou usar um raio diferente nos dois quebra isto — e
+/// NENHUM desses erros seria pego pelo teste de fechamento.
+#[test]
+fn o_flare_e_um_arco_de_circulo_de_verdade() {
+    let (engine, state, wing) = fixture_baseline();
+    let cfg = config_teste();
+    let n = cfg.performance.flare_load_factor;
+    let seg = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+    // R recomputado a partir de V_ref, independente do que a função guardou.
+    let w = MTOW_PIN_KG * G;
+    let v_ref = 1.30 * ((2.0 * w) / (RHO_SL * wing.area_m2 * wing.cl_max)).sqrt();
+    let r = v_ref * v_ref / (G * (n - 1.0));
+    let residuo = seg.flare_distance_m.powi(2)
+                  + (r - seg.flare_height_m).powi(2) - r * r;
+    assert!(residuo.abs() / (r * r) < 1e-12,
+            "o flare não é um arco de raio {r}: resíduo relativo {}",
+            residuo.abs() / (r * r));
+}
+
 /// Rampa mais íngreme ⟹ aproximação estritamente MAIS CURTA (spec §5.4).
 /// Numerador cai (o flare consome mais altura) e denominador sobe — as duas
 /// na mesma direção.
@@ -420,11 +454,31 @@ fn check_approach_angle_migration(toml_str: &str) -> Result<(), ConfigError> {
 
 Escreva o teste de cada guarda, no padrão dos testes de migração existentes.
 
-- [ ] **Passo 7: atualize o comentário de `aircraft_config.rs:305`**, que
-      descreve `rotation_attitude_deg` citando "`[performance]
+- [ ] **Passo 7: atualize o comentário em `config/aircraft/baseline_4seat.toml:324`**
+      (perto de `rotation_attitude_deg = 11.0`), que cita "`[performance]
       rotation_time_s/flare_time_s`, tempos — não ângulos — do mesmo evento".
       Metade dessa frase morreu: `flare_time_s` não existe mais e o flare
-      agora É um ângulo/arco. `old→new`.
+      agora É um arco com ângulo. `old→new`.
+
+> Ponteiro corrigido pela revisão de plano: a 1ª versão deste plano mandava
+> procurar em `aircraft_config.rs:305`, onde esse texto NÃO está (linha 305 de
+> lá é sobre `j_design`, hélice).
+
+- [ ] **Passo 7b: limpe os testes dos campos removidos.** Três testes de
+      rejeição em `src/models/config.rs` guardam campos que deixam de existir:
+      `rejeita_flare_time_s_nao_positivo`, `rejeita_approach_angle_deg_fora_da_faixa`
+      e `rejeita_approach_angle_deg_nao_finito`. Eles **saem** — mas as
+      propriedades que guardavam não podem sumir junto: `flare_load_factor`
+      já ganhou o teste de faixa na Task 1, e o ângulo agora é derivado
+      (não há mais o que rejeitar). **Diga isso no relatório**, item por item —
+      teste removido sem substituto nomeado é achado de revisão.
+
+- [ ] **Passo 7c: `pouso_50ft_maior_que_pouso_ground_roll_mais_ar_fixo`**
+      (`src/agents/performance.rs:~1948`) — o comentário dele afirma
+      "aproximação a 3° percorre ~286 m". Fica desatualizado. Reconfira a
+      relação `d_50ft > d_legado` sob o modelo novo na fixture sintética e
+      reescreva o comentário. Se a relação deixou de valer, isso é ACHADO:
+      escreva a relação nova e verdadeira, viva.
 
 - [ ] **Passo 8: `cargo test` e MEÇA.** Reporte, contra a projeção da spec §7:
       `ldg_approach_angle_deg`, `ldg_flare_height_m`, `ldg_air_distance_m`,
@@ -445,14 +499,48 @@ Escreva o teste de cada guarda, no padrão dos testes de migração existentes.
 
 **Tier declarado: JULGAMENTO (Sonnet 5).**
 
-**Files:** `src/models/specs.rs`, `src/main.rs`, `aircraft_spec.json`,
+**Files:** `src/models/specs.rs`, **`src/agents/performance.rs`**,
+**`src/validation/constraint_checker.rs`**, `src/main.rs`, `aircraft_spec.json`,
 `docs/aircraft_spec.schema.md`, `docs/backlog.md`, `tests/*.rs`
+
+> **Achado da revisão de plano — `..Default::default()` NÃO EXISTE neste
+> crate.** `grep -rn "PerformanceSpec {"` acha **7** construções, TODAS
+> campo-a-campo. Acrescentar 3 campos quebra a compilação em todas. Duas
+> importam além do "fazer compilar":
+> - `src/agents/performance.rs:~1175` — a construção de **PRODUÇÃO** dentro de
+>   `PerformanceAgent::run`. É ali que os 3 campos recebem os valores REAIS.
+> - `src/validation/constraint_checker.rs` — duas fixtures de teste
+>   (`performance_spec_com_gradiente`, `performance_spec_com_rc_e_teto`).
 
 - [ ] **Passo 1: 3 campos novos em `PerformanceSpec`** (spec §6.1):
       `ldg_approach_angle_deg`, `ldg_flare_height_m`, `ldg_air_distance_m`.
-      **Confira se algum literal `PerformanceSpec { ... }` sem
-      `..Default::default()` existe** (no ciclo 13 foi `trim_sintetico()` em
-      `weight_balance.rs` que quebrou assim) — `grep -rn "PerformanceSpec {"`.
+
+- [ ] **Passo 1b: popule-os em `PerformanceAgent::run` — LEIA ANTES DE CODAR**
+
+`landing_distance_50ft_m` devolve `f64`, então ela NÃO carrega a decomposição.
+Chame `landing_air_segment` **UMA ÚNICA VEZ** e use o resultado nos 3 campos:
+
+```rust
+    // Ciclo 14 (spec §6.1): a decomposição do segmento aéreo é publicada
+    // porque ela é 52,5% da distância de pouso em grama e até aqui não
+    // aparecia em lugar nenhum do JSON.
+    //
+    // UMA chamada só, de propósito: γ_app, h_flare e s_air NÃO dependem de
+    // `mu_brake` — o segmento aéreo é idêntico para pavimento e grama, só a
+    // ROLAGEM muda. Chamar duas vezes (uma por superfície) daria os mesmos
+    // números e sugeriria, falsamente, que o ar depende da superfície.
+    let ldg_air = landing_air_segment(mass_ldg, rho_sl, wing, state,
+                                      perf_cfg.flare_load_factor);
+```
+
+**PROIBIDO:** fabricar valores só para compilar, ou recalcular a polar de
+aproximação num segundo lugar. A spec §5.5 tem uma guarda contra a segunda
+polar; a primeira o revisor pegaria.
+
+- [ ] **Passo 1c: as 5 construções restantes de `PerformanceSpec`** (fixtures
+      de teste) recebem valores sintéticos plausíveis, **deliberadamente
+      diferentes dos do baseline real** — mesmo padrão da fixture do
+      `flare_load_factor` na Task 1.
 
 - [ ] **Passo 2: `SCHEMA_VERSION` 5.6 → 5.7** e testes de schema.
 
@@ -463,8 +551,17 @@ Escreva o teste de cada guarda, no padrão dos testes de migração existentes.
       **Tolerâncias inalteradas.**
 
 - [ ] **Passo 5: `docs/aircraft_spec.schema.md`** — bloco `performance` (3
-      campos), histórico v5.7 (MINOR puro, sem exceção registrada: só
-      adiciona campos; `ldg_50ft_*` mudam de VALOR mas não de significado).
+      campos) e histórico v5.7 = **MINOR com EXCEÇÃO REGISTRADA** (spec §6.0),
+      mesmo padrão de v5.2/v5.3/v5.4/v5.5/v5.6.
+
+> **Correção obrigatória da revisão de plano.** A 1ª versão deste plano dizia
+> "MINOR puro, sem exceção registrada" — contra o precedente do próprio
+> documento de schema. A exceção NÃO é porque o valor mudou (todo ciclo muda
+> valores); é porque **a premissa de operação embutida em `ldg_50ft_m` e
+> `ldg_50ft_grass_m` mudou**: de "aproximação estabilizada de 3° COM
+> POTÊNCIA" para "campo curto, MOTOR EM MARCHA LENTA sobre o obstáculo". Quem
+> comparar v5.6 com v5.7 estará comparando dois PROCEDIMENTOS, não duas
+> medições do mesmo. Escreva a exceção nesses termos.
 
 - [ ] **Passo 6: `docs/backlog.md`**
       - **#17 RESOLVIDO**, com a medição: os dois defeitos separados, a tabela
@@ -478,11 +575,21 @@ Escreva o teste de cada guarda, no padrão dos testes de migração existentes.
 - [ ] **Passo 7: `fidelity.performance`** em `src/main.rs`. Tem que declarar
       (a) que `γ_app` é derivado da polar, (b) a **premissa de motor em marcha
       lenta** e que uma aproximação motorizada seria mais longa (o modelo é
-      OTIMISTA nesse caso), (c) que o flare agora consome altura. Varredura de
-      texto morto:
+      OTIMISTA nesse caso), (c) que o flare agora consome altura.
+
+> **ALVO NOMEADO pela revisão de plano — `src/main.rs:~838`.** Dentro do
+> próprio bloco `fidelity.performance` existe hoje a frase: *"a aproximação de
+> pouso (segmento de APROXIMAÇÃO antes do toque, ângulo fixo de 3°, não L/D)
+> continua sem consumir a polar, por construção — não afetada por esta task"*.
+> Depois deste ciclo ela fica **inteiramente FALSA**: a aproximação passa a
+> consumir a polar e É o objeto central da mudança. Reescreva com `old→new`.
+
+Varredura de texto morto — **note o `3°` sem vírgula**, que o padrão da 1ª
+versão deste plano não pegava (foi assim que a frase acima passou despercebida
+por mim):
 
 ```bash
-grep -rni "approach_angle\|flare_time\|glideslope\|3 graus\|3,0°" src/ docs/
+grep -rni "approach_angle\|flare_time\|glideslope\|3 graus\|3,0°\|3°" src/ docs/
 ```
 
 - [ ] **Passo 8: `scripts/verifica-ciclo.sh`** → "Status geral: APROVADO".

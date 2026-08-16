@@ -86,6 +86,21 @@ juntas, e a spec mede a contribuição de cada uma separadamente** (§9).
     CD_ref = cd_gear_extended(wing, state, CL_ref, wing.cd0_flap_ldg_extra)
     γ_app  = atan(CD_ref / CL_ref)
 
+**Aproximação de pequeno ângulo, declarada.** Em planeio a sustentação
+equilibra `W·cos γ`, não `W` — então `CL_ref` acima está sobrestimado por
+`1/cos γ`. A 5,1181°, `cos γ = 0,99601`: **erro de 0,4%**, uma ordem de
+grandeza abaixo do limiar de escalação de 5% deste projeto, e muito abaixo da
+incerteza da própria premissa de técnica de pilotagem (§2.1). Assumido e
+registrado, não corrigido — corrigir exigiria um laço (γ depende de CL, que
+depende de γ) para ganhar 0,4%. Confirmado pela revisão de plano como ruído
+declarável.
+
+**Velocidade constante no flare, declarada.** `R = V_ref²/(g(n−1))` trata a
+velocidade como constante durante o arco. Na física real o flare desacelera,
+então `R` diminui ao longo dele e o arco verdadeiro é mais fechado — ou seja,
+`s_flare` real é MENOR que o modelado. **Direção: CONSERVADORA.** Nomeada
+aqui, não medida neste ciclo.
+
 `γ_app` deixa de ser parâmetro livre e passa a ser **propriedade da polar**.
 `[performance].approach_angle_deg` é REMOVIDO com erro de migração (§6.2).
 
@@ -222,8 +237,25 @@ relatório**, e a sonda é apagada depois. Não fabrique um teste RED artificial
     s_air   > 0
     h_flare < 15.0
 
-Falseável de verdade: se alguém reintroduzir um flare sem altura, ou trocar o
-sinal, ou somar em vez de subtrair, isto quebra.
+Falseável só parcialmente: se alguém reintroduzir um flare sem altura, ou
+trocar o sinal, ou somar em vez de subtrair, isto quebra. **Mas o fechamento
+é TAUTOLÓGICO** — `s_air` foi DEFINIDO como `(15−h)/tan γ`, então a identidade
+vale por construção. Ele pega typo, não erro de modelo. Declarado, não fingido.
+
+### §5.2b — O arco é mesmo um arco (a guarda que NÃO é tautológica)
+
+Acrescentada após a revisão de plano, justamente porque a §5.2 não basta.
+
+O flare é um arco de círculo de raio `R`, tangente à rampa no início e
+horizontal no fim. Para esse arco vale, exatamente:
+
+    s_flare² + (R − h_flare)² = R²
+
+`h_flare` e `s_flare` chegam por caminhos independentes (`R(1−cos γ)` e
+`R sin γ`); Pitágoras os amarra. **Trocar seno por cosseno, errar o sinal do
+`1−cos`, ou usar raios diferentes nos dois quebra isto — e nenhum desses erros
+seria pego pela §5.2.** `R` tem que ser recomputado no teste a partir de
+`V_ref`, não lido do resultado da função.
 
 ### §5.3 — O flare não pode começar acima do obstáculo
 
@@ -264,9 +296,30 @@ escreva a relação nova e verdadeira, viva, no lugar.
 
 ## §6 — Schema 5.7 e migração
 
+### §6.0 — Classificação: MINOR com EXCEÇÃO REGISTRADA
+
+**Correção da revisão de plano.** A 1ª versão desta spec dizia "MINOR puro,
+sem exceção registrada". Errado, e contra o precedente que o próprio
+`docs/aircraft_spec.schema.md` estabeleceu em v5.2, v5.3, v5.4, v5.5 e v5.6.
+
+O bump tem **duas naturezas ao mesmo tempo**:
+
+- **MINOR puro (aditivo):** os três campos novos do §6.1. Nada a registrar.
+- **EXCEÇÃO REGISTRADA:** `ldg_50ft_m` e `ldg_50ft_grass_m` mantêm nome, tipo
+  e unidade, mas **a PREMISSA DE OPERAÇÃO embutida no número muda**. Antes,
+  esses campos respondiam "quanto a aeronave precisa numa aproximação
+  estabilizada de 3° **com potência**". Depois, respondem "quanto ela precisa
+  num pouso de campo curto, **motor em marcha lenta** sobre o obstáculo".
+
+Essa distinção importa mais que "o valor mudou" — todo ciclo muda valores, e
+isso sozinho nunca exigiu exceção. O que exige registro aqui é que **um
+consumidor comparando v5.6 com v5.7 estaria comparando dois PROCEDIMENTOS
+diferentes**, não duas medições do mesmo procedimento. Sem a exceção
+registrada, essa troca de premissa fica invisível de fora do modelo.
+
 ### §6.1 — JSON
 
-Campos NOVOS no bloco `performance` (MINOR puro):
+Campos NOVOS no bloco `performance` (a metade MINOR pura do bump):
 
     ldg_approach_angle_deg    // γ_app derivado — 5,1181 no baseline
     ldg_flare_height_m        // h_flare — 2,596 no baseline
