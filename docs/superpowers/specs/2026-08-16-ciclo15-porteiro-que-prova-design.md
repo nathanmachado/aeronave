@@ -208,17 +208,34 @@ Um literal é **elegível** quando não está em nenhuma destas três posições
 Sublinhados de legibilidade (`7.236_831_147`) contam como dígitos. Notação
 científica (`1e-9`, `5e-5`) nunca é elegível.
 
+**Sinal.** Um `-` imediatamente colado ao literal faz parte dele quando o
+caractere não-branco anterior é `(`, `,`, `=`, `[` ou início de linha — menos
+unário, não subtração. Sem isso, `assert!((vn.n_lim_neg - (-1.52)).abs() …)`
+vincularia `1.52` contra um JSON que publica `-1.52` e reprovaria um pin
+correto. Em `(obtido - 0.007367)` o `-` está separado por espaço e é binário:
+não entra.
+
 **Não há piso de casas decimais no vínculo.** A versão anterior desta seção
 exigia ≥4 casas, o que a tornava incapaz de vincular `3.59` — justamente o
 literal da §7.4. Piso tipográfico é critério de cobertura (§5.5), nunca de
 vínculo.
 
-**Ambiguidade.** Se a linha tiver mais de um literal elegível, um marcador
-vinculado não sabe a qual pertence: a checagem **reprova** e manda dividir a
-linha. Medido em `b8827e8`, sob as três exclusões acima isso ocorre em **uma
-única linha** — `generic_engine.rs:2533`, `assert_eq!(fom.at(0.0), 0.75)` — e
-essa linha recebe isenção (`fom_static` é entrada de config), onde a ambiguidade
-é inofensiva porque nada é comparado.
+**Ambiguidade — definida sobre COBRADOS, não sobre elegíveis.** O vínculo é ao
+primeiro literal **cobrado** (§5.5) da linha, e a checagem só reprova por
+ambiguidade se houver mais de um **cobrado**.
+
+A distinção é obrigatória, não cosmética. Na linha
+`("vy_kmh", perf.vy_kmh, 167.4067945716, 0.01),` há dois elegíveis, mas apenas
+`167.4067945716` é cobrado (`0.01` tem 2 casas e a linha não contém `assert`).
+Se a ambiguidade fosse definida sobre elegíveis, as oito linhas da tabela de
+pins de `generic_engine.rs:1735-1742` reprovariam todas — a construção mais
+importante do inventário.
+
+Medido em `b8827e8` com o algoritmo completo, a ambiguidade ocorre em **uma
+única linha**: `generic_engine.rs:2533`, `assert_eq!(fom.at(0.0), 0.75)`, cujos
+dois cobrados são entradas de config. Recebe isenção, onde a ambiguidade é
+inofensiva porque nada é comparado — a checagem **só reprova por ambiguidade
+quando o marcador é vinculado**.
 
 Exemplos reais deste repositório:
 
@@ -329,16 +346,22 @@ encontrados.
 | `assert` OU ≥4 casas, sem exclusões | 190 |
 | … com tolerância excluída | 131 |
 | … com arquivo isento | 140 |
-| **… com todas as exclusões — a regra adotada** | **83 literais em 77 linhas** |
+| **… algoritmo completo da §5.2 — a regra adotada** | **70 literais em 69 linhas** |
 
-Distribuição dos 83: `generic_engine`=38, `gear_tipback`=10, `vn_diagram`=10,
-`control_surfaces`=8, `acceptance`=6, `propeller`=4, `schema_v4`=3, `cli`=2,
-`empennage`=2. Destes, **40 são pins vinculáveis** (§7.1/§7.2, todos com
-caminho JSON já resolvido e valor já conferido) e os ~43 restantes recebem
-isenção.
+Distribuição dos 70: `generic_engine`=39, `control_surfaces`=8, `gear_tipback`=6,
+`vn_diagram`=6, `propeller`=4, `acceptance`=3, `empennage`=2, `cli`=1,
+`schema_v4`=1.
 
-Contra os 70 do desenho aprovado, são 13 sítios a mais — 19% de trabalho
-adicional para cobrir a classe onde **ambos** os defeitos reais moravam.
+Destes, **44 são pins vinculáveis** (§7.1/§7.2, cada um com caminho JSON
+resolvido e valor já conferido contra o `aircraft_spec.json` de `b8827e8`) e os
+26 restantes recebem isenção.
+
+**A regra semântica custa o mesmo que o piso tipográfico.** O desenho aprovado
+projetava 70 sítios sob a regra de ≥4 casas; a regra por `assert`, uma vez
+aplicadas as exclusões de string, tolerância e arquivo, dá **exatamente 70**
+também — mas 70 diferentes, cobrindo os dois defeitos que a outra deixava
+passar. A troca não foi de custo por cobertura; foi de cobertura errada por
+cobertura certa ao mesmo custo.
 
 ### 5.6 Checagem 4 — o cadeado de cobertura (Markdown)
 
@@ -432,8 +455,12 @@ Levantado sobre `b8827e8`. Classe **(a)** = mapeável a campo do
 | `gear_tipback.rs:277` | `gear.nose_load_max_pct` | `21.8973` | `landing_gear.nose_load_max_pct` |
 | `gear_tipback.rs:305` | `gear.nose_load_min_pct` | `11.2869` | `landing_gear.nose_load_min_pct` |
 | `gear_tipback.rs:787` | `fuel_margin_pct` | `8.785_545_514_5` | `sizing.fuel_margin_pct` |
-| `vn_diagram.rs:93` | `vn.va_kmh` | `242.633` | `vn_diagram.va_kmh` |
-| `vn_diagram.rs:105` | `vn.n_gust_vc` | `3.59` | `vn_diagram.n_gust_vc` |
+| `vn_diagram.rs:93` | `vn.va_kmh` | `242.633` | `vn_diagram.va_kmh` — **§7.4** |
+| `vn_diagram.rs:94` | `vn.vc_kmh` | `280.0` | `vn_diagram.vc_kmh` |
+| `vn_diagram.rs:95` | `vn.vd_kmh` | `350.0` | `vn_diagram.vd_kmh` |
+| `vn_diagram.rs:100` | `vn.n_lim_pos` | `3.8` | `vn_diagram.n_lim_pos` |
+| `vn_diagram.rs:101` | `vn.n_lim_neg` | `-1.52` | `vn_diagram.n_lim_neg` |
+| `vn_diagram.rs:105` | `vn.n_gust_vc` | `3.59` | `vn_diagram.n_gust_vc` — **§7.4** |
 | `propeller.rs:61` | `propeller.tip_mach_static` | `0.493` | `propeller.tip_mach_static` |
 | `propeller.rs:63` | `propeller.tip_mach_cruise_helical` | `0.459` | `propeller.tip_mach_cruise_helical` |
 | `propeller.rs:65` | `propeller.ground_clearance_m` | `0.240` | `propeller.ground_clearance_m` |
@@ -449,8 +476,8 @@ versão original do desenho não os obrigaria; a regra por `assert` adotada na
 
 ### 7.4 Pins encontrados FORA do valor publicado — as duas únicas mudanças autorizadas
 
-Verifiquei os 40 pins das §7.1/§7.2 contra o `aircraft_spec.json` de `b8827e8`
-na precisão em que cada um está escrito. **38 batem. Dois não.**
+Verifiquei os 44 pins das §7.1/§7.2 contra o `aircraft_spec.json` de `b8827e8`
+na precisão em que cada um está escrito. **42 batem. Dois não.**
 
 | sítio | pin escrito | JSON hoje | desvio | tolerância que escondeu |
 |---|---|---|---|---|
