@@ -1704,6 +1704,33 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //   ldg_50ft_m:         581.9677435047 → **582.5217673280**  (+0,095%,
     //                       pouso não consome tração — move só pelo MTOW)
     // Tolerâncias INALTERADAS (1%).
+    //
+    // ─── CICLO 14 (Task 2, spec §2/§7) — SEGMENTO AÉREO DO POUSO,
+    // `ldg_50ft_m` CAI ≈24,6% ─────────────────────────────────────────────
+    //
+    // Dois defeitos independentes do segmento aéreo do pouso corrigidos
+    // JUNTOS (spec §1/§1.3 — corrigir só um deixaria o modelo certo pelo
+    // motivo errado):
+    //   1. GEOMÉTRICO: `s_air = 15/tan(γ_app)` descia os 15 m INTEIROS até
+    //      o solo e `s_flare = V_ref × flare_time_s` era somado com altura
+    //      ZERO — a aeronave "pousava" duas vezes. Agora o flare é um arco
+    //      de raio `R = V_ref²/(g·(n−1))` que CONSOME altura
+    //      (`h_flare = R(1−cos γ)`), e a rampa desce só `15 − h_flare`.
+    //   2. DE PREMISSA: `approach_angle_deg = 3,0°` (REMOVIDO) era o
+    //      *glideslope* de ILS — aproximação COM POTÊNCIA de aeroporto
+    //      pavimentado, mais RASA do que esta célula desce com o motor
+    //      cortado. Agora γ_app é DERIVADO da polar de pouso a V_ref
+    //      (`atan(CD_ref/CL_ref)`, `cd_gear_extended`): **5,1181°**.
+    // Medido: `ldg_50ft_m` **582.5217673280 → 439.27507769894487**
+    // (−24,60%, EXCEDE a tolerância de 1%, re-pin obrigatório — bate com a
+    // projeção da spec §7, "≈439,3"). `ldg_50ft_grass_m` (não pinado nesta
+    // tabela, ver `tests/cli.rs`/`tests/gear_tipback.rs`)
+    // 646.6609422476247 → 503.4142526185835 (−22,17%) — abaixo da pista de
+    // 600 m, checagem #24 FLIPA FAIL→PASS. Os demais 7 pins desta tabela
+    // (decolagem, subida, planeio, gradiente) são de FORA do pouso e
+    // permanecem INALTERADOS (spec §3 do ciclo 14: mudança ISOLADA) —
+    // confirmado, zero divergência além do ponto flutuante. Tolerância
+    // INALTERADA (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
         ("vx_kmh",             perf.vx_kmh,             138.9140767922, 0.01),
         ("vy_kmh",              perf.vy_kmh,             167.4067945716, 0.01),
@@ -1712,7 +1739,7 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         ("climb_gradient_pct",  perf.climb_gradient_pct,   7.9132771517, 0.01),
         ("to_50ft_paved_m",     perf.to_50ft_paved_m,    704.0912242361, 0.01),
         ("to_50ft_grass_m",     perf.to_50ft_grass_m,    858.5934246438, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         582.5217673280, 0.01),
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         439.2750776989, 0.01),
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1874,15 +1901,24 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
         "landing_distance_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
         perf.landing_distance_m, landing_distance_pin);
 
-    // Pouso sobre 15m deve exceder a estimativa legada de 200m fixos —
-    // segmentos adicionais (aproximação/flare) só somam distância. Relação
-    // preservada pelo ciclo 12, task 3 (ambos os lados consomem a MESMA
-    // rolagem integrada nova — `landing_distance_50ft_m` soma aproximação +
-    // flare + rolagem; `landing_distance_m` soma 200m fixos + a MESMA
-    // rolagem — 15/tan(3°)+flare > 200m para esta fixture, então a relação
-    // continua valendo, agora por uma margem um pouco menor).
-    assert!(perf.ldg_50ft_m > perf.landing_distance_m,
-        "Pouso sobre 15m ({:.1}m) deveria exceder a estimativa legada de 200m fixos ({:.1}m)",
+    // `old→new` (ciclo 14, spec §2/§7 — ASSERÇÃO RELACIONAL QUE DEIXOU DE
+    // VALER, mesmo achado de `agents::performance::tests::
+    // pouso_50ft_agora_e_menor_que_pouso_ground_roll_mais_ar_fixo`, agora
+    // medido no baseline REAL). Até o ciclo 13: pouso sobre 15m excedia a
+    // estimativa legada de 200m fixos, porque as duas heurísticas antigas
+    // (`s_air=15/tan(3°)`≈286m + `s_flare` cinemático) somavam bem mais que
+    // 200m. Ciclo 14 deriva γ_app da polar (planeio power-off, 5,1181° —
+    // bem mais íngreme que 3°) e faz o flare consumir altura: o segmento
+    // aéreo TOTAL encolhe para 196,57 m — ABAIXO dos 200m fixos que a
+    // estimativa legada somava por heurística nunca calibrada. A relação
+    // INVERTE: `landing_distance_m` (442,702122 m, INALTERADO — pouso não
+    // consome tração, spec §3) passa a ser MAIOR que `ldg_50ft_m`
+    // (582,521767 m → **439,275078 m**, −24,60%). Relação nova e
+    // verdadeira, viva, no lugar (instrução G do ciclo 14, "não apague").
+    assert!(perf.ldg_50ft_m < perf.landing_distance_m,
+        "ciclo 14: pouso sobre 15m ({:.6}m) deveria ser MENOR que a estimativa legada de 200m \
+         fixos ({:.6}m) — o segmento aéreo físico pós-correção (≈196,57m) é menor que os 200m \
+         que a heurística legada somava (spec §2/§7)",
         perf.ldg_50ft_m, perf.landing_distance_m);
 
     // HISTÓRICO, `old→new` (ciclo 12, task 2, spec §8.1) — a relação

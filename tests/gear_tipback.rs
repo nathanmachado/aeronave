@@ -652,21 +652,40 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // ("o líquido pode ser um `rotation_limit_pct_mac` ACIMA do
     // `cg_mac_fwd_pct`... 'Solo (piloto)' virando violação NOMINAL") — não
     // é regressão, é o cenário PREVISTO acontecendo. Medido, não ajustado.
-    assert_eq!(report.violations.len(), 5,
-        "ciclo 13 (task 4): esperava EXATAMENTE 5 violações no baseline real — gradiente CS \
-         23.65 abaixo de 8,3%, decolagem na grama sobre 15 m (≈859 m), pouso na grama sobre \
-         15 m (≈647 m), a violação NOMINAL de envelope de 'Solo (piloto)' (NOVA, superfície de \
-         grama no balanço de rotação — spec §7/§11.1), E o flip de robustez de '2 pax \
-         dianteiros' (reaberto pela mesma mudança de superfície): {:?}", report.violations);
+    //
+    // `old→new` (ciclo 14, spec §2/§7 — Passo 4 do plano da Task 3 tocado
+    // aqui porque a mudança de física da Task 2 já altera o computado; a
+    // guarda global "cargo test verde ao fim de cada task" exige o re-pin
+    // agora, não só quando a Task 3 publicar os campos novos do JSON).
+    // Contagem **5 → 4**: a checagem #24 (pouso na grama sobre 15 m) FLIPA
+    // FAIL→PASS. Causa: os dois defeitos do segmento aéreo do pouso
+    // corrigidos juntos (flare que não consumia altura + ângulo de
+    // aproximação de ILS/3° substituído pelo planeio power-off derivado da
+    // polar, 5,1181°) — `ldg_50ft_grass_m` 646,660942 m → **503,414253 m**
+    // (−22,2%), abaixo da pista de 600 m. As outras 4 violações
+    // (gradiente CS 23.65, decolagem na grama, envelope nominal de 'Solo
+    // (piloto)', robustez de '2 pax dianteiros') são de fora do pouso —
+    // spec §3 as declara ISOLADAS desta mudança, e permanecem INALTERADAS
+    // (mesmos textos, mesma contagem individual).
+    assert_eq!(report.violations.len(), 4,
+        "ciclo 14 (spec §2/§7): esperava EXATAMENTE 4 violações no baseline real — gradiente \
+         CS 23.65 abaixo de 8,3%, decolagem na grama sobre 15 m (≈859 m), a violação NOMINAL \
+         de envelope de 'Solo (piloto)', E o flip de robustez de '2 pax dianteiros'. O pouso na \
+         grama sobre 15 m SAIU da lista (checagem #24 FLIPOU FAIL→PASS, ver spec §2/§7 — \
+         ldg_50ft_grass_m 646,660942→503,414253 m): {:?}", report.violations);
     assert!(report.violations.iter().any(|v| v.contains("Gradiente de subida")),
-        "uma das cinco violações esperadas é o gradiente CS 23.65 abaixo do piso (lei única \
+        "uma das quatro violações esperadas é o gradiente CS 23.65 abaixo do piso (lei única \
          de tração, spec §11 — risco central do ciclo): {:?}", report.violations);
     assert!(report.violations.iter().any(|v| v.contains("Decolagem (grama, 15 m)")),
-        "uma das cinco violações esperadas é a de decolagem na grama sobre 15 m: {:?}",
+        "uma das quatro violações esperadas é a de decolagem na grama sobre 15 m: {:?}",
         report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
-        "outra das cinco violações esperadas é a de pouso na grama sobre 15 m: {:?}",
-        report.violations);
+    // `old→new` (ciclo 14): a asserção POSITIVA de "Pouso (grama, 15 m)" ∈
+    // violations DEIXOU DE VALER — vira a relação nova e verdadeira,
+    // NEGATIVA: essa string não pode mais aparecer (checagem #24 em PASS).
+    assert!(!report.violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "ciclo 14: a checagem #24 (pouso na grama sobre 15 m) deveria estar em PASS — não \
+         deveria haver mais violação de pouso na grama no baseline real (ldg_50ft_grass_m \
+         ≈503,4 m < 600 m de pista): {:?}", report.violations);
 }
 
 /// Margem mínima de combustível (Task 3, refino-ciclo2, checagem #18 de

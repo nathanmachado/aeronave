@@ -205,8 +205,8 @@
     "climb_gradient_pct": 7.913277151685835,
     "to_50ft_paved_m": 704.09122423612,
     "to_50ft_grass_m": 858.5934246438065,
-    "ldg_50ft_m": 582.5217673279861,
-    "ldg_50ft_grass_m": 646.6609422476247
+    "ldg_50ft_m": 439.27507769894487,
+    "ldg_50ft_grass_m": 503.4142526185835
   },
   "vn_diagram": {
     "va_kmh": 242.69224416885424,
@@ -449,8 +449,7 @@
     "Cenário 'Solo (piloto)': CG 17.8% MAC fora do envelope de CG admissível [18.3%–43.5%] (SM=0.307; x_cg=3.121m, limites em x: [3.128m, 3.442m])",
     "Gradiente de subida 7.9% abaixo do mínimo de 8.3% exigido pela CS 23.65 (Vx=138.9km/h)",
     "Robustez: Cenário '2 pax dianteiros' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 16.80 vs 18.47",
-    "Decolagem (grama, 15 m): 859 m excede a pista disponível de 600 m",
-    "Pouso (grama, 15 m): 647 m excede a pista disponível de 600 m"
+    "Decolagem (grama, 15 m): 859 m excede a pista disponível de 600 m"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
