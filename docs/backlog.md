@@ -1231,7 +1231,7 @@ manual. Cinco pins reais, todos corretos, apareceram nesta varredura que
 não estavam no inventário levantado por leitura:
 `control_surfaces.rs:44` (`2.0895` → `control_surfaces.aileron.span_m`),
 `:45` (`1.0304` → `control_surfaces.aileron.area_m2`), `:138` (`0.0` →
-`control_surfaces.elevator.start_m`), `generic_engine.rs:2587` (`2640.0`
+`control_surfaces.elevator.start_m`), `generic_engine.rs:2600` (`2640.0`
 → `propulsion.engine_rpm_cruise`) e `propeller.rs:57` (`1.76` →
 `propeller.diameter_m`).
 
@@ -1256,6 +1256,16 @@ regra, recalculado sempre que a regra roda.
 **Correção:** os cinco receberam marcador `// PIN:` nesta task, e agora
 são conferidos por `confere_vinculos` a cada `cargo test`. Ganho líquido de
 cobertura, sem mudança de valor. **RESOLVIDO ciclo 15.**
+
+**Nota (fix wave, achada pela revisão final de branch):** a citação
+`generic_engine.rs:2587` acima estava errada — a linha real é `2600`
+(`assert_eq!(sized.prop.engine_rpm_cruise, 2640.0); // PIN:
+propulsion.engine_rpm_cruise`). Valor e caminho sempre estiveram certos;
+só o número de linha era falso. Isto é um erro de número de linha
+**dentro do item que documenta erros de número de linha** (o mesmo
+padrão do item #29 — leitura manual em vez de derivação pela regra). A
+ironia não é anedota, é dado: nomear o hábito no item #29 não o curou
+dentro do próprio item que o nomeia. Corrigido nesta fix wave.
 
 ## 26. Lacuna residual do cadeado — literal curto fora de `assert` escapa das duas regras (DECLARADO, sem correção)
 
@@ -1384,3 +1394,89 @@ escreve "a regra é X" e, no parágrafo seguinte, "portanto os sítios são
 memória sobre o texto. Uma paráfrase engana pela aparência de derivação
 sem carregar a garantia de tê-la. Item de processo, sem correção de
 código associada — a correção é o hábito, aplicável aos próximos ciclos.
+
+## 30. A fronteira de garantia do `pins_vs_json.rs` — o que o porteiro prova e o que ele NÃO prova
+
+Achado mais importante da revisão final de branch do ciclo 15. Uma
+ferramenta que dá mais segurança aparente do que real é exatamente o
+defeito que este ciclo existe para combater (item #13 e suas três
+variantes, itens #24/#25 acima) — deixar essa fronteira sem registro
+repetiria o erro em escala maior, desta vez no próprio porteiro. As
+quatro medições abaixo foram feitas executando as funções REAIS de
+`tests/pins_vs_json.rs` contra o `aircraft_spec.json` commitado, não por
+leitura do código.
+
+**(a) A razão de uma isenção não é validada por nada.**
+`interpreta_marcador` captura o texto depois de `NAO-PUBLICADO` como
+`String` livre, sem checagem de formato ou de conteúdo. Silenciar um pin
+genuíno custa **uma edição de uma linha**: trocando `// PIN:
+vn_diagram.va_kmh` por `// PIN: NAO-PUBLICADO — valor ainda não
+confirmado no manual de voo`, o contador de vinculados caiu de 48 para
+47 e **só o piso** (`MINIMO_DE_PINS_VINCULADOS`) reprovou — nenhuma
+outra checagem notou a isenção falsa.
+
+**(b) A isenção de módulo silencia um arquivo inteiro por uma linha.**
+`tests/generic_engine.rs` tem 23 marcadores vinculados. Isentando o
+módulo inteiro, o contador caiu de 48 para 25 e a checagem do piso
+reprovou sozinha — **o piso funciona contra a versão ingênua do
+ataque.**
+
+**(c) Mas o piso é uma CONTAGEM, e contagem é falsificável por
+padding.** `MINIMO_DE_PINS_VINCULADOS = 48` está exatamente no valor de
+hoje: **folga zero**. A revisão acrescentou 23 linhas triviais e sem
+sentido do tipo `let _c15_bulk_N = 350.0; // PIN: vn_diagram.vd_kmh` em
+outro arquivo; o contador voltou a 48, `cargo test --release` passou
+**limpo com 553 testes**, e os 23 pins reais de `generic_engine.rs`
+ficaram permanentemente fora de verificação sem nenhum teste do
+repositório acusar. Custo do ataque completo: 1 linha de isenção de
+módulo + ~23 linhas de padding mecânico, sem exigir conhecimento nenhum
+do domínio da aeronave.
+
+**(d) Caminho semanticamente errado com valor coincidente é
+indetectável por desenho.** O verificador compara número contra
+caminho; nunca verifica se o caminho citado é o campo que o código ao
+redor de fato exercita. Colisões reais no `aircraft_spec.json` de hoje,
+achadas por varredura sistemática: `empennage.ar_v` e
+`structure.skin_min_thickness_mm` valem **ambos exatamente 1,5** —
+razão de aspecto adimensional e espessura em mm, fisicamente sem
+relação nenhuma entre si. O mesmo literal `1.5` passa marcado
+igualmente com qualquer uma das duas strings de caminho. Outras
+colisões: `empennage.taper_h` / `empennage.taper_v` /
+`trim.cl_ground_rotation` = 0,5 (três campos fisicamente distintos, um
+valor); `propulsion.fuel_capacity_l` / `sizing.fuel_capacity_l` = 260,0
+(esta por construção real do modelo, não coincidência, mas ainda assim
+indistinguível de coincidência pelo verificador).
+
+**A fronteira, em prosa clara:** o porteiro prova, com certeza, que **um
+número escrito no código corresponde ao número publicado no caminho
+JSON que o marcador daquela linha cita**, e pune com precisão real
+qualquer deriva, pin envelhecido ou pin estimado dentro desse conjunto —
+é exatamente o que resolveu os itens #13, #24 e #25. Ele **não** prova
+que a razão de uma isenção é verdadeira, que o caminho citado é o
+semanticamente certo para o valor ao lado, nem que a contagem de
+vínculos reflete cobertura de conteúdo — ela reflete contagem, e
+contagem é falsificável sem nenhum custo de conhecimento de domínio.
+
+**A garantia opera sob boa-fé.** Ele transforma erro honesto — que era
+a causa das três variantes da doença do #13 — em falha alta e imediata
+de `cargo test`. Não foi desenhado para resistir a alguém que queira
+silenciá-lo deliberadamente, e as medições (a)-(c) acima mostram que,
+de fato, não resiste.
+
+**Lacuna DECLARADA, sem correção neste ciclo.** Duas direções óbvias de
+endurecimento futuro, registradas sem implementar:
+
+1. Dar folga ao piso e torná-lo **derivado** em vez de literal — hoje
+   `MINIMO_DE_PINS_VINCULADOS = 48` é um número escrito à mão que por
+   coincidência bate com a contagem de hoje (folga zero); um piso
+   calculado a partir de uma fonte independente do próprio contador
+   fecharia o ataque (c).
+2. Exigir que o marcador cite, além do caminho JSON, o **nome do campo
+   Rust** que a linha exercita (ex.: `// PIN: propulsion.engine_rpm_cruise
+   AS sized.prop.engine_rpm_cruise`), para que caminho e uso possam ser
+   confrontados automaticamente — fecharia o ataque (d).
+
+Ponteiro: `tests/pins_vs_json.rs` (`fn interpreta_marcador`, `fn
+confere_vinculos`, `const MINIMO_DE_PINS_VINCULADOS`), revisão final de
+branch do ciclo 15 (aprovada para merge com este item como
+não-bloqueante).
