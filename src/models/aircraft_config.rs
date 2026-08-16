@@ -134,7 +134,7 @@ pub struct WingCfg {
     /// fração, ao contrário de `cd0_flap_to_extra`: a rolagem de pouso é
     /// modelada com o flap de pouso TOTALMENTE deflexionado do início ao
     /// fim da frenagem, spec §5.1) — via `agents::performance::
-    /// cd_ground_roll`, a mesma fonte única de CD de solo que a rolagem de
+    /// cd_gear_extended`, a mesma fonte única de CD de solo que a rolagem de
     /// decolagem (ciclo 12, task 2) e o balanço de rotação (ciclo 12, task
     /// 4) também consomem.
     ///

@@ -183,7 +183,18 @@ pub fn thrust_available_n(
 /// retrátil ESTENDIDO tem arrasto próximo ao de um trem FIXO — levemente
 /// OTIMISTA (o retrátil estendido não tem as carenagens de um trem fixo bem
 /// projetado), assumido e declarado.
-pub fn cd_ground_roll(
+///
+/// `old→new` (ciclo 14, spec §2.4): esta função chamava-se `cd_gear_extended`.
+/// O nome era estreito — ela nunca calculou "CD de rolagem", e sim a POLAR da
+/// aeronave com TREM ESTENDIDO e um incremento de flap, avaliada num CL
+/// qualquer. Até o ciclo 13 todos os consumidores eram de solo, então o nome
+/// passava. O ciclo 14 cria o primeiro consumidor EM VOO — o segmento de
+/// aproximação do pouso (`landing_distance_50ft_m`, spec §2.1) — e "ground
+/// roll" num cálculo de segmento aéreo passaria a MENTIR.
+///
+/// Consumidores: rolagem de decolagem, rolagem de pouso, balanço de rotação
+/// e aproximação de pouso.
+pub fn cd_gear_extended(
     wing: &WingSpec,
     state: &AircraftState,
     cl_ground_roll: f64,
@@ -615,7 +626,7 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 ///   S = ∫₀^{V_LOF} m·V·dV / F_net(V)     (Simpson composto, 200 intervalos,
 ///                                          `integra_rolagem_decolagem`)
 ///   T(V) = `thrust_available_n`  (lei única de tração, ciclo 13 spec §2)
-///   D(V) = q·S_w·CD_roll,  CD_roll = `cd_ground_roll` (spec §3.1)
+///   D(V) = q·S_w·CD_roll,  CD_roll = `cd_gear_extended` (spec §3.1)
 ///   L(V) = q·S_w·cl_ground_roll
 ///   V_LOF = 1,10·√(2W/(ρ·S_w·cl_max_to))
 ///
@@ -658,7 +669,7 @@ fn takeoff_ground_roll_com_passos(
     let v_lof = 1.10 * ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
     // Ciclo 12, spec §3.1: flap PARCIAL de decolagem (`cd0_flap_to_extra`) —
     // a aeronave rola com o flap de decolagem já deflexionado.
-    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll, wing.cd0_flap_to_extra);
+    let cd_roll = cd_gear_extended(wing, state, cl_ground_roll, wing.cd0_flap_to_extra);
     let engine_rpm = engine.rpm_max_continuous;
 
     let thrust_fn = |v: f64| thrust_available_n(
@@ -762,7 +773,7 @@ pub fn takeoff_distance_50ft_m(
     let engine_rpm_to = engine.rpm_max_continuous;
     // Ciclo 8 (task 1): cd0_flap_to_extra — segmento de SUBIDA consome a
     // polar de arrasto (rotação é puramente cinemática, V_LOF×tempo; o
-    // segmento de SOLO consome a polar via `cd_ground_roll` desde o ciclo
+    // segmento de SOLO consome a polar via `cd_gear_extended` desde o ciclo
     // 12, ver `takeoff_ground_roll_m`).
     let pex = excess_power_kw(v_climb, mass_kg, rho, wing, engine, engine_rpm_to,
                                state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
@@ -845,7 +856,7 @@ fn integra_rolagem_pouso_com_passos(
 ///   S = ∫₀^{V_ref} m·V·dV / F_dec(V)     (Simpson composto, 200 intervalos,
 ///                                          `integra_rolagem_pouso_com_
 ///                                          passos`)
-///   D(V) = q·S_w·CD_roll_ldg,  CD_roll_ldg = `cd_ground_roll` com
+///   D(V) = q·S_w·CD_roll_ldg,  CD_roll_ldg = `cd_gear_extended` com
 ///          `wing.cd0_flap_ldg_extra` (flap CHEIO — spec §5.3a)
 ///   L(V) = q·S_w·cl_ground_roll_ldg   (`cl_ground_roll_landing`, spec §5.2)
 ///   V_ref = 1,30·√(2·W_ldg/(ρ·S_w·wing.cl_max))     (inalterado)
@@ -867,7 +878,7 @@ fn integra_rolagem_pouso_com_passos(
 ///
 /// `state: &AircraftState` — parâmetro NOVO (ciclo 12, spec §5.3b): não
 /// existia porque nenhum segmento consumia a polar; agora necessário para
-/// `state.cd0_gear_fixed_increment` dentro de `cd_ground_roll` (o trem está
+/// `state.cd0_gear_fixed_increment` dentro de `cd_gear_extended` (o trem está
 /// ESTENDIDO na rolagem de pouso, `wing.cd0` é o CD0 de trem RECOLHIDO).
 fn landing_ground_roll_com_passos(
     mass_kg: f64,
@@ -883,7 +894,7 @@ fn landing_ground_roll_com_passos(
     // Ciclo 12, spec §5.3a: flap CHEIO de pouso (`cd0_flap_ldg_extra`) — a
     // aeronave rola com o flap de pouso já deflexionado, ao contrário da
     // rolagem de decolagem (`cd0_flap_to_extra`, flap PARCIAL).
-    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll_ldg, wing.cd0_flap_ldg_extra);
+    let cd_roll = cd_gear_extended(wing, state, cl_ground_roll_ldg, wing.cd0_flap_ldg_extra);
 
     let drag_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cd_roll;
     let lift_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cl_ground_roll_ldg;

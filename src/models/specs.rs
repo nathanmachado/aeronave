@@ -112,7 +112,7 @@ pub struct WingSpec {
     /// (`takeoff_distance_50ft_m`), no gradiente CS 23.65 em configuração
     /// de decolagem (`best_climb_angle_ms`) e — desde o ciclo 12 — na
     /// própria rolagem de decolagem via `agents::performance::
-    /// cd_ground_roll` — fecha a lacuna declarada desde o ciclo 7 ("não
+    /// cd_gear_extended` — fecha a lacuna declarada desde o ciclo 7 ("não
     /// existe modelo de flap na polar deste crate").
     ///
     /// HISTÓRICO `old→new` (ciclo 8 → ciclo 12): até o ciclo 11 esta
@@ -141,7 +141,7 @@ pub struct WingSpec {
     /// modelar o flap MANTIDO durante toda a rolagem de frenagem, a
     /// configuração em que CS 23 mede a distância de pouso desta classe).
     ///
-    /// Consumido por `agents::performance::cd_ground_roll` (via
+    /// Consumido por `agents::performance::cd_gear_extended` (via
     /// `landing_ground_roll_m`/`landing_distance_m`/
     /// `landing_distance_50ft_m`) — primeiro consumidor do delta CHEIO
     /// desde que `cd0_flap_delta` existe (ver docstring `old→new` de

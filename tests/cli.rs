@@ -519,7 +519,7 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// de `agents::performance::takeoff_ground_roll_m`) para integração
 /// numérica da equação de movimento consumindo a polar completa (spec
 /// `2026-08-15-ciclo12-solo-honesto`). O segmento DOMINANTE da distância de
-/// decolagem finalmente paga arrasto (`cd_ground_roll`) e atrito de
+/// decolagem finalmente paga arrasto (`cd_gear_extended`) e atrito de
 /// rolagem explícito (`mu_roll_grass=0,08`, substituindo o antigo
 /// `surface_factor=1,20` que contava a grama sem separar atrito de
 /// arrasto). Medido: `to_50ft_grass_m` 473,469470 m → **819,110978 m**

@@ -2382,7 +2382,7 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
 /// já checa com `T` fixa, aqui com `T = T(Vr(W))` variando junto.
 #[test]
 fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
-    use aeronave::agents::performance::cd_ground_roll;
+    use aeronave::agents::performance::cd_gear_extended;
     use aeronave::agents::trim_authority::{
         rotation_fwd_limit_m, thrust_at_rotation_n,
     };
@@ -2408,7 +2408,7 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
     // Ciclo 12 (task 4): termos de SOLO — MESMOS valores de produção que
     // `TrimAuthorityAgent::run` usa (constantes através do peso, como
     // `z_axis` acima). `cd_roll` reusa `agents::performance::
-    // cd_ground_roll`, fonte única de CD de solo (Task 2), com o flap
+    // cd_gear_extended`, fonte única de CD de solo (Task 2), com o flap
     // PARCIAL de decolagem.
     //
     // `old→new` (ciclo 13, task 4 — spec §7): `mu_roll_paved` →
@@ -2418,7 +2418,7 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
     // `sized.trim.rotation_limit_pct_mac` na asserção final abaixo.
     let mu_roll = cfg.performance.mu_roll_grass;
     let h_cg = cfg.gear.h_cg_ground_m;
-    let cd_roll = cd_ground_roll(
+    let cd_roll = cd_gear_extended(
         wing, &sized.state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
     );
     let z_drag_above_cg = cfg.wing.z_drag_above_cg_m;
