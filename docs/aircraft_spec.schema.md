@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.6
+# `aircraft_spec.json` — contrato do schema v5.7
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -912,6 +912,87 @@ documentação a ser corrigido, não um comportamento aceitável.
     old→new com a MESMA tolerância. Ver `tests/generic_engine.rs` para os
     pins honestos completos.
 
+- **v5.7** (ciclo14-aproximacao-honesta, 2026-08-15 — bump **MINOR**, EXCEÇÃO
+  REGISTRADA, mesmo padrão da v5.2/v5.3/v5.4/v5.5/v5.6). Fecha
+  `docs/backlog.md` #17 (segmento aéreo do pouso usava a rampa de 3° de ILS
+  pavimentado, nunca calibrada para pista de fazenda). O bump tem **duas
+  naturezas ao mesmo tempo**:
+  - **Campos ADICIONADOS (MINOR puro)**: `performance.ldg_approach_angle_deg`
+    (f64, graus), `performance.ldg_flare_height_m` (f64, m) e
+    `performance.ldg_air_distance_m` (f64 ou `"infinita"`, m) — a
+    decomposição do segmento AÉREO do pouso, publicada porque hoje ele é
+    52,5% de `ldg_50ft_grass_m` e não aparecia em lugar nenhum do JSON. Ver
+    §4 abaixo.
+  - **ACHADO desta task (não projetado pela spec)**: `ldg_50ft_m` e
+    `ldg_50ft_grass_m` ganham `#[serde(with = "fatigue_life_serde")]`
+    — a spec do ciclo 14 (§5.3) presumiu que já tinham esse tratamento
+    desde o ciclo 12; era falso (confirmado por git-blame). O guard novo
+    de `landing_air_segment` tornou o infinito alcançável por config
+    normal; sem a correção, esses dois campos serializariam `null` em vez
+    de `"infinita"` nesse caso. Não afeta o baseline real (valores sempre
+    finitos). Ver §5 abaixo.
+  - **Exceção registrada — a PREMISSA de operação embutida no número muda,
+    não só o valor**: `performance.ldg_50ft_m` e `performance.ldg_50ft_grass_m`
+    mantêm nome, tipo e unidade, mas a pergunta que respondem muda. **Antes**:
+    "quanto a aeronave precisa numa aproximação estabilizada de 3°, o
+    *glideslope* de ILS de aeroporto pavimentado, **COM POTÊNCIA**". **Depois**:
+    "quanto ela precisa num pouso de campo curto, **MOTOR EM MARCHA LENTA**
+    sobre o obstáculo de 15 m/50 ft — o procedimento padrão que o próprio POH
+    usa para medir pista curta". Isso importa mais que "o valor mudou" (todo
+    ciclo muda valores, e isso sozinho nunca disparou exceção): um consumidor
+    comparando v5.6 com v5.7 está comparando **dois PROCEDIMENTOS**, não duas
+    medições do mesmo. Sem a exceção registrada essa troca de premissa fica
+    invisível de fora do modelo.
+  - **Mecanismo físico (spec ciclo14 §1/§2)**: dois defeitos independentes
+    corrigidos JUNTOS. (1) DE MODELO, sem depender de premissa nenhuma: o
+    flare somava distância horizontal sem consumir altura — a rampa de
+    aproximação já descia os 15 m inteiros, e o flare era somado por cima,
+    então a aeronave "pousava duas vezes". Corrigido: o flare agora é um arco
+    geométrico de fator de carga `n = [performance].flare_load_factor`
+    (`R = V_ref²/(g·(n−1))`, `h_flare = R·(1−cos γ_app)`,
+    `s_flare = R·sin γ_app`) que CONSOME altura real, e a rampa desce só até
+    essa altura (`s_air = (15−h_flare)/tan γ_app`) — a soma fecha os 15 m por
+    construção. (2) DE PREMISSA: `[performance].approach_angle_deg = 3,0`
+    era o *glideslope* de ILS pavimentado, nunca calibrado para esta célula
+    nem para pista de fazenda. Corrigido: `γ_app` passa a ser DERIVADO da
+    polar de pouso (`atan(CD_ref/CL_ref)`, mesma `cd_gear_extended` da
+    rolagem) no planeio power-off, flap cheio/trem embaixo, em
+    `V_ref = 1,30·Vs` — **5,1181°** no baseline real, quase 71% mais íngreme
+    que os 3° assumidos antes. Os dois erros empurravam a distância para
+    CIMA na mesma direção; corrigir só um deixaria o modelo certo pelo
+    motivo errado (medido: só o conserto geométrico → 610,1 m, ainda
+    REPROVA #24; só a premissa → 527,9 m, PASSA mas geometricamente errado;
+    os dois → **503,4 m**, spec §4.2).
+  - **Migração de CONFIGURAÇÃO** (`aircraft.toml`, não deste schema JSON):
+    `[performance].approach_angle_deg` e `[performance].flare_time_s` foram
+    REMOVIDOS; `[performance].flare_load_factor` (novo, baseline `1,20`,
+    faixa validada `(1,0; 2,0)`) entra em substituição. Carregar um TOML com
+    qualquer um dos campos antigos produz erro de migração NOMEADO
+    (`check_approach_angle_migration`/`check_flare_time_migration`), não
+    default silencioso.
+  - **Duas aproximações declaradas, não corrigidas** (spec ciclo14 §2.1):
+    `CL_ref` usa `W`, não `W·cos γ` (a sustentação real em planeio equilibra
+    `W·cos γ`) — erro de 0,4% a 5,1181° (`cos γ = 0,99601`), uma ordem de
+    grandeza abaixo do limiar de escalação de 5% deste projeto; e o flare
+    trata `V_ref` como CONSTANTE ao longo do arco, quando na física real ela
+    desacelera até ≈1,15·Vs — o raio real diminui, o arco real é mais
+    fechado, logo `s_flare` real é MENOR que o modelado (direção
+    CONSERVADORA, nomeada, não medida neste ciclo).
+  - **Consequência de veredito**: `ldg_50ft_m` **582,521767 → 439,275078 m**
+    (−24,60%), `ldg_50ft_grass_m` **646,660942 → 503,414253 m** (−22,17%).
+    Checagem #24 (pouso em grama, pista de 600 m) **FLIPA de FAIL para
+    PASS** — a premissa de pista de 600 m em grama permanece INTACTA, esta
+    é a primeira violação removida desde o ciclo 11. `validation_status`
+    continua `"FAIL"`, com **4** violações (era 5 antes deste ciclo):
+    gradiente CS 23.65, decolagem em grama (859 m > 600 m), envelope de CG
+    nominal ('Solo (piloto)') e robustez ('2 pax dianteiros'). Ver
+    `docs/backlog.md` #17 (RESOLVIDO, com a medição completa) e spec
+    `docs/superpowers/specs/2026-08-15-ciclo14-aproximacao-honesta-design.md`
+    §1/§2/§4/§6/§7.
+  - Nenhuma tolerância de teste foi afrouxada — só pins re-centrados
+    old→new com a MESMA tolerância. Ver `tests/generic_engine.rs`/
+    `tests/cli.rs`/`tests/gear_tipback.rs` para os pins honestos completos.
+
 ## 2. Convenção de eixos e unidades
 
 - **Sistema de unidades**: SI em todo o documento, com DUAS exceções
@@ -962,7 +1043,7 @@ ponteiro para a docstring/campo onde cada uma está documentada em detalhe.
 | `control_surfaces` | preliminary (frações históricas, Raymer Tab. 6.5) | Análise de autoridade/eficiência de controle |
 | `weight` | **v4.5**: semi-empirical (estruturas: Raymer 15.2 GA × fatores de composto Tab. 15.4; hardware: itens configurados NÃO pesados) | Pesagem em balança de cada item antes da fabricação — as 7 massas estruturais (`weight.structural_masses`) vêm de equações semi-empíricas de componente, mas o hardware/instalação (aviônicos, bateria, cabos etc.) ainda é estimativa de catálogo/projeto, não massa medida; erros aqui se propagam para MTOW/estrutura/trem de pouso |
 | `trim` | preliminary (semi-empírico — Cm_ac/Cm_flap de literatura NACA 230/Raymer cap. 16; `cl_h_max_down_calc` CALCULADO por geometria DATCOM/Nelson (`τ(c_e/c)`, ajuste empírico de Nelson — válido em c_e/c ∈ [0.1, 0.6]); rotação CONSIDERA o binário da linha de TRAÇÃO (braço `prop_axis_above_cg_m`, pós-cancelamento do termo inercial de d'Alembert — ciclo 10 task 2) **e**, desde o ciclo 12 task 4, os binários de atrito de rolamento (`μ_roll·N·h_cg`) e de arrasto de solo (`D·(h_cg−z_drag_above_cg_m)`) — `old→new`: a v5.3 os desprezava com uma estimativa de "≲2 pp de %MAC" que a medição real desta task DESMENTIU (≈4,40 pp medido, mais que o dobro, os dois termos somados são 29% MAIORES que o termo de tração já no balanço); ambos IMPLEMENTADOS neste ciclo, limite dianteiro de rotação recua de 13,3546% para ≈17,76% MAC no baseline real); **ciclo 13 (`old→new`, fecha `docs/backlog.md` #15 PRIORIDADE ALTA e #16)**: o termo de MOMENTO da tração e os termos de SOLO passam a vir da MESMA lei única de tração (antes divergiam ≈27,69% em `Vr≡V_LOF`, indeterminação de ≈8,3 pp de %MAC) — resíduo de d'Alembert ZERO por construção, medido a 1e-12 relativo nos 6 cenários; o limite é calculado nas DUAS superfícies (`rotation_limit_pct_mac_paved`/`_grass`, campos novos) e o campo legado `rotation_limit_pct_mac` passa a valer GRAMA (superfície de operação, mesma premissa de #23/#24) — pavimentado 16,380458% → grama 18,268251% MAC (+1,888 pp) | Ensaio de voo (flare + rotação de decolagem) — resultado SENSÍVEL a `elevator_deflection_max_deg` (±2°) e a `cl_h_max_down` (±0.05 residual) (ver `trim.sensitivity` e §4 abaixo), não tratar como definitivo |
-| `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); **ciclo 12 tasks 2/3 (`old→new`, fecha `docs/backlog.md` item 4)**: rolagem de solo de decolagem E de pouso passam do método ENERGÉTICO fechado (Raymer, `V_ref²/2gμ`, sem termo de arrasto por construção) para integração numérica consumindo a polar completa segmento a segmento — medido: `to_50ft_paved_m` +54,92%, `to_50ft_grass_m` +73,00%, `ldg_50ft_m` +15,90%, `ldg_50ft_grass_m` +16,12% no baseline real (ver v5.5 em §1); a aproximação de pouso (segmento antes do toque, ângulo fixo) SEGUE sem termo de arrasto por construção, não afetada; **ciclo 11 task 1**: `climb_gradient_pct` avaliado no piso LEGAL da norma (1,2·Vs_to, referência típica da CS 23.65 ≥1,2·Vs1), não mais no piso de varredura 1,05·Vs_to (viés otimista removido, `docs/backlog.md` item 2); **ciclo 11 task 2**: Vy/teto de serviço usam referência de estol LIMPA (`wing.cl_max_clean`) e polar limpa, janela de busca [1,05;2,00]·Vs com guarda de argmax interior (`docs/backlog.md` item 3); **ciclo 13 (`old→new`, fecha `docs/backlog.md` #8/#9)**: a tração de rolagem (`thrust_ground_roll_n`) e a de cruzeiro/subida/teto (`thrust_available_n`, polinômio `prop_efficiency`) — que divergiam ≈27,69% em `V_LOF` — foram fundidas na lei única `T(V)=FoM(J)·T_ideal_momentum(V,P_eixo)`; o polinômio apagado violava o teto de conservação de quantidade de movimento em 4 dos 8 pontos de operação medidos, 2 alimentando gates que PASSAVAM (`Vx`→gradiente CS 23.65; `V_LOF`→rotação) — consequência medida: `climb_gradient_pct` **12,451842% → 7,913277%**, FLIPA de PASS para FAIL contra o mínimo de 8,3%; `to_50ft_grass_m` **819,110978 → 858,593425 m** (segue REPROVANDO #23) | Mapa de desempenho de hélice real do fabricante para refinar a polar de subida |
+| `performance` | computed (equações fechadas, atmosfera ISA padrão); **ciclo 8 task 1**: polar de subida/gradiente inclui arrasto de flap parcial (`wing.cd0_flap_to_extra`); **ciclo 12 tasks 2/3 (`old→new`, fecha `docs/backlog.md` item 4)**: rolagem de solo de decolagem E de pouso passam do método ENERGÉTICO fechado (Raymer, `V_ref²/2gμ`, sem termo de arrasto por construção) para integração numérica consumindo a polar completa segmento a segmento — medido: `to_50ft_paved_m` +54,92%, `to_50ft_grass_m` +73,00%, `ldg_50ft_m` +15,90%, `ldg_50ft_grass_m` +16,12% no baseline real (ver v5.5 em §1); **ciclo 14 (`old→new`, fecha `docs/backlog.md` #17)**: a aproximação de pouso (segmento antes do toque) DEIXA de usar ângulo FIXO de 3° (ILS pavimentado, nunca calibrado para esta célula) e passa a CONSUMIR a mesma polar da rolagem (`cd_gear_extended`) — `γ_app = atan(CD_ref/CL_ref)` DERIVADO no planeio power-off, `V_ref=1,30·Vs`, 5,1181° no baseline; o flare (antes puramente cinemático, altura ZERO — a aeronave "pousava duas vezes") passa a ser arco geométrico de fator de carga `n=[performance].flare_load_factor` que CONSOME altura real; PREMISSA DECLARADA de motor em MARCHA LENTA sobre o obstáculo — aproximação COM potência seria mais rasa e mais LONGA, modelo OTIMISTA nessa hipótese; medido: `ldg_50ft_m` **582,521767→439,275078 m** (−24,60%), `ldg_50ft_grass_m` **646,660942→503,414253 m** (−22,17%), checagem #24 FLIPA de FAIL para PASS; três campos novos publicados (`ldg_approach_angle_deg`/`ldg_flare_height_m`/`ldg_air_distance_m`) — ver `agents::performance::landing_air_segment` e v5.7 em §1; **ciclo 11 task 1**: `climb_gradient_pct` avaliado no piso LEGAL da norma (1,2·Vs_to, referência típica da CS 23.65 ≥1,2·Vs1), não mais no piso de varredura 1,05·Vs_to (viés otimista removido, `docs/backlog.md` item 2); **ciclo 11 task 2**: Vy/teto de serviço usam referência de estol LIMPA (`wing.cl_max_clean`) e polar limpa, janela de busca [1,05;2,00]·Vs com guarda de argmax interior (`docs/backlog.md` item 3); **ciclo 13 (`old→new`, fecha `docs/backlog.md` #8/#9)**: a tração de rolagem (`thrust_ground_roll_n`) e a de cruzeiro/subida/teto (`thrust_available_n`, polinômio `prop_efficiency`) — que divergiam ≈27,69% em `V_LOF` — foram fundidas na lei única `T(V)=FoM(J)·T_ideal_momentum(V,P_eixo)`; o polinômio apagado violava o teto de conservação de quantidade de movimento em 4 dos 8 pontos de operação medidos, 2 alimentando gates que PASSAVAM (`Vx`→gradiente CS 23.65; `V_LOF`→rotação) — consequência medida: `climb_gradient_pct` **12,451842% → 7,913277%**, FLIPA de PASS para FAIL contra o mínimo de 8,3%; `to_50ft_grass_m` **819,110978 → 858,593425 m** (segue REPROVANDO #23) | Mapa de desempenho de hélice real do fabricante para refinar a polar de subida |
 | `vn_diagram` | computed (CS 23.333/.335/.337/.341, fórmulas fechadas) | — |
 | `structure` | preliminary (vigas simplificadas — viga I equivalente); flutter: preliminary (estimativa analítica) | FEM (estrutura); GVT — ensaio de vibração em solo (flutter) |
 | `landing_gear` | preliminary (dimensionamento estático de cargas) | Análise dinâmica de pouso/afundamento |
@@ -1349,8 +1430,11 @@ dedução completa.
 | `best_glide_kmh` / `glide_ratio` | f64 | km/h / — | Velocidade e razão L/D de melhor planeio |
 | `climb_gradient_pct` | f64 | % | Gradiente de subida em Vx, solo, MTOW (CS 23.65 exige ≥ 8,3%). **Viés RESOLVIDO** (ciclo 11, task 1, 2026-08-10): a varredura de `best_climb_angle_ms` partia do piso 1,05·V_s_to; como RC/V é monotonicamente DECRESCENTE nessa faixa, a função devolvia esse piso — avaliar mais cedo (mais devagar) sempre dá gradiente MAIOR, então 1,05·V_s_to era um viés OTIMISTA, não uma leitura conservadora. O piso subiu para 1,20·V_s_to, referência típica da CS 23.65 (≥1,2·Vs1). Baseline real E10: **13,896713% (antigo, a 1,05·Vs, otimista) → 12,451842%** (novo, a 1,20·Vs, honesto), -1,444871 pp. Gate PASSA (≥ 8,3%), folga intacta. Ver `docs/backlog.md` item 2 (RESOLVIDO). |
 | `to_50ft_paved_m` / `to_50ft_grass_m` | **f64 ou a string `"infinita"`** | m | Distância de decolagem sobre obstáculo de 15 m/50 ft — referência FÍSICA (segmentada: rolagem + rotação + subida até 15 m). **Caso especial (v5.4)**: quando o obstáculo é inatingível (razão de subida ≤ 0 no segmento de subida até 15m — ver `agents::performance::takeoff_distance_50ft_m`, ramo `rc <= 0.0`), o resultado é `f64::INFINITY`, serializado como a string literal `"infinita"`, NUNCA como `null` nem como um número (ver §5). Um parser JSON genérico deve tratar estes campos como `number \| "infinita"`, não como `number` puro. **`old→new`, ciclo 12 (tasks 2/3, backlog item 4, RESOLVIDO)**: a rolagem que alimenta este campo passou do método energético fechado para integração numérica com arrasto — medido no baseline real: `to_50ft_paved_m` **420,372451 → 651,258408 m** (+54,92%), `to_50ft_grass_m` **473,469470 → 819,110978 m** (+73,00%). **Consequência de gate**: `to_50ft_grass_m` (819,11 m) passa a EXCEDER a pista de grama de 600 m — checagem #23 REPROVA no baseline real (antes PASSAVA). |
-| `ldg_50ft_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft, pista PAVIMENTADA (`mu_brake_paved`) — **INFORMATIVO** desde a v4.8: não é o gate de pista. Diferente de `to_50ft_*`/`to_distance_*`/`landing_distance_m`, este campo NÃO tem tratamento especial de infinito (sempre `number`, nunca `"infinita"`) — ver §5. **`old→new`, ciclo 12 (task 3, backlog item 4, RESOLVIDO)**: rolagem por integração com arrasto e alívio de sustentação — medido: **502,458299 → 582,341118 m** (+15,90%). |
-| `ldg_50ft_grass_m` | f64 | m | Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (`mu_brake_grass`) — sempre > `ldg_50ft_m`; é a grandeza gateada pela checagem #24 contra `runway_available_m`. NÃO tem tratamento especial de infinito (sempre `number`) — ver §5. **`old→new`, ciclo 12 (task 3, backlog item 4, RESOLVIDO)**: medido **556,677173 → 646,437301 m** (+16,12%). **Consequência de gate**: 646,44 m passa a EXCEDER a pista de grama de 600 m — checagem #24 REPROVA no baseline real (antes PASSAVA, por `old→new` (número corrigido, fix wave ciclo 12; era "≈46 m") **600 − 556,677173 = 43,3 m**). |
+| `ldg_50ft_m` | **f64 ou a string `"infinita"`** | m | Distância de pouso sobre obstáculo de 15 m/50 ft, pista PAVIMENTADA (`mu_brake_paved`) — **INFORMATIVO** desde a v4.8: não é o gate de pista. **`old→new`, ciclo 12 (task 3, backlog item 4, RESOLVIDO)**: rolagem por integração com arrasto e alívio de sustentação — medido: **502,458299 → 582,341118 m** (+15,90%). **`old→new`, ciclo 14 (backlog item 17, RESOLVIDO — v5.7 §1)**: segmento AÉREO deixa de usar rampa fixa de 3° com flare sem altura e passa a `landing_air_segment` (γ_app derivado da polar, flare consumindo altura) — medido: **582,521767 → 439,275078 m** (−24,60%; a PREMISSA de operação embutida no número também muda, ver exceção registrada v5.7). **ACHADO (ciclo 14)**: até esta task este campo NÃO tinha `#[serde(with = "fatigue_life_serde")]`, apesar da spec do ciclo 14 §5.3 AFIRMAR que já tinha desde o ciclo 12 — falso, confirmado por git-blame. Corrigido nesta task: agora pode legitimamente ser `f64::INFINITY` (herdado de `ldg_air_distance_m`, ver abaixo, ou da rolagem de solo), serializado como `"infinita"` — ver §5. |
+| `ldg_50ft_grass_m` | **f64 ou a string `"infinita"`** | m | Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (`mu_brake_grass`) — sempre > `ldg_50ft_m`; é a grandeza gateada pela checagem #24 contra `runway_available_m`. **`old→new`, ciclo 12 (task 3, backlog item 4, RESOLVIDO)**: medido **556,677173 → 646,437301 m** (+16,12%). **Consequência de gate**: 646,44 m passa a EXCEDER a pista de grama de 600 m — checagem #24 REPROVA no baseline real (antes PASSAVA, por `old→new` (número corrigido, fix wave ciclo 12; era "≈46 m") **600 − 556,677173 = 43,3 m**). **`old→new`, ciclo 14 (backlog item 17, RESOLVIDO — v5.7 §1)**: mesmo mecanismo de `ldg_50ft_m` acima — medido **646,660942 → 503,414253 m** (−22,17%). **Consequência de gate**: checagem #24 **FLIPA de FAIL para PASS** (503,41 m < 600 m) — primeira violação removida desde o ciclo 11; a premissa de pista de 600 m em grama permanece INTACTA. **ACHADO (ciclo 14)**: mesmo achado/correção de `fatigue_life_serde` de `ldg_50ft_m` acima — ver ali. |
+| `ldg_approach_angle_deg` | f64 (**novo v5.7**) | ° | Ângulo de aproximação γ_app, DERIVADO da polar de pouso (`atan(CD_ref/CL_ref)` no planeio power-off, flap cheio/trem embaixo, em `V_ref`) — não mais config livre. **5,1181°** no baseline real. Sem guarda de teto por construção: é o planeio power-off mais íngreme que a célula sustenta sem freio aerodinâmico (ela não tem). |
+| `ldg_flare_height_m` | f64 (**novo v5.7**) | m | Altura consumida pelo flare — `R·(1−cos γ_app)`, `R = V_ref²/(g·(n−1))`, `n = [performance].flare_load_factor` (baseline 1,20). **2,595814 m** no baseline real. Pode legitimamente valer `f64::INFINITY` se `n` for pequeno demais para o `γ_app` da célula (flare acima do obstáculo — resultado FÍSICO, não NaN nem negativo); não tem tratamento especial de infinito neste campo isolado (o infinito propaga para `ldg_air_distance_m`/`ldg_50ft_*`, que já têm — ver §5). |
+| `ldg_air_distance_m` | f64 (**novo v5.7**) | m | Segmento AÉREO do pouso (aproximação + flare) — `(15−h_flare)/tan(γ_app) + R·sin(γ_app)`, soma que fecha os 15 m/50 ft do obstáculo por construção. **196,573247 m** no baseline real (era 339,82 m, informal, nunca publicado, antes do ciclo 14). Idêntico em pavimento e grama — só a rolagem (não incluída aqui) muda com a superfície. |
 
 ### `vn_diagram` — `VnDiagramSpec` (VnDiagramAgent, CS 23.333/.335/.337/.341)
 
@@ -1571,16 +1655,16 @@ no nominal mas reprova com massas estruturais ±{σ}% (pior caso {caso}):
   alternador, coberto pela bateria). Pode ser vazio mesmo com
   `validation_status == "PASS"`; pode ser não-vazio mesmo com `"FAIL"`.
 
-## 5. Nota especial: infinito em campos `f64` — `fatigue_life_cycles`, `to_50ft_paved_m`, `to_50ft_grass_m`, `to_distance_paved_m`, `to_distance_grass_m`, `landing_distance_m`
+## 5. Nota especial: infinito em campos `f64` — `fatigue_life_cycles`, `to_50ft_paved_m`, `to_50ft_grass_m`, `to_distance_paved_m`, `to_distance_grass_m`, `landing_distance_m`, `ldg_50ft_m`, `ldg_50ft_grass_m`, `ldg_air_distance_m`
 
 JSON (RFC 8259) não tem representação nativa de `Infinity`/`NaN`. A
 biblioteca de serialização usada pelo pipeline (`serde_json`), por padrão,
 converteria um `f64::INFINITY` silenciosamente para `null` — o que quebra
 a desserialização de volta em `f64` (achado do próprio teste de round-trip
-deste schema, `tests/schema_v4.rs`). O pipeline trata **SEIS** campos
+deste schema, `tests/schema_v4.rs`). O pipeline trata **NOVE** campos
 especificamente com este comportamento, serializando `f64::INFINITY` como a
-string `"infinita"` em vez de `null` (`old→new`: eram TRÊS até a v5.4;
-subiu para seis na v5.5, ciclo 12 task 1):
+string `"infinita"` em vez de `null` (`old→new`: eram TRÊS até a v5.4; seis
+na v5.5, ciclo 12 task 1; **nove na v5.7, ciclo 14 task 3**):
 
 1. **`structure.fatigue_life_cycles`** (v4.0+): "vida em fadiga infinita" é
    um resultado FISICAMENTE VÁLIDO do modelo de Goodman modificado — a
@@ -1606,12 +1690,35 @@ subiu para seis na v5.5, ciclo 12 task 1):
    `integra_rolagem_pouso_com_passos` (guarda: `F_net(V) ≤ 0` ⟹ integrando
    `+INFINITY` naquele nó de Simpson, nunca `NaN`). Resultado de FÍSICA
    válido ("decolagem/pouso impossível nesta condição"), não um erro.
-   Comportamento: infinito serializa como `"infinita"`. **NÃO afeta**
-   `ldg_50ft_m`/`ldg_50ft_grass_m` — estes dois continuam sempre `number`,
-   sem tratamento especial (não têm `#[serde(with = "fatigue_life_serde")]`
-   em `src/models/specs.rs`).
+   Comportamento: infinito serializa como `"infinita"`. **Até a v5.6, NÃO
+   afetava** `ldg_50ft_m`/`ldg_50ft_grass_m` — ver item 4 abaixo, ACHADO da
+   v5.7 que corrige essa lacuna.
 
-**Um parser de `aircraft_spec.json` deve tratar estes SEIS campos como
+4. **`performance.ldg_50ft_m`, `performance.ldg_50ft_grass_m` e
+   `performance.ldg_air_distance_m`** (v5.7, ciclo 14, task 3 — **ACHADO**,
+   não projetado pela spec do ciclo): o segmento aéreo do pouso
+   (`agents::performance::landing_air_segment`) pode devolver
+   `f64::INFINITY` para a aproximação (`s_air`) quando o flare começa acima
+   do obstáculo (`h_flare ≥ 15,0` — `[performance].flare_load_factor`
+   pequeno demais para o `γ_app` derivado da polar, spec ciclo14 §5.3),
+   resultado FÍSICO ("pouso impossível sobre o obstáculo nesta condição"),
+   nunca `NaN`/negativo. Esse infinito se propaga para `ldg_air_distance_m`
+   (soma direta) e para `ldg_50ft_m`/`ldg_50ft_grass_m` (que somam o
+   segmento aéreo à rolagem de solo). A spec do ciclo 14 (§5.3) presumiu que
+   `ldg_50ft_m`/`ldg_50ft_grass_m` **já** tinham este tratamento desde o
+   ciclo 12 — **falso**, confirmado por git-blame (`2c47137`, merge do
+   ciclo 12: nenhum dos dois campos tinha
+   `#[serde(with = "fatigue_life_serde")]`). Corrigido nesta task: os três
+   campos agora usam o mesmo mecanismo. Não afeta o baseline real (valores
+   sempre finitos ali) — só fecha uma lacuna que o guard novo do ciclo 14
+   tornou alcançável por config normal (`flare_load_factor` perto de 1,0,
+   dentro da faixa validada `(1,0; 2,0)`), não só por um caso extremo de
+   rolagem. `ldg_flare_height_m` e `ldg_approach_angle_deg` (os outros dois
+   campos novos da v5.7) **permanecem sempre `number`** — `n` estritamente
+   > 1,0 (validado) garante que `R`/`h_flare`/`γ_app` nunca divergem, só
+   `s_air` (e por soma, `ldg_air_distance_m`) pode.
+
+**Um parser de `aircraft_spec.json` deve tratar estes NOVE campos como
 `number | "infinita"`, nunca assumir que são sempre números:**
 - `structure.fatigue_life_cycles`
 - `performance.to_50ft_paved_m`
@@ -1619,10 +1726,13 @@ subiu para seis na v5.5, ciclo 12 task 1):
 - `performance.to_distance_paved_m`
 - `performance.to_distance_grass_m`
 - `performance.landing_distance_m`
+- `performance.ldg_50ft_m`
+- `performance.ldg_50ft_grass_m`
+- `performance.ldg_air_distance_m`
 
 Nenhum outro campo do schema tem esse comportamento especial — em
-particular, `performance.ldg_50ft_m`/`ldg_50ft_grass_m` são sempre
-`number`, mesmo após o ciclo 12.
+particular, `performance.ldg_approach_angle_deg` e
+`performance.ldg_flare_height_m` são sempre `number`.
 
 ## 6. Manutenção deste documento
 

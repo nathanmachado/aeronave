@@ -1245,6 +1245,17 @@ impl PerformanceAgent {
                                                          perf_cfg.mu_brake_grass, cl_ground_roll_ldg,
                                                          perf_cfg);
 
+        // Ciclo 14 (spec §6.1): a decomposição do segmento aéreo é publicada
+        // porque ela é 52,5% da distância de pouso em grama e até aqui não
+        // aparecia em lugar nenhum do JSON.
+        //
+        // UMA chamada só, de propósito: γ_app, h_flare e s_air NÃO dependem de
+        // `mu_brake` — o segmento aéreo é idêntico para pavimento e grama, só a
+        // ROLAGEM muda. Chamar duas vezes (uma por superfície) daria os mesmos
+        // números e sugeriria, falsamente, que o ar depende da superfície.
+        let ldg_air = landing_air_segment(mass_ldg, rho_sl, wing, state,
+                                           perf_cfg.flare_load_factor);
+
         // Melhor planeio (Task 4.7) — MTOW, nível do mar, motor cortado.
         let (v_bg_kmh, ld_max) = best_glide(mtow_kg, rho_sl, wing);
 
@@ -1274,6 +1285,9 @@ impl PerformanceAgent {
             to_50ft_grass_m:      d_to_50ft_grass,
             ldg_50ft_m:           d_ldg_50ft,
             ldg_50ft_grass_m:     d_ldg_50ft_grass,
+            ldg_approach_angle_deg: ldg_air.approach_angle_rad.to_degrees(),
+            ldg_flare_height_m:     ldg_air.flare_height_m,
+            ldg_air_distance_m:     ldg_air.total_m(),
         }
     }
 }

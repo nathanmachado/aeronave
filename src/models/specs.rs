@@ -624,9 +624,24 @@ pub struct PerformanceSpec {
     #[serde(with = "fatigue_life_serde")]
     pub to_50ft_grass_m: f64,
     /// Distância de pouso sobre obstáculo de 15m/50ft (pista pavimentada, m)
-    /// — soma de segmentos: aproximação (γ padrão) + flare + ground roll
-    /// com `mu_brake_paved`. INFORMATIVO desde o ciclo 6 (revisão final):
-    /// o gate de pista (#24) usa `ldg_50ft_grass_m`, não este campo.
+    /// — soma de segmentos: aproximação (γ derivado da polar, ciclo 14) +
+    /// flare + ground roll com `mu_brake_paved`. INFORMATIVO desde o ciclo 6
+    /// (revisão final): o gate de pista (#24) usa `ldg_50ft_grass_m`, não
+    /// este campo.
+    ///
+    /// `old→new` (ciclo 14, spec §5.3, ACHADO desta task): pode ser
+    /// `f64::INFINITY` — herdado tanto do segmento aéreo (flare acima do
+    /// obstáculo, ver `ldg_air_distance_m`) quanto da rolagem de solo
+    /// (`landing_ground_roll_m`, arrasto/frenagem insuficientes). A spec
+    /// deste ciclo (§5.3) AFIRMOU que este campo "já serializa como
+    /// 'infinita' desde o ciclo 12" — **falso**: até esta task nunca teve
+    /// `#[serde(with = "fatigue_life_serde")]` (confirmado por git-blame,
+    /// `2c47137`, merge do ciclo 12), então um `+INFINITY` aqui viraria
+    /// `null` silencioso. Corrigido nesta task porque o guard de
+    /// `landing_air_segment` (spec §5.3) tornou esse infinito alcançável
+    /// por config normal (`flare_load_factor` perto de 1,0, dentro da
+    /// faixa validada), não só por um caso extremo de rolagem.
+    #[serde(with = "fatigue_life_serde")]
     pub ldg_50ft_m: f64,
     /// Distância de pouso sobre obstáculo de 15 m/50 ft em GRAMA (m) —
     /// mesmos segmentos de `ldg_50ft_m`, mas a rolagem de solo usa
@@ -637,7 +652,48 @@ pub struct PerformanceSpec {
     /// grandeza comparada contra `runway_available_m` na checagem #24
     /// (`ConstraintChecker::verify`) — simétrico ao par
     /// `to_50ft_paved_m`/`to_50ft_grass_m` da decolagem.
+    ///
+    /// `old→new` (ciclo 14): mesmo ACHADO/correção de `ldg_50ft_m` acima —
+    /// ver docstring desse campo.
+    #[serde(with = "fatigue_life_serde")]
     pub ldg_50ft_grass_m: f64,
+    /// Ângulo de aproximação γ_app (graus), DERIVADO da polar de pouso —
+    /// não mais config livre (ciclo 14, spec §2.1). `atan(CD_ref/CL_ref)`
+    /// no planeio power-off, flap cheio e trem embaixo, em `V_ref =
+    /// 1,30·V_s`. 5,1181° no baseline real — a aproximação mais íngreme
+    /// que esta célula sustenta em planeio estabilizado sem freio
+    /// aerodinâmico (ela não tem um), por isso não há guarda de teto:
+    /// `γ_app` É esse limite, não uma config que poderia excedê-lo.
+    /// Publicado para tornar auditável de fora um segmento que hoje é
+    /// 52,5% de `ldg_50ft_grass_m` e não aparecia em lugar nenhum do JSON.
+    pub ldg_approach_angle_deg: f64,
+    /// Altura consumida pelo flare (m) — `R·(1−cos γ_app)`, `R =
+    /// V_ref²/(g·(n−1))`, `n = [performance].flare_load_factor` (ciclo 14,
+    /// spec §2.2). Antes do ciclo 14 o flare era puramente horizontal
+    /// (`V_ref × flare_time_s`, altura zero) e a aeronave "pousava duas
+    /// vezes": uma no fim da rampa de aproximação (que já descia os 15 m
+    /// inteiros) e outra no fim do flare. 2,596 m no baseline real.
+    pub ldg_flare_height_m: f64,
+    /// Segmento AÉREO do pouso (m) — aproximação + flare, soma que fecha
+    /// os 15 m/50 ft do obstáculo por construção: `(15−h_flare)/tan(γ_app)
+    /// + R·sin(γ_app)`. 196,573247 m no baseline real (era 339,82 m antes
+    /// do ciclo 14, com o defeito geométrico do parágrafo acima e a rampa
+    /// FIXA de 3° de ILS pavimentado, nunca calibrada para esta célula
+    /// nem para pista de fazenda — backlog #17). PREMISSA DECLARADA: motor
+    /// em MARCHA LENTA sobre o obstáculo (procedimento padrão de campo
+    /// curto, como POH mede pista curta). Uma aproximação COM potência é
+    /// mais RASA e portanto mais LONGA — nessa hipótese este modelo é
+    /// OTIMISTA, não neutro.
+    ///
+    /// Pode ser `f64::INFINITY` (spec §5.3): se o flare começar acima do
+    /// obstáculo (`h_flare ≥ 15,0`, `n` pequeno demais para `γ_app`), a
+    /// aproximação (`s_air`) é FISICAMENTE impossível e vale `+INFINITY` —
+    /// nunca um número negativo espúrio, nunca `NaN`. Serializado como a
+    /// string `"infinita"` nesse caso, não `null` — mesmo tratamento de
+    /// `ldg_50ft_m`/`ldg_50ft_grass_m` (que herdam o mesmo infinito por
+    /// somar este campo) — ver `fatigue_life_serde`.
+    #[serde(with = "fatigue_life_serde")]
+    pub ldg_air_distance_m: f64,
 }
 
 /// Saída do StructuralAgent
@@ -1499,7 +1555,7 @@ pub struct ElectricalSpec {
 /// MESMA tolerância. Ver `docs/aircraft_spec.schema.md` §5 e
 /// `tests/schema_v4.rs`/`tests/generic_engine.rs` para os pins honestos
 /// completos.
-pub const SCHEMA_VERSION: &str = "5.6";
+pub const SCHEMA_VERSION: &str = "5.7";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -1876,6 +1932,12 @@ mod tests {
             to_50ft_grass_m: 1500.0,
             ldg_50ft_m: 700.0,
             ldg_50ft_grass_m: 850.0,
+            // Ciclo 14: sintéticos, deliberadamente diferentes do baseline
+            // real (5,1181° / 2,596 m / 196,57 m) — este teste só exercita
+            // round-trip serde de infinito, não física.
+            ldg_approach_angle_deg: 4.0,
+            ldg_flare_height_m: 3.2,
+            ldg_air_distance_m: 250.0,
         };
 
         // Serializar e verificar que INFINITY vira "infinita"
@@ -1961,6 +2023,12 @@ mod tests {
             to_50ft_grass_m: 1500.0,
             ldg_50ft_m: 700.0,
             ldg_50ft_grass_m: 850.0,
+            // Ciclo 14: sintéticos, deliberadamente diferentes do baseline
+            // real — este teste exercita round-trip serde das distâncias
+            // legado, não física do segmento aéreo.
+            ldg_approach_angle_deg: 4.0,
+            ldg_flare_height_m: 3.2,
+            ldg_air_distance_m: 250.0,
         };
 
         p.to_distance_paved_m = f64::INFINITY;
@@ -1977,5 +2045,62 @@ mod tests {
         assert!(volta.to_distance_paved_m.is_infinite());
         assert!(volta.to_distance_grass_m.is_infinite());
         assert!(volta.landing_distance_m.is_infinite());
+    }
+
+    /// Ciclo 14: `ldg_air_distance_m` herda o mesmo infinito FÍSICO de
+    /// `s_air` (spec §5.3 — flare começando acima do obstáculo, `h_flare ≥
+    /// 15,0`) que já se propaga para `ldg_50ft_m`/`ldg_50ft_grass_m`. Sem
+    /// `fatigue_life_serde` neste campo especificamente, ele viraria `null`
+    /// silencioso no JSON (RFC 8259 não representa infinito) mesmo com os
+    /// outros dois campos do trio (`ldg_approach_angle_deg`,
+    /// `ldg_flare_height_m`) permanecendo finitos — `n` estritamente > 1,0
+    /// (validado) garante que `R`/`h_flare` nunca divergem, só `s_air` (e,
+    /// por soma, `ldg_air_distance_m`) pode.
+    #[test]
+    fn ldg_air_distance_m_roundtrip_serde_com_infinito() {
+        use serde_json;
+
+        let mut p = PerformanceSpec {
+            v_cruise_kmh: 150.0,
+            v_stall_kmh: 45.0,
+            rc_sl_ms: 2.5,
+            rc_cruise_alt_ms: 1.0,
+            service_ceiling_m: 3500.0,
+            to_distance_paved_m: 800.0,
+            to_distance_grass_m: 1200.0,
+            landing_distance_m: 600.0,
+            range_km: 1500.0,
+            endurance_h: 8.0,
+            vx_kmh: 110.0,
+            vy_kmh: 130.0,
+            best_glide_kmh: 120.0,
+            glide_ratio: 8.5,
+            climb_gradient_pct: 12.5,
+            to_50ft_paved_m: 900.0,
+            to_50ft_grass_m: 1500.0,
+            ldg_50ft_m: f64::INFINITY,
+            ldg_50ft_grass_m: f64::INFINITY,
+            // Sintéticos: γ_app/h_flare permanecem FINITOS (n > 1,0 sempre
+            // garante isso), só o segmento aéreo total diverge.
+            ldg_approach_angle_deg: 4.0,
+            ldg_flare_height_m: 14.9,
+            ldg_air_distance_m: 250.0,
+        };
+
+        p.ldg_air_distance_m = f64::INFINITY;
+
+        let json = serde_json::to_string(&p).expect("serializa");
+        assert!(json.contains("\"ldg_air_distance_m\":\"infinita\""), "{json}");
+        assert!(!json.contains("null"), "nenhum campo pode virar null: {json}");
+        // γ_app/h_flare continuam números normais, não infinitos.
+        assert!(json.contains("\"ldg_approach_angle_deg\":4.0"), "{json}");
+        assert!(json.contains("\"ldg_flare_height_m\":14.9"), "{json}");
+
+        let volta: PerformanceSpec = serde_json::from_str(&json).expect("desserializa");
+        assert!(volta.ldg_air_distance_m.is_infinite() && volta.ldg_air_distance_m > 0.0,
+            "ldg_air_distance_m desserializado deveria ser +INFINITY, recebido: {}",
+            volta.ldg_air_distance_m);
+        assert_eq!(volta.ldg_approach_angle_deg, 4.0);
+        assert_eq!(volta.ldg_flare_height_m, 14.9);
     }
 }

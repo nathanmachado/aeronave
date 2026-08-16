@@ -1336,6 +1336,12 @@ mod tests {
             to_50ft_grass_m: 450.0,
             ldg_50ft_m: 550.0,
             ldg_50ft_grass_m: 620.0,
+            // Ciclo 14: sintéticos, deliberadamente diferentes do baseline
+            // real — irrelevantes para a checagem #13 (gradiente) exercitada
+            // por esta fixture.
+            ldg_approach_angle_deg: 4.0,
+            ldg_flare_height_m: 3.2,
+            ldg_air_distance_m: 250.0,
         }
     }
 
@@ -1399,6 +1405,12 @@ mod tests {
             to_50ft_grass_m: 450.0,
             ldg_50ft_m: 550.0,
             ldg_50ft_grass_m: 620.0,
+            // Ciclo 14: sintéticos, deliberadamente diferentes do baseline
+            // real — irrelevantes para as checagens de RC/teto exercitadas
+            // por esta fixture.
+            ldg_approach_angle_deg: 4.0,
+            ldg_flare_height_m: 3.2,
+            ldg_air_distance_m: 250.0,
         }
     }
 
