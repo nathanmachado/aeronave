@@ -935,3 +935,46 @@ fn todo_literal_cobrado_em_teste_carrega_marcador() {
         nus.join("\n")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Task 3 — casca do schema doc: liga `confere_doc`/`confere_cobertura_doc` a
+// `docs/aircraft_spec.schema.md`.
+// ---------------------------------------------------------------------------
+
+const SCHEMA_DOC: &str = "docs/aircraft_spec.schema.md";
+
+fn conteudo_do_schema_doc() -> String {
+    std::fs::read_to_string(raiz().join(SCHEMA_DOC)).expect("schema doc deveria existir")
+}
+
+/// Piso de números atuais conferidos no doc — mesma razão do piso de pins.
+const MINIMO_DE_NUMEROS_NO_DOC: usize = 12;
+
+#[test]
+fn numeros_atuais_do_schema_doc_batem_com_o_json() {
+    let (conferidos, falhas) = confere_doc(&json_commitado(), &conteudo_do_schema_doc());
+    assert!(
+        falhas.is_empty(),
+        "{} divergência(s) em {SCHEMA_DOC}:\n{}",
+        falhas.len(),
+        falhas.join("\n")
+    );
+    assert!(
+        conferidos >= MINIMO_DE_NUMEROS_NO_DOC,
+        "só {conferidos} números atuais conferidos, mínimo {MINIMO_DE_NUMEROS_NO_DOC} \
+         — a varredura degradou e estaria passando sem provar nada"
+    );
+}
+
+#[test]
+fn afirmacao_de_valor_atual_no_doc_exige_marcador() {
+    let nuas = confere_cobertura_doc(&conteudo_do_schema_doc());
+    assert!(
+        nuas.is_empty(),
+        "{} linha(s) de {SCHEMA_DOC} afirmam um valor ATUAL sem marcador \
+         `<!-- PIN:caminho -->`.\nOu marque o número, ou reescreva a frase para não \
+         reivindicar atualidade:\n{}",
+        nuas.len(),
+        nuas.join("\n")
+    );
+}
