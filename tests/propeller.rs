@@ -54,15 +54,15 @@ fn golden_baseline_toyota_mach_e_folga() {
     );
 
     assert_eq!(propeller.source, "config");
-    assert_eq!(propeller.diameter_m, 1.76);
+    assert_eq!(propeller.diameter_m, 1.76); // PIN: propeller.diameter_m
 
     // Pins E10 (old→new, tolerâncias INALTERADAS): 0.546→0.493, 0.496→0.459,
     // 0.275→0.240.
-    assert!((propeller.tip_mach_static - 0.493).abs() < 0.005,
+    assert!((propeller.tip_mach_static - 0.493).abs() < 0.005, // PIN: propeller.tip_mach_static
         "M_static = {:.4} (esperado 0.493 ±0.005)", propeller.tip_mach_static);
-    assert!((propeller.tip_mach_cruise_helical - 0.459).abs() < 0.005,
+    assert!((propeller.tip_mach_cruise_helical - 0.459).abs() < 0.005, // PIN: propeller.tip_mach_cruise_helical
         "M_cruise = {:.4} (esperado 0.459 ±0.005)", propeller.tip_mach_cruise_helical);
-    assert!((propeller.ground_clearance_m - 0.240).abs() < 1e-9,
+    assert!((propeller.ground_clearance_m - 0.240).abs() < 1e-9, // PIN: propeller.ground_clearance_m
         "clearance = {:.6} (esperado 0.240 exato)", propeller.ground_clearance_m);
 
     assert!(propeller.ok_mach_static, "Mach estático deveria estar OK no baseline");

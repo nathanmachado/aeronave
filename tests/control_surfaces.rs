@@ -41,8 +41,8 @@ fn baseline_aileron_bate_calculo_manual() {
         cs.aileron.start_m, cs.aileron.end_m
     );
 
-    let esperado_span = 2.0895_f64;
-    let esperado_area = 1.0304_f64;
+    let esperado_span = 2.0895_f64; // PIN: control_surfaces.aileron.span_m
+    let esperado_area = 1.0304_f64; // PIN: control_surfaces.aileron.area_m2
 
     assert!((cs.aileron.span_m - esperado_span).abs() / esperado_span < 0.01,
         "span/lado = {:.4}m (esperado ≈{esperado_span:.4}m, ±1%)", cs.aileron.span_m);
@@ -74,10 +74,10 @@ fn baseline_areas_pin_exato() {
     // m² (+38,8%). Aileron/flap/rudder não dependem de v_h/elevator_chord_
     // frac — inalterados.
     let casos = [
-        ("aileron", cs.aileron.area_m2, 1.030418_f64),
-        ("flap", cs.flap.area_m2, 1.962538_f64),
-        ("elevator", cs.elevator.area_m2, 1.165835_f64),
-        ("rudder", cs.rudder.area_m2, 0.459899_f64),
+        ("aileron", cs.aileron.area_m2, 1.030418_f64), // PIN: control_surfaces.aileron.area_m2
+        ("flap", cs.flap.area_m2, 1.962538_f64), // PIN: control_surfaces.flap.area_m2
+        ("elevator", cs.elevator.area_m2, 1.165835_f64), // PIN: control_surfaces.elevator.area_m2
+        ("rudder", cs.rudder.area_m2, 0.459899_f64), // PIN: control_surfaces.rudder.area_m2
     ];
     for (nome, obtido, esperado) in casos {
         assert!((obtido - esperado).abs() / esperado < 0.01,
@@ -135,7 +135,7 @@ fn baseline_elevator_end_m_nao_ultrapassa_semi_envergadura_do_eh() {
     assert!(cs.elevator.end_m <= half_span_h + 1e-9,
         "elevator.end_m ({:.4}m) não deveria ultrapassar a semi-envergadura do EH ({:.4}m)",
         cs.elevator.end_m, half_span_h);
-    assert_eq!(cs.elevator.start_m, 0.0);
+    assert_eq!(cs.elevator.start_m, 0.0); // PIN: control_surfaces.elevator.start_m
 }
 
 /// Consistência de espelhamento: a área TOTAL do profundor deve ser
@@ -158,6 +158,7 @@ fn baseline_elevator_area_bate_com_dois_trapezios_por_lado() {
     let area_per_side = 0.5 * (c_start + c_end) * cs.elevator.span_m;
 
     println!("elevator.area_m2={:.9}  2×área_por_lado={:.9}", cs.elevator.area_m2, 2.0 * area_per_side);
+    // PIN: NAO-PUBLICADO — fator da fórmula (duas superfícies), não valor publicado
     assert!((cs.elevator.area_m2 - 2.0 * area_per_side).abs() < 1e-9,
         "elevator.area_m2 ({:.9}) deveria ser exatamente 2×área_por_lado ({:.9})",
         cs.elevator.area_m2, 2.0 * area_per_side);

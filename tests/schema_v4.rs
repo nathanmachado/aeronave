@@ -327,6 +327,7 @@ fn propeller_prop_clearance_critical_m_presente_e_numerico_proximo_do_esperado()
     );
     let obtido = obtido.unwrap();
     assert!(
+        // PIN: propeller.prop_clearance_critical_m
         (obtido - 0.007367).abs() < 0.001,
         "propeller.prop_clearance_critical_m ({obtido:.6}) deveria ficar próximo de ≈+0,007367 m \
          (baseline real pós-E12 nariz-only, checagem #25 PASS — old: ≈−0,00249 m ciclo 10)"

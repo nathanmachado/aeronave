@@ -574,7 +574,21 @@ fn confere_vinculos(json: &serde_json::Value, fontes: &[Fonte]) -> (usize, Vec<S
             };
             let n = idx + 1;
             let nome = &fonte.nome;
-            let cob = cobrados(&masc[idx]);
+            let mut cob = cobrados(&masc[idx]);
+            // Marcador VOLUNTÁRIO: `empennage.rs:42` (`3.134_f64`, 3 casas, sem
+            // `assert`) é pin real que a regra automática de cobrança não
+            // alcançaria — e marcar mais do que a regra exige é sempre
+            // permitido (spec §7.5.1). Sem este fallback, TODO marcador
+            // voluntário reprovaria com "não tem literal cobrado", mesmo
+            // apontando para um valor real e correto — o marcador ficaria
+            // impossível de honrar. Cai para `literais()` (todos os literais
+            // ELEGÍVEIS da linha, sem o piso de cobrança) só quando `cobrados`
+            // não achou nada; os ramos abaixo (`is_empty`/`len() > 1`) seguem
+            // tratando 0 e 2+ exatamente como já tratavam — a ambiguidade
+            // genuína continua reprovando, só que agora com a mensagem certa.
+            if cob.is_empty() {
+                cob = literais(&masc[idx]);
+            }
             if cob.is_empty() {
                 falhas.push(format!(
                     "{nome}:{n} — marcador vinculado a '{caminho}' mas a linha não tem \
@@ -787,6 +801,41 @@ fn marcador_ambiguo_reprova_quando_vinculado() {
 }
 
 #[test]
+fn marcador_voluntario_em_linha_nao_cobrada_e_verificado() {
+    // forma real de empennage.rs:42 — `3.134_f64` tem 3 casas, sem `assert`,
+    // então `cobrados()` NÃO o alcança; mas recebe marcador voluntariamente
+    // (spec §7.5.1, o 48º vinculado) e precisa ser efetivamente CONFERIDO, não
+    // só tolerado. Sem o fallback em `confere_vinculos`, este marcador
+    // reprovaria sempre com "não tem literal cobrado" — mesmo quando o valor
+    // está certo — tornando o marcador impossível de honrar.
+    let certo = [Fonte::nova(
+        "sintetico.rs",
+        "let esperado_s_h = 3.460_f64; // PIN: performance.rc_sl_ms\n",
+    )];
+    let (n, falhas) = confere_vinculos(&json_de_teste(), &certo);
+    assert_eq!((n, falhas.len()), (1, 0), "falhas: {falhas:?}");
+
+    let errado = [Fonte::nova(
+        "sintetico.rs",
+        "let esperado_s_h = 9.999_f64; // PIN: performance.rc_sl_ms\n",
+    )];
+    let (_, falhas) = confere_vinculos(&json_de_teste(), &errado);
+    assert_eq!(falhas.len(), 1, "deveria detectar a divergência mesmo fora da cobrança automática");
+    assert!(falhas[0].contains("DIVERGE"), "{}", falhas[0]);
+
+    // e a ambiguidade genuína (tabela pin + tolerância, nenhum `assert` na
+    // linha) continua reprovando — o fallback só se aplica quando sobra
+    // EXATAMENTE um literal na linha
+    let ambiguo = [Fonte::nova(
+        "sintetico.rs",
+        "(\"rc_sl_ms\", perf.rc_sl_ms, 3.460_f64, 0.05), // PIN: performance.rc_sl_ms\n",
+    )];
+    let (_, falhas) = confere_vinculos(&json_de_teste(), &ambiguo);
+    assert_eq!(falhas.len(), 1);
+    assert!(falhas[0].contains("AMBÍGUO"), "{}", falhas[0]);
+}
+
+#[test]
 fn doc_com_valor_divergente_reprova() {
     let doc = "razão **<!-- PIN:performance.rc_sl_ms -->4,999905 m/s** HOJE\n";
     let (n, falhas) = confere_doc(&json_de_teste(), doc);
@@ -809,4 +858,80 @@ fn doc_com_gatilho_sem_marcador_reprova() {
     assert!(confere_cobertura_doc("no ciclo 11 era 12,345678\n").is_empty());
     // gatilho com número curto: não é cobrado
     assert!(confere_cobertura_doc("são 3,8 g HOJE\n").is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Task 2 — casca de arquivos reais: liga o motor puro acima aos arquivos de
+// teste de verdade do repositório.
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+
+fn raiz() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn json_commitado() -> serde_json::Value {
+    let p = raiz().join("aircraft_spec.json");
+    let texto = std::fs::read_to_string(&p)
+        .unwrap_or_else(|e| panic!("falha ao ler '{}': {e}", p.display()));
+    serde_json::from_str(&texto).expect("aircraft_spec.json deveria ser JSON válido")
+}
+
+/// Arquivos de teste varridos. `pins_vs_json.rs` fica DE FORA: seus literais de
+/// exemplo são dados de teste, não pins.
+fn fontes_reais() -> Vec<Fonte> {
+    let mut caminhos: Vec<PathBuf> = std::fs::read_dir(raiz().join("tests"))
+        .expect("diretório tests/ deveria existir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+        .filter(|p| p.file_name().is_some_and(|n| n != "pins_vs_json.rs"))
+        .collect();
+    caminhos.sort();
+    caminhos
+        .into_iter()
+        .map(|p| {
+            let nome = p.file_name().unwrap().to_string_lossy().to_string();
+            Fonte::nova(&nome, &std::fs::read_to_string(&p).unwrap())
+        })
+        .collect()
+}
+
+/// Piso de marcadores vinculados. Uma checagem que passa porque não encontrou
+/// nada é o mesmo defeito que ela existe para combater: verde sem prova. Se a
+/// sintaxe do marcador quebrar, este piso reprova em vez de degradar em
+/// silêncio.
+///
+/// 48 = os 47 cobrados vinculáveis da spec §7.5.1 mais o voluntário de
+/// `empennage.rs:42`.
+const MINIMO_DE_PINS_VINCULADOS: usize = 48;
+
+#[test]
+fn pins_de_teste_batem_com_o_json_commitado() {
+    let (vinculados, falhas) = confere_vinculos(&json_commitado(), &fontes_reais());
+    assert!(
+        falhas.is_empty(),
+        "{} pin(s) fora do aircraft_spec.json commitado:\n{}",
+        falhas.len(),
+        falhas.join("\n")
+    );
+    assert!(
+        vinculados >= MINIMO_DE_PINS_VINCULADOS,
+        "só {vinculados} marcadores vinculados encontrados, mínimo é \
+         {MINIMO_DE_PINS_VINCULADOS} — a varredura degradou e estaria passando \
+         sem provar nada"
+    );
+}
+
+#[test]
+fn todo_literal_cobrado_em_teste_carrega_marcador() {
+    let nus = confere_cobertura(&fontes_reais());
+    assert!(
+        nus.is_empty(),
+        "{} literal(is) cobrado(s) sem marcador `// PIN:`.\n\
+         Cada um precisa de um caminho do aircraft_spec.json ou de \
+         `// PIN: NAO-PUBLICADO — <razão>`:\n{}",
+        nus.len(),
+        nus.join("\n")
+    );
 }

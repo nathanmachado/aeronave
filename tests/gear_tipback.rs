@@ -179,7 +179,7 @@ fn tipback_do_baseline_real_fecha_o_piso_pin_honesto() {
     // avança um pouco o CG mais TRASEIRO real também — `(x_main − x_cg_
     // aft)` alonga ligeiramente e o tipback SOBE: 16,7356°→**≈16,7940°**
     // (old→new, tolerância INALTERADA). Segue acima do piso de 15°.
-    assert!((gear.tipback_angle_deg - 16.7940).abs() < 0.05,
+    assert!((gear.tipback_angle_deg - 16.7940).abs() < 0.05, // PIN: landing_gear.tipback_angle_deg
         "θ tipback = {:.4}° — pin honesto esperado ≈16.7940° (tolerância ±0.05°)",
         gear.tipback_angle_deg);
     assert!(gear.tipback_angle_deg >= 15.0,
@@ -213,7 +213,7 @@ fn tail_strike_do_baseline_real_satisfaz_o_piso_pin_honesto() {
     println!("Folga tail-strike (baseline real) = {:.4}°", gear.tail_strike_margin_deg);
     // old (pré-E7, x_main=3.55m): 14.51° — E7 (x_main=3.66m): ≈14.88° — E10,
     // corrigido na revisão final (tail_cone_height_m 1.10→0.97): ≈13.1865°.
-    assert!((gear.tail_strike_margin_deg - 13.1865).abs() < 0.05,
+    assert!((gear.tail_strike_margin_deg - 13.1865).abs() < 0.05, // PIN: landing_gear.tail_strike_margin_deg
         "folga tail-strike = {:.4}° — pin honesto esperado ≈13.1865° (tolerância ±0.05°)",
         gear.tail_strike_margin_deg);
     assert!(gear.tail_strike_margin_deg >= 11.0,
@@ -274,7 +274,7 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // fração de carga de nariz — DILUI mais um pouco a carga MÁXIMA:
     // 22,7693%→**≈21,8973%** (old→new, tolerância INALTERADA). Segue
     // abaixo do teto de 25%, agora com mais folga.
-    assert!((gear.nose_load_max_pct - 21.8973).abs() < 0.1,
+    assert!((gear.nose_load_max_pct - 21.8973).abs() < 0.1, // PIN: landing_gear.nose_load_max_pct
         "nose_load_max_pct = {:.4}% — pin honesto esperado ≈21.8973% (tolerância ±0.1%)",
         gear.nose_load_max_pct);
     assert!(gear.nose_load_max_pct <= 25.0,
@@ -302,7 +302,7 @@ fn carga_de_nariz_dois_extremos_do_baseline_real_pin_honesto() {
     // `(x_main − x_nose)` dilui também a carga MÍNIMA: 11,7219%→
     // **≈11,2869%** (old→new, tolerância INALTERADA). Continua acima do
     // piso de 8%.
-    assert!((gear.nose_load_min_pct - 11.2869).abs() < 0.05,
+    assert!((gear.nose_load_min_pct - 11.2869).abs() < 0.05, // PIN: landing_gear.nose_load_min_pct
         "nose_load_min_pct = {:.4}% — pin honesto esperado ≈11.2869% (tolerância ±0.05%)",
         gear.nose_load_min_pct);
     assert!(gear.nose_load_min_pct >= 8.0, "nose_load_min_pct deveria satisfazer o piso de 8%");
@@ -784,7 +784,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
     // media. Líquido: 10,1101115694% → **8,7855455145%** (old→new,
     // −1,3246 pp). Continua bem acima do piso de 5%. Tolerância INALTERADA
     // (±0,1 pp).
-    assert!((fuel_margin_pct - 8.785_545_514_5).abs() < 0.1,
+    assert!((fuel_margin_pct - 8.785_545_514_5).abs() < 0.1, // PIN: sizing.fuel_margin_pct
         "margem de combustível {fuel_margin_pct:.4}% divergiu do pin honesto pós-ciclo-13 \
          ≈8.7855%");
     assert!(fuel_margin_pct >= 5.0,
