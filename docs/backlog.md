@@ -509,6 +509,22 @@ física. Ponteiro: `docs/aircraft_spec.schema.md` (bloco `performance`,
 histórico v5.5), spec §8.1 e §11 item 4, `tests/generic_engine.rs`
 (comentário e asserção `old→new` citados acima).
 
+**Atualização (ciclo 14, backlog item 17, RESOLVIDO)**: a inconsistência
+do lado do POUSO PIOROU, na mesma direção da decolagem acima — a relação
+inverteu de novo. Antes do ciclo 14, `landing_distance_m` (estimativa
+legada, rolagem + 200 m fixos) era MENOR que `ldg_50ft_m` (referência
+física). Com o segmento aéreo honesto do ciclo 14 (γ_app derivado da
+polar, flare consumindo altura — item 17), `ldg_50ft_m` caiu **582,52 →
+439,28 m** enquanto `landing_distance_m` ficou INALTERADO (442,70 m — não
+depende do segmento aéreo, só de rolagem + 200 m fixos). Medido no
+baseline real (HEAD): `ldg_50ft_m` **439,275078 m < landing_distance_m
+442,702122 m** — o campo LEGADO agora SUPERESTIMA a distância física real
+tanto do lado da DECOLAGEM (item acima, desde o ciclo 12) quanto do lado
+do POUSO (desde o ciclo 14). Reforça o caso para a remoção MAJOR: os 200 m
+fixos de aproximação do campo legado nunca representaram nada calibrado
+para esta célula, e agora estão do lado ERRADO da comparação nos dois
+sentidos de voo.
+
 ## 12. Efeito solo omitido na rolagem de solo — direção conservadora
 
 A rolagem de solo (decolagem e pouso, item 4) não modela o efeito solo
@@ -554,6 +570,29 @@ revisão, não de execução). Ponteiro: `scripts/verifica-ciclo.sh`,
 `tests/generic_engine.rs` (linha do pin `ldg_50ft_m`, histórico
 `old→new` na tabela da task de pouso), commit `8f92c55` (ERRATUM ciclo
 11).
+
+**SEGUNDA MANIFESTAÇÃO, agora na DOCUMENTAÇÃO (achada pela Task 3 e
+confirmada pela revisão final de branch do ciclo 14).** O mesmo mecanismo
+apareceu num lugar que a proposta acima NÃO cobriria:
+`docs/aircraft_spec.schema.md:809-810` (histórico v5.5) registra
+`ldg_50ft_m = 582,341118 m` e `ldg_50ft_grass_m = 646,437301 m`, quando os
+valores reais imediatamente antes do ciclo 14 eram **582,521767 m** e
+**646,660942 m** (confirmado por `git show 7d246b3:aircraft_spec.json`).
+Drift introduzido em algum ponto entre os ciclos 12 e 13 — os números do
+schema doc ficaram nos valores do ciclo 12 enquanto o JSON avançou.
+
+Desvios de 0,03%: pequenos demais para saltarem aos olhos, grandes demais
+para serem ruído de compilação. **Nenhum teste guarda o schema doc**, então
+aqui não há nem a tolerância de 1% para culpar — não existe checagem
+nenhuma. A proposta acima cobre pins de TESTE contra o JSON regenerado;
+precisa ser estendida para cobrir também os números citados em
+`docs/aircraft_spec.schema.md`, ou esses números viram arqueologia
+impossível daqui a alguns ciclos.
+
+A Task 3 do ciclo 14 encontrou, documentou e **deliberadamente NÃO
+corrigiu** (fora de escopo, e corrigir sem a checagem automática só adia a
+próxima ocorrência). Ponteiro: `docs/aircraft_spec.schema.md` linhas
+809-810 e o registro da própria Task 3 nas linhas ~926-935 e ~1433-1434.
 
 ## 14. Achados da task 4 — recuo do limite de rotação e margem residual (registro, fix wave ciclo 12)
 
@@ -790,36 +829,75 @@ superficie`, `old→new` do ciclo 13), `aircraft_spec.json`
 `limite_de_rotacao_em_grama_e_mais_restritivo_que_em_pavimentado`
 (`tests/generic_engine.rs`), spec ciclo13 §7/§8.6/§11.1.
 
-## 17. Segmento aéreo do pouso em grama usa a rampa de 3° de ILS pavimentado, nunca calibrada para pista de fazenda
+## 17. Segmento aéreo do pouso em grama usa a rampa de 3° de ILS pavimentado, nunca calibrada para pista de fazenda — RESOLVIDO ciclo 14
 
 Achado do chefe na abertura do ciclo 13 (spec
 `2026-08-15-ciclo13-tracao-unificada-design.md` §12 item 1), fora de
-escopo daquele ciclo — registrado aqui para o ciclo 14.
+escopo daquele ciclo — resolvido no ciclo 14 (spec
+`2026-08-15-ciclo14-aproximacao-honesta-design.md`).
 
-`agents::performance::landing_distance_50ft_m` calcula o segmento de
+`agents::performance::landing_distance_50ft_m` calculava o segmento de
 APROXIMAÇÃO (antes do toque) com um ângulo de descida FIXO de 3°
 (`15/tan(3°) ≈ 286,2 m` para o obstáculo de 15 m/50 ft), convenção
 herdada de procedimento de ILS de aeroporto PAVIMENTADO — nunca calibrada
 para esta célula nem para pista de fazenda/grama.
 
-**Medido no baseline real**: o segmento de aproximação (286,2 m) é **44%
-da distância de pouso em grama** (`ldg_50ft_grass_m` = 646,660942 m). O
-planeio power-off desta célula NA PRÓPRIA configuração de pouso (flap
-cheio, trem embaixo) é **5,118°** (`L/D = 11,165` a `V_ref`) — quase 71%
-mais íngreme que os 3° assumidos. A 5,118° o pouso em grama cairia para
-**≈528 m** e PASSARIA o gate de 600 m (#24), em vez de reprovar em
-646,66 m.
+**Dois defeitos separados, resolvidos JUNTOS** (spec §1), porque têm
+naturezas diferentes e um deles não depende de premissa nenhuma:
 
-**Não é erro de cálculo** — é uma premissa de procedimento (ângulo de
-aproximação-padrão de aeroporto) aplicada a um cenário operacional
-diferente (pista de fazenda, sem ILS, aproximação mais íngreme e mais
-curta é operacionalmente normal para este tipo de aeronave). Corrigir
-exige decidir se o ângulo de aproximação deve vir do L/D power-off REAL
-da célula (mais físico, mas precisa de justificativa operacional — nem
-todo piloto voa no L/D máximo em aproximação final) ou permanecer
-convenção regulatória conservadora. Decisão de projeto, ciclo 14.
-Ponteiro: `agents::performance::landing_distance_50ft_m`
-(`src/agents/performance.rs`), spec ciclo13 §12 item 1.
+1. **DE MODELO** (independe de premissa): o flare somava distância
+   horizontal PURA (`V_ref × flare_time_s`) sem consumir altura nenhuma —
+   a rampa de aproximação já descia os 15 m inteiros, então a aeronave
+   "pousava duas vezes". Indefensável sob qualquer premissa de pilotagem.
+2. **DE PREMISSA**: `[performance].approach_angle_deg = 3,0` era o
+   *glideslope* de ILS pavimentado — nunca calibrado para pista de
+   fazenda de 600 m em grama (premissa declarada do projeto).
+
+**Corrigido** (`agents::performance::landing_air_segment`, ciclo 14 tasks
+1-3): o flare vira um arco geométrico de fator de carga
+`n = [performance].flare_load_factor` (baseline 1,20) que CONSOME altura
+real (`h_flare = R·(1−cos γ_app)`); `γ_app` deixa de ser config livre e
+passa a ser DERIVADO da polar de pouso (`atan(CD_ref/CL_ref)`, mesma
+`cd_gear_extended` da rolagem) no planeio power-off, flap cheio/trem
+embaixo, em `V_ref = 1,30·Vs` — **5,1181°** no baseline real, quase 71%
+mais íngreme que os 3° assumidos antes. PREMISSA DECLARADA: motor em
+MARCHA LENTA sobre o obstáculo (procedimento padrão de campo curto, como
+o POH mede pista curta) — uma aproximação COM potência é mais RASA e
+portanto mais LONGA; se a operação real usar aproximação motorizada,
+este modelo é OTIMISTA, não neutro.
+
+**Por que os dois foram JUNTOS, medido (spec §4.2)** — os dois erros
+empurravam a distância para CIMA na mesma direção, então corrigir só um
+deixaria o modelo certo pelo motivo errado, com os erros parcialmente se
+cancelando:
+
+| Configuração | Aéreo (m) | Pouso grama (m) | Gate 600 m |
+|---|---|---|---|
+| Hoje (3°, flare sem altura) | 339,82 | 646,7 | ❌ |
+| **Só o conserto geométrico** (3°, flare com altura) | 303,27 | **610,1** | ❌ |
+| **Só a premissa** (5,1181°, flare sem altura) | 221,08 | 527,9 | ✅ (mas geometricamente errado) |
+| **Os dois (adotado)** | **196,57** | **503,4** | ✅ |
+
+**O conserto geométrico sozinho NÃO salva o gate** (610,1 m — medido pela
+Task 2 do ciclo 14, evidência de que os dois defeitos precisavam ir
+juntos). A premissa sozinha salvaria, mas por um modelo ainda
+geometricamente errado.
+
+**Sensibilidade a `n` (spec §4.1, medida antes de implementar)**: o único
+parâmetro novo (`flare_load_factor`), varrido de 1,10 a 1,30, move o
+pouso em grama de 532,5 m a 493,7 m — **o veredito PASSA na faixa
+inteira**, o flip do gate não é refém da escolha de `n`.
+
+**Consequência de gate**: `ldg_50ft_m` **582,521767 → 439,275078 m**
+(−24,60%), `ldg_50ft_grass_m` **646,660942 → 503,414253 m** (−22,17%).
+Checagem #24 (pouso em grama, pista de 600 m) **FLIPA de FAIL para
+PASS** — primeira violação removida desde o ciclo 11. A premissa de
+pista de 600 m em grama permanece INTACTA; `validation_status` continua
+`"FAIL"`, agora com 4 violações (era 5). Ponteiro:
+`agents::performance::landing_air_segment` (`src/agents/performance.rs`),
+`src/models/specs.rs` (`ldg_approach_angle_deg`/`ldg_flare_height_m`/
+`ldg_air_distance_m`, novos campos v5.7), `docs/aircraft_spec.schema.md`
+§1 (v5.7), spec ciclo14 §1/§2/§4/§6/§7.
 
 ## 18. `j_design` congelada em config não se reajusta se a velocidade de cruzeiro, `psru_ratio` ou o diâmetro da hélice mudarem
 
@@ -996,3 +1074,38 @@ limpeza para um ciclo dedicado a housekeeping de testes. Ponteiro:
 `src/validation/constraint_checker.rs` (teste e docstring `old→new`,
 linhas ~940–979), `src/models/engine.rs:154`, `tests/empennage.rs:111`
 (referências cruzadas pelo nome).
+
+## 23. Rolagem de pouso integra a partir de `V_ref`, mas o flare sangra velocidade até ≈1,15·Vs antes do toque — direção CONSERVADORA, não medida
+
+Achado nomeado pela spec do ciclo 14 (§3, "O que NÃO muda") — fora de
+escopo daquele ciclo por decisão explícita de projeto, registrado aqui.
+
+`agents::performance::landing_ground_roll_m` integra a rolagem de solo do
+pouso a partir de `V_ref = 1,30·Vs` (35,7351 m/s no baseline real) — a
+mesma velocidade de referência que `landing_air_segment` usa para
+derivar `γ_app`/`R`/`h_flare`/`s_flare` (ciclo 14, item 17 acima). Mas na
+física real do flare, a aeronave DESACELERA ao longo do arco antes de
+tocar o solo — o modelo assume `V_ref` CONSTANTE durante o flare (mesma
+aproximação declarada da spec §2.1, ver item 17 acima), e o toque
+efetivo ocorre perto de `1,15·Vs` (≈31,61 m/s no baseline real, contra os
+35,74 m/s de `V_ref` que a rolagem usa como velocidade INICIAL).
+
+**Direção do erro nomeada, magnitude NÃO medida neste ciclo**: integrar a
+rolagem a partir de uma velocidade INICIAL maior que a velocidade real de
+toque superestima a energia cinética a dissipar — a rolagem real
+(portanto `ldg_50ft_m`/`ldg_50ft_grass_m`) é MENOR que a calculada.
+Integrar a partir de `V_ref` é **CONSERVADOR**, mantido de propósito no
+ciclo 14 (spec §3): corrigir exigiria decidir a velocidade de toque real
+(função do próprio `n = flare_load_factor` e de `γ_app`, não uma
+constante como `1,15·Vs` sugere) e propagá-la como condição inicial da
+integração de `landing_ground_roll_m` — mudança de acoplamento entre o
+segmento aéreo e o de solo, fora do escopo de uma correção pontual.
+
+Quantificar exigiria: (1) derivar a velocidade de toque a partir da
+cinemática do flare (`V_toque` em função de `V_ref`, `n`, `γ_app` — não
+necessariamente `1,15·Vs` fixo, que é só uma aproximação típica citada na
+spec); (2) trocar a condição inicial de `landing_ground_roll_m` de
+`V_ref` para `V_toque`; (3) medir o quanto `ldg_50ft_m`/`ldg_50ft_grass_m`
+encolhem. Ponteiro: `agents::performance::landing_ground_roll_m`,
+`agents::performance::landing_air_segment` (`src/agents/performance.rs`),
+spec `2026-08-15-ciclo14-aproximacao-honesta-design.md` §3.

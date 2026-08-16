@@ -183,7 +183,18 @@ pub fn thrust_available_n(
 /// retrátil ESTENDIDO tem arrasto próximo ao de um trem FIXO — levemente
 /// OTIMISTA (o retrátil estendido não tem as carenagens de um trem fixo bem
 /// projetado), assumido e declarado.
-pub fn cd_ground_roll(
+///
+/// `old→new` (ciclo 14, spec §2.4): esta função chamava-se `cd_ground_roll`.
+/// O nome era estreito — ela nunca calculou "CD de rolagem", e sim a POLAR da
+/// aeronave com TREM ESTENDIDO e um incremento de flap, avaliada num CL
+/// qualquer. Até o ciclo 13 todos os consumidores eram de solo, então o nome
+/// passava. O ciclo 14 cria o primeiro consumidor EM VOO — o segmento de
+/// aproximação do pouso (`landing_distance_50ft_m`, spec §2.1) — e "ground
+/// roll" num cálculo de segmento aéreo passaria a MENTIR.
+///
+/// Consumidores: rolagem de decolagem, rolagem de pouso, balanço de rotação
+/// e aproximação de pouso.
+pub fn cd_gear_extended(
     wing: &WingSpec,
     state: &AircraftState,
     cl_ground_roll: f64,
@@ -615,7 +626,7 @@ pub fn best_glide(mass_kg: f64, rho: f64, wing: &WingSpec) -> (f64, f64) {
 ///   S = ∫₀^{V_LOF} m·V·dV / F_net(V)     (Simpson composto, 200 intervalos,
 ///                                          `integra_rolagem_decolagem`)
 ///   T(V) = `thrust_available_n`  (lei única de tração, ciclo 13 spec §2)
-///   D(V) = q·S_w·CD_roll,  CD_roll = `cd_ground_roll` (spec §3.1)
+///   D(V) = q·S_w·CD_roll,  CD_roll = `cd_gear_extended` (spec §3.1)
 ///   L(V) = q·S_w·cl_ground_roll
 ///   V_LOF = 1,10·√(2W/(ρ·S_w·cl_max_to))
 ///
@@ -658,7 +669,7 @@ fn takeoff_ground_roll_com_passos(
     let v_lof = 1.10 * ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max_to)).sqrt();
     // Ciclo 12, spec §3.1: flap PARCIAL de decolagem (`cd0_flap_to_extra`) —
     // a aeronave rola com o flap de decolagem já deflexionado.
-    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll, wing.cd0_flap_to_extra);
+    let cd_roll = cd_gear_extended(wing, state, cl_ground_roll, wing.cd0_flap_to_extra);
     let engine_rpm = engine.rpm_max_continuous;
 
     let thrust_fn = |v: f64| thrust_available_n(
@@ -762,7 +773,7 @@ pub fn takeoff_distance_50ft_m(
     let engine_rpm_to = engine.rpm_max_continuous;
     // Ciclo 8 (task 1): cd0_flap_to_extra — segmento de SUBIDA consome a
     // polar de arrasto (rotação é puramente cinemática, V_LOF×tempo; o
-    // segmento de SOLO consome a polar via `cd_ground_roll` desde o ciclo
+    // segmento de SOLO consome a polar via `cd_gear_extended` desde o ciclo
     // 12, ver `takeoff_ground_roll_m`).
     let pex = excess_power_kw(v_climb, mass_kg, rho, wing, engine, engine_rpm_to,
                                state.psru_ratio, state.prop_diameter_m, 0.0, isa_delta_c,
@@ -845,7 +856,7 @@ fn integra_rolagem_pouso_com_passos(
 ///   S = ∫₀^{V_ref} m·V·dV / F_dec(V)     (Simpson composto, 200 intervalos,
 ///                                          `integra_rolagem_pouso_com_
 ///                                          passos`)
-///   D(V) = q·S_w·CD_roll_ldg,  CD_roll_ldg = `cd_ground_roll` com
+///   D(V) = q·S_w·CD_roll_ldg,  CD_roll_ldg = `cd_gear_extended` com
 ///          `wing.cd0_flap_ldg_extra` (flap CHEIO — spec §5.3a)
 ///   L(V) = q·S_w·cl_ground_roll_ldg   (`cl_ground_roll_landing`, spec §5.2)
 ///   V_ref = 1,30·√(2·W_ldg/(ρ·S_w·wing.cl_max))     (inalterado)
@@ -867,7 +878,7 @@ fn integra_rolagem_pouso_com_passos(
 ///
 /// `state: &AircraftState` — parâmetro NOVO (ciclo 12, spec §5.3b): não
 /// existia porque nenhum segmento consumia a polar; agora necessário para
-/// `state.cd0_gear_fixed_increment` dentro de `cd_ground_roll` (o trem está
+/// `state.cd0_gear_fixed_increment` dentro de `cd_gear_extended` (o trem está
 /// ESTENDIDO na rolagem de pouso, `wing.cd0` é o CD0 de trem RECOLHIDO).
 fn landing_ground_roll_com_passos(
     mass_kg: f64,
@@ -883,7 +894,7 @@ fn landing_ground_roll_com_passos(
     // Ciclo 12, spec §5.3a: flap CHEIO de pouso (`cd0_flap_ldg_extra`) — a
     // aeronave rola com o flap de pouso já deflexionado, ao contrário da
     // rolagem de decolagem (`cd0_flap_to_extra`, flap PARCIAL).
-    let cd_roll = cd_ground_roll(wing, state, cl_ground_roll_ldg, wing.cd0_flap_ldg_extra);
+    let cd_roll = cd_gear_extended(wing, state, cl_ground_roll_ldg, wing.cd0_flap_ldg_extra);
 
     let drag_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cd_roll;
     let lift_fn = |v: f64| 0.5 * rho * v * v * wing.area_m2 * cl_ground_roll_ldg;
@@ -930,30 +941,126 @@ pub fn landing_distance_m(
     s_ground + s_air
 }
 
+/// Decomposição do segmento AÉREO do pouso (ciclo 14, spec §2) — exposta
+/// para que o JSON possa publicá-la (spec §6.1) e para que as guardas
+/// geométricas possam medir cada parte, em vez de só o total.
+///
+/// `old→new`. Até o ciclo 13 este segmento era duas heurísticas somadas:
+/// `s_air = 15/tan(3°)` (o *glideslope* de ILS — aproximação COM POTÊNCIA de
+/// aeroporto pavimentado, nunca calibrada para a pista de fazenda de 600 m
+/// que é a premissa do projeto) e `s_flare = V_ref × 1,5 s` (cinemática
+/// pura). Juntas somavam 339,82 m = **52,5% da distância de pouso em
+/// grama**.
+///
+/// Havia ali DOIS defeitos de naturezas diferentes (spec §1):
+///  1. GEOMÉTRICO, independente de premissa: `s_air` descia os 15 m INTEIROS
+///     até o solo e o flare era somado com altura ZERO — a aeronave chegava
+///     ao solo duas vezes.
+///  2. DE PREMISSA: 3,0° é mais raso do que esta célula desce com o motor
+///     cortado (L/D 11,165 em config de pouso ⟹ 5,1181°).
+///
+/// Modelo novo:
+///
+///   γ_app   = atan(CD_ref/CL_ref)          [derivado da polar, sem config]
+///   R       = V_ref²/(g·(n−1))             [arco de recolhimento]
+///   h_flare = R·(1 − cos γ_app)            [altura CONSUMIDA pelo flare]
+///   s_flare = R·sin γ_app
+///   s_air   = (15 − h_flare)/tan γ_app     [a rampa desce só o que sobra]
+///
+/// PREMISSA DECLARADA (spec §2.1): motor em MARCHA LENTA sobre o obstáculo —
+/// procedimento padrão de campo curto, e como os números de POH de pista
+/// curta são medidos. Uma aproximação COM potência é mais RASA e mais
+/// LONGA: se a operação real for motorizada, este modelo é OTIMISTA.
+/// Nomeado, não escondido.
+///
+/// Aproximação de PEQUENO ÂNGULO, declarada (spec §2.1): em planeio a
+/// sustentação equilibra `W·cos γ`, não `W` — `CL_ref` abaixo está
+/// sobrestimado por `1/cos γ`. A 5,1181°, `cos γ = 0,99601`: erro de 0,4%,
+/// uma ordem de grandeza abaixo do limiar de escalação de 5% deste projeto.
+/// Assumido e registrado, não corrigido (corrigir exigiria um laço, já que
+/// γ depende de CL, que depende de γ, para ganhar 0,4%).
+///
+/// Velocidade CONSTANTE no flare, declarada (spec §2.1): `R` trata V como
+/// constante durante o arco. Na física real o flare desacelera, então `R`
+/// diminui ao longo dele e o arco verdadeiro é mais fechado — `s_flare`
+/// real é MENOR que o modelado. Direção: CONSERVADORA. Nomeada, não medida
+/// neste ciclo.
+///
+/// Limite físico implícito, sem guarda de teto: o planeio power-off é o
+/// mais íngreme que esta célula consegue de forma estabilizada sem freio
+/// aerodinâmico (que ela não tem). Como `γ_app` agora É esse valor, e não
+/// uma config que poderia excedê-lo, a guarda de teto que a alternativa
+/// exigiria fica desnecessária por construção.
+#[derive(Debug, Clone, Copy)]
+pub struct LandingAirSegment {
+    pub approach_angle_rad: f64,
+    pub flare_height_m: f64,
+    pub flare_distance_m: f64,
+    pub approach_distance_m: f64,
+}
+
+impl LandingAirSegment {
+    pub fn total_m(&self) -> f64 {
+        self.approach_distance_m + self.flare_distance_m
+    }
+}
+
+/// Calcula a decomposição do segmento aéreo do pouso — ver
+/// `LandingAirSegment` para o modelo completo e as premissas declaradas.
+///
+/// `flare_load_factor` é `n` (`[performance].flare_load_factor`, spec §2.2):
+/// estritamente > 1,0 (validado em `models::config`).
+pub fn landing_air_segment(
+    mass_kg: f64,
+    rho: f64,
+    wing: &WingSpec,
+    state: &AircraftState,
+    flare_load_factor: f64,
+) -> LandingAirSegment {
+    let w = mass_kg * G;
+    let v_s = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
+    let v_ref = 1.30 * v_s;
+
+    let cl_ref = 2.0 * w / (rho * wing.area_m2 * v_ref * v_ref);
+    let cd_ref = cd_gear_extended(wing, state, cl_ref, wing.cd0_flap_ldg_extra);
+    let gamma = (cd_ref / cl_ref).atan();
+
+    let r = v_ref * v_ref / (G * (flare_load_factor - 1.0));
+    let h_flare = r * (1.0 - gamma.cos());
+    let s_flare = r * gamma.sin();
+    // Guarda falseável (spec §5.3): flare acima do obstáculo é resultado
+    // FÍSICO impossível, não erro numérico. +INFINITY, nunca negativo/NaN.
+    let s_approach = if h_flare < 15.0 && gamma > 0.0 {
+        (15.0 - h_flare) / gamma.tan()
+    } else {
+        f64::INFINITY
+    };
+
+    LandingAirSegment {
+        approach_angle_rad: gamma,
+        flare_height_m: h_flare,
+        flare_distance_m: s_flare,
+        approach_distance_m: s_approach,
+    }
+}
+
 /// Distância de pouso sobre obstáculo de 15m (50 ft), por segmentos (Task
 /// 4.7) — substitui a distância aérea fixa de 200 m por física real:
 ///
 ///   S_total = S_ar + S_flare + S_ground
-///     S_ar:    15 / tan(γ_app), γ_app = `approach_angle_deg` (padrão 3°)
-///     S_flare: V_ref × `flare_time_s`
+///     S_ar/S_flare: `landing_air_segment` (ciclo 14, spec §2 — ver ali a
+///               decomposição completa e as premissas declaradas)
 ///     S_ground: rolagem de solo integrada (`landing_ground_roll_m`, ciclo
 ///               12 — `mu_brake` já embute o atrito de superfície, sem
 ///               multiplicador adicional)
 ///
-/// HISTÓRICO — DOCSTRING ANTIGA, RESCRITA `old→new` (ciclo 12, spec §5.3b).
-/// A AUDITORIA do ciclo 8 (task 1) concluíra que nenhum dos três segmentos
-/// consumia a polar de arrasto, logo nenhum recebia `cd0_flap_delta`: S_ar
-/// usava um ângulo de aproximação FIXO (não uma razão L/D derivada da
-/// polar — diferente de `best_glide`, que usa `wing.cd0`, mas é planeio com
-/// motor cortado, conceito distinto de aproximação de pouso com flap); S_ar
-/// e S_flare continuam exatamente assim (ângulo fixo/puramente cinemático —
-/// **isso não mudou**). **O que mudou é S_ground**: até o ciclo 11 era
-/// dominado por frenagem sem termo de arrasto (`S_G = V_ref²/(2gμ)`); desde
-/// o ciclo 12 integra a equação de movimento e consome a polar completa via
-/// `landing_ground_roll_m` (`wing.cd0_flap_ldg_extra`, flap CHEIO —
-/// primeiro consumidor real do delta cheio). `wing.cl_max` (CL_max de
-/// POUSO, flap CHEIO) já era a referência correta de V_s/V_ref aqui — isso
-/// não mudou.
+/// `old→new` (ciclo 14, spec §2.3): até aqui S_ar/S_flare eram duas
+/// heurísticas cinemáticas independentes (ângulo de aproximação FIXO de
+/// config + flare por cronometragem), nenhuma consumindo a polar de
+/// arrasto — ver `LandingAirSegment` para o histórico completo. Agora as
+/// duas vêm de `landing_air_segment`, que deriva γ_app da polar de pouso
+/// (`cd_gear_extended`, mesma função da rolagem) e faz o flare consumir
+/// altura de verdade.
 ///
 /// `state: &AircraftState` e `cl_ground_roll_ldg: f64` entram na assinatura
 /// pela mesma razão de `landing_distance_m` acima.
@@ -967,16 +1074,8 @@ pub fn landing_distance_50ft_m(
     perf_cfg: &PerformanceCfg,
 ) -> f64 {
     let s_ground = landing_ground_roll_m(mass_kg, rho, wing, state, mu_brake, cl_ground_roll_ldg);
-
-    let w = mass_kg * G;
-    let v_s = ((2.0 * w) / (rho * wing.area_m2 * wing.cl_max)).sqrt();
-    let v_ref = 1.30 * v_s;
-
-    let gamma_app = perf_cfg.approach_angle_deg.to_radians();
-    let s_air = 15.0 / gamma_app.tan();
-    let s_flare = v_ref * perf_cfg.flare_time_s;
-
-    s_air + s_flare + s_ground
+    let seg = landing_air_segment(mass_kg, rho, wing, state, perf_cfg.flare_load_factor);
+    seg.total_m() + s_ground
 }
 
 // ─── VELOCIDADE MÁXIMA NIVELADA ───────────────────────────────────────────────
@@ -1146,6 +1245,17 @@ impl PerformanceAgent {
                                                          perf_cfg.mu_brake_grass, cl_ground_roll_ldg,
                                                          perf_cfg);
 
+        // Ciclo 14 (spec §6.1): a decomposição do segmento aéreo é publicada
+        // porque ela é 52,5% da distância de pouso em grama e até aqui não
+        // aparecia em lugar nenhum do JSON.
+        //
+        // UMA chamada só, de propósito: γ_app, h_flare e s_air NÃO dependem de
+        // `mu_brake` — o segmento aéreo é idêntico para pavimento e grama, só a
+        // ROLAGEM muda. Chamar duas vezes (uma por superfície) daria os mesmos
+        // números e sugeriria, falsamente, que o ar depende da superfície.
+        let ldg_air = landing_air_segment(mass_ldg, rho_sl, wing, state,
+                                           perf_cfg.flare_load_factor);
+
         // Melhor planeio (Task 4.7) — MTOW, nível do mar, motor cortado.
         let (v_bg_kmh, ld_max) = best_glide(mtow_kg, rho_sl, wing);
 
@@ -1175,6 +1285,9 @@ impl PerformanceAgent {
             to_50ft_grass_m:      d_to_50ft_grass,
             ldg_50ft_m:           d_ldg_50ft,
             ldg_50ft_grass_m:     d_ldg_50ft_grass,
+            ldg_approach_angle_deg: ldg_air.approach_angle_rad.to_degrees(),
+            ldg_flare_height_m:     ldg_air.flare_height_m,
+            ldg_air_distance_m:     ldg_air.total_m(),
         }
     }
 }
@@ -1928,8 +2041,187 @@ mod tests {
                 "sem arrasto e sem freio a rolagem não pode ser um número finito: {s}");
     }
 
+    // ─── Ciclo 14, spec §2/§5: segmento aéreo do pouso — ângulo derivado e
+    // flare com altura ─────────────────────────────────────────────────────
+
+    /// FECHAMENTO GEOMÉTRICO (ciclo 14, spec §5.2) — a guarda central.
+    /// A rampa desce até a altura em que o flare começa, e o flare consome o
+    /// resto. Se alguém reintroduzir um flare sem altura, trocar o sinal, ou
+    /// somar em vez de subtrair, isto quebra.
+    ///
+    /// TAUTOLÓGICO por construção (`s_air` foi DEFINIDO como `(15−h)/tan γ`)
+    /// — pega typo/sinal, não erro de modelo. A guarda que NÃO é tautológica
+    /// é `o_flare_e_um_arco_de_circulo_de_verdade`, abaixo (spec §5.2b).
     #[test]
-    fn pouso_50ft_maior_que_pouso_ground_roll_mais_ar_fixo() {
+    fn segmento_aereo_de_pouso_fecha_os_quinze_metros() {
+        let (_engine, state, wing) = fixture_baseline();
+        let cfg = config_teste();
+        let seg = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state,
+                                      cfg.performance.flare_load_factor);
+        assert!(seg.flare_height_m > 0.0,
+                "flare sem altura — a aeronave pousaria duas vezes (spec §1.1)");
+        assert!(seg.flare_height_m < 15.0, "flare começaria acima do obstáculo");
+        assert!(seg.approach_distance_m > 0.0);
+        let fechamento = (15.0 - seg.flare_height_m)
+                         - seg.approach_distance_m * seg.approach_angle_rad.tan();
+        assert!(fechamento.abs() < 1e-9, "as alturas não fecham 15 m: {fechamento}");
+    }
+
+    /// O ARCO É MESMO UM ARCO (ciclo 14 — guarda acrescentada após a revisão
+    /// de plano). O teste de "fechamento" acima é TAUTOLÓGICO: `s_air` foi
+    /// DEFINIDO como `(15−h)/tan γ`, então a identidade fecha por construção
+    /// e só pega erro de sinal ou typo. Esta aqui não fecha por construção.
+    ///
+    /// O flare é um arco de círculo de raio `R`, tangente à rampa no início e
+    /// HORIZONTAL no fim. Para qualquer ponto desse arco vale, exatamente:
+    ///
+    ///     s_flare² + (R − h_flare)² = R²
+    ///
+    /// `h` e `s` entram por caminhos independentes (`R(1−cos γ)` e `R sin γ`),
+    /// e a identidade de Pitágoras os amarra. Trocar seno por cosseno, errar
+    /// o sinal do `1−cos`, ou usar um raio diferente nos dois quebra isto —
+    /// e NENHUM desses erros seria pego pelo teste de fechamento.
+    #[test]
+    fn o_flare_e_um_arco_de_circulo_de_verdade() {
+        let (_engine, state, wing) = fixture_baseline();
+        let cfg = config_teste();
+        let n = cfg.performance.flare_load_factor;
+        let seg = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+        // R recomputado a partir de V_ref, independente do que a função guardou.
+        let w = MTOW_PIN_KG * G;
+        let v_ref = 1.30 * ((2.0 * w) / (RHO_SL * wing.area_m2 * wing.cl_max)).sqrt();
+        let r = v_ref * v_ref / (G * (n - 1.0));
+        let residuo = seg.flare_distance_m.powi(2)
+                      + (r - seg.flare_height_m).powi(2) - r * r;
+        assert!(residuo.abs() / (r * r) < 1e-12,
+                "o flare não é um arco de raio {r}: resíduo relativo {}",
+                residuo.abs() / (r * r));
+    }
+
+    /// Rampa mais íngreme ⟹ aproximação estritamente MAIS CURTA (spec §5.4).
+    /// Numerador cai (o flare consome mais altura) e denominador sobe — as
+    /// duas na mesma direção. Varre L/D via `wing.cd0` sintético: CD_ref
+    /// maior ⟹ γ_app maior ⟹ `s_air` menor.
+    #[test]
+    fn rampa_mais_ingreme_encurta_a_aproximacao() {
+        let (_engine, state, mut wing) = fixture_baseline();
+        let cfg = config_teste();
+        let n = cfg.performance.flare_load_factor;
+
+        wing.cd0 = 0.020; // arrasto baixo ⟹ L/D alto ⟹ γ_app raso
+        let seg_rasa = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+        wing.cd0 = 0.060; // arrasto alto ⟹ L/D baixo ⟹ γ_app íngreme
+        let seg_ingreme = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+
+        assert!(seg_ingreme.approach_angle_rad > seg_rasa.approach_angle_rad,
+            "CD0 maior deveria dar γ_app ESTRITAMENTE maior: {} vs {}",
+            seg_ingreme.approach_angle_rad, seg_rasa.approach_angle_rad);
+        assert!(seg_ingreme.approach_distance_m < seg_rasa.approach_distance_m,
+            "rampa mais íngreme deveria dar aproximação ESTRITAMENTE mais curta: \
+             s_air(íngreme)={} vs s_air(rasa)={}",
+            seg_ingreme.approach_distance_m, seg_rasa.approach_distance_m);
+    }
+
+    /// Fator de carga maior ⟹ arco mais fechado ⟹ segmento aéreo TOTAL
+    /// estritamente menor (spec §4.1, medido de 1,10 a 1,30).
+    #[test]
+    fn flare_mais_apertado_encurta_o_segmento_aereo() {
+        let (_engine, state, wing) = fixture_baseline();
+        let mut anterior = f64::INFINITY;
+        for n in [1.10, 1.15, 1.20, 1.25, 1.30] {
+            let seg = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+            let total = seg.total_m();
+            assert!(total < anterior, "n={n} não encurtou: {total} >= {anterior}");
+            anterior = total;
+        }
+    }
+
+    /// CONTRA-INTUITIVO E POR ISSO VALIOSO (spec §5.4): uma aeronave mais
+    /// LIMPA plana melhor, aproxima mais raso, e portanto precisa de MAIS
+    /// espaço a partir de 15 m. Se este teste for "consertado" para a
+    /// direção intuitiva, o modelo está errado — pare e escale, não conserte.
+    #[test]
+    fn aeronave_mais_limpa_precisa_de_mais_espaco_aereo() {
+        let (_engine, state, mut wing) = fixture_baseline();
+        let cfg = config_teste();
+        let n = cfg.performance.flare_load_factor;
+
+        wing.cd0 = 0.060; // suja: mais arrasto, planeio pior
+        let seg_suja = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+        wing.cd0 = 0.020; // limpa: menos arrasto, planeio melhor (γ menor)
+        let seg_limpa = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+
+        assert!(seg_limpa.approach_angle_rad < seg_suja.approach_angle_rad,
+            "aeronave mais limpa deveria ter γ_app menor: {} vs {}",
+            seg_limpa.approach_angle_rad, seg_suja.approach_angle_rad);
+        assert!(seg_limpa.total_m() > seg_suja.total_m(),
+            "aeronave mais LIMPA deveria precisar de MAIS espaço aéreo (plana melhor, \
+             aproxima mais raso): total(limpa)={} vs total(suja)={}",
+            seg_limpa.total_m(), seg_suja.total_m());
+    }
+
+    /// O flare não pode começar acima do obstáculo (spec §5.3). Com n → 1⁺ o
+    /// raio DIVERGE. Resultado FÍSICO: +INFINITY, nunca s_air negativo, nunca
+    /// NaN.
+    #[test]
+    fn flare_alto_demais_devolve_infinito_e_nao_numero_espurio() {
+        let (state, wing, prop, engine, _req, mut perf_cfg) = setup();
+        let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
+        let cl_ldg = cl_ground_roll_landing(cl_ground_rotation_teste(), state.to_flap_fraction, &wing);
+        perf_cfg.flare_load_factor = 1.001; // R gigantesco ⟹ h_flare > 15 m
+        let d = landing_distance_50ft_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved,
+                                         cl_ldg, &perf_cfg);
+        assert!(d.is_infinite(), "esperado +INFINITY, veio {d}");
+        assert!(!d.is_nan());
+    }
+
+    /// FONTE ÚNICA DE POLAR (spec §5.5): o CD da aproximação vem da MESMA
+    /// função que a rolagem usa (`cd_gear_extended`). Proíbe uma segunda
+    /// polar de aproximação plantada. Recompõe CL_ref/CD_ref à mão e confere
+    /// contra o γ_app devolvido pela função (`tan γ = CD_ref/CL_ref`).
+    #[test]
+    fn cd_da_aproximacao_vem_da_polar_unica() {
+        let (_engine, state, wing) = fixture_baseline();
+        let cfg = config_teste();
+        let n = cfg.performance.flare_load_factor;
+        let seg = landing_air_segment(MTOW_PIN_KG, RHO_SL, &wing, &state, n);
+
+        let w = MTOW_PIN_KG * G;
+        let v_ref = 1.30 * ((2.0 * w) / (RHO_SL * wing.area_m2 * wing.cl_max)).sqrt();
+        let cl_ref = 2.0 * w / (RHO_SL * wing.area_m2 * v_ref * v_ref);
+        let cd_ref_esperado = cd_gear_extended(&wing, &state, cl_ref, wing.cd0_flap_ldg_extra);
+        let cd_ref_da_funcao = cl_ref * seg.approach_angle_rad.tan();
+
+        let erro_rel = (cd_ref_da_funcao - cd_ref_esperado).abs() / cd_ref_esperado;
+        assert!(erro_rel < 1e-9,
+            "CD_ref da aproximação ({cd_ref_da_funcao}) diverge da polar única \
+             ({cd_ref_esperado}): erro relativo {erro_rel}");
+    }
+
+    /// `old→new` (ciclo 14, spec §2/Passo 7c do plano) — ASSERÇÃO RELACIONAL
+    /// QUE DEIXOU DE VALER, achado de implementação, escrita nova e viva no
+    /// lugar (instrução G do ciclo, "não apague").
+    ///
+    /// Antes: `d_50ft > d_legado` sempre, porque as duas heurísticas antigas
+    /// (`s_air = 15/tan(3°)` ≈ 286 m + `s_flare` cinemático) somavam bem
+    /// mais que os 200 m fixos da estimativa legada. Medido na fixture
+    /// sintética: legado=491,539614 m, 50ft(antigo)=? (não pinado, mas
+    /// sempre MAIOR, ver nome antigo do teste).
+    ///
+    /// Depois: o ângulo de aproximação passa a ser DERIVADO da polar
+    /// (planeio power-off, tipicamente bem mais íngreme que 3°) e o flare
+    /// passa a consumir altura — o segmento aéreo TOTAL encolhe o
+    /// suficiente para ficar ABAIXO dos 200 m fixos que a estimativa legada
+    /// somava por heurística. Medido na fixture sintética:
+    /// `d_legado=491,539614m` → **`d_50ft=477,001299m`** — a relação
+    /// INVERTE: `d_50ft` agora é ESTRITAMENTE MENOR que `d_legado`. Mesmo
+    /// padrão no baseline real (spec §7): `landing_distance_m` (legado)
+    /// projetado inalterado ≈442,7 m contra `ldg_50ft_m` projetado ≈439,3 m.
+    /// Isso é ESPERADO, não regressão: o segmento aéreo físico pós-correção
+    /// (≈196,57 m no baseline real) é menor que os 200 m que a estimativa
+    /// legada somava por heurística nunca calibrada.
+    #[test]
+    fn pouso_50ft_agora_e_menor_que_pouso_ground_roll_mais_ar_fixo() {
         let (state, wing, prop, engine, _req, perf_cfg) = setup();
         let mass_ldg = state.mtow_kg - prop.fuel_capacity_l * engine.fuel.density_kg_per_l * 0.60;
         // Ciclo 12 (task 3): CL de solo em atitude de pouso (flap CHEIO).
@@ -1938,11 +2230,12 @@ mod tests {
                                            cl_ldg);
         let d_50ft = landing_distance_50ft_m(mass_ldg, RHO_SL, &wing, &state, perf_cfg.mu_brake_paved,
                                               cl_ldg, &perf_cfg);
-        println!("Pouso legado (200m ar fixo)={d_legado:.0}m  Pouso 50ft (segmentado)={d_50ft:.0}m");
-        assert!(d_50ft > d_legado,
-            "pouso sobre 15m por segmentos ({d_50ft:.0}m) deveria ser MAIOR que a estimativa \
-             legada de 200m fixos + rolagem ({d_legado:.0}m) — aproximação a 3° percorre \
-             ~286m antes do toque, mais o flare");
+        println!("Pouso legado (200m ar fixo)={d_legado:.6}m  Pouso 50ft (segmentado)={d_50ft:.6}m");
+        assert!(d_50ft < d_legado,
+            "pouso sobre 15m por segmentos ({d_50ft:.6}m) deveria ser MENOR que a estimativa \
+             legada de 200m fixos + rolagem ({d_legado:.6}m) pós-ciclo-14: o segmento aéreo \
+             físico (γ_app derivado da polar + flare com altura) encolhe abaixo dos 200m fixos \
+             que a heurística legada somava (spec §2, ver docstring do teste)");
     }
 
     #[test]

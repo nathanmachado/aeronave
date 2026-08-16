@@ -214,6 +214,8 @@ pub fn parse_aircraft(toml_str: &str) -> Result<AircraftConfig, ConfigError> {
     check_shaft_height_migration(toml_str)?;
     check_to_flap_cm_fraction_migration(toml_str)?;
     check_static_thrust_factor_migration(toml_str)?;
+    check_approach_angle_migration(toml_str)?;
+    check_flare_time_migration(toml_str)?;
     let cfg: AircraftConfig = toml::from_str(toml_str)?;
     validate_aircraft(&cfg)?;
     Ok(cfg)
@@ -493,6 +495,51 @@ fn check_static_thrust_factor_migration(toml_str: &str) -> Result<(), ConfigErro
              [propeller].fom_static (mesmo valor), [propeller].fom_design e \
              [propeller].j_design (ver docs/aircraft_spec.schema.md e \
              config/aircraft/baseline_4seat.toml)"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 14, spec §2.1/§6.2): `[performance].
+/// approach_angle_deg` foi REMOVIDO — o ângulo de aproximação deixou de ser
+/// uma constante de config e passou a ser DERIVADO da polar de pouso
+/// (`atan(CD_ref/CL_ref)` a V_ref, planeio power-off —
+/// `agents::performance::landing_air_segment`). Sem
+/// `deny_unknown_fields`, um TOML antigo com o campo seria IGNORADO em
+/// silêncio, e a configuração carregaria "com sucesso" usando o ângulo
+/// derivado sem que o operador soubesse que o campo que ele definiu não
+/// tem mais efeito nenhum — mesma classe de falha que as demais guardas de
+/// migração deste módulo existem para evitar.
+fn check_approach_angle_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("performance").and_then(|p| p.get("approach_angle_deg")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [performance].approach_angle_deg foi REMOVIDO — \
+             o ângulo de aproximação passou a ser DERIVADO da polar de pouso \
+             (atan(CD_ref/CL_ref) a V_ref, planeio power-off), não mais uma constante. \
+             Remova o campo (ver docs/aircraft_spec.schema.md e a spec do ciclo 14)"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Guarda de migração (ciclo 14, spec §2.2/§6.2): `[performance].
+/// flare_time_s` foi REMOVIDO — o flare deixou de ser uma cronometragem
+/// (`s_flare = V_ref × tempo`, sem consumir altura) e passou a ser um arco
+/// de recolhimento de raio `R = V_ref²/(g·(n−1))`, governado por
+/// `[performance].flare_load_factor` (fator de carga `n`). Mesma razão de
+/// falha silenciosa das demais guardas deste módulo.
+fn check_flare_time_migration(toml_str: &str) -> Result<(), ConfigError> {
+    let raw: toml::Value = toml::from_str(toml_str)?;
+    if raw.get("performance").and_then(|p| p.get("flare_time_s")).is_some() {
+        return Err(ConfigError::Validation(
+            "configuração de aeronave inválida: [performance].flare_time_s foi REMOVIDO — o \
+             flare deixou de ser cronometrado (V_ref × tempo, sem consumir altura) e passou a \
+             ser um arco de recolhimento de raio R = V_ref²/(g·(n−1)). Substitua por \
+             [performance].flare_load_factor (fator de carga n do flare, estritamente > 1,0 e \
+             < 2,0 — ver docs/aircraft_spec.schema.md e a spec do ciclo 14)"
                 .to_string(),
         ));
     }
@@ -1174,15 +1221,28 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // novas em `[propeller]`, logo abaixo do bloco de validação de
     // `propeller` (`propeller.fom_static`/`propeller.fom_design`).
     require_positive("performance.rotation_time_s", cfg.performance.rotation_time_s)?;
-    require_positive("performance.flare_time_s", cfg.performance.flare_time_s)?;
-    require_finite("performance.approach_angle_deg", cfg.performance.approach_angle_deg)?;
-    if cfg.performance.approach_angle_deg <= 1.0 || cfg.performance.approach_angle_deg >= 10.0 {
+    if !(cfg.performance.flare_load_factor > 1.0) || cfg.performance.flare_load_factor >= 2.0 {
         return Err(ConfigError::Validation(format!(
-            "configuração de aeronave inválida: performance.approach_angle_deg deve estar em \
-             (1.0, 10.0) graus (valor: {})",
-            cfg.performance.approach_angle_deg
+            "configuração de aeronave inválida: performance.flare_load_factor = {} deve estar \
+             em (1,0; 2,0) — em n = 1,0 o raio do arco de flare DIVERGE (R = V_ref²/(g(n−1))) \
+             e a aeronave nunca sai da rampa; acima de 2,0 não é pilotagem de pouso",
+            cfg.performance.flare_load_factor
         )));
     }
+    // `old→new` (ciclo 14, spec §2.2/§6.2): a validação de
+    // `performance.flare_time_s` (positivo) foi REMOVIDA daqui — o campo
+    // deixou de existir em `PerformanceCfg` (substituído por
+    // `flare_load_factor`, validado acima). Um TOML antigo com
+    // `flare_time_s` é rejeitado por `check_flare_time_migration` abaixo.
+    //
+    // `old→new` (ciclo 14, spec §2.1/§6.2): a validação de
+    // `performance.approach_angle_deg` (finito, em (1,0; 10,0) graus) foi
+    // REMOVIDA daqui — o campo deixou de existir em `PerformanceCfg`. O
+    // ângulo de aproximação agora é DERIVADO da polar de pouso
+    // (`atan(CD_ref/CL_ref)` a V_ref, planeio power-off —
+    // `agents::performance::landing_air_segment`), não mais uma constante
+    // validável de config. Um TOML antigo com `approach_angle_deg` é
+    // rejeitado por `check_approach_angle_migration` abaixo.
 
     // NOTA (ciclo 3, oew-parametrico): a guarda de consistência
     // "'trem_principal' == 2× gear.mass_main_leg_kg" morreu junto com os
@@ -1685,8 +1745,7 @@ mod tests {
             mu_roll_paved = 0.04
             mu_roll_grass = 0.08
             rotation_time_s = 1.0
-            flare_time_s = 1.5
-            approach_angle_deg = 3.0
+            flare_load_factor = 1.25
             [control_surfaces]
             aileron_span_start_frac = 0.55
             aileron_span_end_frac = 0.90
@@ -2756,26 +2815,74 @@ mod tests {
     }
 
     #[test]
-    fn rejeita_flare_time_s_nao_positivo() {
-        let toml = aircraft_toml_valido().replace("flare_time_s = 1.5", "flare_time_s = 0.0");
-        let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("performance.flare_time_s"), "{err}");
+    fn rejeita_flare_load_factor_fora_da_faixa() {
+        for (linha_antiga, linha_nova) in [
+            ("flare_load_factor = 1.25", "flare_load_factor = 1.0"),
+            ("flare_load_factor = 1.25", "flare_load_factor = 0.8"),
+            ("flare_load_factor = 1.25", "flare_load_factor = 2.5"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains("performance.flare_load_factor"), "{err}");
+            assert!(err.to_string().contains("DIVERGE"),
+                    "a mensagem tem que dizer POR QUE n=1 é proibido: {err}");
+        }
     }
 
+    // `old→new` (ciclo 14, Passo 7b do plano): três testes de rejeição
+    // SAÍRAM daqui porque os campos que guardavam deixaram de existir em
+    // `PerformanceCfg` — mas as PROPRIEDADES que eles protegiam não
+    // desaparecem sem substituto, registradas aqui item por item:
+    //
+    //   `rejeita_flare_time_s_nao_positivo` (guardava
+    //   `performance.flare_time_s > 0`) — substituído por
+    //   `rejeita_flare_load_factor_fora_da_faixa` acima, que já existe
+    //   desde a Task 1 do ciclo 14 e cobre a faixa (1,0; 2,0) de `n`.
+    //
+    //   `rejeita_approach_angle_deg_fora_da_faixa` (guardava
+    //   `performance.approach_angle_deg` em (1,0; 10,0) graus) — SEM
+    //   substituto de VALIDAÇÃO: o ângulo agora é DERIVADO da polar
+    //   (`atan(CD_ref/CL_ref)`, `agents::performance::landing_air_segment`),
+    //   não mais uma constante configurável — não há mais o que rejeitar
+    //   por faixa. A propriedade física equivalente (γ_app > 0, γ_app não
+    //   pode superar o teto físico do planeio power-off) é garantida POR
+    //   CONSTRUÇÃO (spec §2.1: "a guarda de teto que a alternativa exigiria
+    //   fica desnecessária por construção") e testada em
+    //   `agents::performance::tests::segmento_aereo_de_pouso_fecha_os_
+    //   quinze_metros`/`flare_alto_demais_devolve_infinito_e_nao_numero_
+    //   espurio`.
+    //
+    //   `rejeita_approach_angle_deg_nao_finito` (guardava NaN) — mesma
+    //   razão: campo removido, sem mais o que validar por config. `γ_app`
+    //   deriva de grandezas já validadas (`wing.cd0`, CL_ref etc.).
+    //
+    // Os dois campos removidos ganham guarda de MIGRAÇÃO (erro alto e claro
+    // se um TOML antigo ainda os tiver), testada abaixo.
+
+    /// Guarda de migração (ciclo 14, spec §2.1/§6.2): `[performance].
+    /// approach_angle_deg` foi REMOVIDO — o ângulo de aproximação agora é
+    /// DERIVADO da polar de pouso, não mais uma constante.
     #[test]
-    fn rejeita_approach_angle_deg_fora_da_faixa() {
+    fn rejeita_config_antiga_com_approach_angle_deg_com_erro_de_migracao_claro() {
         let toml = aircraft_toml_valido()
-            .replace("approach_angle_deg = 3.0", "approach_angle_deg = 0.5");
+            .replace("[performance]\n", "[performance]\napproach_angle_deg = 3.0\n");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("performance.approach_angle_deg"), "{err}");
+        assert!(err.to_string().contains("approach_angle_deg"), "{err}");
+        assert!(err.to_string().contains("DERIVADO"),
+                "a mensagem tem que dizer o que substitui o campo: {err}");
     }
 
+    /// Guarda de migração (ciclo 14, spec §2.2/§6.2): `[performance].
+    /// flare_time_s` foi REMOVIDO — o flare deixou de ser cronometrado e
+    /// passou a ser um arco de recolhimento (`flare_load_factor`).
     #[test]
-    fn rejeita_approach_angle_deg_nao_finito() {
+    fn rejeita_config_antiga_com_flare_time_s_com_erro_de_migracao_claro() {
         let toml = aircraft_toml_valido()
-            .replace("approach_angle_deg = 3.0", "approach_angle_deg = nan");
+            .replace("[performance]\n", "[performance]\nflare_time_s = 1.5\n");
         let err = parse_aircraft(&toml).unwrap_err();
-        assert!(err.to_string().contains("finito"), "{err}");
+        assert!(err.to_string().contains("flare_time_s"), "{err}");
+        assert!(err.to_string().contains("flare_load_factor"),
+                "a mensagem tem que apontar para o campo novo: {err}");
     }
 
     // ─── [drag] cooling_drag_fraction (Task 5.2) ────────────────────────────

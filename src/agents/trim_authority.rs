@@ -379,7 +379,7 @@ pub fn thrust_at_rotation_n(
 /// Por que a estimativa do ciclo 10 ficou baixa: foi feita SEM `CD_roll`
 /// explícito (o arrasto de solo com trem estendido e flap parcial não
 /// existia como termo neste modelo até o ciclo 12, task 2 —
-/// `agents::performance::cd_ground_roll`) e SEM campo de `μ_roll` (não
+/// `agents::performance::cd_gear_extended`) e SEM campo de `μ_roll` (não
 /// havia `[performance].mu_roll_paved`/`mu_roll_grass` — ciclo 12, spec
 /// §4). Sem esses dois números medíveis, a estimativa foi um palpite
 /// qualitativo ("h_D ≈ h_cg encolhe ainda mais o termo", "uma ordem de
@@ -459,7 +459,7 @@ pub fn thrust_at_rotation_n(
 /// z_drag_above_cg_m)`, com `N = max(0, weight_n − l_g)` e `D = q_r·
 /// s_w_m2·cd_roll`). AMBOS nariz-ABAIXO — SUBTRAEM do momento disponível,
 /// mesmo sentido do termo de tração. `cd_roll` é
-/// `agents::performance::cd_ground_roll(wing, state, cl_ground_rotation,
+/// `agents::performance::cd_gear_extended(wing, state, cl_ground_rotation,
 /// wing.cd0_flap_to_extra)` — flap PARCIAL de DECOLAGEM (a rotação É uma
 /// manobra de decolagem), calculado pelo chamador (`TrimAuthorityAgent::
 /// run`) e passado como escalar para não duplicar a soma do CD aqui.
@@ -857,14 +857,14 @@ impl TrimAuthorityAgent {
 
         // Termos de SOLO do balanço de rotação (ciclo 12, task 4 — ver
         // "TERMOS DE SOLO" na docstring de `rotation_available_moment_nm`).
-        // `cd_roll_ground` reusa `agents::performance::cd_ground_roll` —
+        // `cd_roll_ground` reusa `agents::performance::cd_gear_extended` —
         // MESMA fonte única de CD de solo que a rolagem de decolagem (Task
         // 2) — com o flap PARCIAL de decolagem (`wing.cd0_flap_to_extra`),
         // não o cheio de pouso: a rotação É uma manobra de decolagem. O CD
         // de solo em si não depende de `mu_roll`, então é calculado uma vez
         // e reusado nas duas superfícies abaixo.
         let h_cg_ground = cfg.gear.h_cg_ground_m;
-        let cd_roll_ground = crate::agents::performance::cd_ground_roll(
+        let cd_roll_ground = crate::agents::performance::cd_gear_extended(
             wing, state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
         );
         let z_drag_above_cg = cfg.wing.z_drag_above_cg_m;
@@ -2078,7 +2078,7 @@ mod tests {
             // OPERAÇÃO (grama, spec §7); este hand-check precisa usar o
             // MESMO `mu_roll` que produziu `x_com_tracao`, senão os termos
             // de solo não cancelam mais na diferença.
-            let cd_roll_ground = crate::agents::performance::cd_ground_roll(
+            let cd_roll_ground = crate::agents::performance::cd_gear_extended(
                 &wing, &state, cfg.stability.cl_ground_rotation, wing.cd0_flap_to_extra,
             );
             let x_sem_tracao = rotation_fwd_limit_m(

@@ -834,9 +834,31 @@ fn main() {
          descontinuidade de ≈27,69% entre o modelo de tração da rolagem (thrust_ground_roll_n, \
          APAGADA) e o de cruzeiro/subida (thrust_available_n) em V_LOF deixou de existir: os dois \
          viraram a MESMA lei única T(V)=FoM(J)·T_ideal_momentum(V,P_eixo) (ver comentário acima); \
-         a aproximação de pouso (segmento de \
-         APROXIMAÇÃO antes do toque, ângulo fixo de 3°, não L/D) continua sem consumir a polar, \
-         por construção — não afetada por esta task; Vy/teto de serviço (climb_rate_ms) usam \
+         a aproximação de pouso (old→new, ciclo 14, spec \
+         2026-08-15-ciclo14-aproximacao-honesta, fecha docs/backlog.md item 17: RESOLVIDO) DEIXA \
+         de usar um ângulo FIXO de 3° (convenção de ILS de aeroporto pavimentado, nunca calibrada \
+         para esta célula) e passa a CONSUMIR a mesma polar da rolagem (cd_gear_extended): \
+         γ_app = atan(CD_ref/CL_ref) no planeio power-off, flap cheio/trem embaixo, em \
+         V_ref = 1,30·Vs — 5,1181° no baseline real, quase 71% mais íngreme que os 3° assumidos \
+         antes; o flare (antes puramente cinemático, V_ref×flare_time_s, altura ZERO — a \
+         aeronave \"pousava duas vezes\", uma no fim da rampa que já descia os 15 m inteiros e \
+         outra no fim do flare) passa a ser um arco geométrico de fator de carga \
+         n=[performance].flare_load_factor que CONSOME altura real \
+         (h_flare=R·(1−cos γ_app), R=V_ref²/(g·(n−1))), e a rampa desce só até essa altura \
+         (s_air=(15−h_flare)/tan γ_app) — a soma fecha os 15 m/50 ft por construção. PREMISSA \
+         DECLARADA: motor em MARCHA LENTA sobre o obstáculo (procedimento padrão de campo curto, \
+         como o POH mede pista curta) — uma aproximação COM potência é mais RASA e portanto mais \
+         LONGA; se a operação real usar aproximação motorizada, este modelo é OTIMISTA, não \
+         neutro. Duas aproximações declaradas e NÃO corrigidas (spec ciclo14 §2.1): CL_ref usa W, \
+         não W·cos γ (a sustentação real em planeio equilibra W·cos γ) — erro de 0,4% a 5,1181° \
+         (cos γ=0,99601), uma ordem de grandeza abaixo do limiar de escalação de 5% deste \
+         projeto; e o flare trata V_ref como CONSTANTE ao longo do arco, quando na física real ela \
+         desacelera até ≈1,15·Vs — R real diminui, o arco real é mais fechado, logo s_flare real é \
+         MENOR que o modelado (direção CONSERVADORA, nomeada, não medida neste ciclo). Medido: \
+         ldg_50ft_m 582,521767→439,275078 m (−24,60%), ldg_50ft_grass_m 646,660942→503,414253 m \
+         (−22,17%); checagem #24 (pouso em grama, 600 m) FLIPA de FAIL para PASS. Publicados no \
+         JSON (aditivo, v5.7): ldg_approach_angle_deg, ldg_flare_height_m, ldg_air_distance_m; ver \
+         agents::performance::landing_air_segment; Vy/teto de serviço (climb_rate_ms) usam \
          referência de estol LIMPA \
          (wing.cl_max_clean, não mais o CL_max flapado do ciclo 11 task 2, docs/backlog.md \
          item 3) e polar limpa (cd0_extra = 0.0, config EN-ROUTE), com janela de busca do argmax \

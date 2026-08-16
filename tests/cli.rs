@@ -519,7 +519,7 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// de `agents::performance::takeoff_ground_roll_m`) para integração
 /// numérica da equação de movimento consumindo a polar completa (spec
 /// `2026-08-15-ciclo12-solo-honesto`). O segmento DOMINANTE da distância de
-/// decolagem finalmente paga arrasto (`cd_ground_roll`) e atrito de
+/// decolagem finalmente paga arrasto (`cd_gear_extended`) e atrito de
 /// rolagem explícito (`mu_roll_grass=0,08`, substituindo o antigo
 /// `surface_factor=1,20` que contava a grama sem separar atrito de
 /// arrasto). Medido: `to_50ft_grass_m` 473,469470 m → **819,110978 m**
@@ -674,6 +674,41 @@ fn sem_argumentos_usa_motor_padrao_toyota() {
 /// a violação NOMINAL de envelope de 'Solo (piloto)' (NOVA), e o flip de
 /// robustez de '2 pax dianteiros' (reaberto). `validation_status`
 /// continua `"FAIL"`.
+///
+/// ─── ATUALIZAÇÃO (ciclo 14, task 2, 2026-08-15) — CHECAGEM #24 FLIPA
+/// FAIL→PASS, CONTAGEM CAI PARA 4 ───────────────────────────────────────
+///
+/// O segmento AÉREO do pouso (`agents::performance::landing_air_segment`)
+/// corrige DOIS defeitos independentes (spec do ciclo 14, §1):
+///
+/// 1. GEOMÉTRICO: até aqui `s_air = 15/tan(γ_app)` descia os 15 m
+///    INTEIROS até o solo e o flare (`s_flare = V_ref × flare_time_s`) era
+///    somado com altura ZERO — a aeronave "pousava" duas vezes. Agora o
+///    flare é um arco de raio `R = V_ref²/(g·(n−1))` que CONSOME altura
+///    (`h_flare = R(1−cos γ)`), e a rampa desce só `15 − h_flare`.
+/// 2. DE PREMISSA: `[performance].approach_angle_deg = 3,0°` (removido)
+///    era o *glideslope* de ILS — aproximação COM POTÊNCIA de aeroporto
+///    pavimentado, mais RASA do que esta célula desce com o motor
+///    cortado. Agora γ_app é DERIVADO da polar de pouso a V_ref
+///    (`atan(CD_ref/CL_ref)`, `cd_gear_extended` — mesma função que a
+///    rolagem usa): **5,1181°**, procedimento de campo curto padrão
+///    (motor em marcha lenta sobre o obstáculo).
+///
+/// Os dois juntos encolhem o segmento aéreo 339,82 m → **196,57 m**
+/// (−42,1%). Medido no baseline real: `ldg_50ft_grass_m`
+/// 646,660942 m → **503,414253 m** (−22,2%), agora ABAIXO da pista de
+/// 600 m — a checagem #24 FLIPA FAIL→PASS, o PRIMEIRO ciclo desde o 11 que
+/// REMOVE uma violação. `ldg_50ft_m` (pavimentado) 582,521767 m →
+/// **439,275078 m** (−24,6%). Contagem de violações: **5 → 4** — só a de
+/// pouso na grama sai; as outras 4 (gradiente CS 23.65, decolagem em
+/// grama, envelope NOMINAL de 'Solo (piloto)', robustez de '2 pax
+/// dianteiros') são de FORA do pouso e permanecem INALTERADAS por
+/// construção (spec §3 do ciclo 14 as declara isoladas). `validation_status`
+/// continua `"FAIL"` (ainda restam 4 violações, incluindo a decolagem em
+/// grama a ≈859 m). **Não é afrouxamento de premissa**: a pista de 600 m
+/// em grama permanece INTACTA — a violação era sustentada por um erro
+/// geométrico e uma premissa de aeroporto pavimentado, ambos nomeados e
+/// medidos, não por uma config relaxada.
 #[test]
 fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolagem_e_pouso_grama() {
     let out_path = std::env::temp_dir().join(format!(
@@ -723,13 +758,21 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     // '2 pax dianteiros' (troca de nome, não soma). Assert de contagem
     // PRIMEIRO, com a lista inteira na mensagem: qualquer violação nova
     // aparece por nome no output do teste, sem precisar adivinhar qual foi.
-    assert_eq!(violations.len(), 5,
-        "ciclo 13 (task 4, old→new): esperava EXATAMENTE 5 violações no baseline real — \
-         gradiente CS 23.65 abaixo de 8,3%, decolagem na grama sobre 15 m (≈859 m > 600 m), \
-         pouso na grama sobre 15 m (≈647 m > 600 m), a violação NOMINAL de envelope de 'Solo \
-         (piloto)' (NOVA, superfície de grama no balanço de rotação — spec §7/§11.1), E o flip \
-         de robustez de '2 pax dianteiros' (reaberto pela mesma mudança de superfície), achados \
-         honestos, não uma regressão: {violations:#?}");
+    // `old→new` (ciclo 14, spec §2/§7): contagem **5 → 4** — a checagem
+    // #24 (pouso na grama sobre 15 m) FLIPA FAIL→PASS. Causa: os dois
+    // defeitos do segmento aéreo do pouso corrigidos juntos (flare que não
+    // consumia altura + ângulo de aproximação de ILS/3° substituído pelo
+    // planeio power-off derivado da polar, γ_app=5,1181°) —
+    // `ldg_50ft_grass_m` 646,660942 m → **503,414253 m** (−22,2%), abaixo
+    // da pista de 600 m. As outras 4 violações são de FORA do pouso (spec
+    // §3 as declara ISOLADAS desta mudança) e permanecem INALTERADAS.
+    assert_eq!(violations.len(), 4,
+        "ciclo 14 (spec §2/§7): esperava EXATAMENTE 4 violações no baseline real — gradiente \
+         CS 23.65 abaixo de 8,3%, decolagem na grama sobre 15 m (≈859 m > 600 m), a violação \
+         NOMINAL de envelope de 'Solo (piloto)' (superfície de grama no balanço de rotação — \
+         spec §7/§11.1 do ciclo 13), E o flip de robustez de '2 pax dianteiros'. O pouso na \
+         grama sobre 15 m SAIU da lista (checagem #24 FLIPOU FAIL→PASS, ldg_50ft_grass_m \
+         646,660942→503,414253 m): {violations:#?}");
     // Asserts NOMEADOS por checagem — redundantes com a contagem acima de
     // propósito: se um refactor um dia reabrir/fechar uma violação, a
     // contagem sozinha não diria QUAL mudou.
@@ -786,14 +829,19 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     assert!(violations.iter().any(|v| v.contains("Gradiente de subida")),
         "gradiente CS 23.65 (≈8,02%, abaixo do piso de 8,3%) deveria aparecer como violação \
          NOVA (lei única de tração, spec §11 — risco central do ciclo): {violations:#?}");
-    // (4) Pouso na grama: `ldg_50ft_grass_m` não consome tração (landing
-    // não tem termo de tração no modelo, confirmado na revisão de plano).
-    // `old→new` (ciclo 13, task 3, ERRATUM §3.2.1): 646,437301→**≈647 m**
-    // (o recalibrado de `fom_design` move o combustível/MTOW convergido de
-    // subida, resíduo pequeno). Continua excedendo os 600 m de pista.
-    assert!(violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
-        "pouso na grama (≈647 m, landing não consome tração) deveria exceder os 600 m de \
-         pista disponível: {violations:#?}");
+    // (4) Pouso na grama — ASSERÇÃO RELACIONAL QUE DEIXOU DE VALER,
+    // `old→new` (ciclo 14, spec §2/§7): até o ciclo 13 esta violação
+    // aparecia (`ldg_50ft_grass_m` ≈647 m > 600 m de pista). Ciclo 14
+    // corrige os dois defeitos do segmento aéreo do pouso (flare sem
+    // altura + ângulo de aproximação de ILS/3° em vez do planeio
+    // power-off, γ_app=5,1181° derivado da polar): `ldg_50ft_grass_m`
+    // 646,660942 m → **503,414253 m** (−22,2%), agora ABAIXO dos 600 m —
+    // a checagem #24 FLIPA FAIL→PASS. A relação nova e verdadeira, viva,
+    // no lugar: essa violação NÃO pode mais aparecer.
+    assert!(!violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+        "ciclo 14: a checagem #24 (pouso na grama sobre 15 m) deveria estar em PASS — \
+         ldg_50ft_grass_m ≈503,4 m < 600 m de pista (γ_app derivado da polar + flare com \
+         altura, spec §2): {violations:#?}");
     // (5) `old→new` (ciclo 13, task 2, spec §3.4/§11 — achado NOVO, a
     // projeção da spec ERROU a direção): `to_50ft_grass_m` AUMENTA
     // (819,110978→848,927019 m, +3,64%), não diminui como a spec §3.4
