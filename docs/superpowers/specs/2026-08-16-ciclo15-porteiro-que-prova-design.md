@@ -130,6 +130,31 @@ de tração do ciclo 13. O doc chega a **contradizer a si mesmo**: a linha 1236 
 17,757974% "HOJE" enquanto a linha 1381 diz corretamente 18,268251% "o valor
 publicado HOJE".
 
+### 3.1 QUINTO defeito, achado na implementação — e é meu, do ciclo 14
+
+A §5.4 lista `:1437` (`performance.ldg_air_distance_m`) entre as citações
+"verificadas como corretas, recebem marcador sem alteração de valor". **Não
+está correta.**
+
+| | |
+|---|---|
+| o doc afirma | **196,573247 m** "no baseline real" |
+| o JSON publica | **196,57295565026521** → 196,572956 |
+| desvio | 1,48e-6 relativo — diverge na 4ª casa significativa |
+
+Rastreado: o valor está **imóvel em 196,57295565026521 desde o bump v5.7**
+(`a1f9cc9`), que é o commit que criou o campo. O `196,573247` do documento
+**nunca bateu com nada.**
+
+É a mesma classe dos pins da §7.4 — **citação estimada**, um número que nunca
+foi o valor do pipeline — só que na documentação, e escrita por mim, no ciclo
+14, no mesmo commit que publicou o campo.
+
+O lint da §5.6 não o pega: o texto diz "no baseline real" em minúscula, e o
+gatilho é `Baseline real` com maiúscula. A Task 3 encontrou por conferência
+manual, seguiu a instrução de **não corrigir achado fora do inventário**, e
+reportou. Corrigido na Task 4.
+
 **Nota de escopo:** `:1431-1432` cita `climb_gradient_pct` 12,451842 — hoje
 7,913277 — mas dentro de uma narrativa explicitamente rotulada "ciclo 11", sem
 reivindicar ser o valor vigente. **Não é defeito**; é desatualização por omissão.
@@ -379,8 +404,27 @@ Teste `afirmacao_de_valor_atual_no_doc_exige_marcador`.
 `HOJE`, `Baseline real`, `valor publicado`, `Medido HOJE` **e** um número com
 ≥4 casas decimais **e** nenhum marcador `<!-- PIN:` reprova.
 
-Medido em `b8827e8`, o gatilho ocorre em 9 linhas depois da 1000: `:1050`,
-`:1236`, `:1362`, `:1381`, `:1410`, `:1424`, `:1429`, `:1504`, `:1601`.
+**ERRATUM — minha lista de gatilhos estava errada, e pelo motivo de sempre.**
+Publiquei: `:1050`, `:1236`, `:1362`, `:1381`, `:1410`, `:1424`, `:1429`,
+`:1504`, `:1601` — nove linhas. O lint, quando rodou de verdade, achou **oito**,
+e a interseção é parcial:
+
+| | linhas |
+|---|---|
+| minha previsão | 1050, 1236, **1362**, **1381**, 1410, 1424, 1429, 1504, **1601** |
+| o lint de fato | **697**, 1050, 1236, 1410, 1424, 1429, **1431**, 1504 |
+
+Errei nos dois sentidos. **Três falsos positivos** (`:1362`, `:1381`, `:1601`):
+neles o gatilho e o número estão em **linhas físicas diferentes**, e a checagem
+é por linha — nunca disparariam. **Dois falsos negativos** (`:697`, `:1431`):
+sítios "Baseline real E10:" seguidos de par histórico, que a checagem pega.
+
+A causa é a mesma das §7.5 e §7.5.1: **enunciei a regra corretamente — "linha
+que contenha gatilho E número com ≥4 casas" — e depois produzi a lista por
+outro método**, um grep só do gatilho, sem a conjunção. Quarta vez neste ciclo.
+Não é descuido pontual; é um hábito: escrevo a regra, e então derivo suas
+consequências de cabeça em vez de executá-la. **Uma lista publicada ao lado de
+uma regra deve ser a saída da regra, nunca uma paráfrase dela.**
 
 O gatilho é confiável porque é **a própria afirmação de atualidade** que cria a
 obrigação. Um número sem afirmação de atualidade é histórico e não deve ser
