@@ -184,7 +184,7 @@ pub fn thrust_available_n(
 /// OTIMISTA (o retrátil estendido não tem as carenagens de um trem fixo bem
 /// projetado), assumido e declarado.
 ///
-/// `old→new` (ciclo 14, spec §2.4): esta função chamava-se `cd_gear_extended`.
+/// `old→new` (ciclo 14, spec §2.4): esta função chamava-se `cd_ground_roll`.
 /// O nome era estreito — ela nunca calculou "CD de rolagem", e sim a POLAR da
 /// aeronave com TREM ESTENDIDO e um incremento de flap, avaliada num CL
 /// qualquer. Até o ciclo 13 todos os consumidores eram de solo, então o nome
