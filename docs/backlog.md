@@ -571,6 +571,29 @@ revisão, não de execução). Ponteiro: `scripts/verifica-ciclo.sh`,
 `old→new` na tabela da task de pouso), commit `8f92c55` (ERRATUM ciclo
 11).
 
+**SEGUNDA MANIFESTAÇÃO, agora na DOCUMENTAÇÃO (achada pela Task 3 e
+confirmada pela revisão final de branch do ciclo 14).** O mesmo mecanismo
+apareceu num lugar que a proposta acima NÃO cobriria:
+`docs/aircraft_spec.schema.md:809-810` (histórico v5.5) registra
+`ldg_50ft_m = 582,341118 m` e `ldg_50ft_grass_m = 646,437301 m`, quando os
+valores reais imediatamente antes do ciclo 14 eram **582,521767 m** e
+**646,660942 m** (confirmado por `git show 7d246b3:aircraft_spec.json`).
+Drift introduzido em algum ponto entre os ciclos 12 e 13 — os números do
+schema doc ficaram nos valores do ciclo 12 enquanto o JSON avançou.
+
+Desvios de 0,03%: pequenos demais para saltarem aos olhos, grandes demais
+para serem ruído de compilação. **Nenhum teste guarda o schema doc**, então
+aqui não há nem a tolerância de 1% para culpar — não existe checagem
+nenhuma. A proposta acima cobre pins de TESTE contra o JSON regenerado;
+precisa ser estendida para cobrir também os números citados em
+`docs/aircraft_spec.schema.md`, ou esses números viram arqueologia
+impossível daqui a alguns ciclos.
+
+A Task 3 do ciclo 14 encontrou, documentou e **deliberadamente NÃO
+corrigiu** (fora de escopo, e corrigir sem a checagem automática só adia a
+próxima ocorrência). Ponteiro: `docs/aircraft_spec.schema.md` linhas
+809-810 e o registro da própria Task 3 nas linhas ~926-935 e ~1433-1434.
+
 ## 14. Achados da task 4 — recuo do limite de rotação e margem residual (registro, fix wave ciclo 12)
 
 A task 4 (termos de solo do balanço de rotação, ver item 4/RESOLVIDO acima
