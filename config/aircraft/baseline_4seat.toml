@@ -320,11 +320,16 @@ retraction_time_s = 7.0
 actuators_doors_mass_kg = 20.0
 # Tipback/tail-strike (Task 2, refino-ciclo2) — Raymer, "Aircraft Design",
 # cap. 11. tipback_min_deg=15° é o piso típico de projeto; rotation_
-# attitude_deg=11° é a atitude de picada nominal de rotação/flare desta
-# célula (ver [performance] rotation_time_s/flare_time_s, tempos — não
-# ângulos — do mesmo evento). tail_cone_x_m/tail_cone_height_m descrevem a
-# geometria SIMPLIFICADA do cone de cauda (ver agents::landing_gear::
-# tail_strike_margin_deg para a aproximação exata).
+# attitude_deg=11° é a atitude de picada nominal de rotação desta célula
+# (ver [performance] rotation_time_s, TEMPO — não ângulo — do mesmo
+# evento). `old→new` (ciclo 14, spec §6.2): esta frase citava também
+# "flare_time_s, tempos — não ângulos — do mesmo evento", mas o flare
+# DEIXOU de ser um tempo — agora É um ângulo (arco de raio
+# R = V_ref²/(g(n-1)), [performance].flare_load_factor, ver bloco
+# [performance] abaixo). Metade da frase original morreu aqui.
+# tail_cone_x_m/tail_cone_height_m descrevem a geometria SIMPLIFICADA do
+# cone de cauda (ver agents::landing_gear::tail_strike_margin_deg para a
+# aproximação exata).
 #
 # ACHADO HONESTO (Task 2, baseline E6): com o trem recuado pela Task
 # 1/campanha E1–E6 (x_main 3.85→3.55m, para abrir o envelope de CG via
@@ -495,10 +500,19 @@ mu_roll_grass = 0.08       # grama firme de fazenda (faixa curta 0,05 / alta 0,1
 # agents::propulsion::FigureOfMerit, agents::performance::thrust_available_n).
 rotation_time_s = 1.0      # tempo de rotação até V_LOF, s
 # Fator de carga do arco de flare (ciclo 14, spec §2.2) — substitui
-# flare_time_s. R = V_ref²/(g(n-1)); n=1,20 dá R=651,1 m, h_flare=2,596 m.
+# flare_time_s (REMOVIDO — erro de migração em
+# models::config::check_flare_time_migration). R = V_ref²/(g(n-1));
+# n=1,20 dá R=651,1 m, h_flare=2,596 m, s_flare=58,08 m.
 flare_load_factor = 1.20
-flare_time_s = 1.5         # tempo de flare no pouso a V_ref, s
-approach_angle_deg = 3.0   # ângulo de aproximação padrão até 15m (50 ft)
+# `old→new` (ciclo 14, spec §2.1/§6.2): approach_angle_deg = 3.0 foi
+# REMOVIDO daqui (erro de migração em
+# models::config::check_approach_angle_migration) — o ângulo de aproximação
+# deixou de ser uma constante de config e passou a ser DERIVADO da polar de
+# pouso (atan(CD_ref/CL_ref) a V_ref, planeio power-off —
+# agents::performance::landing_air_segment). Neste baseline γ_app = 5,1181°
+# (L/D = 11,165 em configuração de pouso) — mais íngreme que o antigo 3,0°
+# fixo (o *glideslope* de ILS, aproximação COM POTÊNCIA de aeroporto
+# pavimentado, nunca calibrada para esta pista de fazenda).
 
 # Superfícies de controle (Task 4.2) — frações históricas (Raymer Tab. 6.5,
 # monomotor GA) que dimensionam aileron, flap, profundor e leme a partir da
