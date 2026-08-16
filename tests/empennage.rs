@@ -38,7 +38,7 @@ fn baseline_s_h_bate_calculo_manual() {
         emp.s_horizontal_m2, emp.s_vertical_m2, emp.span_h_m, emp.span_v_m
     );
 
-    let esperado_s_h = 3.134_f64;
+    let esperado_s_h = 3.134_f64; // PIN: empennage.s_horizontal_m2
     assert!((emp.s_horizontal_m2 - esperado_s_h).abs() < 0.05,
         "S_h = {:.4} m² (esperado ≈{esperado_s_h:.3} m² ±0.05)", emp.s_horizontal_m2);
 }
@@ -114,6 +114,7 @@ fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     // também, e passa a testar o requisito de projeto por nome — mas a
     // mudança de forma está declarada aqui em vez de escondida como
     // "re-pin". old: `> 10.0`; new: `(9.2..10.2)` + `> sm_min·100`.
+    // PIN: NAO-PUBLICADO — piso e teto de uma banda de aceitação, não campo do JSON
     assert!((9.2..10.2).contains(&sized.wb.spec.static_margin_pct),
         "SM mínima {:.2}% fora da banda E10 [9.2%, 10.2%) — old≈16.25% (E7) → \
          new≈9.68% (E10); deriva nas duas direções é regressão a investigar",
@@ -121,6 +122,7 @@ fn baseline_todos_os_cenarios_estaveis_com_empenagem_dimensionada() {
     // Amarra explícita ao requisito real (o pin de banda acima é só regressão):
     // a SM mínima segue com folga sobre `[stability].sm_min`, mesmo após o
     // recuo de CG da campanha E10.
+    // PIN: NAO-PUBLICADO — conversão fração→percentual
     assert!(sized.wb.spec.static_margin_pct > cfg.stability.sm_min * 100.0,
         "SM mínima {:.2}% deveria continuar acima do piso de projeto sm_min={:.1}%",
         sized.wb.spec.static_margin_pct, cfg.stability.sm_min * 100.0);

@@ -544,7 +544,7 @@ Ponteiro: spec §3.1 e §11 item 5
 (`docs/superpowers/specs/2026-08-15-ciclo12-solo-honesto-design.md`),
 `agents::performance::cd_ground_roll` (`src/agents/performance.rs`).
 
-## 13. Pin órfão mascarado por tolerância — checagem de pins vs JSON regenerado em `verifica-ciclo.sh`
+## 13. Pin órfão mascarado por tolerância — checagem de pins vs JSON regenerado em `verifica-ciclo.sh` — RESOLVIDO ciclo 15
 
 Achado da revisão da Task 3 (ciclo 12): o pin de `ldg_50ft_m` em
 `tests/generic_engine.rs` ficou dessincronizado do `aircraft_spec.json`
@@ -571,28 +571,102 @@ revisão, não de execução). Ponteiro: `scripts/verifica-ciclo.sh`,
 `old→new` na tabela da task de pouso), commit `8f92c55` (ERRATUM ciclo
 11).
 
-**SEGUNDA MANIFESTAÇÃO, agora na DOCUMENTAÇÃO (achada pela Task 3 e
-confirmada pela revisão final de branch do ciclo 14).** O mesmo mecanismo
-apareceu num lugar que a proposta acima NÃO cobriria:
-`docs/aircraft_spec.schema.md:809-810` (histórico v5.5) registra
-`ldg_50ft_m = 582,341118 m` e `ldg_50ft_grass_m = 646,437301 m`, quando os
-valores reais imediatamente antes do ciclo 14 eram **582,521767 m** e
-**646,660942 m** (confirmado por `git show 7d246b3:aircraft_spec.json`).
-Drift introduzido em algum ponto entre os ciclos 12 e 13 — os números do
-schema doc ficaram nos valores do ciclo 12 enquanto o JSON avançou.
+**Implementado no ciclo 15**, com tolerância ZERO em vez de 1e-4 relativo
+(o `aircraft_spec.json` commitado é referência suficiente — `tests/cli.rs`
+já prova que bate com o pipeline exatamente — então a comparação não
+precisa de tolerância nenhuma) e cobrindo TODOS os arquivos de teste, não
+só os quatro nomeados na proposta original: `tests/pins_vs_json.rs`,
+checagem `confere_vinculos`. Estendido também ao schema doc
+(`confere_doc`), que a proposta original não cobria — ver a retratação e
+os defeitos reais abaixo.
 
-Desvios de 0,03%: pequenos demais para saltarem aos olhos, grandes demais
-para serem ruído de compilação. **Nenhum teste guarda o schema doc**, então
-aqui não há nem a tolerância de 1% para culpar — não existe checagem
-nenhuma. A proposta acima cobre pins de TESTE contra o JSON regenerado;
-precisa ser estendida para cobrir também os números citados em
-`docs/aircraft_spec.schema.md`, ou esses números viram arqueologia
-impossível daqui a alguns ciclos.
+**RETRATAÇÃO (ciclo 15) — a "SEGUNDA MANIFESTAÇÃO" registrada abaixo pelo
+commit `5119592` (fix wave do ciclo 14) é FALSA.** Preservada por
+arqueologia — o texto original apagado deixaria de ser arqueologia —, e
+substituída pela prova, pela causa e pelos defeitos reais que existem de
+fato.
 
-A Task 3 do ciclo 14 encontrou, documentou e **deliberadamente NÃO
-corrigiu** (fora de escopo, e corrigir sem a checagem automática só adia a
-próxima ocorrência). Ponteiro: `docs/aircraft_spec.schema.md` linhas
-809-810 e o registro da própria Task 3 nas linhas ~926-935 e ~1433-1434.
+> **SEGUNDA MANIFESTAÇÃO, agora na DOCUMENTAÇÃO (achada pela Task 3 e
+> confirmada pela revisão final de branch do ciclo 14).** O mesmo mecanismo
+> apareceu num lugar que a proposta acima NÃO cobriria:
+> `docs/aircraft_spec.schema.md:809-810` (histórico v5.5) registra
+> `ldg_50ft_m = 582,341118 m` e `ldg_50ft_grass_m = 646,437301 m`, quando os
+> valores reais imediatamente antes do ciclo 14 eram **582,521767 m** e
+> **646,660942 m** (confirmado por `git show 7d246b3:aircraft_spec.json`).
+> Drift introduzido em algum ponto entre os ciclos 12 e 13 — os números do
+> schema doc ficaram nos valores do ciclo 12 enquanto o JSON avançou.
+>
+> Desvios de 0,03%: pequenos demais para saltarem aos olhos, grandes
+> demais para serem ruído de compilação. **Nenhum teste guarda o schema
+> doc**, então aqui não há nem a tolerância de 1% para culpar — não existe
+> checagem nenhuma. A proposta acima cobre pins de TESTE contra o JSON
+> regenerado; precisa ser estendida para cobrir também os números citados
+> em `docs/aircraft_spec.schema.md`, ou esses números viram arqueologia
+> impossível daqui a alguns ciclos.
+>
+> A Task 3 do ciclo 14 encontrou, documentou e **deliberadamente NÃO
+> corrigiu** (fora de escopo, e corrigir sem a checagem automática só adia
+> a próxima ocorrência). Ponteiro: `docs/aircraft_spec.schema.md` linhas
+> 809-810 e o registro da própria Task 3 nas linhas ~926-935 e ~1433-1434.
+
+**A prova de que é falsa.** As linhas 809-810 narram uma transição
+`old→new` real e INTERNA à era v5.5 — não drift entre ciclos. Verificado
+commit a commit: `619b4a0` (bump v5.5) publicava
+`ldg_50ft_m = 502,4582990603992`; `e06e7e7`, ainda dentro da v5.5,
+publicava `582,3411181885572` — exatamente os `582,341118` que o texto
+acima chama de desatualizados. Ambos os valores EXISTIRAM de fato; as
+linhas 809-810 são um registro correto de uma transição que aconteceu
+dentro da mesma era de schema, não um número que ficou para trás.
+
+O par `582,521767 / 646,660942` que o texto acima chama de "valores reais
+imediatamente antes do ciclo 14" é de um momento POSTERIOR — `0a6136f`,
+ainda dentro da v5.5 mas depois de `e06e7e7` — e o documento já o
+registrava corretamente em OUTRO lugar, sem nenhuma correção necessária:
+a entrada v5.7 na linha 981 (`582,521767 → 439,275078 m`) e a cadeia
+`old→new` das linhas 1433-1434 do mesmo arquivo.
+
+**A causa.** Comparei um valor da era v5.5 (`582,341118`, registrado nas
+linhas 809-810) contra um valor pós-ciclo-13 (`582,521767`) e chamei a
+diferença de deriva. Não abri o histórico commit a commit antes de afirmar
+sobre ele — se tivesse, a tabela acima teria aparecido antes da
+"descoberta", não depois dela.
+
+**A lição, gêmea da do ciclo 14.** Lá afirmei uma correção que não
+existia (uma nota dizendo "isso já está resolvido" que desativava uma
+checagem); aqui, um defeito que não existia. As duas se curam com a mesma
+disciplina: **quem afirma sobre o histórico abre o histórico.**
+
+---
+
+**OS DEFEITOS REAIS (ciclo 15).** Medidos contra o `aircraft_spec.json` de
+`b8827e8` pelo porteiro novo (`tests/pins_vs_json.rs`, checagem 2,
+`confere_doc`) e corrigidos nesta task. São CINCO, não os quatro da
+retratação falsa acima — o quinto só apareceu na implementação:
+
+| Local | O doc dizia | JSON real | Erro |
+|---|---|---|---|
+| `:1236` | `cg_limit_fwd_pct_mac` = 17,757974% "HOJE" | 18,268251143882534 | 2,87% |
+| `:1424` | `rc_sl_ms` "Baseline real: 4,999905" | 3,460340693496421 | 44,5% |
+| `:1429` | `vy_kmh` "Baseline real: 148,435393" | 167,4067945715867 | 12,8% |
+| `:1601-1603` | flip `limite`/`limite_nominal` E o nome do cenário | `18,472333%` / `18,268251%`, cenário "2 pax dianteiros" | — |
+| `:1437` | `ldg_air_distance_m` = 196,573247 m "no baseline real" | 196,57295565026521 | 1,48e-6 |
+
+Os quatro primeiros pararam nos ciclos 11-12 e não acompanharam a mudança
+do modelo de tração do ciclo 13; o quinto (`:1437`) é diferente — nunca foi
+deriva, é **citação estimada desde a origem**: o campo está imóvel em
+196,57295565026521 desde o bump v5.7 (`a1f9cc9`), o commit que criou o
+campo, e `196,573247` nunca bateu com esse valor nem com nenhum outro.
+Achado na implementação, registrado na spec do ciclo 15 §3.1, e é meu, do
+ciclo 14 (o mesmo commit `a1f9cc9` que publicou o campo publicou a citação
+errada). Ver item #24 abaixo — é a mesma classe de defeito que os pins
+estimados de teste, só que em documentação.
+
+Todos os cinco corrigidos nesta task, com marcador `<!-- PIN:... -->` no
+sítio e guardados permanentemente por `confere_doc`/`confere_cobertura_doc`
+em `tests/pins_vs_json.rs` — a proposta original deste item ("seção nova em
+`scripts/verifica-ciclo.sh`") foi implementada, só que como teste do
+próprio porteiro Rust em vez de uma seção do script. **RESOLVIDO ciclo
+15.**
 
 ## 14. Achados da task 4 — recuo do limite de rotação e margem residual (registro, fix wave ciclo 12)
 
@@ -1109,3 +1183,300 @@ spec); (2) trocar a condição inicial de `landing_ground_roll_m` de
 encolhem. Ponteiro: `agents::performance::landing_ground_roll_m`,
 `agents::performance::landing_air_segment` (`src/agents/performance.rs`),
 spec `2026-08-15-ciclo14-aproximacao-honesta-design.md` §3.
+
+## 24. Pins estimados — terceira variante da doença do #13 — RESOLVIDO ciclo 15
+
+Achado da spec do ciclo 15 §7.4, com medição completa por commit. Dois
+pins de `tests/vn_diagram.rs` não batiam com o `aircraft_spec.json` — e,
+diferente do #13 original, **não é deriva**:
+
+| commit | `va_kmh` | `n_gust_vc` |
+|---|---|---|
+| `8f92c55` (ERRATUM ciclo 11) | 242,618735 | 3,572607 |
+| `ed537ae` (pré-ciclo 13) | 242,618735 | 3,572607 |
+| `7d246b3` (pós-ciclo 13) | **242,692244** | 3,572607 |
+| `b8827e8` (hoje) | 242,692244 | 3,572607 |
+
+`n_gust_vc` está **imóvel em 3,572607** por toda a janela — o pin `3.59`
+nunca bateu, em commit nenhum, desde que a janela começa. `va_kmh` mudou
+uma vez, no ciclo 13, mas o pin `242.633` não batia nem com o valor antigo
+(242,618735) nem com o novo (242,692244) — não existe momento no histórico
+em que o pin correspondesse ao pipeline.
+
+**Nomeando a classe: pin estimado.** É a terceira variante da doença do
+#13, e a pior das três. Um pin **envelhecido** (#13 original) ao menos
+testemunha um estado que existiu — o pipeline produziu aquele número em
+algum momento e o mundo mudou depois. Um pin **estimado** não testemunha
+nada: é um número escrito a olho, dentro de uma tolerância larga o
+bastante para nunca cobrar a conta, ocupando o lugar de um número que
+deveria vir do pipeline.
+
+O quinto defeito do schema doc corrigido no Passo 0 deste ciclo
+(`docs/aircraft_spec.schema.md:1437`, `ldg_air_distance_m`, spec §3.1) é a
+MESMA classe, só que em documentação em vez de teste: `196,573247` estava
+imóvel desde o bump v5.7 (`a1f9cc9`, o commit que criou o campo) e nunca
+bateu com o `196,572956` publicado.
+
+**Correção**: os dois únicos literais autorizados a mudar neste ciclo
+(spec §7.4, §10.7) — `tests/vn_diagram.rs:93` `242.633 → 242.692244` e
+`:105` `3.59 → 3.572607`, cada um com `old→new` comentado no sítio e
+tolerâncias (`abs < 1.0`, `abs < 0.05`) **inalteradas**. **RESOLVIDO ciclo
+15.**
+
+## 25. Cinco pins nunca verificados por nada, ausentes do inventário original — RESOLVIDO ciclo 15
+
+Achado da spec do ciclo 15 §7.5/§7.5.1, ao reimplementar o inventário de
+pins a partir do scanner (`tests/pins_vs_json.rs`) em vez de por leitura
+manual. Cinco pins reais, todos corretos, apareceram nesta varredura que
+não estavam no inventário levantado por leitura:
+`control_surfaces.rs:44` (`2.0895` → `control_surfaces.aileron.span_m`),
+`:45` (`1.0304` → `control_surfaces.aileron.area_m2`), `:138` (`0.0` →
+`control_surfaces.elevator.start_m`), `generic_engine.rs:2600` (`2640.0`
+→ `propulsion.engine_rpm_cruise`) e `propeller.rs:57` (`1.76` →
+`propeller.diameter_m`).
+
+Nenhum destes cinco é errado — todos batem, na precisão em que estão
+escritos, com o `aircraft_spec.json` de `b8827e8`. O problema não é o
+valor: é que **nada, em ciclo nenhum anterior a este, os conferia contra
+coisa alguma.** Um pin que bate por sorte e um pin verificado que bate são
+indistinguíveis a olho nu; só a checagem automática separa os dois, e até
+este ciclo essa checagem não existia.
+
+**Causa:** o inventário original (spec do ciclo 15, §7.1/§7.2, hoje
+SUPERSEDIDAS pelo ERRATUM §7.5) foi levantado por leitura do código antes
+de o scanner existir — e leitura manual erra por amostragem, não por
+regra. Os mesmos cinco sítios que a leitura perdeu são exatamente os que a
+regra automática (assert OU ≥4 casas) encontra sem esforço.
+
+**Regra que sai daí:** um inventário de cobertura que não vem do próprio
+verificador é palpite bem apresentado. Um inventário correto não é lido
+para dentro de uma tabela e depois congelado — ele é a SAÍDA de rodar a
+regra, recalculado sempre que a regra roda.
+
+**Correção:** os cinco receberam marcador `// PIN:` nesta task, e agora
+são conferidos por `confere_vinculos` a cada `cargo test`. Ganho líquido de
+cobertura, sem mudança de valor. **RESOLVIDO ciclo 15.**
+
+**Nota (fix wave, achada pela revisão final de branch):** a citação
+`generic_engine.rs:2587` acima estava errada — a linha real é `2600`
+(`assert_eq!(sized.prop.engine_rpm_cruise, 2640.0); // PIN:
+propulsion.engine_rpm_cruise`). Valor e caminho sempre estiveram certos;
+só o número de linha era falso. Isto é um erro de número de linha
+**dentro do item que documenta erros de número de linha** (o mesmo
+padrão do item #29 — leitura manual em vez de derivação pela regra). A
+ironia não é anedota, é dado: nomear o hábito no item #29 não o curou
+dentro do próprio item que o nomeia. Corrigido nesta fix wave.
+
+## 26. Lacuna residual do cadeado — literal curto fora de `assert` escapa das duas regras (DECLARADO, sem correção)
+
+Copiado da spec do ciclo 15 §9 item 1. A regra de cobrança de
+`tests/pins_vs_json.rs` (`cobrados`) marca um literal como exigindo `//
+PIN:` quando a linha contém `assert` OU o literal tem ≥4 casas decimais —
+união deliberada, porque um piso só de casas deixaria passar `3.59` e
+`242.633` (item #24 acima) e um piso só de `assert` deixaria passar a
+tabela de tuplas de `generic_engine.rs:1735-1742`.
+
+A união cobre os casos reais deste ciclo, mas não é completa: um literal
+**fora** de uma linha de `assert` **e** com ≤3 casas decimais escapa das
+duas regras ao mesmo tempo. A própria tabela de tuplas de
+`generic_engine.rs:1734-1749` só é coberta hoje porque os oito literais
+daquela tabela têm ≥4 casas — o `assert` está no laço que itera a tabela,
+não na linha de cada literal. **Um pin novo escrito como entrada de tupla
+com poucas casas decimais passaria pelo cadeado sem marcador nenhum.**
+
+**Não corrigido.** Fechar esta lacuna sintaticamente exigiria análise
+semântica de fluxo (rastrear se o literal alimenta, direta ou
+indiretamente, uma comparação sob tolerância) que o motor deste ciclo —
+funções puras sobre texto mascarado, sem parser de Rust — não faz por
+desenho (spec §4). Lacuna CONHECIDA e DECLARADA. Ponteiro:
+`tests/pins_vs_json.rs` (`fn cobrados`), `generic_engine.rs:1734-1749`,
+spec do ciclo 15 §9 item 1.
+
+## 27. Legibilidade de `docs/aircraft_spec.schema.md:1431-1432` — número histórico dentro de célula rotulada, fácil de ler como atual
+
+`climb_gradient_pct` aparece citado como `12,451842%` (valor hoje é
+`7,913277%`) dentro de uma narrativa da tabela de campos de `performance`,
+explicitamente rotulada "ciclo 11" e "Histórico E10". **Não é defeito**: o
+texto não reivindica que `12,451842%` seja o valor vigente, e por isso o
+marcador `<!-- PIN:... -->` da checagem deste ciclo (que só se aplica a
+afirmações de atualidade — gatilhos `HOJE`/`Baseline real`/`valor
+publicado`, spec §5.6) corretamente NÃO se aplica ali.
+
+O problema é de leitura, não de correção: quem lê a célula isolada, sem
+acompanhar a narrativa completa da linha, pode concluir que 12,451842% é
+o número de hoje — a célula é densa (uma linha só narra ciclos 11 e 13
+juntos) e o rótulo "ciclo 11" fica distante do número, várias frases antes
+dele.
+
+**Não corrigido neste ciclo** — é item de legibilidade de prosa, não de
+exatidão numérica, e está fora do escopo de um ciclo que só toca números
+que afirmam ser o valor atual. Ponteiro: `docs/aircraft_spec.schema.md`
+linhas 1431-1432, spec do ciclo 15 §3.1 (nota de escopo) e §9 item 5.
+
+## 28. Interação entre os dois mecanismos de cobrança — a redundância esconde a falha de um deles (DECLARADO, sem correção)
+
+Achado da revisão da Task 2 (ciclo 15), registrado no adendo da spec §7.5.1.
+`confere_vinculos` filtra candidatos por `cobrados()` (assert OU ≥4 casas)
+antes de tentar vincular um marcador — exceto quando `cobrados()` vem
+vazio, caso em que cai num fallback para `literais()` puro, criado para
+permitir o marcador voluntário de `empennage.rs:41` (3 casas, sem
+`assert`, item #25 acima descreve o inventário que este marcador ajuda a
+fechar).
+
+Esse fallback tem um efeito colateral não previsto: com a fronteira de
+cobrança mutada experimentalmente de `>= 4` para `> 4` (mutação usada
+para provar que a fronteira importa), os pins de **4 casas** de
+`control_surfaces.rs:44-45` deveriam deixar de ser cobrados — e
+deveriam, portanto, reprovar `todo_literal_cobrado_em_teste_carrega_marcador`
+se a cobertura dependesse só da regra de cobrança. Mas eles **continuam
+passando**, porque, não sendo mais cobrados, caem no MESMO fallback que
+existe para o marcador voluntário e são achados vinculados por ali.
+
+**Os dois mecanismos se cobrem.** A proteção da fronteira de 4 casas — o
+comportamento que distingue `cobrados()` de `literais()` e que a spec
+descreve como semântica, não tipográfica — ficou inteiramente concentrada
+num único teste unitário, `fronteira_de_quatro_casas_e_cobrada`. **Quem
+apagar esse teste não verá nada quebrar**: nem `pins_de_teste_batem_com_o_json_commitado`
+nem `todo_literal_cobrado_em_teste_carrega_marcador` acusam a mutação,
+porque o fallback absorve o efeito.
+
+**Lição:** redundância entre mecanismos parece robustez; quando ela
+**esconde** a falha de um deles, é o contrário. Dois componentes que se
+cobrem só aumentam a segurança enquanto se sabe que ambos ainda
+funcionam — no momento em que um deixa de funcionar em silêncio, a
+redundância vira o motivo de ninguém notar.
+
+**Não corrigido.** Removê-la exigiria ou desacoplar o fallback do
+marcador voluntário de uma checagem de fronteira separada, ou aceitar
+que a fronteira de 4 casas só é garantida enquanto
+`fronteira_de_quatro_casas_e_cobrada` existir e passar — o que já é
+verdade hoje, só que implicitamente. Lacuna DECLARADA. Ponteiro:
+`tests/pins_vs_json.rs` (`fn confere_vinculos`, teste
+`fronteira_de_quatro_casas_e_cobrada`), spec do ciclo 15 §7.5.1 (adendo).
+
+## 29. O hábito do chefe — uma lista publicada ao lado de uma regra correta, mas derivada por outro método (item de processo)
+
+Registro de processo, não de código. O ciclo 15 expôs, de forma
+independente, o mesmo padrão quatro vezes: a spec enunciava a regra
+corretamente e depois publicava uma lista, uma contagem ou uma permissão
+**derivada por outro método** — leitura manual, intuição, extrapolação —
+em vez de derivada RODANDO a própria regra. As quatro ocorrências, cada
+uma achada por revisão ou por implementação, nenhuma pelo autor no
+momento de escrever:
+
+(i) o inventário de pins das §7.1-§7.3 foi levantado por leitura do
+código, não pelo scanner — resultou em 11 sítios sem classificação e
+linhas erradas em até 143 linhas, corrigido só pelo ERRATUM §7.5 (ver
+também item #25 acima, os cinco pins que a leitura perdeu);
+
+(ii) a permissão de marcador voluntário da §7.5.1, para `empennage.rs:41`,
+foi escrita como se fosse exercível — mas `confere_vinculos` filtrava os
+candidatos por `cobrados()` antes de tentar vincular, o que tornava a
+permissão IMPOSSÍVEL de exercer tal como especificada; corrigida com o
+fallback descrito no item #28 acima;
+
+(iii) a lista de gatilhos de atualidade da §5.6 previa nove padrões; a
+implementação achou oito reais no texto, com três falsos positivos (padrões
+que a lista previa mas que não ocorrem, ou não do jeito descrito) e dois
+falsos negativos (o gatilho minúsculo "no baseline real" que o quinto
+defeito do doc usa, item #24 acima, não estava na lista de gatilhos em
+maiúscula `Baseline real`);
+
+(iv) `docs/aircraft_spec.schema.md:1437` foi listado na §5.4 como "citação
+verificada como correta, recebe marcador sem alteração de valor" — mas
+nunca tinha sido verificado contra coisa alguma; a citação de
+`196,573247` nunca bateu com o `196,572956` publicado (item #24 acima).
+
+**Regra que sai disso:** uma lista publicada ao lado de uma regra deve
+ser a SAÍDA da regra, nunca uma paráfrase dela. Toda vez que uma spec
+escreve "a regra é X" e, no parágrafo seguinte, "portanto os sítios são
+[lista]", a lista precisa ter vindo de rodar X — não de reconstruir X de
+memória sobre o texto. Uma paráfrase engana pela aparência de derivação
+sem carregar a garantia de tê-la. Item de processo, sem correção de
+código associada — a correção é o hábito, aplicável aos próximos ciclos.
+
+## 30. A fronteira de garantia do `pins_vs_json.rs` — o que o porteiro prova e o que ele NÃO prova
+
+Achado mais importante da revisão final de branch do ciclo 15. Uma
+ferramenta que dá mais segurança aparente do que real é exatamente o
+defeito que este ciclo existe para combater (item #13 e suas três
+variantes, itens #24/#25 acima) — deixar essa fronteira sem registro
+repetiria o erro em escala maior, desta vez no próprio porteiro. As
+quatro medições abaixo foram feitas executando as funções REAIS de
+`tests/pins_vs_json.rs` contra o `aircraft_spec.json` commitado, não por
+leitura do código.
+
+**(a) A razão de uma isenção não é validada por nada.**
+`interpreta_marcador` captura o texto depois de `NAO-PUBLICADO` como
+`String` livre, sem checagem de formato ou de conteúdo. Silenciar um pin
+genuíno custa **uma edição de uma linha**: trocando `// PIN:
+vn_diagram.va_kmh` por `// PIN: NAO-PUBLICADO — valor ainda não
+confirmado no manual de voo`, o contador de vinculados caiu de 48 para
+47 e **só o piso** (`MINIMO_DE_PINS_VINCULADOS`) reprovou — nenhuma
+outra checagem notou a isenção falsa.
+
+**(b) A isenção de módulo silencia um arquivo inteiro por uma linha.**
+`tests/generic_engine.rs` tem 23 marcadores vinculados. Isentando o
+módulo inteiro, o contador caiu de 48 para 25 e a checagem do piso
+reprovou sozinha — **o piso funciona contra a versão ingênua do
+ataque.**
+
+**(c) Mas o piso é uma CONTAGEM, e contagem é falsificável por
+padding.** `MINIMO_DE_PINS_VINCULADOS = 48` está exatamente no valor de
+hoje: **folga zero**. A revisão acrescentou 23 linhas triviais e sem
+sentido do tipo `let _c15_bulk_N = 350.0; // PIN: vn_diagram.vd_kmh` em
+outro arquivo; o contador voltou a 48, `cargo test --release` passou
+**limpo com 553 testes**, e os 23 pins reais de `generic_engine.rs`
+ficaram permanentemente fora de verificação sem nenhum teste do
+repositório acusar. Custo do ataque completo: 1 linha de isenção de
+módulo + ~23 linhas de padding mecânico, sem exigir conhecimento nenhum
+do domínio da aeronave.
+
+**(d) Caminho semanticamente errado com valor coincidente é
+indetectável por desenho.** O verificador compara número contra
+caminho; nunca verifica se o caminho citado é o campo que o código ao
+redor de fato exercita. Colisões reais no `aircraft_spec.json` de hoje,
+achadas por varredura sistemática: `empennage.ar_v` e
+`structure.skin_min_thickness_mm` valem **ambos exatamente 1,5** —
+razão de aspecto adimensional e espessura em mm, fisicamente sem
+relação nenhuma entre si. O mesmo literal `1.5` passa marcado
+igualmente com qualquer uma das duas strings de caminho. Outras
+colisões: `empennage.taper_h` / `empennage.taper_v` /
+`trim.cl_ground_rotation` = 0,5 (três campos fisicamente distintos, um
+valor); `propulsion.fuel_capacity_l` / `sizing.fuel_capacity_l` = 260,0
+(esta por construção real do modelo, não coincidência, mas ainda assim
+indistinguível de coincidência pelo verificador).
+
+**A fronteira, em prosa clara:** o porteiro prova, com certeza, que **um
+número escrito no código corresponde ao número publicado no caminho
+JSON que o marcador daquela linha cita**, e pune com precisão real
+qualquer deriva, pin envelhecido ou pin estimado dentro desse conjunto —
+é exatamente o que resolveu os itens #13, #24 e #25. Ele **não** prova
+que a razão de uma isenção é verdadeira, que o caminho citado é o
+semanticamente certo para o valor ao lado, nem que a contagem de
+vínculos reflete cobertura de conteúdo — ela reflete contagem, e
+contagem é falsificável sem nenhum custo de conhecimento de domínio.
+
+**A garantia opera sob boa-fé.** Ele transforma erro honesto — que era
+a causa das três variantes da doença do #13 — em falha alta e imediata
+de `cargo test`. Não foi desenhado para resistir a alguém que queira
+silenciá-lo deliberadamente, e as medições (a)-(c) acima mostram que,
+de fato, não resiste.
+
+**Lacuna DECLARADA, sem correção neste ciclo.** Duas direções óbvias de
+endurecimento futuro, registradas sem implementar:
+
+1. Dar folga ao piso e torná-lo **derivado** em vez de literal — hoje
+   `MINIMO_DE_PINS_VINCULADOS = 48` é um número escrito à mão que por
+   coincidência bate com a contagem de hoje (folga zero); um piso
+   calculado a partir de uma fonte independente do próprio contador
+   fecharia o ataque (c).
+2. Exigir que o marcador cite, além do caminho JSON, o **nome do campo
+   Rust** que a linha exercita (ex.: `// PIN: propulsion.engine_rpm_cruise
+   AS sized.prop.engine_rpm_cruise`), para que caminho e uso possam ser
+   confrontados automaticamente — fecharia o ataque (d).
+
+Ponteiro: `tests/pins_vs_json.rs` (`fn interpreta_marcador`, `fn
+confere_vinculos`, `const MINIMO_DE_PINS_VINCULADOS`), revisão final de
+branch do ciclo 15 (aprovada para merge com este item como
+não-bloqueante).

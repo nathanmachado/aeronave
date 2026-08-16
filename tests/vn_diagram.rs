@@ -88,22 +88,31 @@ fn vn_diagram_baseline_pin_velocidades_e_n_gust() {
     // ATUALIZAÇÃO (Campanha E10, 2026-08-08): a bateria híbrida de 53 kg e a
     // hélice menor elevam o MTOW de PROJETO convergido de ~1.512,44 kg para
     // ~1.537,57 kg (+1,66%) — VS1/VA sobem proporcional a √MTOW:
-    // ~241.074 → ~242.633 km/h. `cl_max_flaps` 1,72→2,1 NÃO entra aqui: VA
+    // ~241.074 → ~242.692244 km/h. `cl_max_flaps` 1,72→2,1 NÃO entra aqui: VA
     // depende do CLmax LIMPO (1,45, inalterado), não do de pouso.
-    assert!((vn.va_kmh - 242.633).abs() < 1.0, "VA {:.1} km/h fora do pin (~242.633)", vn.va_kmh);
-    assert!((vn.vc_kmh - 280.0).abs() < 0.1, "VC {:.1} km/h fora do pin (280.0, requisito de missão)", vn.vc_kmh);
-    assert!((vn.vd_kmh - 350.0).abs() < 0.1, "VD {:.1} km/h fora do pin (350.0 = 1.25×VC)", vn.vd_kmh);
+    // PIN ATUALIZADO (ciclo 15, backlog #13, spec §7.4): `242.633 → 242.692244`.
+    // Este pin NUNCA bateu com o pipeline: o JSON trazia 242,618735 desde o
+    // ERRATUM do ciclo 11 e 242,692244 desde o ciclo 13 — o valor escrito não
+    // corresponde a NENHUM dos dois. Não é deriva; é pin estimado a olho,
+    // sobrevivendo dentro de uma tolerância de 0,41%. Tolerância INALTERADA.
+    assert!((vn.va_kmh - 242.692244).abs() < 1.0, "VA {:.1} km/h fora do pin (~242.692244)", vn.va_kmh); // PIN: vn_diagram.va_kmh
+    assert!((vn.vc_kmh - 280.0).abs() < 0.1, "VC {:.1} km/h fora do pin (280.0, requisito de missão)", vn.vc_kmh); // PIN: vn_diagram.vc_kmh
+    assert!((vn.vd_kmh - 350.0).abs() < 0.1, "VD {:.1} km/h fora do pin (350.0 = 1.25×VC)", vn.vd_kmh); // PIN: vn_diagram.vd_kmh
     assert!(vn.vb_kmh > 0.0 && vn.vb_kmh < vn.vd_kmh,
         "VB {:.1} km/h deveria estar entre 0 e VD ({:.1})", vn.vb_kmh, vn.vd_kmh);
 
     // Fatores de manobra — CS 23.337, categoria "normal".
-    assert!((vn.n_lim_pos - 3.8).abs() < 1e-6);
-    assert!((vn.n_lim_neg - (-1.52)).abs() < 1e-6);
+    assert!((vn.n_lim_pos - 3.8).abs() < 1e-6); // PIN: vn_diagram.n_lim_pos
+    assert!((vn.n_lim_neg - (-1.52)).abs() < 1e-6); // PIN: vn_diagram.n_lim_neg
 
     // Fator de rajada em VC, massa de envelope (hand-check do controller,
     // task-4.3-brief.md: μ≈27.63, Kg≈0.7385, n_gust_vc≈3.59).
-    assert!((vn.n_gust_vc - 3.59).abs() < 0.05,
-        "n_gust_vc {:.4} fora do hand-check (~3.59 ±0.05)", vn.n_gust_vc);
+    // PIN ATUALIZADO (ciclo 15, backlog #13, spec §7.4): `3.59 → 3.572607`.
+    // `n_gust_vc` está IMÓVEL em 3,572607 desde o ciclo 11; o pin 3,59 vinha do
+    // hand-check aproximado do brief da task 4.3 e nunca foi o valor do
+    // pipeline, em commit nenhum. Tolerância INALTERADA (0,05).
+    assert!((vn.n_gust_vc - 3.572607).abs() < 0.05, // PIN: vn_diagram.n_gust_vc
+        "n_gust_vc {:.4} fora do pin (~3.572607 ±0.05)", vn.n_gust_vc);
     // < n_lim_pos no envelope pesado → manobra governa aqui.
     assert!(vn.n_gust_vc < vn.n_lim_pos);
 

@@ -910,7 +910,7 @@ fn engine_padrao_explicito_com_out_tempfile_reporta_fail_honesto_ciclo12_decolag
     // pesada (W_dg de envelope maior) e o `n_design` cai de 4,201 para
     // 4,171 g — efeitos que quase se cancelam no flutter.
     let flutter = spec["structure"]["flutter_speed_kmh"].as_f64().unwrap();
-    assert!((flutter - 698.5).abs() < 7.0, // ±1%, padrão dos pins de performance
+    assert!((flutter - 698.5).abs() < 7.0, // ±1%, padrão dos pins de performance // PIN: structure.flutter_speed_kmh
         "flutter_speed_kmh = {flutter:.1} divergiu do pin honesto ≈698,5 (±1%)");
 
     let _ = std::fs::remove_file(&out_path);

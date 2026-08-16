@@ -225,8 +225,8 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // porque este pin NÃO está na tabela da spec §11, que só projeta o
     // baseline Toyota; verificado por sonda direta — J baixo é a causa
     // única, não há anomalia). TOLERÂNCIAS INALTERADAS (±1%).
-    let mtow_expected = 994.067254_f64;
-    let fuel_expected = 75.218966_f64;
+    let mtow_expected = 994.067254_f64; // PIN: NAO-PUBLICADO — cenário Rotax + missão ferry, não o par Toyota+default que gera o aircraft_spec.json commitado
+    let fuel_expected = 75.218966_f64; // PIN: NAO-PUBLICADO — idem
 
     assert!((mtow_mission - mtow_expected).abs() / mtow_expected < 0.01,
         "MTOW de missão convergido ({mtow_mission:.1}kg) deveria estar a ±1% de {mtow_expected}kg \
@@ -272,7 +272,7 @@ fn rotax_missao_ferry_gera_spec_completo_data_driven() {
     // parte da folga do tanque: 72,71% → **71,069629%** (old→new,
     // −1,64 pp). Continua MUITO acima do piso de 5% — nenhuma violação
     // nova.
-    let fuel_margin_pct_expected = 71.069629_f64;
+    let fuel_margin_pct_expected = 71.069629_f64; // PIN: NAO-PUBLICADO — cenário Rotax + missão ferry, não o par Toyota+default que gera o aircraft_spec.json commitado
     assert!((fuel_margin_pct - fuel_margin_pct_expected).abs() < 1.0,
         "margem de combustível ({fuel_margin_pct:.2}%) deveria estar próxima do pin honesto \
          ~{fuel_margin_pct_expected}% (mudou o comportamento do sizing? atualize o pin)");

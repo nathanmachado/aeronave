@@ -121,6 +121,7 @@ fn massa_do_motor_afeta_oew_e_cg() {
          do motor ({:.1} kg) — a massa do item 'Motor + acessórios' flui direto \
          do EngineSpec para o item de peso, sem outros termos dependentes dela",
         wb_toyota.oew_kg - wb_rotax.oew_kg, mass_delta);
+    // PIN: NAO-PUBLICADO — diferença OEW Toyota−Rotax, comparação sintética
     assert!((wb_toyota.oew_kg - wb_rotax.oew_kg - 111.0).abs() < 5.0,
         "delta de OEW esperado ~111 kg (195 kg Toyota - 84 kg Rotax), obtido {:.1} kg",
         wb_toyota.oew_kg - wb_rotax.oew_kg);
@@ -313,7 +314,7 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // projeto), que mudou de forma em relação ao polinômio apagado; a
     // preservação "por construção" da spec §3.2 vale só no PONTO de
     // cruzeiro, não no MTOW convergido pelo laço completo.
-    let endurance_pin_h = 7.236_831_147;
+    let endurance_pin_h = 7.236_831_147; // PIN: propulsion.endurance_h
     assert!((sized.prop.endurance_h - endurance_pin_h).abs() < 1e-3,
         "Autonomia (informativa) {:.6} h divergiu do pin pós-E7 {:.6} h",
         sized.prop.endurance_h, endurance_pin_h);
@@ -359,7 +360,7 @@ fn autonomia_e_alcance_informativos_tanque_cheio_no_mtow_convergido() {
     // vs o valor pré-ciclo-13 (2.027,070681 km, `ed537ae`) pela mesma causa
     // (segmento de subida usa a curva `FoM(J)` inteira, não só o ponto de
     // projeto) — ver relatório da task.
-    let range_pin_km = 2_026.312721;
+    let range_pin_km = 2_026.312721; // PIN: propulsion.range_km
     assert!((sized.prop.range_km - range_pin_km).abs() < 1e-2,
         "Alcance (informativo) {:.6} km divergiu do pin pós-E7 {:.6} km",
         sized.prop.range_km, range_pin_km);
@@ -545,10 +546,13 @@ fn margem_de_combustivel_no_mtow_convergido() {
     // **22,8424183377 L (~9,6317470340%)** (old→new, −13,10%). Continua
     // POSITIVA, bem acima do piso de projeto. Tolerâncias INALTERADAS
     // (0,1).
-    let margem_pin_l = 22.842_418_337_7;
+    let margem_pin_l = 22.842_418_337_7; // PIN: sizing.fuel_margin_l
     assert!((margem_l - margem_pin_l).abs() < 0.1,
         "margem de combustível {margem_l:.4} L divergiu do valor medido pós-ciclo-13 \
          {margem_pin_l:.4} L");
+    // convenção de denominador diferente de `sizing.fuel_margin_pct` (% do
+    // exigido, não da capacidade) — ver comentário do teste, linhas 465-478
+    // PIN: NAO-PUBLICADO — convenção de denominador diferente de sizing.fuel_margin_pct
     assert!((margem_pct - 9.631_747_034_0).abs() < 0.1,
         "margem percentual {margem_pct:.4}% divergiu do valor medido pós-ciclo-13 \
          ~9,6317%");
@@ -671,6 +675,7 @@ fn toyota_v_max_regressao_310kmh() {
     // FIXA de 1.461 kg, nenhum efeito de MTOW aqui): 294,3754282745 →
     // **293,3314186794 km/h** (old→new, −1,044 km/h, −0,35%). Tolerância
     // INALTERADA (1 km/h).
+    // PIN: NAO-PUBLICADO — max_level_speed_ms com massa sintética 1.461 kg, não o MTOW convergido
     let v_max_pre_refactor_kmh = 293.3314186794;
     assert!((v_max_kmh - v_max_pre_refactor_kmh).abs() < 1.0,
         "V_max nivelada {v_max_kmh:.2} km/h divergiu do valor pós-E10 \
@@ -941,7 +946,7 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // sobe de volta e o laço de MTOW realimenta: 1.535,4394512537 →
     // **1.538,3323035177 kg** (old→new, +2,893 kg, +0,188%). Tolerância
     // INALTERADA (0,5 kg).
-    let mtow_convergido_kg = 1_538.332_303_517_7;
+    let mtow_convergido_kg = 1_538.332_303_517_7; // PIN: sizing.mtow_mission_kg
     // 7.599257165 h (pré-E7). Campanha E7: MTOW convergido menor ⟹ menos
     // arrasto ⟹ menos consumo de cruzeiro (informativo, tanque cheio) ⟹
     // mais horas com o mesmo tanque: 7.599257 → **7.676424619 h** (old→new).
@@ -981,7 +986,7 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // correta, consumo sobe de volta, MTOW convergido sobe um fio, menos
     // horas com o mesmo tanque: 7,3531379349 → **7,2368311470 h**
     // (old→new, −1,58%). Tolerância INALTERADA (1e-5).
-    let endurance_h = 7.236_831_147_0;
+    let endurance_h = 7.236_831_147_0; // PIN: propulsion.endurance_h
     // 30.792483387 L/h (pré-E7). Campanha E7: MTOW convergido menor ⟹
     // menos arrasto ⟹ menos potência requerida em cruzeiro: 30.792483 →
     // **30.482941164 L/h** (old→new).
@@ -1021,7 +1026,7 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // âncora correta, mais potência requerida, mais consumo: 31,8231484397
     // → **32,3345944166 L/h** (old→new, +1,61%). Tolerância INALTERADA
     // (5e-5).
-    let fc_lph = 32.334_594_416_6;
+    let fc_lph = 32.334_594_416_6; // PIN: propulsion.fc_cruise_lph
     // 885.0 → 890.0 kg (+5 kg, item emp_horizontal 22→27kg — único item de
     // massa alterado que afeta o OEW; avionicos/bateria se cancelam). Task
     // refino-ciclo2 (1b): 890.0 → 890.000018 kg — a massa da empenagem
@@ -1082,7 +1087,7 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // Total: 885,333291 → **899,119935 kg** (old→new, +13,79 kg, +1,56% —
     // bate com o "~+13,8 kg" previsto no plano da campanha). Tolerância do
     // assert INALTERADA (5e-5).
-    let oew_kg = 899.119934921;
+    let oew_kg = 899.119934921; // PIN: weight.oew_kg
 
     assert!((sized.state.mtow_kg - mtow_convergido_kg).abs() < 0.5,
         "MTOW convergido {:.6} kg divergiu do valor medido na Task 5.2 (cooling_drag_fraction) \
@@ -1164,7 +1169,7 @@ fn golden_toyota_baseline_regressao_task_2_1() {
     // fixo — MTOW convergido sobe um fio (ver `mtow_convergido_kg` acima),
     // mais arrasto induzido em V_max: 292,2280131801 → **291,0763415627
     // km/h** (old→new, −1,152 km/h, −0,39%). Tolerância INALTERADA (1e-3).
-    let v_max_pos_task_5_2_kmh = 291.076_341_562_7;
+    let v_max_pos_task_5_2_kmh = 291.076_341_562_7; // PIN: performance.v_cruise_kmh
     assert!((v_max_kmh - v_max_pos_task_5_2_kmh).abs() < 1e-3,
         "V_cruise nivelada {v_max_kmh:.6} km/h divergiu do valor pós-E10 \
          {v_max_pos_task_5_2_kmh:.6} km/h", );
@@ -1352,6 +1357,7 @@ fn tracao_estatica_do_baseline_real_permanece_congelada() {
     println!("thrust_available_n(0)={t0:.10}N");
 
     // Congelado spec §9.2/§3.1: 3.740,0919357761986 N.
+    // PIN: NAO-PUBLICADO — tração estática isolada em V=0; não vira campo do JSON
     let congelado = 3740.0919357761986;
     assert!((t0 - congelado).abs() < 1e-6,
         "thrust_available_n(0) = {t0:.10} diverge do congelado {congelado:.10}");
@@ -1732,14 +1738,14 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // confirmado, zero divergência além do ponto flutuante. Tolerância
     // INALTERADA (1%).
     let pins: [(&str, f64, f64, f64); 8] = [
-        ("vx_kmh",             perf.vx_kmh,             138.9140767922, 0.01),
-        ("vy_kmh",              perf.vy_kmh,             167.4067945716, 0.01),
-        ("best_glide_kmh",      perf.best_glide_kmh,     173.3095981182, 0.01),
-        ("glide_ratio",         perf.glide_ratio,         15.9211771869, 0.01),
-        ("climb_gradient_pct",  perf.climb_gradient_pct,   7.9132771517, 0.01),
-        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    704.0912242361, 0.01),
-        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    858.5934246438, 0.01),
-        ("ldg_50ft_m",          perf.ldg_50ft_m,         439.2750776989, 0.01),
+        ("vx_kmh",             perf.vx_kmh,             138.9140767922, 0.01), // PIN: performance.vx_kmh
+        ("vy_kmh",              perf.vy_kmh,             167.4067945716, 0.01), // PIN: performance.vy_kmh
+        ("best_glide_kmh",      perf.best_glide_kmh,     173.3095981182, 0.01), // PIN: performance.best_glide_kmh
+        ("glide_ratio",         perf.glide_ratio,         15.9211771869, 0.01), // PIN: performance.glide_ratio
+        ("climb_gradient_pct",  perf.climb_gradient_pct,   7.9132771517, 0.01), // PIN: performance.climb_gradient_pct
+        ("to_50ft_paved_m",     perf.to_50ft_paved_m,    704.0912242361, 0.01), // PIN: performance.to_50ft_paved_m
+        ("to_50ft_grass_m",     perf.to_50ft_grass_m,    858.5934246438, 0.01), // PIN: performance.to_50ft_grass_m
+        ("ldg_50ft_m",          perf.ldg_50ft_m,         439.2750776989, 0.01), // PIN: performance.ldg_50ft_m
     ];
     for (nome, obtido, esperado, tol_frac) in pins {
         let tol = esperado.abs() * tol_frac;
@@ -1796,7 +1802,7 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // Ciclo 13 (task 3, ERRATUM §3.2.1): hand-check RE-CONGELADO no valor
     // medido pós-recalibração de `fom_design` (7,913277%, ver tabela
     // old→new acima). Tolerância ±0,2 p.p. MANTIDA.
-    let hand_check_esperado_pct = 7.913_277_151_7;
+    let hand_check_esperado_pct = 7.913_277_151_7; // PIN: performance.climb_gradient_pct
     let hand_check_tol_pp = 0.2;
     assert!((perf.climb_gradient_pct - hand_check_esperado_pct).abs() < hand_check_tol_pp,
         "climb_gradient_pct = {:.6}% divergiu do hand-check congelado (ciclo 13, lei única de \
@@ -1867,12 +1873,12 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     //                        honestidade)
     //   to_distance_grass_m: 940.5909831152 → **951.3920558516**  (+1,15%
     //                        — EXCEDE a tolerância de 1%, precisa de re-pin)
-    let to_distance_paved_novo_pin = 719.6387552401;
+    let to_distance_paved_novo_pin = 719.6387552401; // PIN: performance.to_distance_paved_m
     assert!((perf.to_distance_paved_m - to_distance_paved_novo_pin).abs()
                 < to_distance_paved_novo_pin * 0.01,
         "to_distance_paved_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
         perf.to_distance_paved_m, to_distance_paved_novo_pin);
-    let to_distance_grass_novo_pin = 951.3920558516;
+    let to_distance_grass_novo_pin = 951.3920558516; // PIN: performance.to_distance_grass_m
     assert!((perf.to_distance_grass_m - to_distance_grass_novo_pin).abs()
                 < to_distance_grass_novo_pin * 0.01,
         "to_distance_grass_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
@@ -1895,7 +1901,7 @@ fn golden_toyota_baseline_task_4_7_novos_campos_de_performance() {
     // Ciclo 13 (task 3, ERRATUM §3.2.1): pouso não consome tração — move
     // só pelo MTOW convergido um fio maior (recalibração de `fom_design`):
     // 442.2032197371 → **442.7021220487** (old→new, +0,11%).
-    let landing_distance_pin = 442.702_122_048_7;
+    let landing_distance_pin = 442.702_122_048_7; // PIN: performance.landing_distance_m
     assert!((perf.landing_distance_m - landing_distance_pin).abs()
                 < landing_distance_pin * 0.01,
         "landing_distance_m {:.3} divergiu do pin pós-ciclo-12 {:.3}",
@@ -2108,6 +2114,7 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     let toml_240l = toml_real.replace("capacity_l = 260.0", "capacity_l = 240.0");
     let cfg = parse_aircraft(&toml_240l)
         .expect("TOML mutado (só capacity_l trocado) deveria continuar válido");
+    // PIN: NAO-PUBLICADO — config MUTADA em memória (tanque 240 L)
     assert_eq!(cfg.fuel_system.capacity_l, 240.0, "mutação sintética não teve efeito");
 
     let toyota = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -2168,6 +2175,7 @@ fn orchestrator_toyota_240l_suficiente_de_novo_com_missao_de_7h() {
     // ponto fixo — η de cruzeiro volta à âncora correta, mais combustível
     // exigido: 233,428091 → **236,8630674049 L** (old→new, +1,47%).
     // Tolerância INALTERADA (1e-2).
+    // PIN: NAO-PUBLICADO — resultado da config mutada acima; JSON hipotético
     let necessario_pin_l = 236.863_067_404_9;
     assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
         "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-13 {necessario_pin_l:.6} L");
@@ -2214,6 +2222,7 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
 
     match err {
         SizingError::CombustivelInsuficiente { necessario_l, capacidade_l } => {
+            // PIN: NAO-PUBLICADO — caminho de erro Rotax; falha antes de gerar relatório
             assert!((capacidade_l - 260.0).abs() < 1e-9,
                 "capacidade_l divergiu do config/aircraft/baseline_4seat.toml atual ({capacidade_l})");
             // Task 4.6: 409.32412997472005 L (pré-ISA-completa) → 409.452959981169 L
@@ -2286,6 +2295,7 @@ fn orchestrator_baseline_rotax_ainda_inviavel_com_tanque_260l() {
             // combustível exigido: 380,154212 → **381,9028306684 L**
             // (old→new, +0,46%). Achado qualitativo INALTERADO. Tolerância
             // INALTERADA (1e-2).
+            // PIN: NAO-PUBLICADO — caminho de erro Rotax; falha antes de gerar relatório
             let necessario_pin_l = 381.902_830_668_4;
             assert!((necessario_l - necessario_pin_l).abs() < 1e-2,
                 "necessario_l {necessario_l:.6} L divergiu do valor medido pós-ciclo-13 \
@@ -2367,7 +2377,7 @@ fn golden_toyota_baseline_restricoes_ws_pw_ambos_satisfeitos() {
     // baseline_regressao_task_2_1`, +2,893 kg) → ws_actual ≈ 1.060,4264 →
     // **1.062,4242887745 N/m²** (old→new, +0,19%; tolerância INALTERADA,
     // 1 N/m²).
-    let ws_actual_esperado = 1_062.424_288_774_5;
+    let ws_actual_esperado = 1_062.424_288_774_5; // PIN: sizing.constraints.ws_actual_n_m2
     assert!((c.ws_actual_n_m2 - ws_actual_esperado).abs() < 1.0,
         "ws_actual_n_m2 {:.4} divergiu do valor pinado {:.4} N/m² em mais de 1 N/m²",
         c.ws_actual_n_m2, ws_actual_esperado);
@@ -2491,6 +2501,7 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
 
     // MAGNITUDE pinada (medida): ≈1,4621 pp, folga de 2× — mesma disciplina
     // dos demais pins de resíduo/variação deste repositório.
+    // PIN: NAO-PUBLICADO — diferença entre dois limites de rotação recomputados; não é campo único
     let variacao_pin_pp = 1.4621;
     assert!((variacao_pp - variacao_pin_pp).abs() < 0.5 * variacao_pin_pp,
         "variação medida = {variacao_pp:.4} pp divergiu do pin honesto ≈{variacao_pin_pp:.4} pp");
@@ -2524,13 +2535,15 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
 #[test]
 fn baseline_declara_as_ancoras_da_figura_de_merito() {
     let cfg = baseline_state();
-    assert_eq!(cfg.propeller.fom_static, 0.75);
-    assert_eq!(cfg.propeller.fom_design, 0.815_976_999_245_887_96);
-    assert_eq!(cfg.propeller.j_design,   1.875_143_480_257_116_75);
+    assert_eq!(cfg.propeller.fom_static, 0.75); // PIN: NAO-PUBLICADO — fom_static é ENTRADA de config, não ecoada no relatório
+    assert_eq!(cfg.propeller.fom_design, 0.815_976_999_245_887_96); // PIN: NAO-PUBLICADO — fom_design, entrada de config
+    assert_eq!(cfg.propeller.j_design,   1.875_143_480_257_116_75); // PIN: NAO-PUBLICADO — j_design, entrada de config
 
     // O construtor da curva lê os três campos e nada mais.
     let fom = cfg.propeller.figure_of_merit();
+    // PIN: NAO-PUBLICADO — fom_static/fom_design são ENTRADAS de config, não são ecoadas no relatório
     assert_eq!(fom.at(0.0), 0.75);
+    // PIN: NAO-PUBLICADO — idem
     assert_eq!(fom.at(cfg.propeller.j_design), 0.815_976_999_245_887_96);
 }
 
@@ -2539,7 +2552,7 @@ fn baseline_declara_as_ancoras_da_figura_de_merito() {
 #[test]
 fn baseline_declara_o_fator_de_carga_do_flare() {
     let cfg = baseline_state();
-    assert_eq!(cfg.performance.flare_load_factor, 1.20);
+    assert_eq!(cfg.performance.flare_load_factor, 1.20); // PIN: NAO-PUBLICADO — flare_load_factor, entrada de config
 }
 
 /// ÂNCORA DE CRUZEIRO (spec §3.2 + ERRATUM §3.2.1, guarda §8.3).
@@ -2559,7 +2572,7 @@ fn baseline_declara_o_fator_de_carga_do_flare() {
 /// de grandeza, não o limite que o ponto fixo sustenta.
 #[test]
 fn eficiencia_de_cruzeiro_reproduz_a_ancora_do_polinomio_apagado() {
-    const ETA_ANCORA: f64 = 0.783_881_496_567_659_82;
+    const ETA_ANCORA: f64 = 0.783_881_496_567_659_82; // PIN: propulsion.prop_efficiency
     let cfg = baseline_state();
     let req = baseline_mission();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -2584,7 +2597,7 @@ fn rpm_de_cruzeiro_do_baseline_permanece_2640() {
     let req = baseline_mission();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let sized = size_aircraft(&cfg, &engine, &req).expect("baseline real deveria convergir");
-    assert_eq!(sized.prop.engine_rpm_cruise, 2640.0);
+    assert_eq!(sized.prop.engine_rpm_cruise, 2640.0); // PIN: propulsion.engine_rpm_cruise
 }
 
 /// RESÍDUO DE d'ALEMBERT ZERO — fecha o backlog #15 (PRIORIDADE ALTA).

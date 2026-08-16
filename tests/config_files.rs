@@ -1,3 +1,8 @@
+//! PIN: NAO-PUBLICADO — round-trip de parsing de TOML de ponta a ponta: todo
+//! literal deste arquivo compara uma struct Rust contra o literal do próprio
+//! `config/**/*.toml`, nunca contra saída de pipeline. São 50 literais que nada
+//! acrescentariam ao inventário de pins (ciclo 15, backlog #13).
+//!
 //! Testes de carregamento de arquivos de configuração reais do disco
 //! (`config/engines/*.toml`, `config/aircraft/*.toml`, `config/missions/*.toml`).
 //!
