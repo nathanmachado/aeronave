@@ -231,11 +231,18 @@ Se a ambiguidade fosse definida sobre elegíveis, as oito linhas da tabela de
 pins de `generic_engine.rs:1735-1742` reprovariam todas — a construção mais
 importante do inventário.
 
-Medido em `b8827e8` com o algoritmo completo, a ambiguidade ocorre em **uma
-única linha**: `generic_engine.rs:2533`, `assert_eq!(fom.at(0.0), 0.75)`, cujos
-dois cobrados são entradas de config. Recebe isenção, onde a ambiguidade é
-inofensiva porque nada é comparado — a checagem **só reprova por ambiguidade
-quando o marcador é vinculado**.
+Medido em `b8827e8` com o algoritmo completo **e as duas correções da §7.5**, a
+ambiguidade ocorre em **duas linhas**, e ambas são isentas:
+
+- `generic_engine.rs:2533`, `assert_eq!(fom.at(0.0), 0.75)` — os dois cobrados
+  são entradas de config.
+- `empennage.rs:117`, `assert!((9.2..10.2).contains(…))` — piso e teto de uma
+  banda de aceitação. **Esta linha só tem dois cobrados depois do FIX 1**; antes
+  dele o `10.2` era invisível, e a ambiguidade não aparecia porque metade do
+  problema estava escondida.
+
+A checagem **só reprova por ambiguidade quando o marcador é vinculado**, então
+as duas passam.
 
 Exemplos reais deste repositório:
 
@@ -346,15 +353,16 @@ encontrados.
 | `assert` OU ≥4 casas, sem exclusões | 190 |
 | … com tolerância excluída | 131 |
 | … com arquivo isento | 140 |
-| **… algoritmo completo da §5.2 — a regra adotada** | **70 literais em 69 linhas** |
+| **… algoritmo completo da §5.2 + correções da §7.5** | **70 literais em 68 linhas** |
 
-Distribuição dos 70: `generic_engine`=39, `control_surfaces`=8, `gear_tipback`=6,
-`vn_diagram`=6, `propeller`=4, `acceptance`=3, `empennage`=2, `cli`=1,
+Distribuição dos 70: `generic_engine`=39, `control_surfaces`=8, `vn_diagram`=6,
+`gear_tipback`=5, `propeller`=4, `acceptance`=3, `empennage`=3, `cli`=1,
 `schema_v4`=1.
 
-Destes, **44 são pins vinculáveis** (§7.1/§7.2, cada um com caminho JSON
-resolvido e valor já conferido contra o `aircraft_spec.json` de `b8827e8`) e os
-26 restantes recebem isenção.
+Destes, **47 são pins vinculáveis cobrados** e 23 recebem isenção. Some-se
+`empennage.rs:42`, que é pin real mas não é cobrado pela regra e recebe marcador
+voluntário: **48 vinculados**. Todos na §7.5.1, com caminho JSON resolvido e
+valor conferido contra o `aircraft_spec.json` de `b8827e8`.
 
 **A regra semântica custa o mesmo que o piso tipográfico.** O desenho aprovado
 projetava 70 sítios sob a regra de ≥4 casas; a regra por `assert`, uma vez
@@ -397,6 +405,8 @@ mutando arquivos do repositório**:
 | `arquivo_com_isencao_de_modulo_e_ignorado` | `//! PIN: NAO-PUBLICADO — …` no topo isenta o arquivo |
 | `literal_em_comentario_nao_exige_marcador` | `// valor antigo: 582.341118` → passa |
 | `notacao_cientifica_nao_e_vinculada` | `< 1e-9` não é candidato a vínculo |
+| `range_nao_engole_o_segundo_operando` | `(9.2..10.2).contains(…)` devolve **dois** literais — regressão do FIX 1 da §7.5 |
+| `string_de_multiplas_linhas_nao_vaza_literal` | a mensagem de `gear_tipback.rs:787-789`, cortada em duas linhas, não produz o fantasma `8.7855` — regressão do FIX 2 |
 | `doc_com_gatilho_sem_marcador_reprova` | linha com "HOJE" e `12,345678` sem marcador → falha |
 | `doc_com_valor_divergente_reprova` | marcador aponta `rc_sl_ms`, texto diz `4,999905` → falha |
 
@@ -414,6 +424,12 @@ apenas escrita.
 ---
 
 ## 7. Inventário de pins vinculáveis
+
+> **AVISO — §7.1, §7.2 e §7.3 estão SUPERSEDIDAS pela §7.5.** Foram levantadas
+> por leitura, antes de o scanner existir, e a revisão de plano provou que a
+> leitura errou: 11 sítios sem classificação, números de linha deslocados em até
+> 143 linhas, e um pin listado que a regra sequer cobra. Ficam registradas
+> porque a §7.4 argumenta a partir delas. **Quem for implementar usa a §7.5.**
 
 Levantado sobre `b8827e8`. Classe **(a)** = mapeável a campo do
 `aircraft_spec.json` do baseline real (Toyota + `baseline_4seat` + `default`).
@@ -537,6 +553,154 @@ carregar:
 | `generic_engine.rs:2527-2542` | `fom_static`/`fom_design`/`j_design`/`flare_load_factor` são **entradas** de config, não ecoadas no relatório |
 | `acceptance.rs:228-278` `994.067254`, `75.218966`, `71.069629` | cenário **Rotax + missão ferry**, não o par que gera o `aircraft_spec.json` commitado |
 | `config_files.rs` (bloco inteiro) | round-trip de parsing: compara struct contra o literal do próprio TOML, nunca saída de pipeline |
+
+---
+
+### 7.5 ERRATUM — inventário refeito a partir do scanner (AUTORITATIVO)
+
+A revisão de plano reprovou o ciclo com cinco achados. Três eram meus, e a raiz
+dos três é a mesma: **construí o inventário por leitura e depois escrevi a regra,
+em vez de rodar a regra e classificar o que ela devolvesse.** Um inventário de
+cobertura que não vem do próprio verificador não é inventário — é palpite bem
+apresentado.
+
+Além disso a revisão achou **dois bugs no algoritmo da §5.2**, ambos com
+ocorrência viva:
+
+- **Operador de range.** A supressão de "dígito precedido por `.`" (que existe
+  para não confundir campo com literal) engole o segundo operando de um range.
+  Em `empennage.rs:117`, `assert!((9.2..10.2).contains(…))`, o literal `10.2`
+  ficava **invisível ao scanner** — cobrado pela regra, jamais cobrado na
+  prática. **Correção:** `.` precedido de outro `.` é range, não separador
+  decimal, e não suprime.
+- **String de múltiplas linhas.** A máscara roda por linha e reinicia o estado
+  `em_string` a cada uma. Em `gear_tipback.rs:787-789` a mensagem de erro
+  continua na linha seguinte via `\`, e o `8.7855` do TEXTO era colhido como se
+  fosse código — um literal FANTASMA, que não existe. **Correção:** a máscara
+  passa a ser por arquivo, carregando `em_string` de uma linha para a próxima.
+
+**Medido, não presumido.** Reimplementei o scanner com as duas correções e rodei
+sobre `b8827e8`:
+
+| | literais | linhas | ambíguas |
+|---|---|---|---|
+| algoritmo com os dois bugs | 70 | 69 | 1 |
+| **algoritmo corrigido** | **70** | **68** | **2** |
+
+Os dois defeitos erram para lados opostos — um perde um literal real, o outro
+inventa um falso — e por isso **a contagem de literais não se move**. Foi só ao
+abrir por linha e por ambiguidade que a compensação apareceu.
+
+É a segunda vez neste mesmo ciclo em que um agregado imóvel esconde movimento
+embaixo dele: no #21, `range_km` varia 0,017% enquanto o gradiente atravessa um
+limite de aeronavegabilidade; aqui, "70" fica parado enquanto um pin real some e
+um fantasma nasce. **Duas ocorrências independentes da mesma armadilha, no mesmo
+ciclo, tornam a regra geral: um número que não se move não é evidência de que
+nada se moveu — é um convite a abrir o número.**
+
+**Contagem corrigida: 70 literais em 68 linhas** — perde o fantasma de
+`gear_tipback.rs:789`, ganha o `10.2` de `empennage.rs:117`. **47 vinculados
+cobrados + 1 vinculado voluntário + 23 isentos.**
+
+#### 7.5.1 Vinculados — 48 no total, todos conferidos contra `b8827e8`
+
+| sítio | literal | caminho JSON |
+|---|---|---|
+| `cli.rs:913` | `698.5` | `structure.flutter_speed_kmh` |
+| `control_surfaces.rs:44` | `2.0895` | `control_surfaces.aileron.span_m` |
+| `control_surfaces.rs:45` | `1.0304` | `control_surfaces.aileron.area_m2` |
+| `control_surfaces.rs:77` | `1.030418` | `control_surfaces.aileron.area_m2` |
+| `control_surfaces.rs:78` | `1.962538` | `control_surfaces.flap.area_m2` |
+| `control_surfaces.rs:79` | `1.165835` | `control_surfaces.elevator.area_m2` |
+| `control_surfaces.rs:80` | `0.459899` | `control_surfaces.rudder.area_m2` |
+| `control_surfaces.rs:138` | `0.0` | `control_surfaces.elevator.start_m` |
+| `empennage.rs:42` † | `3.134` | `empennage.s_horizontal_m2` |
+| `gear_tipback.rs:182` | `16.7940` | `landing_gear.tipback_angle_deg` |
+| `gear_tipback.rs:216` | `13.1865` | `landing_gear.tail_strike_margin_deg` |
+| `gear_tipback.rs:277` | `21.8973` | `landing_gear.nose_load_max_pct` |
+| `gear_tipback.rs:305` | `11.2869` | `landing_gear.nose_load_min_pct` |
+| `gear_tipback.rs:787` | `8.785_545_514_5` | `sizing.fuel_margin_pct` |
+| `generic_engine.rs:316` | `7.236_831_147` | `propulsion.endurance_h` |
+| `generic_engine.rs:362` | `2_026.312721` | `propulsion.range_km` |
+| `generic_engine.rs:548` | `22.842_418_337_7` | `sizing.fuel_margin_l` |
+| `generic_engine.rs:944` | `1_538.332_303_517_7` | `sizing.mtow_mission_kg` |
+| `generic_engine.rs:984` | `7.236_831_147_0` | `propulsion.endurance_h` |
+| `generic_engine.rs:1024` | `32.334_594_416_6` | `propulsion.fc_cruise_lph` |
+| `generic_engine.rs:1085` | `899.119934921` | `weight.oew_kg` |
+| `generic_engine.rs:1167` | `291.076_341_562_7` | `performance.v_cruise_kmh` |
+| `generic_engine.rs:1735` | `138.9140767922` | `performance.vx_kmh` |
+| `generic_engine.rs:1736` | `167.4067945716` | `performance.vy_kmh` |
+| `generic_engine.rs:1737` | `173.3095981182` | `performance.best_glide_kmh` |
+| `generic_engine.rs:1738` | `15.9211771869` | `performance.glide_ratio` |
+| `generic_engine.rs:1739` | `7.9132771517` | `performance.climb_gradient_pct` |
+| `generic_engine.rs:1740` | `704.0912242361` | `performance.to_50ft_paved_m` |
+| `generic_engine.rs:1741` | `858.5934246438` | `performance.to_50ft_grass_m` |
+| `generic_engine.rs:1742` | `439.2750776989` | `performance.ldg_50ft_m` |
+| `generic_engine.rs:1799` | `7.913_277_151_7` | `performance.climb_gradient_pct` |
+| `generic_engine.rs:1870` | `719.6387552401` | `performance.to_distance_paved_m` |
+| `generic_engine.rs:1875` | `951.3920558516` | `performance.to_distance_grass_m` |
+| `generic_engine.rs:1898` | `442.702_122_048_7` | `performance.landing_distance_m` |
+| `generic_engine.rs:2370` | `1_062.424_288_774_5` | `sizing.constraints.ws_actual_n_m2` |
+| `generic_engine.rs:2562` | `0.783_881_496_567_659_82` | `propulsion.prop_efficiency` |
+| `generic_engine.rs:2587` | `2640.0` | `propulsion.engine_rpm_cruise` |
+| `propeller.rs:57` | `1.76` | `propeller.diameter_m` |
+| `propeller.rs:61` | `0.493` | `propeller.tip_mach_static` |
+| `propeller.rs:63` | `0.459` | `propeller.tip_mach_cruise_helical` |
+| `propeller.rs:65` | `0.240` | `propeller.ground_clearance_m` |
+| `schema_v4.rs:330` | `0.007367` | `propeller.prop_clearance_critical_m` |
+| `vn_diagram.rs:93` | `242.633` | `vn_diagram.va_kmh` — **§7.4** |
+| `vn_diagram.rs:94` | `280.0` | `vn_diagram.vc_kmh` |
+| `vn_diagram.rs:95` | `350.0` | `vn_diagram.vd_kmh` |
+| `vn_diagram.rs:100` | `3.8` | `vn_diagram.n_lim_pos` |
+| `vn_diagram.rs:101` | `-1.52` | `vn_diagram.n_lim_neg` |
+| `vn_diagram.rs:105` | `3.59` | `vn_diagram.n_gust_vc` — **§7.4** |
+
+† `empennage.rs:42` **não é cobrado** pela regra (3 casas, linha sem `assert`).
+É um pin real e recebe marcador **voluntariamente** — marcar mais do que a regra
+exige é sempre permitido; marcar menos, nunca.
+
+**46 dos 48 batem.** Os dois que não são os da §7.4, e continuam sendo as duas
+únicas mudanças de literal autorizadas.
+
+**Os seis que o inventário lido tinha perdido**, todos conferidos e todos batendo:
+`control_surfaces.rs:44` (2,0894999999999997), `:45` (1,0304181034482756),
+`:138` (0,0), `generic_engine.rs:2587` (2640,0), `propeller.rs:57` (1,76) e
+`empennage.rs:42` (3,1339657839114095). **Cinco deles são pins que batiam por
+sorte** — nunca verificados por nada, e a spec afirmava cobertura sem os
+cobrir.
+
+#### 7.5.2 Isentos — 23, cada um com a razão que o marcador deve carregar
+
+| sítio | literal | razão |
+|---|---|---|
+| `acceptance.rs:228` | `994.067254` | cenário Rotax + missão ferry, não o par que gera o JSON commitado |
+| `acceptance.rs:229` | `75.218966` | idem |
+| `acceptance.rs:275` | `71.069629` | idem |
+| `control_surfaces.rs:161` | `2.0` | fator da fórmula (duas superfícies), não valor publicado |
+| `empennage.rs:117` | `9.2` | piso de uma banda de aceitação, não campo |
+| `empennage.rs:117` | `10.2` | teto da mesma banda |
+| `empennage.rs:124` | `100.0` | conversão fração→percentual |
+| `generic_engine.rs:124` | `111.0` | diferença OEW Toyota−Rotax, comparação sintética |
+| `generic_engine.rs:552` | `9.631_747_034_0` | convenção de denominador diferente de `sizing.fuel_margin_pct` (% do exigido, não da capacidade) — ver comentário do teste, linhas 465-478 |
+| `generic_engine.rs:674` | `293.3314186794` | `max_level_speed_ms` com massa sintética 1.461 kg, não o MTOW convergido |
+| `generic_engine.rs:1355` | `3740.0919357761986` | tração estática isolada em V=0; não vira campo do JSON |
+| `generic_engine.rs:2111` | `240.0` | config MUTADA em memória (tanque 240 L) |
+| `generic_engine.rs:2171` | `236.863_067_404_9` | resultado da config mutada acima; JSON hipotético |
+| `generic_engine.rs:2217` | `260.0` | caminho de erro Rotax; falha antes de gerar relatório |
+| `generic_engine.rs:2289` | `381.902_830_668_4` | idem |
+| `generic_engine.rs:2494` | `1.4621` | diferença entre dois limites de rotação recomputados; não é campo único |
+| `generic_engine.rs:2527` | `0.75` | `fom_static` é ENTRADA de config, não ecoada no relatório |
+| `generic_engine.rs:2528` | `0.815_976_999_245_887_96` | `fom_design`, entrada de config |
+| `generic_engine.rs:2529` | `1.875_143_480_257_116_75` | `j_design`, entrada de config |
+| `generic_engine.rs:2533` | `0.0` e `0.75` | **linha ambígua** (dois cobrados): avalia `FoM.at()` sobre entradas de config |
+| `generic_engine.rs:2534` | `0.815_976_999_245_887_96` | idem |
+| `generic_engine.rs:2542` | `1.20` | `flare_load_factor`, entrada de config |
+
+Mais a isenção de módulo em `tests/config_files.rs` (§5.5).
+
+**O fantasma some.** `gear_tipback.rs:789` (`8.7855`) não aparece nesta lista
+porque, corrigido o bug da máscara, ele deixa de existir: é texto de mensagem de
+erro, não literal.
 
 ---
 
