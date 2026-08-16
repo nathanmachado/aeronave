@@ -1174,6 +1174,14 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
     // novas em `[propeller]`, logo abaixo do bloco de validação de
     // `propeller` (`propeller.fom_static`/`propeller.fom_design`).
     require_positive("performance.rotation_time_s", cfg.performance.rotation_time_s)?;
+    if !(cfg.performance.flare_load_factor > 1.0) || cfg.performance.flare_load_factor >= 2.0 {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: performance.flare_load_factor = {} deve estar \
+             em (1,0; 2,0) — em n = 1,0 o raio do arco de flare DIVERGE (R = V_ref²/(g(n−1))) \
+             e a aeronave nunca sai da rampa; acima de 2,0 não é pilotagem de pouso",
+            cfg.performance.flare_load_factor
+        )));
+    }
     require_positive("performance.flare_time_s", cfg.performance.flare_time_s)?;
     require_finite("performance.approach_angle_deg", cfg.performance.approach_angle_deg)?;
     if cfg.performance.approach_angle_deg <= 1.0 || cfg.performance.approach_angle_deg >= 10.0 {
@@ -1685,6 +1693,7 @@ mod tests {
             mu_roll_paved = 0.04
             mu_roll_grass = 0.08
             rotation_time_s = 1.0
+            flare_load_factor = 1.25
             flare_time_s = 1.5
             approach_angle_deg = 3.0
             [control_surfaces]
@@ -2753,6 +2762,21 @@ mod tests {
         let toml = aircraft_toml_valido().replace("rotation_time_s = 1.0", "rotation_time_s = -1.0");
         let err = parse_aircraft(&toml).unwrap_err();
         assert!(err.to_string().contains("performance.rotation_time_s"), "{err}");
+    }
+
+    #[test]
+    fn rejeita_flare_load_factor_fora_da_faixa() {
+        for (linha_antiga, linha_nova) in [
+            ("flare_load_factor = 1.25", "flare_load_factor = 1.0"),
+            ("flare_load_factor = 1.25", "flare_load_factor = 0.8"),
+            ("flare_load_factor = 1.25", "flare_load_factor = 2.5"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains("performance.flare_load_factor"), "{err}");
+            assert!(err.to_string().contains("DIVERGE"),
+                    "a mensagem tem que dizer POR QUE n=1 é proibido: {err}");
+        }
     }
 
     #[test]

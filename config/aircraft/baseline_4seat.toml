@@ -494,6 +494,9 @@ mu_roll_grass = 0.08       # grama firme de fazenda (faixa curta 0,05 / alta 0,1
 # governa a lei de tração única em toda a faixa de V (ver
 # agents::propulsion::FigureOfMerit, agents::performance::thrust_available_n).
 rotation_time_s = 1.0      # tempo de rotação até V_LOF, s
+# Fator de carga do arco de flare (ciclo 14, spec §2.2) — substitui
+# flare_time_s. R = V_ref²/(g(n-1)); n=1,20 dá R=651,1 m, h_flare=2,596 m.
+flare_load_factor = 1.20
 flare_time_s = 1.5         # tempo de flare no pouso a V_ref, s
 approach_angle_deg = 3.0   # ângulo de aproximação padrão até 15m (50 ft)
 

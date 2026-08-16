@@ -2498,6 +2498,14 @@ fn baseline_declara_as_ancoras_da_figura_de_merito() {
     assert_eq!(fom.at(cfg.propeller.j_design), 0.815_976_999_245_887_96);
 }
 
+/// O fator de carga do flare é técnica de pilotagem + limite estrutural,
+/// não uma cronometragem. Ciclo 14, spec §2.2.
+#[test]
+fn baseline_declara_o_fator_de_carga_do_flare() {
+    let cfg = baseline_state();
+    assert_eq!(cfg.performance.flare_load_factor, 1.20);
+}
+
 /// ÂNCORA DE CRUZEIRO (spec §3.2 + ERRATUM §3.2.1, guarda §8.3).
 /// `fom_design` é calibrada para que a lei única reproduza, no ponto de
 /// cruzeiro, a eficiência que o polinômio JavaProp apagado entregava —

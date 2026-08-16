@@ -649,6 +649,15 @@ pub struct PerformanceCfg {
     /// Tempo de rotação — do início da rotação até V_LOF, a V_LOF
     /// aproximadamente constante (s).
     pub rotation_time_s: f64,
+    /// Fator de carga do FLARE de pouso (ciclo 14, spec §2.2) — substitui
+    /// `flare_time_s`. O flare é um arco de recolhimento de raio
+    /// `R = V_ref²/(g·(n−1))`, não uma cronometragem: com `n` maior o arco é
+    /// mais fechado, consome menos altura e termina antes.
+    ///
+    /// Estritamente > 1,0 — em `n = 1` o raio DIVERGE (voo reto, o flare
+    /// nunca termina). Teto de 2,0: fator de carga de flare acima disso não é
+    /// pilotagem de pouso.
+    pub flare_load_factor: f64,
     /// Tempo de flare/arredondamento no pouso, a V_ref aproximadamente
     /// constante (s).
     pub flare_time_s: f64,
@@ -983,6 +992,7 @@ pub mod test_fixtures {
                 mu_roll_paved: 0.045,
                 mu_roll_grass: 0.085,
                 rotation_time_s: 1.2,
+                flare_load_factor: 1.25,
                 flare_time_s: 1.4,
                 approach_angle_deg: 3.2,
             },
