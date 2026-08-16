@@ -198,6 +198,21 @@ fn mascara_arquivo(conteudo: &str) -> Vec<String> {
         }
         saida.push(m.into_iter().collect());
     }
+    // Carregar estado pelo arquivo inteiro tem um modo de falha próprio: se a
+    // máscara ficar PRESA em modo string — um `r#"..."#`, um literal de
+    // caractere `'"'`, uma aspa desemparelhada — ela apaga em silêncio todo
+    // literal do resto do arquivo. Cobertura a menos, sem erro, sem aviso:
+    // exatamente a doença que este ciclo existe para curar, só que dentro do
+    // próprio verificador. Um arquivo Rust válido nunca termina dentro de uma
+    // string, então terminar dentro de uma é prova de que a máscara errou.
+    assert!(
+        !em_string,
+        "a máscara terminou o arquivo DENTRO de uma string — construção não \
+         suportada (raw string `r#\"…\"#`, literal de caractere `'\\\"'`, ou aspa \
+         desemparelhada). A partir do ponto em que ela se perdeu, TODO literal \
+         foi apagado e a cobertura caiu sem aviso. Estenda a máscara antes de \
+         confiar nesta varredura."
+    );
     saida
 }
 
@@ -221,6 +236,14 @@ fn mascara_respeita_aspa_escapada() {
 }
 
 #[test]
+#[should_panic(expected = "DENTRO de uma string")]
+fn mascara_presa_em_string_reprova_alto() {
+    // Uma aspa desemparelhada faria a máscara apagar TODO o resto do arquivo em
+    // silêncio. A guarda converte perda de cobertura em falha alta.
+    mascara_arquivo("let s = \"nunca fecha;\nlet x = 1.23456;\n");
+}
+
+#[test]
 fn string_de_multiplas_linhas_nao_vaza_literal() {
     // forma real de tests/gear_tipback.rs:787-789
     let fonte = "assert!((pct - 8.785_545_514_5).abs() < 0.1,\n    \"margem {pct:.4}% divergiu do pin honesto \\\n     ≈8.7855%\");\n";
@@ -238,7 +261,7 @@ fn string_de_multiplas_linhas_nao_vaza_literal() {
 cargo test --test pins_vs_json
 ```
 
-Esperado: 3 testes passando. Se `string_de_multiplas_linhas_nao_vaza_literal`
+Esperado: 4 testes passando. Se `string_de_multiplas_linhas_nao_vaza_literal`
 falhar, o `em_string` não está sendo carregado entre linhas — é o FIX 2 e é o
 ponto inteiro deste passo. **Cole a saída no relatório.**
 
@@ -428,7 +451,7 @@ FIX 1 e rode de novo.
 cargo test --test pins_vs_json
 ```
 
-Esperado ao fim: **9 testes passando.**
+Esperado ao fim: **10 testes passando.**
 
 - [ ] **Passo 5: escreva marcadores, resolução de caminho e precisão**
 
@@ -481,6 +504,17 @@ fn marcadores_markdown(linha: &str) -> Vec<(Marcador, usize)> {
         let abre = base + rel;
         let Some(f) = linha[abre..].find("-->") else { break };
         let fecha = abre + f + 3;
+        // `<!-->` é um comentário HTML degenerado: o `-->` começa a menos de 4
+        // bytes do `<!--`, e `abre + 4 > fecha - 3`. Fatiar com início maior
+        // que fim é PANIC do Rust, não falha de teste — o arquivo de teste
+        // inteiro morre sem dizer por quê. Não há ocorrência hoje, mas o custo
+        // da guarda é uma linha e o custo de não tê-la é um panic opaco no dia
+        // em que alguém escrever um comentário HTML malformado em qualquer
+        // ponto do documento.
+        if fecha < abre + 7 {
+            base = fecha;
+            continue;
+        }
         let interior = &linha[abre + 4..fecha - 3];
         if let Some(p) = interior.find("PIN:") {
             out.push((interpreta_marcador(&interior[p + 4..]), fecha));
@@ -576,6 +610,19 @@ fn marcadores_markdown_leem_todos_os_da_linha() {
 }
 
 #[test]
+fn comentario_html_degenerado_nao_causa_panic() {
+    // `<!-->` tem o `-->` a menos de 4 bytes do `<!--`: sem guarda, o fatiamento
+    // de `interior` teria início maior que fim e o arquivo de teste inteiro
+    // morreria com um panic opaco.
+    assert!(marcadores_markdown("texto <!--> mais texto").is_empty());
+    assert!(marcadores_markdown("<!---->").is_empty());
+    // e um marcador legítimo logo depois de um degenerado continua sendo lido
+    let m = marcadores_markdown("<!--> **<!-- PIN:performance.rc_sl_ms -->3,460341**");
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].0, Marcador::Vinculado("performance.rc_sl_ms".into()));
+}
+
+#[test]
 fn numero_ptbr_le_virgula_decimal_e_sinal() {
     assert_eq!(numero_ptbr("18,268251% < 43,460036%").as_deref(), Some("18.268251"));
     assert_eq!(numero_ptbr(" -8,818504% MAC (HOJE)").as_deref(), Some("-8.818504"));
@@ -614,7 +661,7 @@ fn precisao_escrita_e_o_que_manda() {
 cargo test --test pins_vs_json
 ```
 
-Esperado: **14 testes passando.** Se `precisao_escrita_e_o_que_manda` falhar em
+Esperado: **16 testes passando.** Se `precisao_escrita_e_o_que_manda` falhar em
 qualquer das três últimas asserções, a função está frouxa e deixaria passar
 exatamente os defeitos que este ciclo existe para pegar.
 
@@ -925,7 +972,7 @@ cargo test --release
 git diff b8827e8 -- src/ aircraft_spec.json
 ```
 
-Esperado: **26 testes** no arquivo novo, suíte completa verde, `git diff` vazio.
+Esperado: **28 testes** no arquivo novo, suíte completa verde, `git diff` vazio.
 
 ```
 git add tests/pins_vs_json.rs
@@ -1410,8 +1457,8 @@ Rodar depois da Task 4, antes da revisão final de branch:
 2. `git diff b8827e8 -- aircraft_spec.json` → **vazio**
 3. `git diff b8827e8 -- src/` → **vazio**
 4. `grep -n "SCHEMA_VERSION" src/models/specs.rs` → ainda **5.7**
-5. `cargo test --test pins_vs_json` → **30 testes** (26 da Task 1, 2 da Task 2,
-   2 da Task 3); suíte total ≥ **549**
+5. `cargo test --test pins_vs_json` → **32 testes** (28 da Task 1, 2 da Task 2,
+   2 da Task 3); suíte total ≥ **551**
 6. `git diff b8827e8 -- tests/` contém apenas: comentários `PIN:`, o arquivo
    novo, e **exatamente dois** literais alterados com seus `old→new`
 7. Nenhuma tolerância alterada em lugar nenhum
