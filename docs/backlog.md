@@ -1613,3 +1613,111 @@ comportou assim, só a PROSA de uma seção fazia a alegação mais forte que o
 código nunca sustentou. Ponteiro: `docs/aircraft_spec.schema.md` §4
 ("`fidelity`, `violations`, `warnings`"), spec ciclo16, Task 5 Passo 6
 (ERRATUM da revisão de plano).
+
+## 37. `robustness.flips[]` é um canal paralelo que a incerteza do ciclo 16 NÃO alcança
+
+Achado da revisão final do ciclo 16. **Não se manifesta no baseline de hoje** —
+e é exatamente por isso que está escrito.
+
+Cada `RobustnessFlip` tem uma violação companheira em `violations[]` (ver
+`docs/aircraft_spec.schema.md`, seção de `robustness`). Quando um check vira
+dentro da banda de `propeller.fom_static`, quem recebe o prefixo
+`INDETERMINADO — ` é a **companheira em `violations[]`**, porque é sobre ela
+que `incerteza::publica_violacoes` opera. O `flip` em si é calculado e
+serializado ANTES e independentemente de `validation::incerteza::analisa`
+(`src/main.rs`, `robustness: Some(robustness.clone())`).
+
+**Consequência se um flip de robustez cair na banda:** o JSON passa a ter
+**duas visões estruturadas do mesmo evento discordando**. `violations[]` diria
+"o modelo não sustenta este veredito"; `robustness.flips[]` continuaria
+narrando uma falha lisa e determinada, com `valor` e `limite` numéricos e
+nenhuma marca de incerteza.
+
+O consumidor prejudicado é o **mais bem-comportado**: quem lê o array
+estruturado em vez de fazer parsing de prosa perde a incerteza inteira. É a
+classe de risco que o ciclo 16 existe para fechar, num canal que ele não cobre.
+
+Hoje não ocorre porque o único indeterminado do baseline (`gradiente_cs2365`)
+não é um flip de robustez. Isso é propriedade do baseline, não do desenho.
+
+**Conserto proposto:** dar a `RobustnessFlip` um campo `indeterminado: bool`
+(ou `veredito`) alimentado pelo mesmo `inc.checks`, para que as duas visões não
+possam divergir. Não feito no ciclo 16 porque exigiria mexer no caminho de
+serialização durante a fix wave, com risco ao invariante do artefato — e a
+regra da casa é uma fix wave só. Ponteiro: spec ciclo16 §9 item 6,
+`src/validation/incerteza.rs::publica_violacoes`, `src/models/specs.rs`
+(`RobustnessFlip`).
+
+## 38. A bisseção do breakeven prova UMA travessia, não a unicidade dela
+
+Achado da revisão final do ciclo 16. Não é defeito do número publicado.
+
+O bracket publicado em `uncertainty.checks[].breakeven_lo/hi` **testemunha uma
+travessia real**: `bisseca` exige, por `assert!` (de verdade, não
+`debug_assert!`), que os dois extremos do bracket tenham vereditos opostos, e o
+teste `breakeven_publicado_e_provado_re_rodando_o_pipeline` reconfirma
+re-executando o pipeline nos dois lados.
+
+O que o código **não** prova é que a travessia é a **única** dentro da banda.
+Se `viola(fom)` não fosse monotônica ali — fisicamente improvável para este
+parâmetro, mas não verificado —, existiriam outras travessias, e a bisseção
+convergiria para uma delas sem dizer qual. O texto publicado ("breakeven em
+[…]") sugere unicidade que não foi verificada.
+
+A spec do ciclo 16 declara isso na §5.4 ("sob travessia dupla o número
+publicado é UM breakeven medido, não 'o único'") e, após a revisão final,
+também na §9 item 7 — porque §9 é onde o leitor procura lacunas.
+
+**Conserto proposto:** um teste de propriedade que amostre `viola(fom)` em N
+pontos da banda e falhe se detectar mais de uma transição, ou aceitar a lacuna
+declarada. Ponteiro: `src/validation/incerteza.rs::bisseca`, spec ciclo16 §5.4
+e §9.
+
+## 39. A fronteira de garantia da INCERTEZA do ciclo 16 — o que o mecanismo prova e o que ele NÃO prova
+
+Irmão do item #30, que fez a mesma medição para o `pins_vs_json.rs` do ciclo
+15. Medido pela revisão final, rodando os ataques, não estimado.
+
+**Quanto custa fazer o modelo esconder uma indeterminação?**
+
+1. **Atacar o código** — fazer `classifica` ignorar os extremos e decidir só
+   pelo nominal: **~4 linhas numa função**. Blast radius: **9 testes em 4
+   arquivos** (2 unitários puros, `tests/cli.rs`, 4 em `tests/incerteza.rs`, 2
+   em `tests/schema_v4.rs`). Nenhuma edição acidental sobrevive.
+2. **Estreitar a banda em config** — `fom_static_tol_pct` de 10,0 para 4,0
+   tira o `gradiente_cs2365` da banda (o breakeven está a +4,649% do nominal):
+   **1 linha de TOML**. Reprovam **9 testes em 4 arquivos** SE o artefato não
+   for regenerado. Se o atacante regenerar e commitar honestamente, a mudança
+   de política fica **visível no `git diff`** — mas para a suíte voltar a verde
+   ele ainda precisa reescrever ou apagar pelo menos **4 testes cujo NOME
+   denuncia o que fazem**: `baseline_tem_exatamente_um_check_indeterminado`,
+   `breakeven_publicado_e_provado_re_rodando_o_pipeline`,
+   `contagem_de_violacoes_e_igual_com_banda_larga_ou_estreita`,
+   `uncertainty_bloco_publica_banda_efetiva_e_o_gradiente_indeterminado`.
+3. **Colapsar a banda a um ponto** — `fom_static_tol_pct = 1e-9` passa na
+   validação `(0 ; 100)`, que não tem piso de largura. Elimina TODO
+   indeterminado. **Isto é deliberadamente permitido**: a banda é declaração de
+   confiança do projeto, e o modelo não deve sobrepor-se a ela. É aceitável
+   **só porque `declared_tol_pct` é publicado no artefato** — quem lê vê a
+   política que produziu o veredito. Um piso arbitrário seria o modelo fingindo
+   saber quanta incerteza o usuário deveria declarar.
+4. **Editar `uncertainty.checks: []` direto no JSON commitado**: pego
+   **imediatamente**, por 3 testes em 2 arquivos, incluindo
+   `cli.rs::aircraft_spec_json_commitado_bate_com_o_pipeline_real`, que
+   regenera e compara.
+
+**Conclusão declarada.** O mecanismo tem duas defesas reais: (a) o teste de
+regeneração do `aircraft_spec.json` commitado, que pega qualquer divergência
+entre binário e arquivo — bug ou edição manual; e (b) testes **nomeados pelo
+propósito**, que pegam qualquer regressão de código.
+
+**Mas a garantia é de AUDITORIA, não estrutural.** Quem esteja disposto a
+reescrever deliberadamente os testes cujo nome anuncia "isto existe para provar
+que o modelo admite não saber" ainda consegue. A única coisa no caminho é um
+revisor lendo `git diff -- tests/` e reconhecendo que um teste com esse nome
+sumiu ou mudou de sentido.
+
+É a mesma fronteira do #30, e vale repetir a formulação de lá: **a ferramenta
+prova mecanicamente contra ERRO, não contra um adversário disposto a editar a
+prova junto com o alvo.** O ciclo 16 fez o modelo admitir que não sabe; não fez
+o modelo resistir a quem queira silenciá-lo, e não pretende ter feito.

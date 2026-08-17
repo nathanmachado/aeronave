@@ -771,6 +771,37 @@ mais perigosa do problema que resolve.**
    proíbe. A decolagem na grama é o exemplo vivo: dentro do alcance do teto,
    fora do alcance de `fom_static` sozinho em todo (0 ; 1].
 
+Três lacunas acrescentadas pela **revisão final** — nenhuma se manifesta no
+baseline de hoje, e é por isso mesmo que precisam estar escritas:
+
+6. **`robustness.flips[]` é um canal paralelo que a incerteza NÃO alcança.**
+   Cada `RobustnessFlip` tem uma violação companheira em `violations[]`, e é a
+   COMPANHEIRA que recebe o prefixo `INDETERMINADO — `. O `flip` em si é
+   serializado antes e independentemente de `incerteza::analisa`. Se um dia um
+   flip de robustez cair dentro da banda, **o JSON terá duas visões
+   estruturadas do mesmo evento discordando**: `violations[]` dizendo "o modelo
+   não sabe" e `robustness.flips[]` narrando uma falha lisa e determinada. Um
+   consumidor que leia o array estruturado — o mais bem-comportado dos
+   consumidores — perderia a incerteza inteira. Hoje não ocorre porque o único
+   indeterminado não é um flip. Backlog #37.
+7. **A bisseção prova UMA travessia, não a unicidade dela.** O bracket
+   publicado testemunha uma travessia real — o `assert!` exige vereditos
+   opostos nos extremos, e um teste reconfirma re-rodando o pipeline. Mas o
+   código não prova que a travessia é única dentro da banda: se `viola(fom)`
+   não fosse monotônica ali, existiriam outras, e o texto publicado
+   ("breakeven em […]") sugere unicidade que não foi verificada. A §5.4 já
+   declara isso para o caso de travessia dupla; **a §9 passa a declarar
+   também**, porque é aqui que o leitor procura. Backlog #38.
+8. **A banda pode ser esvaziada por política, sem violar validação nenhuma.**
+   `fom_static_tol_pct` é validado só como `(0 ; 100)`; não há piso de largura.
+   Um valor como `1e-9` colapsa a banda a um ponto e elimina TODO indeterminado.
+   **Isso é deliberadamente permitido** — a banda é declaração de confiança do
+   projeto, e o modelo não deve sobrepor-se a ela — mas só é aceitável porque
+   **`declared_tol_pct` é publicado no artefato**. Quem lê vê a política que
+   produziu o veredito. Um piso arbitrário seria o modelo fingindo saber quanta
+   incerteza o usuário deveria declarar; a publicação é a defesa correta, e ela
+   está de pé.
+
 ---
 
 ## 10. Reprodutibilidade das medições
