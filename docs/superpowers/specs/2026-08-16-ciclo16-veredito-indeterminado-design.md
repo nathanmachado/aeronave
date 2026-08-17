@@ -837,10 +837,27 @@ parte da regra e não é: a regra estava certa, o **censo** é que foi feito por
 leitura parcial. Vale registrar que as duas ocorrências deste ciclo (§2.2 e
 esta) foram pegas por quem executou algo, não por quem leu.
 
-**Consequência ainda em aberto:** a unicidade de `(flip.check, flip.caso)`
-dentro de uma corrida **não foi verificada por ninguém**. Vai para a revisão da
-Task 2 como item explícito. Uma lacuna herdada de um erratum não é menos
-lacuna.
+**Consequência que estava em aberto — FECHADA pela revisão da Task 2.** A
+unicidade de `(flip.check, flip.caso)` dentro de uma corrida não havia sido
+verificada por ninguém. A revisão verificou, lendo
+`src/validation/robustness.rs`, e o par **é** único:
+
+- `caso` assume 3 valores por corrida, cada um de exatamente uma chamada —
+  `evaluate_case("dianteiro", …)` (`:407`), `evaluate_case("traseiro", …)`
+  (`:408`), `evaluate_world(…, "massa-total", …)` (`:580`) — nunca em laço.
+- Dentro de cada chamada, os checks de nome fixo (`"Tipback"`, `"Carga de nariz
+  máx"`, `"Carga de nariz mín"`) estão cada um atrás de um único `if`, não de
+  laço: no máximo um push por chamada.
+- Os checks por cenário usam `format!("Cenário '{}'", …)` sobre os 5 nomes
+  fixos e distintos de `weight_balance.rs:553-558`.
+- E o prefixo `"Cenário '"` funciona como **namespace textual**: nenhum outro
+  `check` literal do arquivo começa com ele, então colisão entre um flip de
+  cenário e um de nome fixo é impossível *por construção de string*,
+  independentemente da unicidade dos nomes de cenário.
+
+Vale mais que o resultado: a lacuna foi fechada por **leitura dirigida do
+código que a produzia**, não por argumento de plausibilidade. Era exatamente o
+que faltava quando eu escrevi "o único".
 
 **Desvio de localização declarado.** O teste de varredura de fonte não coube em
 `constraint_checker.rs::mod tests` — precisa de `mascara_arquivo`, que vive no
@@ -856,6 +873,22 @@ Risco novo a declarar: se alguém remover `mod common;` de `pins_vs_json.rs`, os
 autotestes da máscara vão junto e `identidade_de_checks.rs` passa a usar uma
 máscara não testada. É o item #28 numa roupa nova — dois consumidores, um só
 com testes.
+
+**Revisão da Task 2: APROVADA, sem bloqueadores e sem achados.** Verificou o
+invariante do zero; confirmou que a máscara mudou apenas de `fn` para `pub fn`,
+corpo byte-idêntico; confirmou os pisos 48/12 intocados e nenhuma asserção
+afrouxada nas ~60 conversões de leitor.
+
+Mutações que a revisão rodou, todas revertidas:
+
+| mutação | reprovou? |
+|---|---|
+| push com `id` não literal (escapa o scanner) | **sim** — "26 sítios, 25 ids" |
+| dois pushes com o mesmo `id` | **sim** — "id duplicado entre violações e portões" |
+| remover um marcador `// PIN:` de um teste | **sim** — dois testes do porteiro do ciclo 15 |
+
+A primeira linha é a que importa: o scanner de unicidade **reprova quando
+enganado**, e não só quando obedecido.
 
 ---
 
