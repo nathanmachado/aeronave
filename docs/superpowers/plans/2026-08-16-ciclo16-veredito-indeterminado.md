@@ -997,7 +997,7 @@ feat(schema): publica a banda de incerteza e o veredito INDETERMINADO (schema 6.
 §5.5→Task 5 Passo 2; §5.6→Task 5 Passo 3; §5.7→Task 5 Passo 1; §5.8→Task 3
 Passo 4; §6→Global Constraints 2 e 3; §7→Task 5 Passos 4 e 7; §8→distribuído
 (1→T4P6, 2→T5P3, 3→T5P2, 4→T4P2, 5→T3P1, 6→T2P1, 7 e 8→T3P1, 9→T1P5/T2P6,
-10→T1P7); §9→sem task, é declaração; §11→Task 5 Passo 8.
+10→T1P7); §9→sem task, é declaração; §12→Task 5 Passo 8.
 
 **Consistência de tipos.** `Violacao{id,texto}` (T2) é lido por `analisa` (T4)
 e por `textos()` (T1/T2). `Banda` (T3) é campo de `Incerteza` (T4) e é

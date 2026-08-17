@@ -729,7 +729,95 @@ passos extras.
 
 ---
 
-## 11. Backlog a abrir
+## 11. Registro de execução
+
+Escrito à medida que as tasks fecham. Existe porque a spec é o lugar onde este
+ciclo guarda o que aprendeu, e um achado de processo perdido entre a task e o
+merge é um achado que não aconteceu.
+
+### Task 1 — extração do pipeline
+
+**Primeira tentativa, operacional MECÂNICO: falhou.** Dois defeitos:
+
+1. A extração ficou pela metade — `main.rs` passou a chamar `pipeline::executa`
+   **e continuou calculando tudo inline**. Cada agente rodava duas vezes.
+2. Os dois MTOWs do projeto foram colapsados: `design_mtow_kg` (missão, de
+   `state.mtow_kg`) e `envelope_mtow_kg` (envelope, de `wb.spec.mtow_kg`)
+   passaram ambos a ler `wb.spec.mtow_kg`. MTOW convergido 1538,3 → 1557,5 kg.
+   E o comentário de **20 linhas** logo acima, que explicava que colapsá-los era
+   o *bug B5* corrigido num ciclo anterior, foi **apagado no mesmo edit que
+   cometeu o bug que ele descrevia**.
+
+O invariante byte-idêntico pegou na primeira execução. O operacional
+**reportou a divergência em vez de mascará-la** — registro a favor: ajustar a
+base para casar com o obtido estava a um comando de distância, e teria feito o
+ciclo seguir com uma mudança de física dentro de um refactor que promete zero
+mudança.
+
+**ERRO DE ROTEAMENTO — meu, e é item de processo novo.** A regra da casa diz
+"operacional mecânico só recebe task cuja correção o `verifica-ciclo.sh`
+consegue PROVAR". Eu apliquei a regra e classifiquei a Task 1 como mecânica
+porque a **prova** era mecânica: script, diff, byte a byte.
+
+Mas prova mecânica não torna o **trabalho** mecânico. Esta task exigia entender
+uma distinção de domínio que o repositório documenta em vinte linhas. **A
+provabilidade por script é condição NECESSÁRIA, não suficiente.** A condição
+que faltava enunciar: o trabalho também não pode depender de uma distinção
+semântica que o código carrega só em prosa.
+
+É irmão do #29. Lá eu derivava as consequências de uma regra sem executá-la;
+aqui apliquei uma regra de roteamento sem checar se a premissa dela cobria o
+caso.
+
+**Segunda tentativa, operacional de JULGAMENTO: fechou.** Invariante provado,
+554 testes, gate APROVADO, comentário de 20 linhas restaurado byte a byte.
+
+**Achado do script de prova.** O operacional precisou normalizar uma linha do
+stdout — a última, que ecoa o argumento `--out`, e que diverge por construção
+porque a base foi escrita com um nome de arquivo e a corrida nova com outro. A
+alegação era legítima (verificada: o diff bruto tem exatamente uma linha
+divergente, só no caminho, com a mesma versão de schema e o mesmo sufixo), e o
+defeito era do script, meu.
+
+Mas normalização **legítima** e normalização **segura** são coisas diferentes:
+um `sed` aberto dentro de um script de prova é uma superfície que alguém alarga
+depois. O guarda foi reescrito para se auto-limitar — compara bruto primeiro e,
+se divergir, exige um único par de linhas, exige que seja a linha `[ SAÍDA ]`,
+e exige que tirando o caminho as duas sejam idênticas — e foi **provado por
+mutação** (`mutaprova16.sh`): passa no legítimo e reprova em (a) duas linhas
+divergentes, (b) uma linha divergente que não é a `[ SAÍDA ]` — o caso que é
+literalmente a divergência de MTOW da primeira tentativa — e (c) uma linha
+`[ SAÍDA ]` que difira além do caminho, como uma versão de schema trocada.
+
+**Alegação de proveniência falsa na mensagem de commit.** O corpo de `c9ed8f8`
+diz que `tests/pipeline_extracao.rs` "já estava presente, conferido, passa sem
+alteração". O arquivo foi **criado** por essa task — `git log --all` mostra um
+único commit para ele, o próprio `c9ed8f8`. O conteúdo está correto e bate com
+o Passo 6; o defeito é só a alegação.
+
+Não emendei a mensagem. Emendar apagaria o fato de que a alegação foi feita, e
+num ciclo cujo tema é não lavar veredito, lavar o registro seria incoerente —
+mesmo sendo pequeno. Fica aqui, e vai para a mensagem de merge.
+
+**Mutação (revisão).** Trocar `design_mtow_kg` por `envelope_mtow_kg` na
+chamada do `PerformanceAgent` — o bug exato da primeira tentativa — é pego por
+**dois** testes independentes (`tests/cli.rs` e `tests/pipeline_extracao.rs`).
+Remover `propeller.fill_critical_clearance` é pego por quatro. Reordenar
+agentes independentes não é pego **e não deveria ser**: não tem efeito
+observável, e as dependências reais são impostas estaticamente pelo borrow
+checker, garantia mais forte que teste. Renomear o id de um portão não é pego
+por nada — **esperado**, porque o id ainda não é serializado nem verificado; é
+trabalho da Task 2, e fica registrado que a garantia não existe até lá.
+
+**Consequência para o roteamento da Task 2.** Reclassificada de mecânica para
+**julgamento**. A atribuição dos ids exige decidir o que distingue as três
+condições do `#10` e as duas do `#17` — julgamento de nomeação, não
+transcrição. O teste de varredura de fonte prova a unicidade, mas não escolhe
+os nomes.
+
+---
+
+## 12. Backlog a abrir
 
 - Calibrar `fom_static` por elemento de pá / JavaProp em J=0, substituindo a
   banda declarada por banda medida.
