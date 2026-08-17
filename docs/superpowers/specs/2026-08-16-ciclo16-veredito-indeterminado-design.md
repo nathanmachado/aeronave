@@ -1086,6 +1086,39 @@ concorrência é pior, porque parece uma.
    pedindo que seja reportado como achado de primeira ordem. Não observado (o
    pipeline converge de 0,55 a 1,0) e fora do domínio medido.
 
+#### Task 4 — consertos da revisão
+
+583 testes (572 + 11), invariante provado, gate APROVADO, artefato intocado.
+Cada teste novo **visto reprovando** sob a mutação correspondente, com a saída
+dos dois estados no relatório.
+
+Com os portões incluídos, a varredura do baseline ganhou **uma** entrada:
+`portao_envelope_cg_todos`, FALHA determinada, sem alcance de hélice —
+duplicando `envelope_cg::Solo (piloto)` em significado, visível por regra e não
+suprimida. Nenhum número de física mudou.
+
+**O achado do Conserto 3, que eu pedi para ser reportado e que mudou o
+desenho do teste.** No baseline de hoje, os conjuntos de ids violados em
+`banda.hi` (0,815976999245888) e em `banda.hi_declarado` (0,8250000000000001)
+**coincidem** — mesmos três ids, portões incluídos. Só as magnitudes nos textos
+diferem ("778 m" vs "768 m").
+
+Ou seja: **um teste baseado na saída não conseguiria distinguir os dois.** Usar
+a banda declarada em vez da efetiva — rodar até 0,825, fora do domínio onde
+`FoM(J)` é não decrescente — produziria exatamente o mesmo veredito por check.
+
+O conserto foi mudar o que se amarra: `Incerteza` ganhou `fom_lo_usado` e
+`fom_hi_usado`, e o teste afirma `fom_hi_usado == banda.hi`, nunca
+`hi_declarado`. **Quando duas entradas candidatas produzem saída
+indistinguível, o teste tem que pinar a ENTRADA, não a saída.**
+
+É a terceira aparição do padrão do ciclo — a primeira foi `range_km` variando
+0,037% enquanto `fuel_climb_kg` variava 46% (o #21 original); a segunda foram
+os dois bugs do scanner do ciclo 15, que erravam para lados opostos e mantinham
+a contagem em 70. Aqui é a forma mais pura: **a saída observável é idêntica e a
+entrada é fisicamente inadmissível.** Um agregado que não se move não é
+evidência de que nada se moveu — e, no limite, nem a saída inteira é.
+
 ---
 
 ## 12. Backlog a abrir
