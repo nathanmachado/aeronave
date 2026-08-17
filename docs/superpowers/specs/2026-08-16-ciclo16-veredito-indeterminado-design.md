@@ -1119,6 +1119,32 @@ a contagem em 70. Aqui é a forma mais pura: **a saída observável é idêntica
 entrada é fisicamente inadmissível.** Um agregado que não se move não é
 evidência de que nada se moveu — e, no limite, nem a saída inteira é.
 
+**Task 4 APROVADA na segunda passada.** A revisão confirmou os dois bloqueadores
+por mutação própria (reverter os portões derruba 3 testes; a bisseção realmente
+não é chamada quando um extremo falha, provado por uma `viola` que entra em
+pânico se invocada), e confirmou que a exclusão de `portao_restricoes` é provada
+por teste que **compara** `p.ok` contra `violations.is_empty()` de verdade, em
+vez de afirmar a equivalência.
+
+**Mas o Conserto 3 continua sendo decoração contra o cenário que importa**, e
+isso vai para a Task 5. A revisão mutou `analisa` para a corrida usar
+`banda.hi_declarado` enquanto `fom_hi_usado` seguia lido de `banda.hi`: **os 583
+testes passam**. Hoje o código está correto por construção — a mesma variável
+alimenta a publicação e a corrida — mas o teste compara `fom_hi_usado` com
+`banda.hi`, dois valores estáticos, **nunca com o argumento que a corrida de
+fato recebeu**.
+
+Um campo chamado `fom_hi_usado` que pode mentir sobre o que foi usado é
+exatamente o vetor de falsa afirmação que este ciclo existe para fechar. O
+conserto certo não é mais um teste: é **`roda_com_fom` devolver o `fom` que
+usou**, e `fom_hi_usado` sair desse retorno. Uma fonte, não duas. Assim a
+divergência deixa de ser detectável-por-teste e passa a ser **impossível de
+escrever**.
+
+Vale a distinção geral: quando um teste amarra duas cópias de um valor uma à
+outra, ele prova que as cópias concordam, não que qualquer uma delas é a que o
+sistema usou.
+
 ---
 
 ## 12. Backlog a abrir
