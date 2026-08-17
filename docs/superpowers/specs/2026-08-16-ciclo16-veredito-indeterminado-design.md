@@ -943,6 +943,23 @@ na tolerância são rejeitados só pela semântica IEEE754 de `!(v > 0 && v < 10
 e `hi_declarado` do baseline é de fato `0.8250000000000001` — sem nenhum
 literal `0.825` escondido em teste ou comentário.
 
+**Conserto APROVADO na segunda passada** (563 testes), com uma discrepância
+registrada. O operacional relatou que a mutação derrubava **2** testes; a
+revisão aplicou a mesma mutação duas vezes, com `--no-fail-fast` para garantir
+que nenhum binário fosse pulado, e obteve **1** — só
+`banda_da_fixture_nao_e_truncada`. E confirmou por busca que existem exatamente
+duas chamadas a `.banda()` no repositório, ambas nos testes dedicados: não há
+candidato a segundo teste.
+
+A explicação provável é `cargo test` sem `--no-fail-fast` abortando após o
+primeiro binário falhar, e o corte sendo lido como falha adicional. O achado
+original permanece correto e o requisito do bloqueador foi cumprido — o teste
+novo mata a mutação sozinho.
+
+Fica registrado mesmo sendo imaterial, porque é a mesma classe dos erros deste
+ciclo: **um número relatado que quem relatou não conferiu**. A diferença é que
+desta vez o número foi conferido por outro antes de virar registro.
+
 ---
 
 ## 12. Backlog a abrir
