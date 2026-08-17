@@ -12,22 +12,12 @@
 
 use std::path::PathBuf;
 
-use aeronave::agents::control_surfaces::ControlSurfacesAgent;
-use aeronave::agents::electrical::ElectricalAgent;
-use aeronave::agents::landing_gear::LandingGearAgent;
-use aeronave::agents::performance::PerformanceAgent;
-use aeronave::agents::propeller::PropellerAgent;
-use aeronave::agents::structural::StructuralAgent;
-use aeronave::agents::trim_authority::TrimAuthorityAgent;
-use aeronave::agents::vn_diagram::VnDiagramAgent;
 use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{
-    AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION,
+    AircraftReport, GeometrySpec, SizingReport, UncertaintySpec, SCHEMA_VERSION,
 };
-use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::{ConstraintChecker, VerifyInputs};
-use aeronave::validation::robustness::RobustnessAgent;
+use aeronave::validation::incerteza;
 use std::collections::BTreeMap;
 
 fn config_path(rel: &str) -> PathBuf {
@@ -36,101 +26,69 @@ fn config_path(rel: &str) -> PathBuf {
 
 /// Monta o `AircraftReport` completo a partir da aeronave-base real
 /// (`config/aircraft/baseline_4seat.toml` + Toyota 1GD-FTV + missão
-/// default) — mesma sequência de agentes de `main.rs`.
+/// default).
+///
+/// Ciclo 16 (Task 1, dividendo — spec §5.3): antes desta task, esta função
+/// REIMPLEMENTAVA o pipeline inteiro (uma cópia da sequência de agentes de
+/// `main.rs`) e decidia o veredito global só por `report.all_satisfied()`
+/// — o portão `#0` de `main.rs`, sem os outros 8 (V_cruzeiro, autonomia de
+/// bloco, RC, teto de serviço, flutter, anti-tombamento, estabilidade
+/// longitudinal, envelope de CG). Eram DUAS definições de "veredito
+/// global" DIVERGENTES coincidindo por acaso no baseline (nenhum dos 8
+/// portões extras jamais reprovava sozinho enquanto `#0` passava) — a
+/// doença do #13 (`docs/backlog.md`) em outra roupa: o teste que deveria
+/// vigiar o pipeline mantinha uma cópia dele que podia divergir em
+/// silêncio. Agora chama `pipeline::executa` — a MESMA função que
+/// `main.rs` chama.
+///
+/// `old→new` (ciclo 16, Task 5): o veredito global deixou de ser o AND dos 9
+/// `res.portoes` — vira `validation::incerteza::veredito_global`, os TRÊS
+/// estados PASS/FAIL/INDETERMINADO da spec §5.5, calculados sobre a MESMA
+/// união de ids que os 9 portões cobriam (`Incerteza::checks`, ver
+/// `ids_do_ponto`), então nenhuma cobertura foi perdida — só ganhou um
+/// terceiro valor. `violations` também deixou de ser `report.textos()` cru:
+/// vira `incerteza::publica_violacoes`, que reescreve/insere o texto
+/// INDETERMINADO (spec §5.6 + ERRATUM). Mesma função que `main.rs` chama —
+/// mantendo o precedente do parágrafo acima.
 fn build_baseline_report() -> AircraftReport {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
 
-    let sized = size_aircraft(&cfg, &engine, &req)
+    let res = aeronave::pipeline::executa(&cfg, &engine, &req)
         .expect("aeronave-base + Toyota deveria convergir com o tanque de 260 L");
 
-    let design_mtow_kg = sized.state.mtow_kg;
-    let envelope_mtow_kg = sized.wb.spec.mtow_kg;
-    let state = &sized.state;
-    let wing = &sized.wing;
-    let prop = &sized.prop;
-    let mission = &sized.mission;
-    let wb = &sized.wb;
-    let emp = &sized.emp;
-    // task trim-authority: já aplicado a `sized.wb` por `size_aircraft`
-    // (`WeightBalanceOutput::apply_trim`) — recalcula aqui só para popular
-    // o bloco `trim` do relatório, mesma sequência de `main.rs`.
-    // Ciclo 10 (task 2): `state`/`engine`/`req` + `prop.thrust_cruise_n` —
-    // momento da linha de tração na rotação e no trim de cruzeiro.
-    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb, state, &engine, &req,
-                                       prop.thrust_cruise_n);
+    let design_mtow_kg = res.state.mtow_kg;
+    let envelope_mtow_kg = res.wb.spec.mtow_kg;
 
-    let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
-    let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
-
-    let mass_light_kg = wb.scenarios.iter()
-        .map(|s| s.total_mass_kg)
-        .fold(f64::INFINITY, f64::min);
-    let vn = VnDiagramAgent::run(
-        wing, envelope_mtow_kg, mass_light_kg, &req, &cfg.structure.design_category,
-    );
-
-    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
-                                      &cfg.performance, cfg.stability.cl_ground_rotation);
-
-    // Ciclo 3 (oew-parametrico): massas estruturais COMPUTADAS
-    // (`agents::mass_model` via `SizedAircraft::structural_masses`) —
-    // mesma fiação de `main.rs`, não mais itens fixos de
-    // `[[masses.items]]`.
-    let wing_mass_kg = sized.structural_masses.asa_kg;
-    let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
-
-    let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
-    let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-    let mass_main_total = sized.structural_masses.trem_principal_kg;
-    let mass_nose = sized.structural_masses.trem_nariz_kg;
-    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
-
-    // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
-    // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
-
-    let electrical = ElectricalAgent::run(&cfg);
-
-    // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
-    // de `main.rs` — logo após o `LandingGearAgent`, contra os limites
-    // NOMINAIS já calculados (`wb`/`gear`).
-    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp,
-                                           &sized.structural_masses, wb, &gear, &propeller,
-                                           mission, &perf);
-
-    let report = ConstraintChecker::verify(&VerifyInputs {
-        req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
-        propeller: &propeller, perf: &perf, mission, electrical: &electrical,
-        gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
-        robustness: &robustness, prop_cfg: &cfg.propeller,
-    });
-    let all_ok = report.all_satisfied();
+    let inc = incerteza::analisa(&cfg, &engine, &req, &res);
+    let validation_status = incerteza::veredito_global(&inc).to_string();
+    let violations = incerteza::publica_violacoes(&res.report.violations, &inc);
+    let uncertainty = UncertaintySpec::from_incerteza(cfg.propeller.fom_static_tol_pct, &inc);
 
     let geometry = GeometrySpec {
         wing_le_root_x_m: cfg.wing.le_root_x_m,
-        chord_root_m: wb.chord_root_m,
-        chord_tip_m: wb.chord_tip_m,
-        mac_m: wb.mac_m,
-        mac_le_x_m: wb.mac_le_x_m,
-        y_mac_m: mac_spanwise_pos(wing.span_m, wing.taper_ratio),
+        chord_root_m: res.wb.chord_root_m,
+        chord_tip_m: res.wb.chord_tip_m,
+        mac_m: res.wb.mac_m,
+        mac_le_x_m: res.wb.mac_le_x_m,
+        y_mac_m: mac_spanwise_pos(res.wing.span_m, res.wing.taper_ratio),
         fuselage_length_m: cfg.fuselage.length_m,
         cabin_width_m: cfg.fuselage.cabin_width_m,
         cabin_height_m: cfg.fuselage.cabin_height_m,
     };
 
-    let fuel_margin_l = cfg.fuel_system.capacity_l - mission.fuel_total_l;
+    let fuel_margin_l = cfg.fuel_system.capacity_l - res.mission.fuel_total_l;
     let sizing = SizingReport {
         mtow_mission_kg: design_mtow_kg,
         mtow_envelope_kg: envelope_mtow_kg,
-        iterations: sized.iterations.clone(),
+        iterations: res.iterations.clone(),
         converged: true,
-        fuel_required_l: mission.fuel_total_l,
+        fuel_required_l: res.mission.fuel_total_l,
         fuel_capacity_l: cfg.fuel_system.capacity_l,
         fuel_margin_l,
         fuel_margin_pct: fuel_margin_l / cfg.fuel_system.capacity_l * 100.0,
-        constraints: sized.constraints.clone(),
+        constraints: res.constraints.clone(),
     };
 
     let mut fidelity: BTreeMap<String, String> = BTreeMap::new();
@@ -147,33 +105,36 @@ fn build_baseline_report() -> AircraftReport {
     AircraftReport {
         schema_version: SCHEMA_VERSION.to_string(),
         revision: SCHEMA_VERSION.to_string(),
-        validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
-        wing: wing.clone(),
-        propulsion: prop.clone(),
+        validation_status,
+        wing: res.wing.clone(),
+        propulsion: res.prop.clone(),
         geometry: Some(geometry),
-        empennage: Some(emp.clone()),
-        control_surfaces: Some(cs.clone()),
-        weight: Some(wb.spec.clone()),
-        trim: Some(trim),
-        performance: Some(perf),
-        vn_diagram: Some(vn.clone()),
-        structure: Some(struc),
-        landing_gear: Some(gear),
-        propeller: Some(propeller),
-        mission: Some(mission.clone()),
-        electrical: Some(electrical.clone()),
+        empennage: Some(res.empennage.clone()),
+        control_surfaces: Some(res.control_surfaces.clone()),
+        weight: Some(res.wb.spec.clone()),
+        trim: Some(res.trim.clone()),
+        performance: Some(res.perf.clone()),
+        vn_diagram: Some(res.vn.clone()),
+        structure: Some(res.struc.clone()),
+        landing_gear: Some(res.gear.clone()),
+        propeller: Some(res.propeller.clone()),
+        mission: Some(res.mission.clone()),
+        electrical: Some(res.electrical.clone()),
         sizing: Some(sizing),
-        robustness: Some(robustness),
+        robustness: Some(res.robustness.clone()),
         fidelity,
-        violations: report.violations,
-        warnings: report.warnings,
+        violations,
+        warnings: res.report.warnings.clone(),
+        uncertainty,
     }
 }
 
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "5.7");
+    // `old→new` (ciclo 16, Task 5 — bump MAJOR, ver docstring de
+    // `SCHEMA_VERSION` para a justificativa completa): "5.7" → "6.0".
+    assert_eq!(report.schema_version, "6.0");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -185,12 +146,117 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
         "geometry", "empennage", "control_surfaces", "weight", "trim", "performance",
         "vn_diagram", "structure", "landing_gear", "propeller", "mission",
         "electrical", "sizing", "robustness", "fidelity", "violations", "warnings",
+        // Ciclo 16, Task 5: bloco novo — ver `UncertaintySpec`.
+        "uncertainty",
     ];
-    assert!(expected_keys.len() >= 16, "lista de chaves esperadas deveria ter pelo menos 16 entradas");
+    assert!(expected_keys.len() >= 17, "lista de chaves esperadas deveria ter pelo menos 17 entradas");
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.7");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "6.0");
+}
+
+/// Ciclo 16 (Task 5, spec §5.7): o bloco `uncertainty` publica a banda
+/// EFETIVA (truncada em `fom_design`) de `propeller.fom_static` e o único
+/// check indeterminado do baseline (gradiente CS 23.65), com o breakeven
+/// MEDIDO — não um valor recalculado à mão, o mesmo `UncertaintySpec` que
+/// `main.rs` escreve no `aircraft_spec.json` commitado.
+///
+/// Ordem de `checks`: alfabética por `id` (`validation::incerteza::analisa`
+/// itera um `BTreeSet<String>`) — `gradiente_cs2365` cai no índice 2 entre
+/// os 5 ids do baseline (`decolagem_grama` < `envelope_cg::Solo (piloto)` <
+/// `gradiente_cs2365` < `portao_envelope_cg_todos` < `robustez::…`). Se um
+/// dia um sexto check entrar em ordem alfabética anterior, este índice
+/// precisa ser revisto — não é acidente, é a ordem publicada de hoje.
+#[test]
+fn uncertainty_bloco_publica_banda_efetiva_e_o_gradiente_indeterminado() {
+    let report = build_baseline_report();
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let u = &value["uncertainty"];
+
+    assert_eq!(u["parameter"].as_str().unwrap(), "propeller.fom_static");
+    assert_eq!(u["nominal"].as_f64().unwrap(), 0.75); // PIN: uncertainty.nominal
+    assert_eq!(u["declared_tol_pct"].as_f64().unwrap(), 10.0); // PIN: uncertainty.declared_tol_pct
+    assert_eq!(u["band_declared_lo"].as_f64().unwrap(), 0.675); // PIN: uncertainty.band_declared_lo
+    // PIN: uncertainty.band_declared_hi
+    assert_eq!(u["band_declared_hi"].as_f64().unwrap(), 0.825_000_000_000_000_1);
+    assert_eq!(u["band_lo"].as_f64().unwrap(), 0.675); // PIN: uncertainty.band_lo
+    // PIN: uncertainty.band_hi
+    assert_eq!(u["band_hi"].as_f64().unwrap(), 0.815_976_999_245_888);
+    assert!(u["band_truncated"].as_bool().unwrap(),
+        "baseline real: a banda tem que estar truncada em fom_design");
+    assert!(u["band_truncated_reason"].as_str().unwrap().contains("fom_design"),
+        "a razão de truncagem tem que citar fom_design — publicada, não em silêncio");
+    assert!(u["ceiling_evaluated"].as_bool().unwrap());
+
+    let checks = u["checks"].as_array().expect("checks deveria ser um array");
+    assert_eq!(checks.len(), 5,
+        "baseline real: 5 checks entram no bloco (violam em pelo menos um dos 4 pontos) — \
+         {checks:#?}");
+
+    let gradiente = &checks[2];
+    assert_eq!(gradiente["id"].as_str().unwrap(), "gradiente_cs2365");
+    assert_eq!(gradiente["veredito"].as_str().unwrap(), "INDETERMINADO");
+    assert_eq!(gradiente["veredito_lo"].as_str().unwrap(), "FALHA");
+    assert_eq!(gradiente["veredito_nominal"].as_str().unwrap(), "FALHA");
+    assert_eq!(gradiente["veredito_hi"].as_str().unwrap(), "PASSA");
+    assert!(gradiente["alcance_de_helice"].as_bool().unwrap());
+    // PIN: uncertainty.checks.2.breakeven_lo
+    assert_eq!(gradiente["breakeven_lo"].as_f64().unwrap(), 0.784_867_237_235_786_1);
+    // PIN: uncertainty.checks.2.breakeven_hi
+    assert_eq!(gradiente["breakeven_hi"].as_f64().unwrap(), 0.784_867_775_020_359_6);
+    assert!(gradiente["motivo"].is_null(),
+        "o gradiente tem bracket medido — não precisa de motivo textual");
+
+    // Os outros 4 checks são FALHA determinada, sem breakeven — cobertura
+    // direta de que `UncertaintyCheckSpec::from` NÃO inventa bracket para
+    // quem não tem.
+    for c in checks {
+        if c["id"].as_str().unwrap() == "gradiente_cs2365" {
+            continue;
+        }
+        assert_eq!(c["veredito"].as_str().unwrap(), "FALHA", "id={}", c["id"]);
+        assert!(c["breakeven_lo"].is_null(), "id={}", c["id"]);
+        assert!(c["breakeven_hi"].is_null(), "id={}", c["id"]);
+    }
+}
+
+/// `validation::incerteza::publica_violacoes` reescreveu o texto da CS 23.65
+/// com o prefixo `INDETERMINADO — ` — a interface pública de facto é o
+/// TEXTO (spec §5.6, razão 3), então o vínculo com o JSON tem que ser
+/// verificado no `violations` publicado, não só no bloco `uncertainty`.
+#[test]
+fn violations_publica_o_texto_indeterminado_para_o_gradiente() {
+    let report = build_baseline_report();
+    assert_eq!(report.violations.len(), 4,
+        "contagem PERMANECE 4 — INDETERMINADO reescreve, não insere, porque o gradiente JÁ \
+         violava no nominal: {:#?}", report.violations);
+
+    let gradiente = report.violations.iter()
+        .find(|v| v.contains("Gradiente de subida"))
+        .expect("uma das 4 violações tem que ser o gradiente CS 23.65");
+    assert!(gradiente.starts_with("INDETERMINADO — "), "obtido: {gradiente}");
+    assert!(gradiente.contains("banda declarada de propeller.fom_static"), "obtido: {gradiente}");
+    assert!(gradiente.contains("breakeven em"), "obtido: {gradiente}");
+    assert!(gradiente.ends_with("O modelo NÃO sustenta este veredito."), "obtido: {gradiente}");
+
+    // As outras 3 violações NÃO carregam o prefixo — só o check indeterminado
+    // é reescrito.
+    let nao_indeterminadas: Vec<&String> = report.violations.iter()
+        .filter(|v| !v.starts_with("INDETERMINADO — "))
+        .collect();
+    assert_eq!(nao_indeterminadas.len(), 3, "obtido: {nao_indeterminadas:#?}");
+}
+
+/// Falha determinada domina indeterminação (spec §5.5): mesmo com o
+/// gradiente CS 23.65 indeterminado, `validation_status` continua FAIL —
+/// as outras 3 violações são falha DETERMINADA. Este ciclo não muda o
+/// veredito do projeto, só o que o modelo consegue dizer sobre ele.
+#[test]
+fn validation_status_do_baseline_continua_fail_com_indeterminado_presente() {
+    let report = build_baseline_report();
+    assert_eq!(report.validation_status, "FAIL");
 }
 
 /// Schema 5.0 (Task 2, ciclo7-clmax-decolagem — bump MAJOR): `wing.cl_max_to`

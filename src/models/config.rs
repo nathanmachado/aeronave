@@ -867,6 +867,21 @@ fn validate_aircraft(cfg: &AircraftConfig) -> Result<(), ConfigError> {
             )));
         }
     }
+    if cfg.propeller.fom_design < cfg.propeller.fom_static {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.fom_design = {} é MENOR que \
+             propeller.fom_static = {} — FoM(J) ficaria DECRESCENTE em J, descrevendo uma \
+             hélice que entrega fração MENOR da tração ideal quanto mais rápido voa \
+             (ver agents::propulsion::FigureOfMerit)",
+            cfg.propeller.fom_design, cfg.propeller.fom_static)));
+    }
+    if !(cfg.propeller.fom_static_tol_pct > 0.0 && cfg.propeller.fom_static_tol_pct < 100.0) {
+        return Err(ConfigError::Validation(format!(
+            "configuração de aeronave inválida: propeller.fom_static_tol_pct = {} fora de \
+             (0 ; 100) — a banda de incerteza precisa ter largura positiva e o extremo \
+             inferior precisa continuar positivo",
+            cfg.propeller.fom_static_tol_pct)));
+    }
 
     // [fuel_system]
     require_positive("fuel_system.capacity_l", cfg.fuel_system.capacity_l)?;
@@ -1697,6 +1712,7 @@ mod tests {
             ground_clearance_min_m = 0.23
             prop_plane_x_m = 0.20
             fom_static = 0.72
+            fom_static_tol_pct = 10.0
             fom_design = 0.80
             j_design   = 1.60
             [fuel_system]
@@ -3333,5 +3349,89 @@ mod tests {
         assert_eq!(req.analysis.taxi_fuel_l, 2.5);
         assert_eq!(req.analysis.descent_rate_ms, 3.5);
         assert_eq!(req.analysis.descent_power_fraction, 0.25);
+    }
+
+    // ─── [propeller] fom_static_tol_pct (ciclo 16, Task 3) ────────────────────
+
+    /// Ciclo 16 — `fom_static_tol_pct` é OBRIGATÓRIO. Um TOML que não declara
+    /// quanto confia no próprio `fom_static` tem que falhar no carregamento, não
+    /// herdar um default silencioso: o default seria o modelo escolhendo sozinho
+    /// o quanto acredita em si mesmo.
+    #[test]
+    fn tolerancia_de_fom_static_ausente_falha_o_carregamento() {
+        let toml = aircraft_toml_valido()
+            .lines()
+            .filter(|line| !line.contains("fom_static_tol_pct"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("fom_static_tol_pct"), "{err}");
+    }
+
+    /// FoM(J) tem que ser NÃO DECRESCENTE. `fom_design < fom_static` descreve uma
+    /// hélice que entrega FRAÇÃO MENOR da tração ideal quanto MAIS rápido voa.
+    /// Antes do ciclo 16 isso passava calado — `config.rs:853-869` só tinha
+    /// `require_positive` e o teto 1,0.
+    #[test]
+    fn fom_design_menor_que_fom_static_e_rejeitado() {
+        let toml = aircraft_toml_valido()
+            .replace("fom_design = 0.80", "fom_design = 0.70");
+        let err = parse_aircraft(&toml).unwrap_err();
+        assert!(err.to_string().contains("fom_design"), "{err}");
+        assert!(err.to_string().contains("fom_static"), "{err}");
+        assert!(err.to_string().contains("DECRESCENTE"), "{err}");
+    }
+
+    #[test]
+    fn tolerancia_fora_de_0_a_100_e_rejeitada() {
+        for (linha_antiga, linha_nova) in [
+            ("fom_static_tol_pct = 10.0", "fom_static_tol_pct = 0.0"),
+            ("fom_static_tol_pct = 10.0", "fom_static_tol_pct = 100.0"),
+            ("fom_static_tol_pct = 10.0", "fom_static_tol_pct = -5.0"),
+            ("fom_static_tol_pct = 10.0", "fom_static_tol_pct = 150.0"),
+        ] {
+            let toml = aircraft_toml_valido().replace(linha_antiga, linha_nova);
+            let err = parse_aircraft(&toml).unwrap_err();
+            assert!(err.to_string().contains("fom_static_tol_pct"), "{err}");
+            assert!(err.to_string().contains("0"), "{err}");
+            assert!(err.to_string().contains("100"), "{err}");
+        }
+    }
+
+    /// A banda efetiva do baseline é truncada em `fom_design`.
+    #[test]
+    fn banda_efetiva_do_baseline_e_truncada_em_fom_design() {
+        let cfg = load_aircraft(std::path::Path::new("config/aircraft/baseline_4seat.toml")).unwrap();
+        let b = cfg.propeller.banda();
+        assert_eq!(b.lo, 0.75 * 0.90);
+        assert_eq!(b.hi, cfg.propeller.fom_design);   // 0.81597699924588796
+        assert!(b.truncada);
+        assert!(b.motivo_truncagem.as_ref().unwrap().contains("fom_design"));
+    }
+
+    /// Ciclo 16, Task 3 (conserto de revisão) — o caminho NÃO TRUNCADO da banda.
+    ///
+    /// Sem este teste, `banda()` pode afirmar truncagem que não houve e a suíte
+    /// inteira passa (provado por mutação na revisão: forçar `truncada = true`
+    /// com motivo falso não quebrou nenhum dos 562 testes). A spec §5.1 exige que
+    /// a truncagem seja publicada COM a razão e nunca em silêncio; uma banda que
+    /// AFIRMA ter encolhido sem ter encolhido é o mesmo defeito espelhado.
+    ///
+    /// A fixture tem `fom_static = 0.72` e `fom_design = 0.80`, então o topo
+    /// declarado (0,792) fica ABAIXO de `fom_design` e não há o que truncar — a
+    /// escolha do valor da fixture foi feita no plano justamente para exercitar
+    /// este ramo.
+    #[test]
+    fn banda_da_fixture_nao_e_truncada() {
+        let toml = aircraft_toml_valido();
+        let cfg = parse_aircraft(&toml).expect("fixture TOML deveria ser válida");
+        let b = cfg.propeller.banda();
+        assert!(!b.truncada, "a fixture não deveria truncar: hi_declarado={} <= fom_design={}",
+                b.hi_declarado, cfg.propeller.fom_design);
+        assert!(b.motivo_truncagem.is_none(),
+                "sem truncagem não pode haver motivo: {:?}", b.motivo_truncagem);
+        // Bit-exato: sem truncagem, `hi` É `hi_declarado`, não uma aproximação.
+        assert_eq!(b.hi, b.hi_declarado);
+        assert_eq!(b.lo, b.lo_declarado);
     }
 }

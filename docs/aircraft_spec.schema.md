@@ -1,4 +1,4 @@
-# `aircraft_spec.json` — contrato do schema v5.7
+# `aircraft_spec.json` — contrato do schema v6.0
 
 Este documento é o **contrato formal** entre o pipeline de modelagem
 matemática (`aeronave`, este repositório) e qualquer consumidor a jusante —
@@ -992,6 +992,74 @@ documentação a ser corrigido, não um comportamento aceitável.
   - Nenhuma tolerância de teste foi afrouxada — só pins re-centrados
     old→new com a MESMA tolerância. Ver `tests/generic_engine.rs`/
     `tests/cli.rs`/`tests/gear_tipback.rs` para os pins honestos completos.
+- **v6.0** (Task 5, ciclo16-veredito-indeterminado — bump **MAJOR**, ver
+  ERRATUM da revisão de plano registrado abaixo). Fecha `docs/backlog.md`
+  #21. Publica o veredito INDETERMINADO: até este ciclo, um check cujo
+  resultado dependia de `propeller.fom_static` — o único parâmetro da lei de
+  tração que NUNCA foi calibrado, herdado de McCormick com dois algarismos
+  significativos — era carimbado PASSA ou FALHA com a mesma confiança de um
+  check totalmente determinado. Este ciclo dá ao modelo um terceiro estado
+  para dizer "não sei", em vez de forçar uma escolha entre dois que não
+  descrevem a situação.
+  - **Bloco NOVO `uncertainty`** (`UncertaintySpec`, ver §4 abaixo): banda de
+    incerteza declarada de `propeller.fom_static` (`nominal`,
+    `declared_tol_pct`, os extremos DECLARADOS e os EFETIVOS — truncados em
+    `propeller.fom_design` e/ou 1,0 quando o declarado excede o domínio
+    fisicamente admissível), e `checks[]` — um por id que viola em pelo
+    menos um dos quatro pontos avaliados (nominal, extremo inferior,
+    extremo superior, teto de quantidade de movimento), com o veredito por
+    ponto e o BRACKET medido do breakeven (nunca um ponto — a largura do
+    bracket É a precisão publicada).
+  - **`validation_status` ALARGA de domínio** — `"PASS" | "FAIL"` →
+    `"PASS" | "FAIL" | "INDETERMINADO"` (regra: FAIL se existe qualquer
+    check com falha DETERMINADA; senão INDETERMINADO se existe qualquer
+    check indeterminado; senão PASS — falha determinada DOMINA
+    indeterminação). Bump **MAJOR**, não MINOR: a primeira versão desta
+    entrada argumentava MINOR (nenhum campo mudou de TIPO, o único
+    consumidor em árvore é a suíte de testes, o valor novo só aparece
+    quando não existe falha determinada). A revisão de plano contestou e
+    está certa — o risco não é substituir um `"FAIL"` antigo por
+    `"INDETERMINADO"`, é que **um consumidor que testa `status == "FAIL"`
+    passa a tratar `"INDETERMINADO"` como seguro** (lê "o modelo não sabe"
+    como "está tudo bem"), e alargar o domínio de um campo tipo-enum É
+    quebra de compatibilidade pela política deste documento (ver acima). Um
+    número de versão não impede ninguém de escrever `== "FAIL"`; obriga
+    quem atualiza a OLHAR.
+  - **Declaração explícita sobre o backlog #11**: as remoções enfileiradas
+    do item #11 (`performance.to_distance_paved_m`/`to_distance_grass_m`/
+    `landing_distance_m`, "para um bump MAJOR futuro") **NÃO viajam junto**
+    nesta v6.0. Gastar o MAJOR aqui não obriga a gastá-lo inteiro — o #11
+    continua aberto e precisa do PRÓXIMO MAJOR.
+  - **A violação indeterminada é REESCRITA, nunca removida.** Um check
+    indeterminado presente no nominal tem o texto de `violations`
+    REESCRITO com prefixo `"INDETERMINADO — "` — contagem inalterada. Um
+    check indeterminado AUSENTE do nominal (passa hoje, vira dentro da
+    banda declarada) gera uma violação NOVA com o mesmo prefixo — contagem
+    SOBE. É o único caso em que o silêncio favoreceria o projeto, e por
+    isso é o caso que mais importa, mesmo não ocorrendo no baseline real de
+    hoje.
+  - **Consequência de veredito no baseline real**: `validation_status`
+    **continua `"FAIL"`** — das 4 violações, 3 continuam falha DETERMINADA
+    (decolagem em grama, envelope de CG nominal 'Solo (piloto)', robustez
+    '2 pax dianteiros'); a quarta (gradiente CS 23.65) vira INDETERMINADA
+    — <!-- PIN:uncertainty.band_lo -->0,675000 a
+    <!-- PIN:uncertainty.band_hi -->0,815977 HOJE, breakeven medido em
+    [<!-- PIN:uncertainty.checks.2.breakeven_lo -->0,784867 ;
+    <!-- PIN:uncertainty.checks.2.breakeven_hi -->0,784868] HOJE. **Este
+    ciclo não muda o veredito do projeto** — muda o que o modelo consegue
+    dizer sobre ele.
+  - **Lacunas declaradas** (não fechadas por este ciclo, ver spec §9): a
+    banda (`declared_tol_pct` = <!-- PIN:uncertainty.declared_tol_pct -->10,000000%
+    HOJE) é POLÍTICA DE PROJETO sobre uma entrada não calibrada, não uma
+    medição de hélice; só `propeller.fom_static` é varrido — as demais
+    entradas declaradamente não validadas do baseline (`ground_clearance_min_m`,
+    `prop_plane_x_m`, entre outras) não são; e é um parâmetro por vez —
+    interações entre incertezas não são exploradas.
+  - Nenhuma tolerância de teste foi afrouxada e nenhum número de FÍSICA
+    mudou — `propeller.fom_static` continua <!-- PIN:uncertainty.nominal -->0,750000
+    HOJE, a lei de tração continua a mesma, os agentes continuam os
+    mesmos. Ver `tests/schema_v4.rs`/`tests/generic_engine.rs`/
+    `tests/incerteza.rs` para os pins honestos completos.
 
 ## 2. Convenção de eixos e unidades
 
@@ -1063,7 +1131,7 @@ canônica de INTERPRETAÇÃO, o JSON em si é a fonte do texto exibido.
 |---|---|---|
 | `schema_version` | string | sempre |
 | `revision` | string (DEPRECATED, = `schema_version`) | sempre |
-| `validation_status` | string (`"PASS"` \| `"FAIL"`) | sempre |
+| `validation_status` | string (`"PASS"` \| `"FAIL"` \| `"INDETERMINADO"`, **domínio alargado na v6.0**) | sempre |
 | `wing` | objeto (`WingSpec`) | sempre |
 | `propulsion` | objeto (`PropulsionSpec`) | sempre |
 | `geometry` | objeto (`GeometrySpec`) ou `null` | sempre preenchido por `main.rs` |
@@ -1083,6 +1151,7 @@ canônica de INTERPRETAÇÃO, o JSON em si é a fonte do texto exibido.
 | `fidelity` | objeto `{string: string}` | sempre, não-vazio |
 | `violations` | array de string | sempre (vazio se `validation_status == "PASS"`) |
 | `warnings` | array de string | sempre (pode ser vazio) |
+| `uncertainty` | objeto (`UncertaintySpec`, **novo na v6.0**) | sempre — ver §4 abaixo |
 
 Os blocos são tipados `Option<T>` no Rust (podem em tese ser `null`) por
 simetria estrutural entre si — na prática, `main.rs` sempre os preenche
@@ -1648,13 +1717,84 @@ no nominal mas reprova com massas estruturais ±{σ}% (pior caso {caso}):
 
 - `fidelity`: ver §3 acima.
 - `violations`: array de strings, uma por requisito de projeto NÃO
-  satisfeito (`ConstraintChecker::verify`). Vazio se e somente se
-  `validation_status == "PASS"`.
+  satisfeito (`ConstraintChecker::verify`). **`validation_status == "PASS"`
+  ⟹ `violations` vazio** — o portão `#0` do veredito global É
+  `report.all_satisfied() == violations.is_empty()` (ver §4 "Blocos de
+  topo", linha de `violations`, e `pipeline::executa`).
+  - **`old→new` (ciclo 16, Task 5 — esclarecimento de documentação, não
+    correção de defeito, ver `docs/backlog.md`).** Esta entrada afirmava
+    "vazio SE E SOMENTE SE `validation_status == "PASS"`" — uma
+    implicação nas DUAS direções. A direção acima (`PASS ⟹ vazio`) sempre
+    foi verdadeira e continua verdadeira. A RECÍPROCA é FALSA, e estava
+    SUB-DOCUMENTADA até este ciclo: **`violations: []` NÃO implica
+    `PASS`.** Motivo: dos 9 `Portao` que compõem o veredito global
+    (`pipeline::Portao`, ver `pipeline::executa`), 8 podem reprovar SEM
+    empurrar nenhuma `Violacao` companheira em `violations` (ex.:
+    `portao_v_cruzeiro`, `portao_flutter`, `portao_antitombamento`,
+    `portao_estabilidade_long` não têm NENHUMA violação correspondente —
+    achado da revisão da Task 4 do ciclo16-veredito-indeterminado, que
+    motivou incluir os 9 portões na varredura de
+    `validation::incerteza::analisa`, ver `ids_do_ponto`). Um consumidor
+    que trata `violations: []` como sinônimo de aprovado está incompleto;
+    o campo correto para o veredito agregado é sempre
+    `validation_status` — desde a v6.0, com domínio
+    `"PASS" | "FAIL" | "INDETERMINADO"` (ver §1).
 - `warnings`: array de strings — condições que NÃO violam nenhum requisito
   do projeto, mas merecem atenção do time de CAD (ex.: diâmetro de hélice
   derivado divergente do provisório; pico elétrico acima da capacidade do
   alternador, coberto pela bateria). Pode ser vazio mesmo com
   `validation_status == "PASS"`; pode ser não-vazio mesmo com `"FAIL"`.
+
+### `uncertainty` — `UncertaintySpec` (`validation::incerteza`, **novo na v6.0**)
+
+Banda de incerteza declarada de `propeller.fom_static` — o único parâmetro
+da lei de tração NUNCA calibrado (herdado de McCormick, dois algarismos
+significativos) — e o veredito por check sob essa banda. Publicado por
+`validation::incerteza::analisa` + `UncertaintySpec::from_incerteza`
+(`src/models/specs.rs`), chamado por `main.rs` depois do pipeline
+convergir. `parameter` nomeia explicitamente QUAL entrada foi varrida —
+**não é uma afirmação de que o resto do JSON é certo** (spec do ciclo16,
+§9: o baseline tem outras entradas declaradamente não validadas —
+`ground_clearance_min_m`, `prop_plane_x_m`, entre outras — e nenhuma delas
+é varrida por este bloco).
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `parameter` | string | — | `"propeller.fom_static"` — único parâmetro varrido neste ciclo |
+| `nominal` | f64 | fração (0–1) | `propeller.fom_static` de config — eco, não recálculo |
+| `declared_tol_pct` | f64 | % | `propeller.fom_static_tol_pct` de config — a declaração de confiança do projeto sobre `nominal` |
+| `band_declared_lo` | f64 | fração (0–1) | `nominal · (1 − declared_tol_pct/100)` — extremo inferior DECLARADO. Nunca truncado (só o topo trunca) |
+| `band_declared_hi` | f64 | fração (0–1) | `nominal · (1 + declared_tol_pct/100)` — extremo superior DECLARADO, ANTES de qualquer truncagem. Pode exceder `band_hi` quando `band_truncated` |
+| `band_lo` | f64 | fração (0–1) | Extremo inferior EFETIVO — sempre igual a `band_declared_lo` |
+| `band_hi` | f64 | fração (0–1) | Extremo superior EFETIVO — o valor de fato USADO na varredura (não uma releitura de `band_declared_hi`), truncado em `propeller.fom_design` e/ou 1,0 quando `band_declared_hi` excede o domínio fisicamente admissível (acima de `fom_design`, `FoM(J)` seria DECRESCENTE em J) |
+| `band_truncated` | bool | — | `true` quando `band_hi < band_declared_hi` |
+| `band_truncated_reason` | string ou `null` | — | Razão(ões) da truncagem, concatenadas — `null` quando `!band_truncated` |
+| `ceiling_evaluated` | bool | — | `true` quando o ponto do TETO de quantidade de movimento (as duas âncoras `fom_static`/`fom_design` em 1,0) convergiu |
+| `checks` | array de objetos (`UncertaintyCheckSpec`) | — | Um por id (violação OU portão) que viola em pelo menos um dos QUATRO pontos avaliados (nominal, `band_lo`, `band_hi`, teto). Um check que passa nos quatro NÃO gera linha |
+
+Sub-bloco `uncertainty.checks[]` (`UncertaintyCheckSpec`):
+
+| Campo | Tipo | Unidade | Descrição |
+|---|---|---|---|
+| `id` | string | — | Identidade estável do check (`validation::constraint_checker::Violacao::id` ou `pipeline::Portao::id`) — NUNCA contém número calculado, é a chave de pareamento entre os quatro pontos |
+| `veredito` | string (`"PASSA"` \| `"FALHA"` \| `"INDETERMINADO"`) | — | Veredito FINAL. `"FALHA"` = presente nos três pontos nominal/lo/hi (falha DETERMINADA); `"PASSA"` = ausente nos três; `"INDETERMINADO"` = pertinência DIFERE entre os três pontos |
+| `veredito_lo` | string (mesmo domínio) | — | Veredito pontual em `band_lo` |
+| `veredito_nominal` | string (mesmo domínio) | — | Veredito pontual no `nominal` de config |
+| `veredito_hi` | string (mesmo domínio) | — | Veredito pontual em `band_hi` |
+| `alcance_de_helice` | bool | — | `false` = falha TAMBÉM no teto de quantidade de movimento — NENHUMA hélice conserta. `true` NÃO afirma que existe hélice real capaz — afirma só que a física não proíbe |
+| `breakeven_lo` | f64 ou `null` | fração (0–1) | Extremo inferior do BRACKET medido do breakeven — `null` quando não há travessia única (não monotônico, ou um extremo que não convergiu) |
+| `breakeven_hi` | f64 ou `null` | fração (0–1) | Extremo superior do bracket — a LARGURA `breakeven_hi − breakeven_lo` é a própria precisão publicada (nunca um ponto único: publicar um ponto com tolerância à parte seria a falsa precisão que este ciclo existe para curar) |
+| `motivo` | string ou `null` | — | Texto livre quando o veredito indeterminado NÃO vem de travessia única (não monotônico, ou falha de convergência num extremo) — `null` no caso normal |
+
+**A violação correspondente em `violations` é reescrita, nunca removida**
+(ver §1, entrada v6.0, e a entrada `violations` acima nesta seção): um
+check indeterminado PRESENTE no nominal tem seu texto em `violations`
+prefixado com `"INDETERMINADO — "`, contagem inalterada; um check
+indeterminado AUSENTE do nominal gera uma violação NOVA com o mesmo
+prefixo, contagem SOBE. Baseline real HOJE: `uncertainty.checks` tem
+**5** entradas (4 violações "clássicas" mais o portão duplicado em
+significado `portao_envelope_cg_todos`), das quais só `gradiente_cs2365`
+é `"INDETERMINADO"` — as demais são `"FALHA"` determinada.
 
 ## 5. Nota especial: infinito em campos `f64` — `fatigue_life_cycles`, `to_50ft_paved_m`, `to_50ft_grass_m`, `to_distance_paved_m`, `to_distance_grass_m`, `landing_distance_m`, `ldg_50ft_m`, `ldg_50ft_grass_m`, `ldg_air_distance_m`
 

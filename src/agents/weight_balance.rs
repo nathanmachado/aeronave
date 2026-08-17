@@ -444,7 +444,7 @@ pub struct WeightBalanceOutput {
     pub scenarios: Vec<ScenarioResult>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScenarioResult {
     pub name: &'static str,
     pub total_mass_kg: f64,

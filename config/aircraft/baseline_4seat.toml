@@ -181,6 +181,10 @@ prop_plane_x_m = 0.20
 # JavaProp apagado) com resíduo 0,000e0. Desvio vs a estimativa de 1ª ordem
 # do erratum (0,81595438786045016): +0,00277% — dentro do 0,1% esperado.
 fom_static = 0.75
+# Tolerância epistêmica declarada sobre `fom_static` (%) — ciclo 16, spec §5.1.
+# NÃO é medição de hélice — é a declaração de quanto o projeto confia numa
+# entrada que nunca foi calibrada (ver ciclo 16 design doc §1 e §5.1).
+fom_static_tol_pct = 10.0
 fom_design = 0.81597699924588796
 j_design   = 1.87514348025711675
 

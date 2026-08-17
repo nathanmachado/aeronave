@@ -93,7 +93,7 @@ use std::path::PathBuf;
 use aeronave::agents::landing_gear::LandingGearAgent;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::{ConstraintChecker, VerifyInputs};
+use aeronave::validation::constraint_checker::{ConstraintChecker, VerifyInputs, Violacao};
 
 fn config_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
@@ -427,16 +427,16 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
         robustness: &robustness, prop_cfg: &cfg.propeller,
     });
 
-    assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
+    assert!(!report.violations.iter().any(|v| v.texto.starts_with("Tipback:")),
         "não deveria haver violação de tipback no baseline real pós-E7: {:?}", report.violations);
-    assert!(!report.violations.iter().any(|v| v.starts_with("Tail-strike:")),
+    assert!(!report.violations.iter().any(|v| v.texto.starts_with("Tail-strike:")),
         "não deveria haver violação de tail-strike no baseline real: {:?}", report.violations);
     // Ciclo 3 (oew-parametrico): a carga de nariz PASSOU a violar (≈29,0%,
     // depois ≈28,6% no ciclo 4) — FAIL honesto asserido por nome aqui até a
     // campanha E9. E10 (2026-08-08) resolve por PROJETO (`x_nose_m`
     // 1,40→1,30 + bateria de 53 kg a 7,80 m): 28,6%→22,77%, abaixo do teto.
     // A asserção INVERTE — ver docstring.
-    assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:")),
+    assert!(!report.violations.iter().any(|v| v.texto.starts_with("Carga de nariz:")),
         "campanha E10: não deveria haver violação de carga de nariz (≈22,77% ≤ 25,0%) no \
          baseline real: {:?}", report.violations);
     // Checagem #19 (robustez à incerteza de massa estrutural, σ=15% =
@@ -517,18 +517,18 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     //     negativa (16,80 vs 18,47).
     // Contagem de robustez: **1 → 1** (mesmo tamanho, composição DIFERENTE
     // — sai 'Solo (piloto)', entra '2 pax dianteiros').
-    let robustez: Vec<&String> = report.violations.iter()
-        .filter(|v| v.starts_with("Robustez:")).collect();
+    let robustez: Vec<&Violacao> = report.violations.iter()
+        .filter(|v| v.texto.starts_with("Robustez:")).collect();
     assert_eq!(robustez.len(), 1,
         "ciclo 13 (task 4): esperava EXATAMENTE 1 violação de robustez (σ=15%) no baseline \
          real, na superfície de operação (grama) — '2 pax dianteiros' reabre porque a régua \
          nominal recuou com a grama; 'Solo (piloto)' saiu desta lista porque virou violação \
          NOMINAL de envelope, não robustez: {:?}",
         report.violations);
-    assert!(robustez.iter().any(|v| v.contains("2 pax dianteiros")),
+    assert!(robustez.iter().any(|v| v.texto.contains("2 pax dianteiros")),
         "esperava o flip de robustez do cenário '2 pax dianteiros' (reaberto pela superfície \
          de grama, spec §11.1): {:?}", report.violations);
-    assert!(!robustez.iter().any(|v| v.contains("Solo (piloto)")),
+    assert!(!robustez.iter().any(|v| v.texto.contains("Solo (piloto)")),
         "'Solo (piloto)' não deveria mais aparecer como flip de ROBUSTEZ — ele virou violação \
          NOMINAL de envelope (a régua o alcançou até no mundo nominal): {:?}",
         report.violations);
@@ -548,14 +548,14 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
     // mesma superfície que as checagens #23/#24 já reprovam para esta
     // decolagem, agora também gateando o balanço de rotação. Medido, não
     // ajustado.
-    let fora: Vec<&String> = report.violations.iter()
-        .filter(|v| v.contains("fora do envelope de CG admissível")).collect();
+    let fora: Vec<&Violacao> = report.violations.iter()
+        .filter(|v| v.texto.contains("fora do envelope de CG admissível")).collect();
     assert_eq!(fora.len(), 1,
         "ciclo 13 (task 4): 'Solo (piloto)' deveria sair do envelope de CG NOMINAL — o limite \
          dianteiro de rotação na superfície de operação (grama) sobe para ≈18,268% MAC contra \
          um CG nominal de ≈17,8%: {:?}",
         report.violations);
-    assert!(fora[0].contains("Solo (piloto)"),
+    assert!(fora[0].texto.contains("Solo (piloto)"),
         "a única violação de envelope NOMINAL esperada é 'Solo (piloto)': {:?}",
         report.violations);
     // ATUALIZAÇÃO (ciclo 9, transferência de atitude do #25 — old→new): a
@@ -673,16 +673,16 @@ fn constraint_checker_sem_violacoes_de_trem_nem_de_robustez_no_baseline_real() {
          de envelope de 'Solo (piloto)', E o flip de robustez de '2 pax dianteiros'. O pouso na \
          grama sobre 15 m SAIU da lista (checagem #24 FLIPOU FAIL→PASS, ver spec §2/§7 — \
          ldg_50ft_grass_m 646,660942→503,414253 m): {:?}", report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("Gradiente de subida")),
+    assert!(report.violations.iter().any(|v| v.texto.contains("Gradiente de subida")),
         "uma das quatro violações esperadas é o gradiente CS 23.65 abaixo do piso (lei única \
          de tração, spec §11 — risco central do ciclo): {:?}", report.violations);
-    assert!(report.violations.iter().any(|v| v.contains("Decolagem (grama, 15 m)")),
+    assert!(report.violations.iter().any(|v| v.texto.contains("Decolagem (grama, 15 m)")),
         "uma das quatro violações esperadas é a de decolagem na grama sobre 15 m: {:?}",
         report.violations);
     // `old→new` (ciclo 14): a asserção POSITIVA de "Pouso (grama, 15 m)" ∈
     // violations DEIXOU DE VALER — vira a relação nova e verdadeira,
     // NEGATIVA: essa string não pode mais aparecer (checagem #24 em PASS).
-    assert!(!report.violations.iter().any(|v| v.contains("Pouso (grama, 15 m)")),
+    assert!(!report.violations.iter().any(|v| v.texto.contains("Pouso (grama, 15 m)")),
         "ciclo 14: a checagem #24 (pouso na grama sobre 15 m) deveria estar em PASS — não \
          deveria haver mais violação de pouso na grama no baseline real (ldg_50ft_grass_m \
          ≈503,4 m < 600 m de pista): {:?}", report.violations);
@@ -814,7 +814,7 @@ fn margem_de_combustivel_do_baseline_real_fica_acima_do_piso_pin_honesto() {
         prop_cfg: &cfg.propeller,
     });
 
-    assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),
+    assert!(!report.violations.iter().any(|v| v.texto.contains("Margem de combustível")),
         "não deveria haver violação de margem de combustível no baseline real pós-E7: {:?}",
         report.violations);
 }

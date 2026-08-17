@@ -1,6 +1,6 @@
 {
-  "schema_version": "5.7",
-  "revision": "5.7",
+  "schema_version": "6.0",
+  "revision": "6.0",
   "validation_status": "FAIL",
   "wing": {
     "span_m": 11.94,
@@ -450,11 +450,80 @@
   },
   "violations": [
     "Cenário 'Solo (piloto)': CG 17.8% MAC fora do envelope de CG admissível [18.3%–43.5%] (SM=0.307; x_cg=3.121m, limites em x: [3.128m, 3.442m])",
-    "Gradiente de subida 7.9% abaixo do mínimo de 8.3% exigido pela CS 23.65 (Vx=138.9km/h)",
+    "INDETERMINADO — Gradiente de subida 7.9% abaixo do mínimo de 8.3% exigido pela CS 23.65 (Vx=138.9km/h). O veredito VIRA dentro da banda declarada de propeller.fom_static [0.675000–0.815977]: breakeven em [0.784867–0.784868], +4.6% sobre o nominal 0.750. O modelo NÃO sustenta este veredito.",
     "Robustez: Cenário '2 pax dianteiros' passa no nominal mas reprova com massas estruturais ±15.0% (pior caso dianteiro): 16.80 vs 18.47",
     "Decolagem (grama, 15 m): 859 m excede a pista disponível de 600 m"
   ],
   "warnings": [
     "Orçamento elétrico: carga de pico (pior caso, todas as cargas simultâneas) 1260.0 W excede a capacidade do alternador (900.0 W) — banco de baterias deve cobrir o transiente"
-  ]
+  ],
+  "uncertainty": {
+    "parameter": "propeller.fom_static",
+    "nominal": 0.75,
+    "declared_tol_pct": 10.0,
+    "band_declared_lo": 0.675,
+    "band_declared_hi": 0.8250000000000001,
+    "band_lo": 0.675,
+    "band_hi": 0.815976999245888,
+    "band_truncated": true,
+    "band_truncated_reason": "topo truncado em propeller.fom_design (0.815976999245888): acima dele FoM(J) seria DECRESCENTE em J",
+    "ceiling_evaluated": true,
+    "checks": [
+      {
+        "id": "decolagem_grama",
+        "veredito": "FALHA",
+        "veredito_lo": "FALHA",
+        "veredito_nominal": "FALHA",
+        "veredito_hi": "FALHA",
+        "alcance_de_helice": true,
+        "breakeven_lo": null,
+        "breakeven_hi": null,
+        "motivo": null
+      },
+      {
+        "id": "envelope_cg::Solo (piloto)",
+        "veredito": "FALHA",
+        "veredito_lo": "FALHA",
+        "veredito_nominal": "FALHA",
+        "veredito_hi": "FALHA",
+        "alcance_de_helice": false,
+        "breakeven_lo": null,
+        "breakeven_hi": null,
+        "motivo": null
+      },
+      {
+        "id": "gradiente_cs2365",
+        "veredito": "INDETERMINADO",
+        "veredito_lo": "FALHA",
+        "veredito_nominal": "FALHA",
+        "veredito_hi": "PASSA",
+        "alcance_de_helice": true,
+        "breakeven_lo": 0.7848672372357861,
+        "breakeven_hi": 0.7848677750203596,
+        "motivo": null
+      },
+      {
+        "id": "portao_envelope_cg_todos",
+        "veredito": "FALHA",
+        "veredito_lo": "FALHA",
+        "veredito_nominal": "FALHA",
+        "veredito_hi": "FALHA",
+        "alcance_de_helice": false,
+        "breakeven_lo": null,
+        "breakeven_hi": null,
+        "motivo": null
+      },
+      {
+        "id": "robustez::Cenário '2 pax dianteiros'::dianteiro",
+        "veredito": "FALHA",
+        "veredito_lo": "FALHA",
+        "veredito_nominal": "FALHA",
+        "veredito_hi": "FALHA",
+        "alcance_de_helice": false,
+        "breakeven_lo": null,
+        "breakeven_hi": null,
+        "motivo": null
+      }
+    ]
+  }
 }

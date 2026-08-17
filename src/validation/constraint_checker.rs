@@ -43,15 +43,41 @@ pub const SERVICE_CEILING_MIN_M: f64 = 3_000.0;
 /// era um literal `"trem_retratil"` repetido em produção e em testes).
 pub const GEAR_ACTUATOR_LOAD_NAME: &str = "trem_retratil";
 
+/// Uma violação com IDENTIDADE ESTÁVEL (ciclo 16, spec §5.2).
+///
+/// Antes deste ciclo uma restrição avaliada não era reificada: cada um dos
+/// 25 sítios de checagem fazia `violations.push(format!("…"))` e o TEXTO
+/// formatado era toda a identidade que existia. O texto carrega valores
+/// (`"7.9%"` vs `"7.4%"`), então não serve de chave para parear o MESMO
+/// check entre duas corridas com `fom_static` diferente — e sem chave não
+/// há como a varredura de banda (`validation::incerteza`) dizer QUAL check
+/// virou.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Violacao {
+    /// Estável sob variação de config — NUNCA contém número CALCULADO
+    /// (`"gradiente_cs2365"`, não `"gradiente_7.9"`). Pode conter texto DE
+    /// CONFIG (nome de cenário, nome de check de robustez), que é estável
+    /// à parte de `fom_static`.
+    pub id: String,
+    pub texto: String,
+}
+
 #[derive(Debug)]
 pub struct ConstraintReport {
-    pub violations: Vec<String>,
+    pub violations: Vec<Violacao>,
     pub warnings: Vec<String>,
 }
 
 impl ConstraintReport {
     pub fn all_satisfied(&self) -> bool {
         self.violations.is_empty()
+    }
+
+    /// Só os textos, na ordem — o que vai para o JSON
+    /// (`AircraftReport.violations` continua `Vec<String>`, byte-idêntico
+    /// a antes deste ciclo).
+    pub fn textos(&self) -> Vec<String> {
+        self.violations.iter().map(|v| v.texto.clone()).collect()
     }
 }
 
@@ -107,20 +133,35 @@ impl ConstraintChecker {
         // (verificado indiretamente: se P_avail > P_req ao calcular propulsão
         //  com V = V_min_cruise, o requisito está satisfeito)
         // Aqui verificamos se a razão L/D está dentro do esperado
+        //
+        // Ciclo 16 (Task 2): o id é `ld_ratio_cruise`, NÃO `velocidade_
+        // cruzeiro` — o comentário acima fala em "Velocidade de cruzeiro",
+        // mas o código testa `wing.ld_ratio_cruise`, física diferente
+        // (razão L/D, não velocidade). Nomear pelo comentário colidiria com
+        // o portão homônimo `portao_v_cruzeiro` em significado (não em
+        // string, já que os prefixos `portao_`/sem-prefixo não colidem por
+        // construção — mas colidiria em CLAREZA, que é o que este id existe
+        // para preservar).
         if wing.ld_ratio_cruise < 10.0 {
-            violations.push(format!(
-                "L/D cruzeiro {:.1} abaixo do mínimo de 10 (eficiência insuficiente)",
-                wing.ld_ratio_cruise
-            ));
+            violations.push(Violacao {
+                id: "ld_ratio_cruise".to_string(),
+                texto: format!(
+                    "L/D cruzeiro {:.1} abaixo do mínimo de 10 (eficiência insuficiente)",
+                    wing.ld_ratio_cruise
+                ),
+            });
         }
 
         // 2. Velocidade de stall: CS-23 exige V_s0 (pouso, com flap) ≤ V_cruise / 1.8
         let v_stall_limit = req.cruise_speed_min_kmh / 1.8;
         if wing.stall_speed_flaps_kmh > v_stall_limit {
-            violations.push(format!(
-                "V_stall (VS0) {:.1} km/h excede limite CS-23 de {:.1} km/h (= V_cruise/1.8)",
-                wing.stall_speed_flaps_kmh, v_stall_limit
-            ));
+            violations.push(Violacao {
+                id: "stall_speed_vs_cruise".to_string(),
+                texto: format!(
+                    "V_stall (VS0) {:.1} km/h excede limite CS-23 de {:.1} km/h (= V_cruise/1.8)",
+                    wing.stall_speed_flaps_kmh, v_stall_limit
+                ),
+            });
         }
 
         // (Finding 4 da revisão final — checagens VAZIAS removidas do array
@@ -173,10 +214,13 @@ impl ConstraintChecker {
 
         // 5. Consumo: alerta se acima de 35 L/h (degrada autonomia)
         if prop.fc_cruise_lph > 35.0 {
-            violations.push(format!(
-                "Consumo cruzeiro {:.1} L/h acima do limite de 35 L/h para autonomia de 8h",
-                prop.fc_cruise_lph
-            ));
+            violations.push(Violacao {
+                id: "consumo_cruzeiro".to_string(),
+                texto: format!(
+                    "Consumo cruzeiro {:.1} L/h acima do limite de 35 L/h para autonomia de 8h",
+                    prop.fc_cruise_lph
+                ),
+            });
         }
 
         // 6. Alcance Breguet com TANQUE CHEIO (Finding 4 da revisão final —
@@ -195,12 +239,15 @@ impl ConstraintChecker {
         // esta checagem falhe mesmo com `Ok(sized)`.
         let range_req = req.cruise_speed_min_kmh * req.endurance_min_h;
         if mission.breguet_range_full_tank_km < range_req {
-            violations.push(format!(
-                "Alcance Breguet com tanque cheio {:.0} km abaixo do requisito de {:.0} km \
-                 (a missão mínima cabe no tanque, mas o alcance Breguet do tanque cheio não \
-                 cobre a distância exigida)",
-                mission.breguet_range_full_tank_km, range_req
-            ));
+            violations.push(Violacao {
+                id: "alcance_breguet_tanque_cheio".to_string(),
+                texto: format!(
+                    "Alcance Breguet com tanque cheio {:.0} km abaixo do requisito de {:.0} km \
+                     (a missão mínima cabe no tanque, mas o alcance Breguet do tanque cheio não \
+                     cobre a distância exigida)",
+                    mission.breguet_range_full_tank_km, range_req
+                ),
+            });
         }
 
         // 7. MTOW razoável para a potência do motor instalado (fator de carga de potência)
@@ -220,11 +267,14 @@ impl ConstraintChecker {
         // célula/hélice/PSRU), isto é uma violação de requisito, não um
         // panic — o motor pode não ser adequado a este projeto.
         if !prop.cruise_feasible {
-            violations.push(format!(
-                "Cruzeiro inviável: potência requerida {:.1} kW > disponível {:.1} kW \
-                 no rpm de cruzeiro escolhido (motor {})",
-                prop.p_req_cruise_kw, prop.p_shaft_cruise_kw, engine.name
-            ));
+            violations.push(Violacao {
+                id: "cruzeiro_inviavel".to_string(),
+                texto: format!(
+                    "Cruzeiro inviável: potência requerida {:.1} kW > disponível {:.1} kW \
+                     no rpm de cruzeiro escolhido (motor {})",
+                    prop.p_req_cruise_kw, prop.p_shaft_cruise_kw, engine.name
+                ),
+            });
         }
 
         // 9. Envelope de CG admissível (Task 4.4 + task trim-authority):
@@ -257,26 +307,40 @@ impl ConstraintChecker {
         // deixar essa causa raiz implícita em N mensagens repetidas.
         let envelope_vazio = wb.spec.cg_limit_fwd_pct_mac > wb.spec.cg_limit_aft_pct_mac;
         if envelope_vazio {
-            violations.push(format!(
-                "Envelope de CG VAZIO: limite dianteiro por rotação ({:.1}% MAC) fica ATRÁS \
-                 do limite traseiro de estabilidade ({:.1}% MAC) — nenhum CG é admissível; \
-                 causa: trem principal muito atrás do CG (gear.x_main_m). Revisar posição do \
-                 trem.",
-                wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac
-            ));
+            violations.push(Violacao {
+                id: "envelope_cg_vazio".to_string(),
+                texto: format!(
+                    "Envelope de CG VAZIO: limite dianteiro por rotação ({:.1}% MAC) fica ATRÁS \
+                     do limite traseiro de estabilidade ({:.1}% MAC) — nenhum CG é admissível; \
+                     causa: trem principal muito atrás do CG (gear.x_main_m). Revisar posição do \
+                     trem.",
+                    wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac
+                ),
+            });
         }
 
+        // Ciclo 16 (Task 2): id `envelope_cg::{nome do cenário}` — contrato
+        // fixado na spec §5.2/plano Task 2 Passo 4, consumido por
+        // `validation::incerteza` e pela Task 5. É o ÚNICO id deste arquivo
+        // que a varredura de fonte (Task 2, teste
+        // `todo_sitio_de_violacao_tem_id_e_os_ids_sao_globalmente_unicos`)
+        // não prova único por si só — depende de `sc.name` nunca se repetir
+        // entre cenários (nomes fixos em `agents::weight_balance`, não TOML
+        // de usuário — ver a "lacuna declarada" da spec §5.2).
         for sc in &wb.scenarios {
             if !sc.inside_envelope {
-                violations.push(format!(
-                    "Cenário '{}': CG {:.1}% MAC fora do envelope de CG admissível \
-                     [{:.1}%–{:.1}%] (SM={:.3}; x_cg={:.3}m, limites em x: \
-                     [{:.3}m, {:.3}m])",
-                    sc.name, sc.cg_pct_mac,
-                    wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
-                    sc.static_margin, sc.x_cg_m,
-                    x_limit_fwd_m, x_limit_aft_m,
-                ));
+                violations.push(Violacao {
+                    id: format!("envelope_cg::{}", sc.name),
+                    texto: format!(
+                        "Cenário '{}': CG {:.1}% MAC fora do envelope de CG admissível \
+                         [{:.1}%–{:.1}%] (SM={:.3}; x_cg={:.3}m, limites em x: \
+                         [{:.3}m, {:.3}m])",
+                        sc.name, sc.cg_pct_mac,
+                        wb.spec.cg_limit_fwd_pct_mac, wb.spec.cg_limit_aft_pct_mac,
+                        sc.static_margin, sc.x_cg_m,
+                        x_limit_fwd_m, x_limit_aft_m,
+                    ),
+                });
             }
         }
 
@@ -284,25 +348,34 @@ impl ConstraintChecker {
         // cruzeiro e folga, cada um reportado com o diâmetro (config ou
         // derivado) que produziu o resultado.
         if !propeller.ok_mach_static {
-            violations.push(format!(
-                "Hélice: Mach de ponta ESTÁTICO {:.3} acima do admissível \
-                 (diâmetro {:.2}m, fonte: {})",
-                propeller.tip_mach_static, propeller.diameter_m, propeller.source
-            ));
+            violations.push(Violacao {
+                id: "mach_ponta_estatico".to_string(),
+                texto: format!(
+                    "Hélice: Mach de ponta ESTÁTICO {:.3} acima do admissível \
+                     (diâmetro {:.2}m, fonte: {})",
+                    propeller.tip_mach_static, propeller.diameter_m, propeller.source
+                ),
+            });
         }
         if !propeller.ok_mach_cruise {
-            violations.push(format!(
-                "Hélice: Mach de ponta em CRUZEIRO (helicoidal) {:.3} acima do admissível \
-                 (diâmetro {:.2}m, fonte: {})",
-                propeller.tip_mach_cruise_helical, propeller.diameter_m, propeller.source
-            ));
+            violations.push(Violacao {
+                id: "mach_ponta_cruzeiro".to_string(),
+                texto: format!(
+                    "Hélice: Mach de ponta em CRUZEIRO (helicoidal) {:.3} acima do admissível \
+                     (diâmetro {:.2}m, fonte: {})",
+                    propeller.tip_mach_cruise_helical, propeller.diameter_m, propeller.source
+                ),
+            });
         }
         if !propeller.ok_clearance {
-            violations.push(format!(
-                "Hélice: folga de solo {:.3}m abaixo do mínimo exigido \
-                 (diâmetro {:.2}m, fonte: {})",
-                propeller.ground_clearance_m, propeller.diameter_m, propeller.source
-            ));
+            violations.push(Violacao {
+                id: "folga_solo_helice".to_string(),
+                texto: format!(
+                    "Hélice: folga de solo {:.3}m abaixo do mínimo exigido \
+                     (diâmetro {:.2}m, fonte: {})",
+                    propeller.ground_clearance_m, propeller.diameter_m, propeller.source
+                ),
+            });
         }
 
         // 11. Diâmetro derivado × provisório (mitigação pós-revisão da Task
@@ -322,11 +395,17 @@ impl ConstraintChecker {
         // gradiente mínimo de 8.3% (avaliado em Vx, ao nível do mar, MTOW —
         // ver `agents::performance::best_climb_angle_ms`).
         if perf.climb_gradient_pct < CLIMB_GRADIENT_MIN_PCT {
-            violations.push(format!(
-                "Gradiente de subida {:.1}% abaixo do mínimo de {:.1}% exigido pela CS 23.65 \
-                 (Vx={:.1}km/h)",
-                perf.climb_gradient_pct, CLIMB_GRADIENT_MIN_PCT, perf.vx_kmh
-            ));
+            violations.push(Violacao {
+                // Ciclo 16: literal CONTRATO entre tasks — Task 4 (Passos
+                // 5-6) e Task 5 (Passo 3) dependem deste id exato. NÃO
+                // renomear sem atualizar as duas.
+                id: "gradiente_cs2365".to_string(),
+                texto: format!(
+                    "Gradiente de subida {:.1}% abaixo do mínimo de {:.1}% exigido pela CS 23.65 \
+                     (Vx={:.1}km/h)",
+                    perf.climb_gradient_pct, CLIMB_GRADIENT_MIN_PCT, perf.vx_kmh
+                ),
+            });
         }
 
         // 13. Orçamento elétrico — carga CONTÍNUA (Task 5.2): não pode
@@ -335,11 +414,14 @@ impl ConstraintChecker {
         // capturados no orçamento contínuo).
         let limite_continuo_w = electrical.alternator_w * ELECTRICAL_CONTINUOUS_MARGIN_FRAC;
         if electrical.continuous_load_w > limite_continuo_w {
-            violations.push(format!(
-                "Orçamento elétrico: carga contínua {:.1} W excede 80% da capacidade do \
-                 alternador ({:.1} W de {:.1} W nominais)",
-                electrical.continuous_load_w, limite_continuo_w, electrical.alternator_w
-            ));
+            violations.push(Violacao {
+                id: "eletrico_carga_continua".to_string(),
+                texto: format!(
+                    "Orçamento elétrico: carga contínua {:.1} W excede 80% da capacidade do \
+                     alternador ({:.1} W de {:.1} W nominais)",
+                    electrical.continuous_load_w, limite_continuo_w, electrical.alternator_w
+                ),
+            });
         }
 
         // 14. Orçamento elétrico — carga de PICO (Task 5.2): se o pico
@@ -373,12 +455,15 @@ impl ConstraintChecker {
         // mutada (ver `violacao_de_tipback_aparece_quando_abaixo_do_piso`
         // abaixo, mesmo padrão da checagem #18).
         if gear.tipback_angle_deg < gear_cfg.tipback_min_deg {
-            violations.push(format!(
-                "Tipback: ângulo {:.1}° abaixo do piso de {:.1}° (Raymer cap. 11) — risco de \
-                 tombar sobre a cauda com o CG mais traseiro real dos cenários de carga \
-                 (trem principal em x_main={:.2}m)",
-                gear.tipback_angle_deg, gear_cfg.tipback_min_deg, gear_cfg.x_main_m
-            ));
+            violations.push(Violacao {
+                id: "tipback".to_string(),
+                texto: format!(
+                    "Tipback: ângulo {:.1}° abaixo do piso de {:.1}° (Raymer cap. 11) — risco de \
+                     tombar sobre a cauda com o CG mais traseiro real dos cenários de carga \
+                     (trem principal em x_main={:.2}m)",
+                    gear.tipback_angle_deg, gear_cfg.tipback_min_deg, gear_cfg.x_main_m
+                ),
+            });
         }
 
         // 16. Tail-strike (Task 2, refino-ciclo2): a folga angular entre o
@@ -386,13 +471,16 @@ impl ConstraintChecker {
         // >= `[gear].rotation_attitude_deg` (a atitude de picada nominal na
         // rotação/flare), senão a cauda toca o solo antes da rotação.
         if gear.tail_strike_margin_deg < gear_cfg.rotation_attitude_deg {
-            violations.push(format!(
-                "Tail-strike: folga angular {:.1}° abaixo da atitude de rotação de {:.1}° — \
-                 risco de a cauda tocar o solo na rotação/flare (tail_cone_x_m={:.2}m, \
-                 x_main={:.2}m)",
-                gear.tail_strike_margin_deg, gear_cfg.rotation_attitude_deg,
-                gear_cfg.tail_cone_x_m, gear_cfg.x_main_m
-            ));
+            violations.push(Violacao {
+                id: "tail_strike".to_string(),
+                texto: format!(
+                    "Tail-strike: folga angular {:.1}° abaixo da atitude de rotação de {:.1}° — \
+                     risco de a cauda tocar o solo na rotação/flare (tail_cone_x_m={:.2}m, \
+                     x_main={:.2}m)",
+                    gear.tail_strike_margin_deg, gear_cfg.rotation_attitude_deg,
+                    gear_cfg.tail_cone_x_m, gear_cfg.x_main_m
+                ),
+            });
         }
 
         // 17. Carga de nariz nos DOIS extremos reais dos cenários de carga
@@ -403,19 +491,30 @@ impl ConstraintChecker {
         // task robustez) — `validation::robustness` reexporta as MESMAS
         // constantes para avaliar os conjuntos adversariais contra os
         // mesmos tetos/pisos, fonte única.
+        // Ciclo 16 (Task 2, ERRATUM da spec §5.2): o comentário `#17` cobre
+        // DOIS `push` independentes — teto (CG dianteiro) e piso (CG
+        // traseiro) — que podem disparar JUNTOS (nenhuma relação entre os
+        // dois campos é imposta aqui). Ids distintos, sufixados pela
+        // CONDIÇÃO testada, não pelo número do comentário.
         if gear.nose_load_max_pct > NOSE_LOAD_MAX_CEILING_PCT {
-            violations.push(format!(
-                "Carga de nariz: {:.1}% no CG mais DIANTEIRO real excede o teto de {:.1}% \
-                 (risco de sobrecarga estrutural/pneu do trem de nariz)",
-                gear.nose_load_max_pct, NOSE_LOAD_MAX_CEILING_PCT
-            ));
+            violations.push(Violacao {
+                id: "carga_nariz_teto".to_string(),
+                texto: format!(
+                    "Carga de nariz: {:.1}% no CG mais DIANTEIRO real excede o teto de {:.1}% \
+                     (risco de sobrecarga estrutural/pneu do trem de nariz)",
+                    gear.nose_load_max_pct, NOSE_LOAD_MAX_CEILING_PCT
+                ),
+            });
         }
         if gear.nose_load_min_pct < NOSE_LOAD_MIN_FLOOR_PCT {
-            violations.push(format!(
-                "Carga de nariz: {:.1}% no CG mais TRASEIRO real abaixo do piso de {:.1}% \
-                 (tração/direção em solo insuficiente)",
-                gear.nose_load_min_pct, NOSE_LOAD_MIN_FLOOR_PCT
-            ));
+            violations.push(Violacao {
+                id: "carga_nariz_piso".to_string(),
+                texto: format!(
+                    "Carga de nariz: {:.1}% no CG mais TRASEIRO real abaixo do piso de {:.1}% \
+                     (tração/direção em solo insuficiente)",
+                    gear.nose_load_min_pct, NOSE_LOAD_MIN_FLOOR_PCT
+                ),
+            });
         }
 
         // 18. Margem mínima de combustível (Task 3, refino-ciclo2): a folga
@@ -435,13 +534,16 @@ impl ConstraintChecker {
         let fuel_margin_pct = (fuel_capacity_l - mission.fuel_total_l) / fuel_capacity_l * 100.0;
         let fuel_margin_min_pct = req.min_fuel_margin_fraction * 100.0;
         if fuel_margin_pct < fuel_margin_min_pct {
-            violations.push(format!(
-                "Margem de combustível: {:.2}% da capacidade do tanque abaixo do mínimo de \
-                 {:.1}% (combustível exigido pela missão {:.1} L, capacidade do tanque {:.1} L, \
-                 margem {:.1} L)",
-                fuel_margin_pct, fuel_margin_min_pct,
-                mission.fuel_total_l, fuel_capacity_l, fuel_capacity_l - mission.fuel_total_l
-            ));
+            violations.push(Violacao {
+                id: "margem_combustivel".to_string(),
+                texto: format!(
+                    "Margem de combustível: {:.2}% da capacidade do tanque abaixo do mínimo de \
+                     {:.1}% (combustível exigido pela missão {:.1} L, capacidade do tanque {:.1} L, \
+                     margem {:.1} L)",
+                    fuel_margin_pct, fuel_margin_min_pct,
+                    mission.fuel_total_l, fuel_capacity_l, fuel_capacity_l - mission.fuel_total_l
+                ),
+            });
         }
 
         // 19. Robustez à incerteza do modelo de massas (ciclo 4, task
@@ -454,13 +556,28 @@ impl ConstraintChecker {
         // violação nomeada, não um aviso: o veredito nominal sozinho não é
         // confiável o bastante para essas 7 massas. Um `violations.push`
         // por flip (zero flips ⇒ zero violações desta checagem).
+        // Ciclo 16 (Task 2, julgamento além do que o plano cobriu
+        // explicitamente — a spec §5.2 só fixa o contrato de
+        // `envelope_cg::{cenário}` para o check #9, mas #19 é
+        // estruturalmente idêntico: UM sítio de `push`, zero a N violações
+        // por corrida, uma por `flip`). Um id FIXO ("robustez") colidiria
+        // sempre que dois flips ocorrerem na MESMA corrida — cenário real,
+        // não hipotético: o histórico deste arquivo (ver comentários
+        // `old→new` em `tests/gear_tipback.rs`) registra corridas passadas
+        // com 2 flips simultâneos. `flip.check`/`flip.caso` são texto DE
+        // CONFIG (nome do check + qual mundo adversarial disparou), nunca
+        // um número calculado — mesma garantia de estabilidade de
+        // `envelope_cg::{cenário}`.
         for flip in &robustness.flips {
-            violations.push(format!(
-                "Robustez: {} passa no nominal mas reprova com massas estruturais ±{:.1}% \
-                 (pior caso {}): {:.2} vs {:.2}",
-                flip.check, robustness.sigma_mass_fraction * 100.0, flip.caso,
-                flip.valor, flip.limite
-            ));
+            violations.push(Violacao {
+                id: format!("robustez::{}::{}", flip.check, flip.caso),
+                texto: format!(
+                    "Robustez: {} passa no nominal mas reprova com massas estruturais ±{:.1}% \
+                     (pior caso {}): {:.2} vs {:.2}",
+                    flip.check, robustness.sigma_mass_fraction * 100.0, flip.caso,
+                    flip.valor, flip.limite
+                ),
+            });
         }
 
         // 20 — atuador de retração vs orçamento elétrico (ciclo 5): o pico
@@ -477,17 +594,23 @@ impl ConstraintChecker {
         // se aplica quando `[gear].retractable = true`.
         if gear_cfg.retractable {
             match electrical.loads.iter().find(|l| l.name == GEAR_ACTUATOR_LOAD_NAME) {
-                None => violations.push(format!(
-                    "Carga '{GEAR_ACTUATOR_LOAD_NAME}' ausente do orçamento elétrico — aeronave \
-                     de trem retrátil precisa declarar o pico do atuador em \
-                     [[electrical.loads]]"
-                )),
-                Some(l) if l.peak_w < gear.actuator_power_w => violations.push(format!(
-                    "Atuador de retração: pico declarado em [[electrical.loads]] \
-                     '{GEAR_ACTUATOR_LOAD_NAME}' ({:.1} W) menor que a potência computada do \
-                     atuador ({:.1} W) — orçamento elétrico subdimensionado",
-                    l.peak_w, gear.actuator_power_w
-                )),
+                None => violations.push(Violacao {
+                    id: "atuador_retracao_ausente".to_string(),
+                    texto: format!(
+                        "Carga '{GEAR_ACTUATOR_LOAD_NAME}' ausente do orçamento elétrico — aeronave \
+                         de trem retrátil precisa declarar o pico do atuador em \
+                         [[electrical.loads]]"
+                    ),
+                }),
+                Some(l) if l.peak_w < gear.actuator_power_w => violations.push(Violacao {
+                    id: "atuador_retracao_subdimensionado".to_string(),
+                    texto: format!(
+                        "Atuador de retração: pico declarado em [[electrical.loads]] \
+                         '{GEAR_ACTUATOR_LOAD_NAME}' ({:.1} W) menor que a potência computada do \
+                         atuador ({:.1} W) — orçamento elétrico subdimensionado",
+                        l.peak_w, gear.actuator_power_w
+                    ),
+                }),
                 Some(_) => {}
             }
         }
@@ -504,19 +627,25 @@ impl ConstraintChecker {
         // para `rc_sl_ms` diretamente) — pior nominal, melhor veredito.
         // Fecha essa lacuna: o piso nominal agora é verificado aqui.
         if perf.rc_sl_ms < RC_SL_MIN_MS {
-            violations.push(format!(
-                "Razão de subida ao nível do mar (MTOW) {:.2} m/s abaixo do mínimo de {:.1} m/s",
-                perf.rc_sl_ms, RC_SL_MIN_MS
-            ));
+            violations.push(Violacao {
+                id: "rc_sl".to_string(),
+                texto: format!(
+                    "Razão de subida ao nível do mar (MTOW) {:.2} m/s abaixo do mínimo de {:.1} m/s",
+                    perf.rc_sl_ms, RC_SL_MIN_MS
+                ),
+            });
         }
 
         // 22. Teto de serviço, MTOW (achado de review, ciclo 5, Important
         // 1) — mesmo raciocínio de monotonicidade da checagem #21 acima.
         if perf.service_ceiling_m < SERVICE_CEILING_MIN_M {
-            violations.push(format!(
-                "Teto de serviço (MTOW) {:.0} m abaixo do mínimo de {:.0} m",
-                perf.service_ceiling_m, SERVICE_CEILING_MIN_M
-            ));
+            violations.push(Violacao {
+                id: "teto_servico".to_string(),
+                texto: format!(
+                    "Teto de serviço (MTOW) {:.0} m abaixo do mínimo de {:.0} m",
+                    perf.service_ceiling_m, SERVICE_CEILING_MIN_M
+                ),
+            });
         }
 
         // 23. Decolagem na GRAMA sobre obstáculo de 15 m dentro da pista
@@ -532,10 +661,13 @@ impl ConstraintChecker {
         // operacional real é responsabilidade do valor configurado em
         // `runway_available_m`, não de uma folga implícita no operador.
         if perf.to_50ft_grass_m > req.runway_available_m {
-            violations.push(format!(
-                "Decolagem (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
-                perf.to_50ft_grass_m, req.runway_available_m
-            ));
+            violations.push(Violacao {
+                id: "decolagem_grama".to_string(),
+                texto: format!(
+                    "Decolagem (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
+                    perf.to_50ft_grass_m, req.runway_available_m
+                ),
+            });
         }
         // 24. Pouso na GRAMA sobre obstáculo de 15 m dentro da pista
         // disponível (Ciclo 6, task 2; superfície corrigida na revisão
@@ -547,10 +679,13 @@ impl ConstraintChecker {
         // esse o caso dimensionante da premissa de pista. O pavimentado
         // permanece no spec como informativo.
         if perf.ldg_50ft_grass_m > req.runway_available_m {
-            violations.push(format!(
-                "Pouso (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
-                perf.ldg_50ft_grass_m, req.runway_available_m
-            ));
+            violations.push(Violacao {
+                id: "pouso_grama".to_string(),
+                texto: format!(
+                    "Pouso (grama, 15 m): {:.0} m excede a pista disponível de {:.0} m",
+                    perf.ldg_50ft_grass_m, req.runway_available_m
+                ),
+            });
         }
 
         // 25. Folga de hélice em condição CRÍTICA (CS 23.925) — ciclo 8,
@@ -628,14 +763,17 @@ impl ConstraintChecker {
             propeller.ground_clearance_m - delta_prop
         );
         if propeller.prop_clearance_critical_m <= 0.0 {
-            violations.push(format!(
-                "Hélice (condição crítica CS 23.925, pivô nos mains): folga estática {:.3} m − \
-                 Δ_prop {:.3} m (fator {:.4}× sobre curso RESTANTE do nariz {:.3} m + pneu murcho \
-                 {:.3} m) = {:.3} m ≤ 0",
-                propeller.ground_clearance_m, delta_prop, fator,
-                curso_restante_nariz_m, gear_cfg.tire_deflation_delta_m,
-                propeller.prop_clearance_critical_m
-            ));
+            violations.push(Violacao {
+                id: "folga_helice_critica".to_string(),
+                texto: format!(
+                    "Hélice (condição crítica CS 23.925, pivô nos mains): folga estática {:.3} m − \
+                     Δ_prop {:.3} m (fator {:.4}× sobre curso RESTANTE do nariz {:.3} m + pneu murcho \
+                     {:.3} m) = {:.3} m ≤ 0",
+                    propeller.ground_clearance_m, delta_prop, fator,
+                    curso_restante_nariz_m, gear_cfg.tire_deflation_delta_m,
+                    propeller.prop_clearance_critical_m
+                ),
+            });
         }
 
         ConstraintReport { violations, warnings }
@@ -837,10 +975,10 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Cruzeiro inviável")),
             "esperava violação de cruzeiro inviável, obteve: {:?}", report.violations);
         // A mensagem deve carregar os números reais, não só um rótulo.
-        assert!(report.violations.iter().any(|v| v.contains("150.0") && v.contains("100.0")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("150.0") && v.texto.contains("100.0")),
             "violação deveria citar P_req/P_shaft: {:?}", report.violations);
     }
 
@@ -853,7 +991,7 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Cruzeiro inviável")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Cruzeiro inviável")),
             "não deveria haver violação de cruzeiro inviável, obteve: {:?}", report.violations);
     }
 
@@ -875,11 +1013,11 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("fora do envelope de CG admissível")),
             "esperava violação de envelope de CG, obteve: {:?}", report.violations);
         // A mensagem deve citar os limites do envelope em %MAC, não só um rótulo.
         assert!(report.violations.iter().any(|v|
-                v.contains(&format!("{:.1}%", wb.spec.cg_limit_fwd_pct_mac))),
+                v.texto.contains(&format!("{:.1}%", wb.spec.cg_limit_fwd_pct_mac))),
             "violação deveria citar o limite dianteiro do envelope: {:?}", report.violations);
     }
 
@@ -992,7 +1130,7 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Envelope de CG VAZIO")),
             "não deveria haver violação dedicada de envelope vazio no baseline pós-E6: {:?}",
             report.violations);
         // RE-PIN (ciclo 5, ver docstring acima): com a fixture agora
@@ -1000,8 +1138,8 @@ mod tests {
         // achado da campanha E7) não ocorre mais — o cenário "4 pax +
         // bagagem + cheio" sobe para SM≈11,07%. Zero violações de envelope
         // esperadas, sem exceção.
-        let violacoes_de_envelope: Vec<&String> = report.violations.iter()
-            .filter(|v| v.contains("fora do envelope de CG admissível"))
+        let violacoes_de_envelope: Vec<&Violacao> = report.violations.iter()
+            .filter(|v| v.texto.contains("fora do envelope de CG admissível"))
             .collect();
         println!("violações de envelope = {violacoes_de_envelope:?}");
         // RE-CONFIRMADO (ciclo 10, task 2 — momento da linha de tração):
@@ -1065,10 +1203,10 @@ mod tests {
             "ciclo 13 task 4: com o limite de rotação na superfície de OPERAÇÃO (grama, spec \
              §7), o cenário 'Solo (piloto)' volta a ficar fora do envelope de CG — obtido {:?}",
             violacoes_de_envelope);
-        assert!(violacoes_de_envelope[0].contains("Solo (piloto)"),
+        assert!(violacoes_de_envelope[0].texto.contains("Solo (piloto)"),
             "a única violação de envelope esperada é 'Solo (piloto)' — obtido {:?}",
             violacoes_de_envelope);
-        assert!(!report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Envelope de CG VAZIO")),
             "o envelope continua FECHADO como faixa (fwd ≈18,3% < aft ≈43,5%) — só o cenário \
              'Solo (piloto)' fica fora dele, não é o caso degenerado de envelope vazio: {:?}",
             report.violations);
@@ -1161,14 +1299,14 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, fuel_capacity_l, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Envelope de CG VAZIO")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Envelope de CG VAZIO")),
             "esperava violação dedicada de envelope vazio, obteve: {:?}", report.violations);
-        assert!(report.violations.iter().any(|v| v.contains("gear.x_main_m")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("gear.x_main_m")),
             "violação de envelope vazio deveria citar a causa raiz (gear.x_main_m): {:?}",
             report.violations);
         // Ainda deve haver violações POR CENÁRIO também (não substitui,
         // complementa).
-        assert!(report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("fora do envelope de CG admissível")),
             "violações por cenário deveriam continuar presentes ao lado da dedicada: {:?}",
             report.violations);
     }
@@ -1188,7 +1326,7 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("fora do envelope de CG admissível")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("fora do envelope de CG admissível")),
             "não deveria haver violação de envelope de CG, obteve: {:?}", report.violations);
     }
 
@@ -1202,9 +1340,9 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Mach de ponta ESTÁTICO")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Mach de ponta ESTÁTICO")),
             "esperava violação de Mach de ponta estático, obteve: {:?}", report.violations);
-        assert!(report.violations.iter().any(|v| v.contains("0.990")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("0.990")),
             "violação deveria citar o Mach observado: {:?}", report.violations);
     }
 
@@ -1225,7 +1363,7 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("folga de solo")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("folga de solo")),
             "esperava violação de folga de solo, obteve: {:?}", report.violations);
     }
 
@@ -1241,7 +1379,7 @@ mod tests {
 
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Hélice:")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Hélice:")),
             "não deveria haver violação de hélice, obteve: {:?}", report.violations);
     }
 
@@ -1279,7 +1417,7 @@ mod tests {
         assert!(report.warnings.iter().any(|w| w.contains("Diâmetro de hélice derivado")),
             "esperava aviso de divergência de diâmetro, obteve: {:?}", report.warnings);
         // É AVISO, não violação — o resultado continua fisicamente válido.
-        assert!(!report.violations.iter().any(|v| v.contains("Diâmetro de hélice derivado")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Diâmetro de hélice derivado")),
             "divergência de diâmetro deveria ser aviso, não violação: {:?}", report.violations);
     }
 
@@ -1353,10 +1491,10 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Gradiente de subida")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Gradiente de subida")),
             "esperava violação de gradiente de subida, obteve: {:?}", report.violations);
         // A mensagem deve citar o gradiente observado e o piso da CS 23.65.
-        assert!(report.violations.iter().any(|v| v.contains("6.0") && v.contains("8.3")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("6.0") && v.texto.contains("8.3")),
             "violação deveria citar o gradiente observado (6.0%) e o mínimo CS 23.65 \
              (8.3%): {:?}", report.violations);
     }
@@ -1369,7 +1507,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Gradiente de subida")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Gradiente de subida")),
             "não deveria haver violação de gradiente quando climb_gradient_pct (9.0%) >= \
              8.3%, obteve: {:?}", report.violations);
     }
@@ -1422,9 +1560,9 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Razão de subida ao nível do mar")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Razão de subida ao nível do mar")),
             "esperava violação de RC ao nível do mar, obteve: {:?}", report.violations);
-        assert!(report.violations.iter().any(|v| v.contains("1.40") && v.contains("1.5")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("1.40") && v.texto.contains("1.5")),
             "violação deveria citar o RC observado (1.40) e o piso (1.5): {:?}", report.violations);
     }
 
@@ -1436,7 +1574,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Razão de subida ao nível do mar")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Razão de subida ao nível do mar")),
             "não deveria haver violação de RC ao nível do mar quando rc_sl_ms (5.0) >= \
              RC_SL_MIN_MS (1.5), obteve: {:?}", report.violations);
     }
@@ -1449,9 +1587,9 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Teto de serviço")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Teto de serviço")),
             "esperava violação de teto de serviço, obteve: {:?}", report.violations);
-        assert!(report.violations.iter().any(|v| v.contains("2500") && v.contains("3000")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("2500") && v.texto.contains("3000")),
             "violação deveria citar o teto observado (2500) e o mínimo (3000): {:?}",
             report.violations);
     }
@@ -1464,7 +1602,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Teto de serviço")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Teto de serviço")),
             "não deveria haver violação de teto de serviço quando service_ceiling_m (5000) >= \
              SERVICE_CEILING_MIN_M (3000), obteve: {:?}", report.violations);
     }
@@ -1487,7 +1625,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("grama") && v.contains("pista disponível")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("grama") && v.texto.contains("pista disponível")),
             "esperava violação de decolagem na grama excedendo a pista disponível \
              ({:.1} m > {:.1} m), obteve: {:?}", perf.to_50ft_grass_m, req.runway_available_m,
              report.violations);
@@ -1503,7 +1641,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Pouso (grama") && v.contains("pista disponível")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Pouso (grama") && v.texto.contains("pista disponível")),
             "esperava violação de pouso na grama excedendo a pista disponível \
              ({:.1} m > {:.1} m), obteve: {:?}", perf.ldg_50ft_grass_m, req.runway_available_m,
              report.violations);
@@ -1528,7 +1666,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Pouso (grama")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Pouso (grama")),
             "pista de {:.1} m acomoda o pouso pavimentado ({:.1} m) mas NÃO o de grama ({:.1} m) — \
              #24 deveria reprovar: {:?}", req.runway_available_m, perf.ldg_50ft_m,
              perf.ldg_50ft_grass_m, report.violations);
@@ -1541,7 +1679,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("pista disponível")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("pista disponível")),
             "fixture intacta (pista de {:.0} m sintéticos) não deveria violar #23/#24 — \
              decolagem grama {:.1} m, pouso grama {:.1} m: {:?}",
              req.runway_available_m, perf.to_50ft_grass_m, perf.ldg_50ft_grass_m,
@@ -1583,9 +1721,9 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("carga contínua")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("carga contínua")),
             "esperava violação de carga elétrica contínua, obteve: {:?}", report.violations);
-        assert!(report.violations.iter().any(|v| v.contains("750.0") && v.contains("720.0")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("750.0") && v.texto.contains("720.0")),
             "violação deveria citar a carga observada (750.0 W) e o limite de 80% (720.0 W): \
              {:?}", report.violations);
     }
@@ -1599,7 +1737,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("carga contínua")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("carga contínua")),
             "não deveria haver violação de carga contínua, obteve: {:?}", report.violations);
     }
 
@@ -1615,7 +1753,7 @@ mod tests {
         assert!(report.warnings.iter().any(|w| w.contains("carga de pico")),
             "esperava aviso de pico elétrico, obteve: {:?}", report.warnings);
         // É AVISO, não violação — banco de baterias cobre o transiente.
-        assert!(!report.violations.iter().any(|v| v.contains("pico")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("pico")),
             "excesso de pico deveria ser aviso, não violação: {:?}", report.violations);
     }
 
@@ -1650,7 +1788,7 @@ mod tests {
         let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                  &propeller, &perf, &mission, &electrical_real, &gear, &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("carga contínua")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("carga contínua")),
             "baseline real (430 W contínuo / 900 W alternador, ~52,2% de margem) não deveria \
              violar o limite de 80%: {:?}", report.violations);
         assert!(report.warnings.iter().any(|w| w.contains("carga de pico")),
@@ -1687,7 +1825,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.starts_with("Tipback:")),
+        assert!(report.violations.iter().any(|v| v.texto.starts_with("Tipback:")),
             "esperava violação de tipback com gear.tipback_angle_deg sintético abaixo do piso, \
              obteve: {:?}", report.violations);
     }
@@ -1703,7 +1841,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.starts_with("Tipback:")),
+        assert!(!report.violations.iter().any(|v| v.texto.starts_with("Tipback:")),
             "não deveria haver violação de tipback com gear.tipback_angle_deg sintético acima \
              do piso, obteve: {:?}", report.violations);
     }
@@ -1737,7 +1875,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("DIANTEIRO")),
+        assert!(report.violations.iter().any(|v| v.texto.starts_with("Carga de nariz:") && v.texto.contains("DIANTEIRO")),
             "esperava violação de carga de nariz (ramo do TETO) com gear.nose_load_max_pct \
              sintético acima de {:.1}%, obteve: {:?}", NOSE_LOAD_MAX_CEILING_PCT, report.violations);
     }
@@ -1753,7 +1891,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("DIANTEIRO")),
+        assert!(!report.violations.iter().any(|v| v.texto.starts_with("Carga de nariz:") && v.texto.contains("DIANTEIRO")),
             "não deveria haver violação de carga de nariz (ramo do TETO) com gear.nose_load_max_pct \
              sintético abaixo de {:.1}%, obteve: {:?}", NOSE_LOAD_MAX_CEILING_PCT, report.violations);
     }
@@ -1771,7 +1909,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("TRASEIRO")),
+        assert!(report.violations.iter().any(|v| v.texto.starts_with("Carga de nariz:") && v.texto.contains("TRASEIRO")),
             "esperava violação de carga de nariz (ramo do PISO) com gear.nose_load_min_pct \
              sintético abaixo de {:.1}%, obteve: {:?}", NOSE_LOAD_MIN_FLOOR_PCT, report.violations);
     }
@@ -1787,7 +1925,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.starts_with("Carga de nariz:") && v.contains("TRASEIRO")),
+        assert!(!report.violations.iter().any(|v| v.texto.starts_with("Carga de nariz:") && v.texto.contains("TRASEIRO")),
             "não deveria haver violação de carga de nariz (ramo do PISO) com gear.nose_load_min_pct \
              sintético acima de {:.1}%, obteve: {:?}", NOSE_LOAD_MIN_FLOOR_PCT, report.violations);
     }
@@ -1811,10 +1949,10 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, fuel_capacity_l, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("Margem de combustível")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("Margem de combustível")),
             "esperava violação de margem de combustível, obteve: {:?}", report.violations);
         // A mensagem deve citar a margem observada (5.00%) e o piso da missão (8.0%).
-        assert!(report.violations.iter().any(|v| v.contains("5.00%") && v.contains("8.0%")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("5.00%") && v.texto.contains("8.0%")),
             "violação deveria citar a margem observada (5.00%) e o piso (8.0%): {:?}",
             report.violations);
     }
@@ -1831,7 +1969,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, fuel_capacity_l, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("Margem de combustível")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("Margem de combustível")),
             "não deveria haver violação de margem de combustível, obteve: {:?}", report.violations);
     }
 
@@ -1871,7 +2009,7 @@ mod tests {
         let report_sem_flips = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine, &wb,
                                                            &propeller, &perf, &mission, &electrical, &gear,
                                                            &gear_cfg, 220.0, &robustness_sem_flips, &prop_cfg));
-        assert!(!report_sem_flips.violations.iter().any(|v| v.starts_with("Robustez:")),
+        assert!(!report_sem_flips.violations.iter().any(|v| v.texto.starts_with("Robustez:")),
             "RobustnessSpec com flips vazio não deveria gerar nenhuma violação #19, obteve: {:?}",
             report_sem_flips.violations);
 
@@ -1894,13 +2032,13 @@ mod tests {
                                                           &propeller, &perf, &mission, &electrical, &gear,
                                                           &gear_cfg, 220.0, &robustness_com_flip, &prop_cfg));
 
-        let violacoes_robustez: Vec<&String> = report_com_flip.violations.iter()
-            .filter(|v| v.starts_with("Robustez:"))
+        let violacoes_robustez: Vec<&Violacao> = report_com_flip.violations.iter()
+            .filter(|v| v.texto.starts_with("Robustez:"))
             .collect();
         assert_eq!(violacoes_robustez.len(), 1,
             "esperava EXATAMENTE uma violação #19 para um único flip injetado: {:?}",
             report_com_flip.violations);
-        let v = violacoes_robustez[0];
+        let v = &violacoes_robustez[0].texto;
         assert!(v.contains("Tipback"), "violação deveria citar o check do flip ('Tipback'): {v}");
         assert!(v.contains("traseiro"), "violação deveria citar o caso do flip ('traseiro'): {v}");
         assert!(v.contains("12.34"), "violação deveria citar o valor do flip (12.34): {v}");
@@ -1940,8 +2078,8 @@ mod tests {
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
         assert!(report.violations.iter().any(|v|
-                v.contains(GEAR_ACTUATOR_LOAD_NAME) && v.contains("1.0")
-                && v.contains(&format!("{:.1}", gear.actuator_power_w))),
+                v.texto.contains(GEAR_ACTUATOR_LOAD_NAME) && v.texto.contains("1.0")
+                && v.texto.contains(&format!("{:.1}", gear.actuator_power_w))),
             "esperava violação citando 'trem_retratil', o peak_w declarado (1.0) e a potência \
              computada do atuador ({:.1}): {:?}", gear.actuator_power_w, report.violations);
     }
@@ -1963,7 +2101,7 @@ mod tests {
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
         assert!(report.violations.iter().any(|v|
-                v.contains(GEAR_ACTUATOR_LOAD_NAME) && v.contains("ausente")),
+                v.texto.contains(GEAR_ACTUATOR_LOAD_NAME) && v.texto.contains("ausente")),
             "esperava violação citando a ausência da carga 'trem_retratil', obteve: {:?}",
             report.violations);
     }
@@ -1983,7 +2121,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains(GEAR_ACTUATOR_LOAD_NAME)),
+        assert!(!report.violations.iter().any(|v| v.texto.contains(GEAR_ACTUATOR_LOAD_NAME)),
             "trem FIXO (retractable=false) não deveria exigir a carga 'trem_retratil', mesmo \
              ausente: {:?}", report.violations);
     }
@@ -1999,7 +2137,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("atuador")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("atuador")),
             "fixture intacta (peak_w declarado bem acima do computado) não deveria gerar \
              nenhuma violação da checagem #20, obteve: {:?}", report.violations);
     }
@@ -2040,9 +2178,9 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("condição crítica CS 23.925")),
             "esperava violação de folga crítica CS 23.925, obteve: {:?}", report.violations);
-        assert!(report.violations.iter().any(|v| v.contains("-0.012")),
+        assert!(report.violations.iter().any(|v| v.texto.contains("-0.012")),
             "violação deveria citar a folga crítica observada: {:?}", report.violations);
     }
 
@@ -2076,7 +2214,7 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("condição crítica CS 23.925")),
             "não deveria haver violação de folga crítica CS 23.925, obteve: {:?}",
             report.violations);
     }
@@ -2103,7 +2241,155 @@ mod tests {
                                                  &propeller, &perf, &mission, &electrical, &gear,
                                                  &gear_cfg, 220.0, &robustness, &prop_cfg));
 
-        assert!(!report.violations.iter().any(|v| v.contains("condição crítica CS 23.925")),
+        assert!(!report.violations.iter().any(|v| v.texto.contains("condição crítica CS 23.925")),
             "folga crítica positiva (0.001 m) não deveria violar: {:?}", report.violations);
+    }
+
+    // ─── Ciclo 16, Task 2: identidade estável de check ─────────────────────
+    //
+    // `todo_sitio_de_violacao_tem_id_e_os_ids_sao_globalmente_unicos` (a
+    // varredura de FONTE, primeiro dos quatro testes do Passo 1) vive em
+    // `tests/identidade_de_checks.rs`, NÃO aqui — ela precisa reusar
+    // `mascara_arquivo` de `tests/pins_vs_json.rs` (agora em
+    // `tests/common/mod.rs`), e um teste unitário desta lib (`#[cfg(test)]
+    // mod tests` dentro de `src/`) não enxerga o crate de testes de
+    // integração: são binários separados, sem módulo compartilhado. Os
+    // outros três — que não precisam da máscara — ficam aqui, junto do tipo
+    // que testam.
+
+    /// Defesa em profundidade: unicidade em TEMPO DE EXECUÇÃO sobre a
+    /// UNIÃO das duas coleções (`Violacao::id` ∪ `Portao::id`) — o espaço
+    /// em que `validation::incerteza::analisa` (Task 4) vai comparar
+    /// L ∪ N ∪ H ∪ T. Roda o pipeline completo no baseline real: qualquer
+    /// id duplicado aqui faria a varredura de banda parear o veredito de
+    /// um check sobre o outro, em silêncio.
+    #[test]
+    fn ids_sao_unicos_em_execucao_incluindo_portoes() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let cfg = crate::models::config::load_aircraft(
+            &manifest.join("config/aircraft/baseline_4seat.toml")).unwrap();
+        let engine = crate::models::config::load_engine(
+            &manifest.join("config/engines/default.toml")).unwrap();
+        let req = crate::models::config::load_mission(
+            &manifest.join("config/missions/default.toml")).unwrap();
+
+        let res = crate::pipeline::executa(&cfg, &engine, &req)
+            .expect("baseline real deveria convergir");
+
+        let mut vistos = std::collections::HashSet::new();
+        for v in &res.report.violations {
+            assert!(vistos.insert(v.id.clone()),
+                "id de violação duplicado em execução: '{}' — {:?}", v.id,
+                res.report.violations.iter().map(|v| &v.id).collect::<Vec<_>>());
+        }
+        for p in &res.portoes {
+            assert!(vistos.insert(p.id.to_string()),
+                "id de portão duplicado (ou colidindo com um id de violação) em \
+                 execução: '{}'", p.id);
+        }
+        assert_eq!(vistos.len(), res.report.violations.len() + res.portoes.len(),
+            "a contagem de ids únicos tem que bater com violações + portões — \
+             qualquer diferença é uma colisão que o loop acima deveria ter pegado");
+    }
+
+    /// Adversarial: força as TRÊS condições do comentário `#10` (Mach de
+    /// ponta estático, Mach de ponta em cruzeiro, folga de solo) e as DUAS
+    /// do `#17` (teto e piso de carga de nariz) a disparar na MESMA
+    /// corrida — a combinação que o baseline real NUNCA produz (por isso a
+    /// suíte inteira passaria verde mesmo com ids colididos, se dependesse
+    /// só do baseline). A unicidade ESTÁTICA do outro teste já cobre os
+    /// dois casos (os ids são literais fixos por sítio), mas este teste
+    /// deixa a INTENÇÃO escrita em EXECUÇÃO: apagar a varredura de fonte
+    /// não deixa o buraco silencioso.
+    #[test]
+    fn condicoes_do_mesmo_check_numerado_nao_colidem() {
+        let (req, wing, prop, engine, wb, mut propeller, perf, mission, electrical,
+             mut gear, gear_cfg, prop_cfg, robustness) = setup();
+
+        // #10: as três condições de uma vez.
+        propeller.ok_mach_static = false;
+        propeller.ok_mach_cruise = false;
+        propeller.ok_clearance = false;
+
+        // #17: teto E piso de uma vez — `ConstraintChecker::verify` não
+        // impõe relação nenhuma entre os dois campos, então a config
+        // sintética pode forçar ambos independentemente (mesmo que
+        // fisicamente incomum ter os dois extremos violados ao mesmo
+        // tempo).
+        gear.nose_load_max_pct = 30.0; // > NOSE_LOAD_MAX_CEILING_PCT (25.0)
+        gear.nose_load_min_pct = 5.0;  // < NOSE_LOAD_MIN_FLOOR_PCT (8.0)
+
+        let report = ConstraintChecker::verify(&inputs(&req, &wing, &prop, 1_500.0, &engine,
+            &wb, &propeller, &perf, &mission, &electrical, &gear, &gear_cfg, 220.0,
+            &robustness, &prop_cfg));
+
+        let esperados = [
+            "mach_ponta_estatico", "mach_ponta_cruzeiro", "folga_solo_helice",
+            "carga_nariz_teto", "carga_nariz_piso",
+        ];
+        for id in esperados {
+            assert!(report.violations.iter().any(|v| v.id == id),
+                "esperava violação com id '{id}' na corrida adversarial — ids obtidos: {:?}",
+                report.violations.iter().map(|v| &v.id).collect::<Vec<_>>());
+        }
+        let mut vistos = std::collections::HashSet::new();
+        for v in &report.violations {
+            assert!(vistos.insert(v.id.clone()),
+                "id duplicado na MESMA corrida — as condições do #10/#17 forçadas juntas \
+                 colidiram: '{}' — ids obtidos: {:?}", v.id,
+                report.violations.iter().map(|v| &v.id).collect::<Vec<_>>());
+        }
+    }
+
+    /// `Violacao::id` NÃO pode conter valor que dependa da config: é a
+    /// chave de pareamento entre corridas com `fom_static` diferente
+    /// (`validation::incerteza`, Task 4). Roda o pipeline em DOIS pontos —
+    /// o `fom_static` do baseline (0.75, gradiente CS 23.65 em FAIL) e um
+    /// ponto bem mais alto da mesma banda física (0.80, mesma direção que
+    /// a Task 3 vai truncar em `fom_design`≈0.816) — e prova que o id
+    /// `"gradiente_cs2365"` identifica o MESMO check nos dois pontos, com
+    /// veredito OPOSTO: a prova de estabilidade não é que os CONJUNTOS de
+    /// id coincidam (não deveriam — é exatamente o efeito que este ciclo
+    /// existe para medir), é que UM id fixo continua servindo de chave
+    /// mesmo quando a verdade que ele indexa muda.
+    #[test]
+    fn ids_de_violacao_sao_estaveis_sob_fom_static() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut cfg = crate::models::config::load_aircraft(
+            &manifest.join("config/aircraft/baseline_4seat.toml")).unwrap();
+        let engine = crate::models::config::load_engine(
+            &manifest.join("config/engines/default.toml")).unwrap();
+        let req = crate::models::config::load_mission(
+            &manifest.join("config/missions/default.toml")).unwrap();
+
+        let res_lo = crate::pipeline::executa(&cfg, &engine, &req)
+            .expect("baseline (fom_static nominal) deveria convergir");
+
+        cfg.propeller.fom_static = 0.80;
+        let res_hi = crate::pipeline::executa(&cfg, &engine, &req)
+            .expect("baseline com fom_static=0.80 deveria convergir");
+
+        let ids_lo: std::collections::HashSet<String> =
+            res_lo.report.violations.iter().map(|v| v.id.clone()).collect();
+        let ids_hi: std::collections::HashSet<String> =
+            res_hi.report.violations.iter().map(|v| v.id.clone()).collect();
+
+        assert!(ids_lo.contains("gradiente_cs2365"),
+            "pré-condição: no fom_static nominal (0.75) o gradiente CS 23.65 deveria violar \
+             — ids obtidos: {ids_lo:?}");
+        assert!(!ids_hi.contains("gradiente_cs2365"),
+            "com fom_static mais alto (0.80, mais tração disponível) o gradiente CS 23.65 \
+             deveria deixar de violar — se ainda violar, ajuste o ponto alto deste teste, \
+             não afrouxe a asserção — ids obtidos: {ids_hi:?}");
+
+        // Checks que NÃO dependem de fom_static (ou dependem, mas não a
+        // ponto de mudar de veredito entre 0.75 e 0.80) mantêm o MESMO id
+        // nos dois pontos — nenhum outro id do baseline embute o valor de
+        // `fom_static` na string.
+        let persistem: std::collections::HashSet<_> = ids_lo.intersection(&ids_hi).collect();
+        assert!(!persistem.is_empty(),
+            "esperava pelo menos um check persistindo com o MESMO id nos dois pontos \
+             (prova de que variar fom_static não muda a IDENTIDADE de nenhum outro check) \
+             — lo={ids_lo:?} hi={ids_hi:?}");
     }
 }

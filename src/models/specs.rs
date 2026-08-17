@@ -1555,7 +1555,38 @@ pub struct ElectricalSpec {
 /// MESMA tolerância. Ver `docs/aircraft_spec.schema.md` §5 e
 /// `tests/schema_v4.rs`/`tests/generic_engine.rs` para os pins honestos
 /// completos.
-pub const SCHEMA_VERSION: &str = "5.7";
+///
+/// v6.0 (Task 5, ciclo16-veredito-indeterminado — bump **MAJOR**, spec §7 +
+/// ERRATUM da revisão de plano): bloco de topo NOVO `uncertainty`
+/// (`UncertaintySpec`) publica a banda de incerteza declarada de
+/// `propeller.fom_static` — os extremos efetivamente varridos, a razão de
+/// truncagem quando houver, e um `checks[]` com o veredito por ponto
+/// (lo/nominal/hi) e o bracket do breakeven MEDIDO (nunca um ponto — a
+/// largura do bracket É a precisão publicada) para cada check que viola em
+/// pelo menos um dos quatro pontos avaliados (nominal, lo, hi, teto de
+/// quantidade de movimento). `validation_status` ALARGA de domínio
+/// `"PASS" | "FAIL"` para `"PASS" | "FAIL" | "INDETERMINADO"` (regra:
+/// FAIL se existe QUALQUER check com falha DETERMINADA; senão INDETERMINADO
+/// se existe qualquer check indeterminado; senão PASS — falha determinada
+/// DOMINA indeterminação, spec §5.5). O bump é MAJOR, não MINOR, porque
+/// alargar o domínio de um campo tipo-enum QUEBRA um consumidor que testa
+/// `status == "FAIL"` como sinônimo de "seguro" — ler `INDETERMINADO` (que
+/// significa "o modelo não sabe") como PASS implícito é exatamente a
+/// auto-decepção que este projeto existe para impedir; a política de bump
+/// deste documento (§1) já classifica alargamento de domínio de enum como
+/// quebra de compatibilidade. Um check indeterminado no NOMINAL tem seu
+/// texto de violação REESCRITO com prefixo `INDETERMINADO — ` (contagem de
+/// `violations` NÃO muda); um check indeterminado AUSENTE do nominal (o caso
+/// em que o silêncio favoreceria o projeto: "passa hoje, vira dentro da
+/// banda") gera uma violação NOVA com o mesmo prefixo (contagem SOBE) —
+/// INDETERMINADO nunca REMOVE violação, nos dois casos.
+///
+/// **Declaração explícita sobre o backlog #11 (spec §7).** As remoções
+/// enfileiradas do item #11 (`performance.to_distance_paved_m`/
+/// `to_distance_grass_m`/`landing_distance_m`, "para um bump MAJOR futuro")
+/// **NÃO** viajam junto nesta v6.0. Gastar o MAJOR aqui não obriga a gastá-lo
+/// inteiro — o #11 continua aberto, e precisa do PRÓXIMO MAJOR.
+pub const SCHEMA_VERSION: &str = "6.0";
 
 /// Geometria consolidada para consumo do CAD paramétrico — todas as
 /// posições em metros do DATUM (ponta do nariz, x positivo para trás — ver
@@ -1625,6 +1656,111 @@ pub struct SizingReport {
     pub constraints: WingLoadingReport,
 }
 
+/// Um check dentro do bloco `uncertainty` (ciclo 16, Task 5, spec §5.7).
+///
+/// Espelha `validation::incerteza::CheckIncerto`, mas NÃO é o mesmo tipo —
+/// `CheckIncerto` não deriva `Serialize` (decisão da revisão da Task 4: o
+/// tipo de domínio não deve carregar a forma de serialização). `breakeven:
+/// Option<(f64, f64)>` vira dois campos NULÁVEIS (`breakeven_lo`/
+/// `breakeven_hi`), não um par serializado — um tuplo `Option<(f64,f64)>`
+/// serializaria como `[a, b]` ou `null`, forma que a spec §5.7 não usa.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UncertaintyCheckSpec {
+    pub id: String,
+    pub veredito: crate::validation::incerteza::Veredito,
+    pub veredito_lo: crate::validation::incerteza::Veredito,
+    pub veredito_nominal: crate::validation::incerteza::Veredito,
+    pub veredito_hi: crate::validation::incerteza::Veredito,
+    /// `false` = falha TAMBÉM no teto de quantidade de movimento: nenhuma
+    /// hélice conserta. `true` NÃO afirma que existe hélice real capaz —
+    /// afirma só que a física não proíbe (spec §9, item 5).
+    pub alcance_de_helice: bool,
+    pub breakeven_lo: Option<f64>,
+    pub breakeven_hi: Option<f64>,
+    pub motivo: Option<String>,
+}
+
+impl From<&crate::validation::incerteza::CheckIncerto> for UncertaintyCheckSpec {
+    fn from(c: &crate::validation::incerteza::CheckIncerto) -> Self {
+        UncertaintyCheckSpec {
+            id: c.id.clone(),
+            veredito: c.veredito,
+            veredito_lo: c.veredito_lo,
+            veredito_nominal: c.veredito_nominal,
+            veredito_hi: c.veredito_hi,
+            alcance_de_helice: c.alcance_de_helice,
+            breakeven_lo: c.breakeven.map(|(a, _)| a),
+            breakeven_hi: c.breakeven.map(|(_, b)| b),
+            motivo: c.motivo.clone(),
+        }
+    }
+}
+
+/// Bloco de topo `uncertainty` (ciclo 16, Task 5, spec §5.7) — a banda de
+/// incerteza declarada de `propeller.fom_static` e o veredito por check sob
+/// essa banda. Nomeia o `parameter` de propósito, para não ser lida como
+/// "todo o resto do JSON é certo" (spec §9, item 2: só `fom_static` é
+/// varrido; as demais entradas declaradamente não validadas do baseline —
+/// `ground_clearance_min_m`, `prop_plane_x_m`, entre outras — não são).
+///
+/// Só entram em `checks` os ids que violam em pelo menos um dos quatro
+/// pontos avaliados (nominal, lo, hi, teto) — já garantido por construção em
+/// `validation::incerteza::analisa` (o conjunto `todos` é exatamente essa
+/// união), não filtrado aqui de novo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UncertaintySpec {
+    /// `"propeller.fom_static"` — único parâmetro varrido neste ciclo.
+    pub parameter: String,
+    /// `propeller.fom_static` nominal (`banda.nominal`).
+    pub nominal: f64,
+    /// `propeller.fom_static_tol_pct` de config — a declaração de confiança.
+    pub declared_tol_pct: f64,
+    /// `nominal · (1 − tol/100)` — extremo inferior DECLARADO, sem truncagem
+    /// (o piso nunca trunca — só o topo, ver `PropellerCfg::banda`).
+    pub band_declared_lo: f64,
+    /// `nominal · (1 + tol/100)` — extremo superior DECLARADO, ANTES de
+    /// qualquer truncagem. Pode exceder `band_hi` quando `band_truncated`.
+    pub band_declared_hi: f64,
+    /// Extremo inferior EFETIVO — sempre igual a `band_declared_lo` (o piso
+    /// nunca trunca).
+    pub band_lo: f64,
+    /// Extremo superior EFETIVO — o valor de fato USADO na varredura
+    /// (`Incerteza::fom_hi_usado`, não uma releitura de `banda.hi`; ver o
+    /// CONSERTO da Task 5 em `validation::incerteza::roda_com_fom`).
+    /// Truncado em `propeller.fom_design` e/ou 1,0 quando `band_declared_hi`
+    /// excede o domínio fisicamente admissível.
+    pub band_hi: f64,
+    pub band_truncated: bool,
+    pub band_truncated_reason: Option<String>,
+    /// `true` quando o ponto do teto de quantidade de movimento (as DUAS
+    /// âncoras em 1,0) convergiu — ver spec §9, item 5: teto é TETO, não
+    /// META (`alcance_de_helice: true` não afirma hélice real capaz).
+    pub ceiling_evaluated: bool,
+    pub checks: Vec<UncertaintyCheckSpec>,
+}
+
+impl UncertaintySpec {
+    /// `tol_pct` vem de `AircraftConfig::propeller.fom_static_tol_pct` —
+    /// `Banda` (ciclo 16 Task 3) não carrega o percentual em si, só os
+    /// extremos já calculados, então o chamador (main.rs/tests) passa o
+    /// percentual de config à parte.
+    pub fn from_incerteza(tol_pct: f64, inc: &crate::validation::incerteza::Incerteza) -> Self {
+        UncertaintySpec {
+            parameter: inc.parametro.to_string(),
+            nominal: inc.banda.nominal,
+            declared_tol_pct: tol_pct,
+            band_declared_lo: inc.banda.lo_declarado,
+            band_declared_hi: inc.banda.hi_declarado,
+            band_lo: inc.fom_lo_usado,
+            band_hi: inc.fom_hi_usado,
+            band_truncated: inc.banda.truncada,
+            band_truncated_reason: inc.banda.motivo_truncagem.clone(),
+            ceiling_evaluated: inc.teto_avaliado,
+            checks: inc.checks.iter().map(UncertaintyCheckSpec::from).collect(),
+        }
+    }
+}
+
 /// Relatório completo de validação — saída do Orchestrator
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AircraftReport {
@@ -1687,6 +1823,11 @@ pub struct AircraftReport {
     /// task só `violations` era serializado — `warnings` existia em
     /// `ConstraintReport` mas era descartado ao montar o JSON final.
     pub warnings: Vec<String>,
+    /// Banda de incerteza declarada de `propeller.fom_static` e o veredito
+    /// por check sob essa banda (ciclo 16, Task 5) — ver `UncertaintySpec`.
+    /// Sempre presente (não `Option`): `main.rs` sempre roda
+    /// `validation::incerteza::analisa` depois de convergir o pipeline.
+    pub uncertainty: UncertaintySpec,
 }
 
 // ─── TESTES UNITÁRIOS ────────────────────────────────────────────────────────

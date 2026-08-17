@@ -305,6 +305,26 @@ pub struct PropellerCfg {
     /// Razão de avanço de projeto da hélice (ciclo 13, spec §3.2). Acima
     /// dela `FigureOfMerit::at` satura.
     pub j_design: f64,
+    /// Tolerância epistêmica declarada sobre `fom_static` (%) — ciclo 16.
+    ///
+    /// NÃO é medição de hélice. É a declaração de quanto o projeto confia
+    /// numa entrada que NUNCA foi calibrada: `fom_design` e `j_design` foram
+    /// retro-derivados por ponto fixo até resíduo 0,000e0, `fom_static` é um
+    /// fator de McCormick herdado com dois algarismos significativos.
+    /// Obrigatório de propósito — ver spec do ciclo 16, §5.1.
+    pub fom_static_tol_pct: f64,
+}
+
+/// Banda de incerteza EFETIVA de `fom_static` (ciclo 16, spec §5.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Banda {
+    pub nominal: f64,
+    pub lo: f64,
+    pub hi: f64,
+    pub lo_declarado: f64,
+    pub hi_declarado: f64,
+    pub truncada: bool,
+    pub motivo_truncagem: Option<String>,
 }
 
 impl PropellerCfg {
@@ -317,6 +337,44 @@ impl PropellerCfg {
             fom_design: self.fom_design,
             j_design:   self.j_design,
         }
+    }
+
+    /// Banda efetiva. O topo é truncado em `fom_design` (acima dele FoM(J)
+    /// seria DECRESCENTE em J) e em 1,0 (teto de quantidade de movimento).
+    /// O topo efetivo é, portanto, a maior tração estática que se pode alegar
+    /// sem contradizer a única âncora que FOI calibrada.
+    pub fn banda(&self) -> Banda {
+        let lo_declarado = self.fom_static * (1.0 - self.fom_static_tol_pct / 100.0);
+        let hi_declarado = self.fom_static * (1.0 + self.fom_static_tol_pct / 100.0);
+        let mut hi = hi_declarado;
+        // Razões ACUMULADAS, nunca sobrescritas. A spec §5.1 promete que a
+        // truncagem é publicada com a razão; um `motivo = Some(...)` que
+        // sobrescreve o anterior descarta metade da explicação exatamente no
+        // formato que a promessa proíbe.
+        let mut motivos: Vec<String> = Vec::new();
+        if self.fom_design < hi {
+            hi = self.fom_design;
+            motivos.push(format!(
+                "topo truncado em propeller.fom_design ({}): acima dele FoM(J) seria \
+                 DECRESCENTE em J", self.fom_design));
+        }
+        // RAMO INATINGÍVEL HOJE, mantido como defesa em profundidade. Prova:
+        // `validate_aircraft_config` rejeita `fom_design > 1.0` (config.rs:858-868).
+        // Logo, ou o primeiro ramo truncou e `hi = fom_design ≤ 1,0`,
+        // ou não truncou e `hi = hi_declarado ≤ fom_design ≤ 1,0`. Nos dois casos
+        // `hi ≤ 1,0` e este ramo não dispara.
+        //
+        // A guarda de monotonicidade (`fom_design >= fom_static`) NÃO participa
+        // desta prova. Se alguém um dia relaxar o teto de `fom_design`, este ramo
+        // passa a valer — e acumula a razão em vez de apagar a anterior.
+        if hi > 1.0 {
+            hi = 1.0;
+            motivos.push("topo truncado em 1,0 — teto de quantidade de movimento".to_string());
+        }
+        Banda { nominal: self.fom_static, lo: lo_declarado, hi,
+                lo_declarado, hi_declarado, truncada: !motivos.is_empty(),
+                motivo_truncagem: if motivos.is_empty() { None }
+                                  else { Some(motivos.join(" ; ")) } }
     }
 }
 
@@ -870,6 +928,7 @@ pub mod test_fixtures {
                 // item 4): um literal do baseline real plantado em teste sintético
                 // produz teste verde que não prova nada.
                 fom_static: 0.72,
+                fom_static_tol_pct: 10.0,
                 fom_design: 0.80,
                 j_design:   1.60,
             },
