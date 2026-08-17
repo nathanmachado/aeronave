@@ -1145,6 +1145,68 @@ Vale a distinção geral: quando um teste amarra duas cópias de um valor uma à
 outra, ele prova que as cópias concordam, não que qualquer uma delas é a que o
 sistema usou.
 
+### Task 5 — publicar
+
+595 testes (583 + 12), gate APROVADO, schema **6.0**. A única task do ciclo que
+move o artefato.
+
+**O invariante exato, verificado pelo chefe com script próprio**, sem reusar o
+do operacional (abordagem diferente: achatar os dois JSONs em pares
+caminho→valor e classificar CADA diferença):
+
+```
+campos totais: base=344  novo=399  (delta 55)
+diferenças PERMITIDAS: 58
+   [1. versão] revision:       '5.7' -> '6.0'
+   [1. versão] schema_version: '5.7' -> '6.0'
+   [3. texto]  violations[1]:  prefixado com "INDETERMINADO — "
+   [2. bloco]  55 campos novos em `uncertainty` (todos ADIÇÕES)
+diferenças PROIBIDAS: 0
+
+campos numéricos de física conferidos: 287
+campos numéricos que se MOVERAM: 0
+```
+
+**287 campos de física, zero movimento.** É o mesmo 287 do inventário de
+sensibilidade da §2.1 (89 móveis + 198 imóveis) — o ciclo inteiro reescreveu o
+pipeline, reificou 25 restrições, adicionou uma varredura que roda o modelo
+quatro vezes por invocação, e **não moveu uma casa decimal**.
+
+O texto original da violação está **preservado dentro** do novo, não
+substituído — verificado como substring, não por inspeção.
+
+Veredito publicado: **`FAIL`**, 4 violações, banda efetiva
+`[0,675 ; 0,815976999245888]`, e a lista de checks com um único
+`INDETERMINADO`: `gradiente_cs2365`, breakeven
+`[0,7848672372357861 ; 0,7848677750203596]`.
+
+**O conserto herdado, feito na forma estrutural certa.** `roda_com_fom` passou
+a devolver `(f64, Ponto)` e `fom_lo_usado`/`fom_hi_usado` saem desse retorno. A
+mutação da revisão da Task 4 — rodar com `hi_declarado` publicando `banda.hi` —
+**deixou de ser escrevível**: as duas coisas agora são a mesma linha, então a
+mutação natural move as duas juntas e o teste reprova. Saiu de
+"detectável por teste" para "impossível de expressar".
+
+**Pisos do porteiro subiram para o valor MEDIDO**, não estimado: pins
+vinculados 48 → **58** e números no doc 12 → **20**, ambos obtidos elevando o
+piso artificialmente e lendo a contagem real na mensagem de falha. Os +10 vêm
+de `fom_static` deixar de ser `NAO-PUBLICADO` (dois sítios) mais oito vínculos
+novos do bloco `uncertainty`.
+
+**Achado do operacional que eu não tinha previsto.** A linha 1084 do schema doc
+— a que o ERRATUM do plano protegia — ficou intocada, corretamente. Mas **outra
+prosa do mesmo §4** fazia a alegação forte "se e somente se", que é justamente a
+versão falsa da mesma afirmação. Corrigida, registrada como esclarecimento de
+documentação e não como defeito. O ERRATUM protegeu a linha certa e o
+implementador achou a errada ao lado.
+
+**Mutações, todas revertidas.** Trocar a prioridade FALHA/INDETERMINADO no
+veredito global reprova o teste dedicado. Remover a inserção no caso
+"indeterminado ausente do nominal" reprova com "contagem SOBE de 0 para 1" — o
+ramo que não ocorre no baseline e que era o único em que o silêncio favoreceria
+o projeto **existe no código e está provado**. E trocar a reescrita do texto por
+remoção derruba **seis testes independentes**.
+
 ---
 
 ## 12. Backlog a abrir
