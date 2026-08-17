@@ -616,7 +616,7 @@ fn main() {
         println!("  ══ TODOS OS REQUISITOS SATISFEITOS ══");
     } else {
         println!("  ✗ REQUISITOS PENDENTES — revisar parâmetros de projeto");
-        for v in &report.violations { println!("    VIOLAÇÃO: {v}"); }
+        for v in &report.violations { println!("    VIOLAÇÃO: {}", v.texto); }
     }
     for w in &report.warnings { println!("  ⚠ {w}"); }
 
@@ -1010,7 +1010,7 @@ fn main() {
         sizing:           Some(sizing),
         robustness:       Some(robustness.clone()),
         fidelity,
-        violations:       report.violations.clone(),
+        violations:       report.textos(),
         warnings:         report.warnings.clone(),
     };
 

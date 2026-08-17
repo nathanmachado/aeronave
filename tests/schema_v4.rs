@@ -112,7 +112,7 @@ fn build_baseline_report() -> AircraftReport {
         sizing: Some(sizing),
         robustness: Some(res.robustness.clone()),
         fidelity,
-        violations: res.report.violations.clone(),
+        violations: res.report.textos(),
         warnings: res.report.warnings.clone(),
     }
 }
