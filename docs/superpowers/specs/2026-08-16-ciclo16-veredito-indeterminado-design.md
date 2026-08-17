@@ -333,19 +333,54 @@ impl ConstraintReport {
 
 Regras do `id`:
 
+- **Um id por sítio `violations.push`**, não por comentário numerado. São
+  **25 sítios** (26 ocorrências de `violations.push` em
+  `constraint_checker.rs`, uma delas dentro de um comentário na linha 455).
 - **Nenhum número que dependa da config.** `"gradiente_cs2365"`, não
   `"gradiente_7.9"`.
 - Checks parametrizados por cenário embutem o nome do cenário, que é texto de
   config e não varia com `fom_static`:
   `"envelope_cg::Solo (piloto)"`, `"robustez_flip::2 pax dianteiros"`.
-- Os **9 portões** de `main.rs:641-663` também ganham id. Eles hoje não
-  empurram string nenhuma, o que significa que um FAIL pode não ter nenhuma
-  linha em `violations` — e um portão pode virar dentro da banda sem deixar
-  rastro. Sem id eles ficariam fora da varredura.
+- Os **9 portões** de `main.rs:641-663` também ganham id, **todos com prefixo
+  `portao_`**. Eles hoje não empurram string nenhuma, o que significa que um
+  FAIL pode não ter nenhuma linha em `violations` — e um portão pode virar
+  dentro da banda sem deixar rastro. Sem id ficariam fora da varredura.
 
-Um teste dedicado exige que os ids sejam **únicos** e **estáveis sob variação
-de `fom_static`** (roda em dois pontos da banda e compara os conjuntos de id
-esperados).
+> **ERRATUM (revisão de plano).** A primeira versão desta seção dizia que o id
+> "sai do comentário numerado que já existe acima de cada check". A revisão
+> mostrou que a regra **colide**: vários comentários numerados cobrem mais de
+> um `push` independente — `#10` (`:287`, `:294`, `:301`: Mach estático, Mach
+> de cruzeiro, folga de solo), `#17` (`:407`, `:414`: teto e piso de carga de
+> nariz, dois `if` separados que podem disparar JUNTOS), e `#9a` (`:260`,
+> envelope vazio), cujo próprio comentário já avisa ser "distinta das
+> violações por cenário abaixo". Pior: o comentário do check `#1` diz
+> "Velocidade de cruzeiro" mas o código testa `ld_ratio_cruise < 10.0`, e
+> colidiria com o portão homônimo.
+>
+> Duas colisões silenciosas fariam a varredura publicar o veredito de um check
+> sobre o outro — e o fixture do baseline nunca dispara essas condições
+> juntas, então a suíte passaria verde.
+
+O conserto **não** é eu publicar a lista dos ids ambíguos: seria consertar o
+caso conhecido, deixar o desconhecido de pé, e me pôr outra vez publicando uma
+lista derivada à mão (#29). O conserto é estrutural, em três camadas:
+
+1. **Prefixo `portao_`** nos 9 portões: as duas famílias de id passam a não
+   poder colidir *por construção*.
+2. **Teste que varre o FONTE**, na técnica que o ciclo 15 já estabeleceu em
+   `tests/pins_vs_json.rs`: extrai todo literal `id:` de
+   `constraint_checker.rs` e de `pipeline.rs` e exige (a) que a contagem de
+   literais bata com a contagem de sítios `violations.push`, e (b) unicidade
+   global entre as duas famílias. Um mecânico que dê o mesmo id aos dois
+   `push` do `#17` vê vermelho imediatamente; um que acrescente um `push` sem
+   id, também.
+3. **Teste de tempo de execução** sobre a união `Violacao::id ∪ Portao::id`, e
+   um **teste adversarial** com config sintética que force as DUAS condições
+   do `#17` a disparar simultaneamente — a combinação que o baseline nunca
+   produz.
+
+Mais o teste de **estabilidade sob variação de `fom_static`** (roda em dois
+pontos da banda e compara os conjuntos de id).
 
 ### 5.3 O pipeline como função
 
@@ -560,7 +595,7 @@ passa calada.
 
 **O diff de `aircraft_spec.json` contra `bfd4921` tem que ser EXATAMENTE:**
 
-1. `schema_version` (e `revision`): `"5.7"` → `"5.8"`
+1. `schema_version` (e `revision`): `"5.7"` → `"6.0"`
 2. o bloco novo `uncertainty`
 3. o texto da violação da CS 23.65 (prefixo `INDETERMINADO — …`)
 
@@ -576,16 +611,36 @@ nenhuma.
 
 ## 7. Schema e pins
 
-**Bump 5.7 → 5.8 (MINOR).** Pela política de `docs/aircraft_spec.schema.md:1739-1747`,
-aditivo é MINOR. Nenhum campo foi renomeado, removido ou teve tipo/unidade
-mudados. O ponto discutível é o **domínio** de `validation_status`, que
-alarga de dois para três valores — um consumidor que faça match exaustivo
-sobre `PASS`/`FAIL` quebra. Julgamento declarado: MINOR, porque (a) nenhum
-campo mudou de tipo, (b) o único consumidor na árvore é a suíte de testes, e
-(c) o valor novo só aparece quando NÃO existe falha determinada, ou seja,
-nunca no lugar de um `FAIL` que existiria antes. **O julgamento é declarado
-para poder ser contestado** pela revisão de plano; se ela discordar, vira
-MAJOR 6.0.
+**Bump 5.7 → 6.0 (MAJOR).**
+
+> **ERRATUM (revisão de plano).** A primeira versão desta seção propunha
+> MINOR 5.8, argumentando que (a) nenhum campo mudou de tipo, (b) o único
+> consumidor na árvore é a suíte de testes, e (c) o valor novo só aparece
+> quando não existe falha determinada, nunca no lugar de um `FAIL` que
+> existiria antes. A revisão contestou e está certa. O argumento (c) mede o
+> risco errado: o perigo não é substituir um FAIL antigo, é que **um
+> consumidor que teste `status == "FAIL"` trata `INDETERMINADO` como
+> seguro** — e "o modelo não sabe" sendo lido como "está tudo bem" é
+> exatamente a auto-decepção que este projeto existe para impedir. O
+> argumento (b) também cai: `tests/schema_v4.rs` descreve o JSON como
+> "contrato mínimo com o time de CAD", ou seja há consumidor fora da
+> árvore. Alargar o domínio de um campo tipo-enum é quebra de
+> compatibilidade, e a política do projeto
+> (`docs/aircraft_spec.schema.md:1743`) manda MAJOR para quebra.
+
+O bump é MAJOR porque o domínio de `validation_status` alarga de
+`"PASS" | "FAIL"` para `"PASS" | "FAIL" | "INDETERMINADO"`. Um número de
+versão não impede ninguém de escrever `== "FAIL"`; o que ele faz é obrigar
+quem atualiza a olhar. É para isso que MAJOR serve.
+
+**Declaração explícita sobre o backlog #11.** O item #11 tem remoções
+enfileiradas para "um bump MAJOR futuro"
+(`performance.to_distance_paved_m`/`to_distance_grass_m`/`landing_distance_m`).
+**A 6.0 deste ciclo NÃO as carrega.** A remoção exige analisar quem consome
+esses campos, o que é assunto do #11 e não deste ciclo; gastar o MAJOR aqui
+não obriga a gastá-lo inteiro, e MAJOR é barato num projeto com um consumidor
+em árvore. Fica registrado para que ninguém leia "6.0" e presuma que o #11
+foi junto — o #11 continua aberto e agora precisa do próximo MAJOR.
 
 **Pins (porteiro do ciclo 15).** Este é o primeiro ciclo em que o
 `tests/pins_vs_json.rs` enfrenta campos novos. Consequências:

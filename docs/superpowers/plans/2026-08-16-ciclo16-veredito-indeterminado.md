@@ -31,7 +31,7 @@ Valem para TODAS as tasks. Copiadas literalmente da spec.
 2. **Invariante das tasks 1, 2 e 3:** `aircraft_spec.json` e o **stdout do
    binário** byte-idênticos ao commit base `bfd4921`. Sem exceção.
 3. **Invariante da task 5 (final):** o diff de `aircraft_spec.json` contra
-   `bfd4921` é EXATAMENTE (a) `schema_version` e `revision` `"5.7"`→`"5.8"`,
+   `bfd4921` é EXATAMENTE (a) `schema_version` e `revision` `"5.7"`→`"6.0"`,
    (b) o bloco novo `uncertainty`, (c) o texto da violação da CS 23.65.
    Todo o resto byte-idêntico.
 4. **Tolerâncias INALTERADAS.** Nenhum `assert` afrouxa sua tolerância. Se um
@@ -189,11 +189,17 @@ mantenha o stderr igual também).
 
 - [ ] **Passo 3: mover os 9 portões para `executa`, com id**
 
-Os ids, na ordem de `main.rs:641-660`:
+Os ids, na ordem de `main.rs:641-660`. **Todos com prefixo `portao_`** — assim
+as duas famílias de id (portão e violação) não podem colidir por construção, e
+o teste de unicidade da Task 2 vira defesa em profundidade em vez de barreira
+única. Sem o prefixo há colisão real: o comentário do check `#1` de
+`constraint_checker.rs:106` diz "Velocidade de cruzeiro" enquanto o código
+testa `ld_ratio_cruise < 10.0` — mesma palavra, física diferente.
 
 ```
-"restricoes"     "v_cruzeiro"   "autonomia_bloco"   "rc_sl"    "teto_servico"
-"flutter"        "antitombamento"   "estabilidade_long"   "envelope_cg_todos"
+"portao_restricoes"   "portao_v_cruzeiro"      "portao_autonomia_bloco"
+"portao_rc_sl"        "portao_teto_servico"    "portao_flutter"
+"portao_antitombamento"   "portao_estabilidade_long"   "portao_envelope_cg_todos"
 ```
 
 O `rotulo` é o mesmo `String` de hoje, `format!` incluído — o stdout tem que
@@ -284,8 +290,13 @@ segunda regra de veredito de `schema_v4.rs`), e as três provas de invariante.
 
 ## Task 2: identidade estável de check
 
-**Roteamento:** operacional mecânico. Provável por script (invariante
-byte-idêntico) mais um teste de unicidade.
+**Roteamento:** operacional mecânico. Provável por script — o invariante
+byte-idêntico mais o teste que **varre o fonte** e prova, sem depender de
+nenhuma corrida, que cada sítio de `push` tem exatamente um id e que os ids
+são globalmente únicos. A revisão de plano observou, com razão, que "mecânico"
+só se sustenta se a ambiguidade dos ids for resolvida no plano; a resolução
+adotada é mais forte que a lista que ela propôs — é um teste que reprova a
+ambiguidade em vez de um documento que a enumera.
 
 **Files:**
 - Modify: `src/validation/constraint_checker.rs`, `src/main.rs`, e todo sítio
@@ -308,18 +319,53 @@ vem da config. `"envelope_cg::Solo (piloto)"` é estável sob variação de
 Em `src/validation/constraint_checker.rs`, `mod tests`:
 
 ```rust
-/// Ciclo 16, Task 2 — dois checks nunca compartilham `id`. Sem isso a
-/// varredura de banda (`validation::incerteza`) parearia checks distintos
-/// e publicaria veredito de um sobre o outro.
+/// Ciclo 16, Task 2 — unicidade provada VARRENDO O FONTE, não observando uma
+/// corrida. Um teste de tempo de execução sobre o baseline não serve sozinho:
+/// o fixture nunca dispara #9a, nem as três condições do #10, nem as duas do
+/// #17 ao mesmo tempo, então uma implementação com ids colididos passaria
+/// verde na suíte inteira e só quebraria com uma config futura.
+///
+/// Técnica idêntica à do `tests/pins_vs_json.rs` (ciclo 15): o fonte é a
+/// fonte da verdade, e a contagem prova que ninguém acrescentou um `push` sem
+/// id.
 #[test]
-fn ids_de_violacao_sao_unicos() {
-    let report = /* fixture do baseline real, como em gear_tipback.rs:394 */;
+fn todo_sitio_de_violacao_tem_id_e_os_ids_sao_globalmente_unicos() {
+    let cc = std::fs::read_to_string("src/validation/constraint_checker.rs").unwrap();
+    let pl = std::fs::read_to_string("src/pipeline.rs").unwrap();
+
+    // `violations.push` fora de comentário (há uma ocorrência dentro de um
+    // comentário na linha 455 — a máscara do pins_vs_json.rs resolve isso).
+    let sitios = conta_pushes_fora_de_comentario(&cc);
+    let ids_cc = literais_de_id(&cc);
+    assert_eq!(ids_cc.len(), sitios,
+        "cada sítio `violations.push` precisa de EXATAMENTE um `id:` — \
+         {sitios} sítios, {} ids", ids_cc.len());
+
+    let ids_pl = literais_de_id(&pl);
+    assert_eq!(ids_pl.len(), 9, "os 9 portões precisam de id");
+    assert!(ids_pl.iter().all(|i| i.starts_with("portao_")),
+        "id de portão tem que ter prefixo `portao_` — é o que impede colisão \
+         com o namespace das violações por construção");
+
     let mut vistos = std::collections::HashSet::new();
-    for v in &report.violations {
-        assert!(vistos.insert(v.id.clone()),
-                "id duplicado: {} — a varredura de banda parearia checks distintos", v.id);
+    for id in ids_cc.iter().chain(ids_pl.iter()) {
+        assert!(vistos.insert(id.clone()),
+            "id duplicado entre violações e portões: {id} — a varredura de banda \
+             publicaria o veredito de um check sobre o outro, em silêncio");
     }
 }
+
+/// Defesa em profundidade: unicidade também em tempo de execução, sobre a
+/// UNIÃO das duas coleções — que é o espaço em que `incerteza::analisa`
+/// compara (L ∪ N ∪ H ∪ T).
+#[test]
+fn ids_sao_unicos_em_execucao_incluindo_portoes() { … }
+
+/// Adversarial: força as DUAS condições do check #17 (teto e piso de carga de
+/// nariz, `constraint_checker.rs:407` e `:414`) a disparar na MESMA corrida —
+/// a combinação que o baseline nunca produz e que esconderia a colisão.
+#[test]
+fn duas_condicoes_do_mesmo_check_numerado_nao_colidem() { … }
 
 /// `id` NÃO pode conter valor que dependa da config: é a chave de pareamento
 /// entre corridas com `fom_static` diferente.
@@ -362,13 +408,28 @@ impl ConstraintReport {
 
 Regra mecânica: cada `violations.push(format!(…))` vira
 `violations.push(Violacao { id: …, texto: format!(…) })`, **com o `format!`
-intocado**. O id sai do comentário numerado que já existe acima de cada check
-(`// 12. Gradiente de subida (Task 4.7, CS 23.65)` → `"gradiente_cs2365"`).
-Checks em laço sobre cenários concatenam o nome: `format!("envelope_cg::{}",
-cenario.nome)`.
+intocado**.
 
-O id do gradiente da CS 23.65 é **`"gradiente_cs2365"`** — a Task 4 e a Task 5
-dependem desse literal exato.
+**Um id por SÍTIO DE PUSH, não por comentário numerado.** São 25 sítios (26
+ocorrências de `violations.push`, uma delas dentro de um comentário na linha
+455). Vários comentários numerados cobrem mais de um `push` independente — o
+`#10` cobre três (`:287` Mach estático, `:294` Mach de cruzeiro, `:301` folga
+de solo), o `#17` cobre dois (`:407` teto e `:414` piso de carga de nariz, dois
+`if` separados que **podem disparar juntos**), e o `#9a` (`:260`) é dedicada,
+com o próprio comentário avisando ser "distinta das violações por cenário
+abaixo". Nesses casos o id ganha sufixo que distingue a CONDIÇÃO testada, não
+o número do comentário.
+
+Não vou listar aqui os 25 ids: a lista seria minha paráfrase da regra (#29). O
+que garante a corretude é o teste do Passo 1, que varre o fonte, exige
+contagem igual à de sítios e unicidade global — inclusive contra os 9
+`portao_*`. Se um id ficar ambíguo, o teste é vermelho antes de qualquer outra
+coisa.
+
+Dois literais são **contrato entre tasks** e ficam fixados aqui:
+- `"gradiente_cs2365"` (check `#12`, `constraint_checker.rs:325`) — a Task 4
+  Passos 5-6 e a Task 5 Passo 3 dependem dele.
+- Checks em laço sobre cenários: `format!("envelope_cg::{}", cenario.nome)`.
 
 - [ ] **Passo 5: consertar os leitores**
 
@@ -474,20 +535,32 @@ impl PropellerCfg {
         let lo_declarado = self.fom_static * (1.0 - self.fom_static_tol_pct / 100.0);
         let hi_declarado = self.fom_static * (1.0 + self.fom_static_tol_pct / 100.0);
         let mut hi = hi_declarado;
-        let mut motivo = None;
+        // Razões ACUMULADAS, nunca sobrescritas. A spec §5.1 promete que a
+        // truncagem é publicada com a razão; um `motivo = Some(...)` que
+        // sobrescreve o anterior descarta metade da explicação exatamente no
+        // formato que a promessa proíbe.
+        let mut motivos: Vec<String> = Vec::new();
         if self.fom_design < hi {
             hi = self.fom_design;
-            motivo = Some(format!(
+            motivos.push(format!(
                 "topo truncado em propeller.fom_design ({}): acima dele FoM(J) seria \
                  DECRESCENTE em J", self.fom_design));
         }
+        // RAMO INATINGÍVEL HOJE, mantido como defesa em profundidade. Prova:
+        // `validate_aircraft_config` rejeita `fom_design > 1.0`
+        // (`config.rs:858-868`) e, desde o ciclo 16, `fom_design < fom_static`
+        // (Passo 4). Logo, ou o ramo acima truncou e `hi = fom_design ≤ 1,0`,
+        // ou não truncou e `hi = hi_declarado ≤ fom_design ≤ 1,0`. Se alguém
+        // relaxar o teto de `fom_design` no futuro, esta guarda passa a valer
+        // — e acumula a razão em vez de apagar a anterior.
         if hi > 1.0 {
             hi = 1.0;
-            motivo = Some("topo truncado em 1,0 — teto de quantidade de movimento".to_string());
+            motivos.push("topo truncado em 1,0 — teto de quantidade de movimento".to_string());
         }
         Banda { nominal: self.fom_static, lo: lo_declarado, hi,
-                lo_declarado, hi_declarado, truncada: motivo.is_some(),
-                motivo_truncagem: motivo }
+                lo_declarado, hi_declarado, truncada: !motivos.is_empty(),
+                motivo_truncagem: if motivos.is_empty() { None }
+                                  else { Some(motivos.join(" ; ")) } }
     }
 }
 ```
@@ -657,10 +730,40 @@ extremo — **nunca engolido**. Precedente:
 /// própria incerteza no formato.
 const TOL_BREAKEVEN: f64 = 1e-6;
 const MAX_ITER_BREAKEVEN: usize = 60;
+
+/// Pré-condição: `viola(lo) != viola(hi)`. A Task 4 Passo 3 só chama esta
+/// função nesse caso — o caso não monotônico (`viola(lo) == viola(hi)`, só o
+/// nominal discordando) sai com `breakeven = None` e motivo, sem bissecar.
+fn bisseca(
+    lo: f64,
+    hi: f64,
+    viola: &mut dyn FnMut(f64) -> bool,
+) -> (f64, f64) {
+    let (mut a, mut b) = (lo, hi);
+    let va = viola(a);
+    debug_assert_ne!(va, viola(b), "pré-condição: os extremos têm que discordar");
+    let mut i = 0;
+    while b - a > TOL_BREAKEVEN && i < MAX_ITER_BREAKEVEN {
+        let m = a + (b - a) / 2.0;      // não `(a+b)/2.0`: evita overflow e
+                                        // preserva o bracket em f64
+        if viola(m) == va { a = m; } else { b = m; }
+        i += 1;
+    }
+    debug_assert_ne!(viola(a), viola(b), "invariante: o bracket devolvido tem que discordar");
+    (a, b)
+}
 ```
 
-Invariante da bisseção: ao devolver `(a, b)`, o check pertence às violações em
-exatamente um dos dois. Verificado por `debug_assert!` e pelo teste do Passo 6.
+**Invariante da bisseção:** ao devolver `(a, b)`, o check pertence às violações
+em exatamente um dos dois. A bisseção padrão o preserva a cada iteração — ela
+mantém `viola(a) != viola(b)` por construção, o que é robusto a qualquer
+número de cruzamentos internos **desde que os extremos iniciais discordem**.
+Com travessia dupla dentro do intervalo, ela converge para *um* dos
+cruzamentos; qual deles não é determinado, e isso é declarado: o número
+publicado é *um* breakeven medido, não "o único".
+
+Verificado por `debug_assert!` nas duas pontas e, em release, pelo teste do
+Passo 6, que re-roda o pipeline de verdade.
 
 - [ ] **Passo 5: teste de integração no baseline real**
 
@@ -755,7 +858,7 @@ em 4 e `.contains("Gradiente de subida")` continua verdadeiro, então
 Teste obrigatório: a contagem de `violations` com a banda ligada é IGUAL à
 contagem com a banda colapsada. INDETERMINADO nunca remove violação.
 
-- [ ] **Passo 4: `SCHEMA_VERSION` 5.7 → 5.8**
+- [ ] **Passo 4: `SCHEMA_VERSION` 5.7 → 6.0 (MAJOR — ver ERRATUM da spec §7)**
 
 `specs.rs:1558`, e o pin `tests/schema_v4.rs:193`. Registrar em §1 do schema
 doc, incluindo o **alargamento do domínio** de `validation_status` para três
@@ -777,12 +880,28 @@ Qualquer quarta diferença é falha da task.
 
 - [ ] **Passo 6: schema doc**
 
-Bloco novo documentado com a tabela do padrão da casa. A linha
-`docs/aircraft_spec.schema.md:1084` afirma "vazio se `validation_status ==
-"PASS"`" — **essa invariante já era falsa antes deste ciclo** (os 8 portões
-ad-hoc de `main.rs` reprovam sem empurrar string nenhuma, então FAIL com
-`violations: []` sempre foi representável). Corrija a linha e registre o
-achado no backlog; não o conserte em silêncio.
+Bloco novo documentado com a tabela do padrão da casa.
+
+> **ERRATUM (revisão de plano).** A primeira versão deste passo mandava
+> corrigir `docs/aircraft_spec.schema.md:1084` — que afirma `violations`
+> "vazio se `validation_status == "PASS"`" — alegando que a invariante já era
+> falsa, porque os portões ad-hoc de `main.rs` reprovam sem empurrar string e
+> portanto FAIL com `violations: []` é representável.
+>
+> **O raciocínio é inválido e a linha está certa.** A linha afirma
+> `PASS ⟹ violations vazio`, uma direção só. O portão `#0` do veredito global
+> **é** `report.all_satisfied()` (`main.rs:642`, dentro do `all` da `:661`),
+> ou seja `all_ok` exige `violations.is_empty()` — logo `PASS ⟹ vazio` é
+> verdadeiro hoje, e continua verdadeiro depois deste ciclo (PASS passa a
+> exigir também nenhum indeterminado, o que só reforça). O que eu havia
+> provado é a recíproca, `vazio ⇏ PASS`, que é outra proposição — e que a
+> linha 1084 nunca afirmou.
+>
+> Instrução corrigida: **não reescreva a linha 1084.** Acrescente ao lado a
+> direção que é genuinamente sub-documentada e demonstrável — `violations: []`
+> **não** implica PASS, porque 8 dos 9 portões reprovam sem produzir linha
+> nenhuma. Registre no backlog como esclarecimento de documentação, não como
+> defeito corrigido.
 
 - [ ] **Passo 7: pins**
 
@@ -802,7 +921,7 @@ incoerência de idioma do domínio de `validation_status`).
 - [ ] **Passo 9: suíte, portão, commit**
 
 ```
-feat(schema): publica a banda de incerteza e o veredito INDETERMINADO (schema 5.8)
+feat(schema): publica a banda de incerteza e o veredito INDETERMINADO (schema 6.0 — MAJOR)
 ```
 
 ---
