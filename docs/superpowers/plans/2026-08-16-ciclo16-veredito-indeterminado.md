@@ -335,7 +335,14 @@ fn todo_sitio_de_violacao_tem_id_e_os_ids_sao_globalmente_unicos() {
 
     // `violations.push` fora de comentário (há uma ocorrência dentro de um
     // comentário na linha 455 — a máscara do pins_vs_json.rs resolve isso).
+    // REUSE `mascara_arquivo` de tests/pins_vs_json.rs:41-98 — ela já carrega
+    // estado de string entre linhas e FALHA ALTO se a máscara ficar presa
+    // (`assert!(!em_string, …)`), que foi um dos dois bugs que a revisão de
+    // plano do ciclo 15 pegou antes de virarem código.
     let sitios = conta_pushes_fora_de_comentario(&cc);
+    // O padrão tem que ser `id:\s*"` — dois-pontos SEGUIDO DE ASPAS. `id:`
+    // sozinho casaria com a declaração do campo (`pub id: String,`) e com os
+    // doc-comments que mencionam `id:`, inflando a contagem.
     let ids_cc = literais_de_id(&cc);
     assert_eq!(ids_cc.len(), sitios,
         "cada sítio `violations.push` precisa de EXATAMENTE um `id:` — \
@@ -361,11 +368,21 @@ fn todo_sitio_de_violacao_tem_id_e_os_ids_sao_globalmente_unicos() {
 #[test]
 fn ids_sao_unicos_em_execucao_incluindo_portoes() { … }
 
-/// Adversarial: força as DUAS condições do check #17 (teto e piso de carga de
-/// nariz, `constraint_checker.rs:407` e `:414`) a disparar na MESMA corrida —
-/// a combinação que o baseline nunca produz e que esconderia a colisão.
+/// Adversarial: força condições do MESMO comentário numerado a disparar na
+/// MESMA corrida — as combinações que o baseline nunca produz e que
+/// esconderiam a colisão. Duas famílias, não uma:
+///   - check #17 (`:407` teto e `:414` piso de carga de nariz);
+///   - check #10 (`:287` Mach estático, `:294` Mach de cruzeiro, `:301` folga
+///     de solo) — TRÊS condições, o caso mais arriscado em contagem.
+///
+/// A unicidade estática do teste anterior já cobre os dois, porque ali os ids
+/// são literais fixos por sítio. Este teste existe para que a INTENÇÃO fique
+/// escrita em execução: apagar o teste de varredura de fonte não deixa o
+/// buraco silencioso (a lição do `fronteira_de_quatro_casas_e_cobrada` do
+/// ciclo 15, item #28 do backlog — dois mecanismos que se cobrem só aumentam
+/// a segurança enquanto se sabe que ambos ainda funcionam).
 #[test]
-fn duas_condicoes_do_mesmo_check_numerado_nao_colidem() { … }
+fn condicoes_do_mesmo_check_numerado_nao_colidem() { … }
 
 /// `id` NÃO pode conter valor que dependa da config: é a chave de pareamento
 /// entre corridas com `fom_static` diferente.
@@ -430,6 +447,16 @@ Dois literais são **contrato entre tasks** e ficam fixados aqui:
 - `"gradiente_cs2365"` (check `#12`, `constraint_checker.rs:325`) — a Task 4
   Passos 5-6 e a Task 5 Passo 3 dependem dele.
 - Checks em laço sobre cenários: `format!("envelope_cg::{}", cenario.nome)`.
+
+**Lacuna declarada da verificação estática.** `envelope_cg::{}` é o único id
+**não literal**, então a varredura de fonte não consegue provar a unicidade
+dele — ela depende de `cenario.nome` nunca se repetir. A revisão de plano
+conferiu: os nomes de cenário são `&'static str` fixos em
+`src/agents/weight_balance.rs:553-554`, não vêm de TOML de usuário. É lista
+pequena, em código, revisada como qualquer outro literal — não é caminho de
+colisão realista, mas **é** o ponto onde as três camadas param de provar e
+passam a confiar. Fica escrito para que quem um dia mover os nomes de cenário
+para config saiba o que quebra.
 
 - [ ] **Passo 5: consertar os leitores**
 
@@ -741,7 +768,7 @@ fn bisseca(
 ) -> (f64, f64) {
     let (mut a, mut b) = (lo, hi);
     let va = viola(a);
-    debug_assert_ne!(va, viola(b), "pré-condição: os extremos têm que discordar");
+    assert_ne!(va, viola(b), "pré-condição da bisseção: os extremos têm que discordar");
     let mut i = 0;
     while b - a > TOL_BREAKEVEN && i < MAX_ITER_BREAKEVEN {
         let m = a + (b - a) / 2.0;      // não `(a+b)/2.0`: evita overflow e
@@ -749,10 +776,34 @@ fn bisseca(
         if viola(m) == va { a = m; } else { b = m; }
         i += 1;
     }
-    debug_assert_ne!(viola(a), viola(b), "invariante: o bracket devolvido tem que discordar");
+    // `assert!` DE VERDADE, não `debug_assert!`: o binário que gera
+    // aircraft_spec.json é compilado em release, e o Cargo.toml não tem
+    // `[profile.release]`, então `debug-assertions` é false ali. Um
+    // `debug_assert!` seria inerte exatamente no caminho que publica. Custa
+    // uma comparação por check indeterminado (um, no baseline).
+    assert_ne!(viola(a), viola(b),
+        "invariante da bisseção: o bracket publicado tem que ter vereditos OPOSTOS \
+         nos dois extremos — senão o breakeven publicado não testemunha travessia \
+         nenhuma");
     (a, b)
 }
 ```
+
+**Sobre a largura do bracket, e por que ela NÃO leva um assert.** Se
+`MAX_ITER_BREAKEVEN` fosse consumido antes de `b − a ≤ TOL_BREAKEVEN`, o
+bracket sairia mais largo que o prometido — mas **não em silêncio**, porque a
+largura publicada *é* a precisão publicada. `breakeven_lo` e `breakeven_hi`
+vão para o JSON como medidos; um bracket largo se declara sozinho. Foi por
+isso que a spec §5.4 escolheu publicar intervalo em vez de ponto: a única
+forma de mentir sobre a precisão seria publicar um ponto e prometer uma
+tolerância à parte.
+
+O invariante que **merece** `assert!` é outro — o de que os extremos
+discordam. Esse, sim, se violado, faz o número publicado não testemunhar nada,
+e é indetectável na leitura do artefato.
+
+(Folga medida: o domínio tem largura máxima ~1,0, e `1,0 / 2^20 < 1e-6`, então
+~20 iterações bastam contra as 60 disponíveis.)
 
 **Invariante da bisseção:** ao devolver `(a, b)`, o check pertence às violações
 em exatamente um dos dois. A bisseção padrão o preserva a cada iteração — ela
