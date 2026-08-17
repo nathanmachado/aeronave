@@ -359,12 +359,14 @@ impl PropellerCfg {
                  DECRESCENTE em J", self.fom_design));
         }
         // RAMO INATINGÍVEL HOJE, mantido como defesa em profundidade. Prova:
-        // `validate_aircraft_config` rejeita `fom_design > 1.0`
-        // (`config.rs:858-868`) e, desde o ciclo 16, `fom_design < fom_static`
-        // (Passo 4). Logo, ou o ramo acima truncou e `hi = fom_design ≤ 1,0`,
-        // ou não truncou e `hi = hi_declarado ≤ fom_design ≤ 1,0`. Se alguém
-        // relaxar o teto de `fom_design` no futuro, esta guarda passa a valer
-        // — e acumula a razão em vez de apagar a anterior.
+        // `validate_aircraft_config` rejeita `fom_design > 1.0` (config.rs:858-868).
+        // Logo, ou o primeiro ramo truncou e `hi = fom_design ≤ 1,0`,
+        // ou não truncou e `hi = hi_declarado ≤ fom_design ≤ 1,0`. Nos dois casos
+        // `hi ≤ 1,0` e este ramo não dispara.
+        //
+        // A guarda de monotonicidade (`fom_design >= fom_static`) NÃO participa
+        // desta prova. Se alguém um dia relaxar o teto de `fom_design`, este ramo
+        // passa a valer — e acumula a razão em vez de apagar a anterior.
         if hi > 1.0 {
             hi = 1.0;
             motivos.push("topo truncado em 1,0 — teto de quantidade de movimento".to_string());

@@ -3408,4 +3408,30 @@ mod tests {
         assert!(b.truncada);
         assert!(b.motivo_truncagem.as_ref().unwrap().contains("fom_design"));
     }
+
+    /// Ciclo 16, Task 3 (conserto de revisão) — o caminho NÃO TRUNCADO da banda.
+    ///
+    /// Sem este teste, `banda()` pode afirmar truncagem que não houve e a suíte
+    /// inteira passa (provado por mutação na revisão: forçar `truncada = true`
+    /// com motivo falso não quebrou nenhum dos 562 testes). A spec §5.1 exige que
+    /// a truncagem seja publicada COM a razão e nunca em silêncio; uma banda que
+    /// AFIRMA ter encolhido sem ter encolhido é o mesmo defeito espelhado.
+    ///
+    /// A fixture tem `fom_static = 0.72` e `fom_design = 0.80`, então o topo
+    /// declarado (0,792) fica ABAIXO de `fom_design` e não há o que truncar — a
+    /// escolha do valor da fixture foi feita no plano justamente para exercitar
+    /// este ramo.
+    #[test]
+    fn banda_da_fixture_nao_e_truncada() {
+        let toml = aircraft_toml_valido();
+        let cfg = parse_aircraft(&toml).expect("fixture TOML deveria ser válida");
+        let b = cfg.propeller.banda();
+        assert!(!b.truncada, "a fixture não deveria truncar: hi_declarado={} <= fom_design={}",
+                b.hi_declarado, cfg.propeller.fom_design);
+        assert!(b.motivo_truncagem.is_none(),
+                "sem truncagem não pode haver motivo: {:?}", b.motivo_truncagem);
+        // Bit-exato: sem truncagem, `hi` É `hi_declarado`, não uma aproximação.
+        assert_eq!(b.hi, b.hi_declarado);
+        assert_eq!(b.lo, b.lo_declarado);
+    }
 }
