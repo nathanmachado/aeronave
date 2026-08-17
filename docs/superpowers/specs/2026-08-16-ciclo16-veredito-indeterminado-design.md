@@ -960,6 +960,71 @@ Fica registrado mesmo sendo imaterial, porque é a mesma classe dos erros deste
 ciclo: **um número relatado que quem relatou não conferiu**. A diferença é que
 desta vez o número foi conferido por outro antes de virar registro.
 
+### Task 4 — a varredura
+
+572 testes (563 + 9), invariante provado, gate APROVADO. **Todos os números
+medidos bateram com os da spec §2** — banda, breakeven, vereditos por ponto,
+alcance de hélice. A varredura leva **330–420 ms em release**, abaixo da
+estimativa de ~1,2 s da §5.4 (que era estimativa de custo, não medição a
+reproduzir).
+
+Saída da varredura no baseline:
+
+| id | veredito | lo | nom | hi | alcance de hélice | breakeven |
+|---|---|---|---|---|---|---|
+| `gradiente_cs2365` | **INDETERMINADO** | Falha | Falha | Passa | sim | `[0,784867237236 ; 0,784867775020]` |
+| `decolagem_grama` | Falha | Falha | Falha | Falha | sim | — |
+| `envelope_cg::Solo (piloto)` | Falha | Falha | Falha | Falha | **não** | — |
+| `robustez::Cenário '2 pax dianteiros'::dianteiro` | Falha | Falha | Falha | Falha | **não** | — |
+
+O bracket contém `0,784867742387`, o valor medido independentemente na §2.3.
+
+**ERRO DE ORQUESTRAÇÃO — meu, e vira regra.** Eu despachei a re-revisão da
+Task 3 e a Task 4 **em paralelo**, raciocinando que "a revisão é somente
+leitura e a Task 4 cria arquivo novo, então não colidem".
+
+Errado. **Uma revisão que testa por mutação NÃO é somente leitura** — mutação
+escreve na árvore. Foi eu mesmo quem instruiu o revisor a mutar e reverter.
+
+O que aconteceu: a Task 4 começou e encontrou uma mutação órfã
+(`MUTACAO_REVISOR_BOGUS`) viva em `src/models/aircraft_config.rs`, sobra da
+revisão em andamento. Ela percebeu, reverteu com `git checkout --` e reportou —
+que é o comportamento certo.
+
+Dois danos possíveis, nenhum realizado por sorte:
+1. A Task 4 poderia ter medido a varredura inteira contra uma `banda()` mutada.
+   Naquela mutação específica só `truncada`/`motivo` mudavam, e `lo`/`hi` não —
+   os resultados teriam saído iguais. **Uma mutação que mexesse em `hi` teria
+   contaminado toda a medição do ciclo.**
+2. O `git checkout --` da Task 4 poderia ter revertido a mutação do revisor **no
+   meio da medição dele**, fazendo-o observar zero falhas e concluir que o teste
+   novo não pegava nada.
+
+Por isso a medição-chave da Task 3 foi **refeita pelo chefe**, sozinha na
+árvore, depois do incidente (`remuta16.sh`): com a mutação aplicada, exatamente
+**um** teste reprova — `banda_da_fixture_nao_e_truncada` — confirmando o
+revisor e não o operacional. E a suíte foi reexecutada, também pelo chefe:
+**572 testes, 0 falhas**, com `git diff d9e8b3b 6339fb9 -- src/models/` vazio,
+provando que a Task 4 não alterou os arquivos da Task 3.
+
+**Regra nova:** revisão por mutação e task de implementação **nunca** correm em
+paralelo na mesma árvore. Em geral: antes de paralelizar dois agentes,
+perguntar não "eles editam os mesmos arquivos?" mas **"algum dos dois escreve
+na árvore em algum momento, ainda que temporariamente?"**. Uma medição feita
+durante concorrência não é medição — e uma medição de segunda mão feita durante
+concorrência é pior, porque parece uma.
+
+**Decisões do implementador que o plano não cobria**, todas declaradas:
+1. Falha de convergência num extremo → check vira INDETERMINADO com `motivo`
+   citando o extremo e a mensagem do `PipelineError`, sem tentar bissecar (não
+   há garantia de que pontos internos convirjam). `avalia()` foi separada de
+   `analisa()` para tornar a decisão pura testável com `viola` sintética.
+2. Teto falhando → `alcance_de_helice` marcado **conservadoramente** `false`
+   com motivo: nunca afirma alcance sem ter medido.
+3. Falha num ponto INTERNO durante a bisseção → `.expect(...)` com mensagem
+   pedindo que seja reportado como achado de primeira ordem. Não observado (o
+   pipeline converge de 0,55 a 1,0) e fora do domínio medido.
+
 ---
 
 ## 12. Backlog a abrir
