@@ -2535,15 +2535,25 @@ fn rotation_limit_variacao_medida_na_faixa_de_pesos_dos_cenarios() {
 #[test]
 fn baseline_declara_as_ancoras_da_figura_de_merito() {
     let cfg = baseline_state();
-    assert_eq!(cfg.propeller.fom_static, 0.75); // PIN: NAO-PUBLICADO — fom_static é ENTRADA de config, não ecoada no relatório
+    // `old→new` (ciclo 16, Task 5): `fom_static` DEIXA de ser NAO-PUBLICADO —
+    // a banda de incerteza (Task 3) e o bloco `uncertainty` (Task 5, spec
+    // §5.7) publicam `fom_static` como `uncertainty.nominal`. O pin vira
+    // VINCULADO — se isto for esquecido, é exatamente o caso que o porteiro
+    // do ciclo 15 (`tests/pins_vs_json.rs`) existe para pegar.
+    assert_eq!(cfg.propeller.fom_static, 0.75); // PIN: uncertainty.nominal
     assert_eq!(cfg.propeller.fom_design, 0.815_976_999_245_887_96); // PIN: NAO-PUBLICADO — fom_design, entrada de config
     assert_eq!(cfg.propeller.j_design,   1.875_143_480_257_116_75); // PIN: NAO-PUBLICADO — j_design, entrada de config
 
     // O construtor da curva lê os três campos e nada mais.
     let fom = cfg.propeller.figure_of_merit();
-    // PIN: NAO-PUBLICADO — fom_static/fom_design são ENTRADAS de config, não são ecoadas no relatório
-    assert_eq!(fom.at(0.0), 0.75);
-    // PIN: NAO-PUBLICADO — idem
+    // `fom.at(0.0) == fom_static` por definição (J=0 é o ponto estático) —
+    // MESMO campo publicado acima, mesmo vínculo. `j_estatico` isola o `0.0`
+    // do `0.75` cobrado abaixo: os dois na MESMA linha seriam um marcador
+    // AMBÍGUO para o scanner de tests/pins_vs_json.rs (2 literais cobrados).
+    let j_estatico = 0.0;
+    let fom_no_estatico = fom.at(j_estatico);
+    assert_eq!(fom_no_estatico, 0.75); // PIN: uncertainty.nominal
+    // PIN: NAO-PUBLICADO — fom_design não é ecoado no relatório (só fom_static, via uncertainty.nominal)
     assert_eq!(fom.at(cfg.propeller.j_design), 0.815_976_999_245_887_96);
 }
 

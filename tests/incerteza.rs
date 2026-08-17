@@ -2,12 +2,16 @@
 //! baseline REAL (não uma fixture sintética): os números medidos aqui têm
 //! que reproduzir a spec §2, não redescobri-los por acaso.
 //!
-//! Nada é publicado no JSON por esta task — a Task 5 publica. Estes testes
-//! só provam que `validation::incerteza::analisa` produz o que a spec
-//! registrou como medido.
+//! A Task 4 não publicava nada no JSON — a Task 5 publica (ver
+//! `tests/schema_v4.rs` para os testes do bloco `uncertainty`). Os testes
+//! ORIGINAIS deste arquivo continuam só provando que `analisa` produz o que
+//! a spec registrou como medido; ao final foi acrescentado o teste do
+//! invariante "INDETERMINADO nunca remove violação" (spec §8, item 2), que
+//! precisa comparar duas corridas com bandas de larguras diferentes e por
+//! isso pertence aqui, não a `tests/schema_v4.rs`.
 
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
-use aeronave::validation::incerteza::{analisa, Veredito};
+use aeronave::validation::incerteza::{analisa, publica_violacoes, Veredito};
 
 fn carrega_baseline() -> (
     aeronave::models::aircraft_config::AircraftConfig,
@@ -56,7 +60,19 @@ fn baseline_tem_exatamente_um_check_indeterminado() {
     assert!(inc.teto_avaliado, "o teto de quantidade de movimento tem que ter convergido");
 
     // Banda efetiva do baseline (spec §2, Task 3): [0,675 ; 0,81597699924588796].
-    assert_eq!(inc.banda.lo, 0.75 * 0.90); // PIN: NAO-PUBLICADO — banda de incerteza não publicada nesta task (Task 5)
+    // `old→new` (ciclo 16, Task 5): a banda PASSA a ser publicada
+    // (uncertainty.band_lo/band_hi) — a isenção que cobria esta linha (a
+    // banda ainda não era publicada) ficou FALSA. Em vez de virar um
+    // marcador vinculado aqui (a fórmula fom_static·(1−tol/100) teria DOIS
+    // literais na mesma linha, ambíguo para o scanner de
+    // tests/pins_vs_json.rs — ver literal_apos_operador_de_comparacao... \
+    // daquele arquivo para o critério), a asserção passa a derivar o valor
+    // esperado dos MESMOS campos de config que banda() lê — sem literal
+    // nenhum, então sem precisar de marcador. O vínculo real com o JSON
+    // publicado mora em tests/schema_v4.rs, no teste do bloco uncertainty.
+    let lo_declarado = cfg.propeller.fom_static
+        * (1.0 - cfg.propeller.fom_static_tol_pct / 100.0);
+    assert_eq!(inc.banda.lo, lo_declarado);
     assert_eq!(inc.banda.hi, cfg.propeller.fom_design);
     assert!(inc.banda.truncada);
 }
@@ -117,8 +133,17 @@ fn breakeven_publicado_e_provado_re_rodando_o_pipeline() {
     assert!(a < b, "bracket tem que ser (lo, hi) com lo < hi");
     assert!(b - a < 1e-6, "largura do bracket tem que respeitar a tolerância publicada");
 
-    // Medido na spec §2.3: breakeven em fom_static ≈ 0,784867742387.
-    // PIN: NAO-PUBLICADO — breakeven não publicado nesta task (Task 5); valor medido na spec §2.3
+    // Medido na spec §2.3: breakeven em fom_static ≈ 0,784867742387 — um
+    // valor de referência INDEPENDENTE (script de bisseção externo da spec
+    // §2.3, não o mesmo cálculo desta função), comparado por TOLERÂNCIA
+    // (1e-6), não por igualdade — não é o mesmo número que
+    // `uncertainty.checks[].breakeven_lo`/`breakeven_hi` publicados (esses
+    // são o BRACKET medido aqui, ~1e-7 de largura, publicados e vinculados
+    // em `tests/schema_v4.rs`). `old→new` (ciclo 16, Task 5): a razão da
+    // isenção mudou de "breakeven não publicado" (FALSO desde esta task) para
+    // "dois literais idênticos na mesma linha, ambíguo para o scanner de
+    // vínculo — ver `cob.len() > 1` em tests/pins_vs_json.rs".
+    // PIN: NAO-PUBLICADO — literal duplicado na mesma linha (ambíguo); vínculo real em tests/schema_v4.rs
     assert!((a - 0.784867742387).abs() < 1e-6 && (b - 0.784867742387).abs() < 1e-6,
         "bracket tem que estar em torno do breakeven medido na spec §2.3 — obtido ({a}, {b})");
 
@@ -280,4 +305,62 @@ fn varredura_usa_banda_hi_nao_hi_declarado_mesmo_quando_os_ids_coincidem() {
         "os textos têm que diferir (magnitudes diferentes) mesmo com os ids \
          coincidindo — achado desta task: os CONJUNTOS de id em hi e hi_declarado \
          coincidem no baseline de hoje, então este teste NÃO se apoia neles sozinhos");
+}
+
+// ── Task 5, Passo 3 — INDETERMINADO nunca remove violação ─────────────────
+// Teste OBRIGATÓRIO da spec §8, item 2: "a contagem de `violations` com a
+// banda ligada é igual à contagem com a banda colapsada". `fom_static_tol_pct`
+// não pode ser 0 (validação exige `> 0`, Task 3), então "colapsada" aqui é uma
+// banda MUITO mais estreita (1%, contra os 10% do baseline) — estreita o
+// bastante para o breakeven do gradiente CS 23.65 (a +4,6% do nominal) ficar
+// FORA da banda, e o check volta a ser FALHA determinada, não indeterminado.
+// A contagem de `violations` continua a MESMA (4) nos dois casos — só o
+// CONTEÚDO de uma delas muda (texto reescrito vs. texto original). Isso É a
+// prova: reduzir a banda até fazer o indeterminado desaparecer NÃO reduz a
+// contagem — a violação continua lá, só deixa de ser rotulada indeterminada.
+#[test]
+fn contagem_de_violacoes_e_igual_com_banda_larga_ou_estreita() {
+    let (cfg, engine, req) = carrega_baseline();
+    let nominal = aeronave::pipeline::executa(&cfg, &engine, &req)
+        .expect("baseline tem que convergir");
+
+    // Banda larga (config real, tol_pct do TOML — 10%).
+    let inc_larga = analisa(&cfg, &engine, &req, &nominal);
+    let violacoes_larga = publica_violacoes(&nominal.report.violations, &inc_larga);
+
+    // `nominal.report.violations` é o mesmo nos dois casos: `tol_pct` só
+    // afeta `banda()`/`analisa`, nunca a corrida NOMINAL (que usa
+    // `fom_static` puro, sem tocar `fom_static_tol_pct`) — por isso não
+    // precisa reconvergir o pipeline para a banda estreita.
+    let mut cfg_estreita = cfg.clone();
+    cfg_estreita.propeller.fom_static_tol_pct = 1.0;
+    let inc_estreita = analisa(&cfg_estreita, &engine, &req, &nominal);
+    let violacoes_estreita = publica_violacoes(&nominal.report.violations, &inc_estreita);
+
+    assert_eq!(violacoes_larga.len(), nominal.report.violations.len(),
+        "banda larga (10%): a contagem PUBLICADA tem que bater com a contagem NOMINAL — \
+         INDETERMINADO reescreve, nunca remove");
+    assert_eq!(violacoes_estreita.len(), nominal.report.violations.len(),
+        "banda estreita (1%): mesma regra — nenhuma violação sai");
+    assert_eq!(violacoes_larga.len(), violacoes_estreita.len(),
+        "a contagem tem que ser a MESMA independente da largura da banda — \
+         larga: {violacoes_larga:#?}\nestreita: {violacoes_estreita:#?}");
+
+    // Confirma que a banda estreita de fato MUDA o rótulo (prova que o teste
+    // não está comparando duas corridas idênticas por acidente): com 1% de
+    // tolerância o gradiente CS 23.65 (breakeven a +4,6% do nominal, medido
+    // em `breakeven_publicado_e_provado_re_rodando_o_pipeline`) fica FORA da
+    // banda e o check deixa de ser indeterminado.
+    let indet_larga = inc_larga.checks.iter()
+        .filter(|c| c.veredito == Veredito::Indeterminado).count();
+    let indet_estreita = inc_estreita.checks.iter()
+        .filter(|c| c.veredito == Veredito::Indeterminado).count();
+    assert_eq!(indet_larga, 1, "banda larga: o gradiente CS 23.65 tem que estar indeterminado");
+    assert_eq!(indet_estreita, 0,
+        "banda estreita (1%): o breakeven (+4,6% do nominal) fica FORA da banda — o gradiente \
+         volta a ser FALHA determinada, não indeterminado. Se isto falhar, o teste não está \
+         de fato comparando duas larguras de banda diferentes.");
+    assert!(!violacoes_estreita.iter().any(|v| v.starts_with("INDETERMINADO — ")),
+        "com a banda estreita, NENHUMA violação deveria estar rotulada INDETERMINADO: \
+         {violacoes_estreita:#?}");
 }

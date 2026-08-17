@@ -19,9 +19,7 @@ use crate::models::aircraft_config::{AircraftConfig, Banda};
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
 use crate::pipeline::{Portao, Resultado};
-use crate::validation::constraint_checker::ConstraintReport;
-#[cfg(test)]
-use crate::validation::constraint_checker::Violacao;
+use crate::validation::constraint_checker::{ConstraintReport, Violacao};
 
 /// Estado de veredito de um check sob incerteza (ciclo 16, spec §5.5).
 ///
@@ -31,7 +29,11 @@ use crate::validation::constraint_checker::Violacao;
 /// significado — "aquele extremo não convergiu", nunca "pertinência
 /// ambígua num ponto só" (um único ponto é sempre PASSA ou FALHA quando o
 /// pipeline converge).
+/// `#[serde(rename_all = "UPPERCASE")]` — Task 5, spec §5.7: o JSON publica
+/// `"PASSA"`/`"FALHA"`/`"INDETERMINADO"`, não `"Passa"`/`"Falha"`/
+/// `"Indeterminado"` (o que o derive produziria sem a anotação).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Veredito {
     Passa,
     Falha,
@@ -108,13 +110,32 @@ fn ids_do_ponto(report: &ConstraintReport, portoes: &[Portao]) -> HashSet<String
     ids
 }
 
+/// Roda o pipeline em `fom_static` e devolve, JUNTO com o `Ponto`, o próprio
+/// `fom_static` que foi de fato escrito em `cfg2` e usado na corrida
+/// (ciclo 16, CONSERTO do achado da revisão da Task 4: "fom_hi_usado é
+/// decoração").
+///
+/// Antes deste conserto, `analisa` tinha DUAS variáveis independentes —
+/// `fom_lo_usado`/`fom_hi_usado`, atribuídas de `banda.lo`/`banda.hi` — e
+/// SEPARADAMENTE passava `banda.lo`/`banda.hi` como argumento desta função. A
+/// revisão mutou só a CHAMADA (para `banda.hi_declarado`) mantendo a
+/// ATRIBUIÇÃO (`fom_hi_usado = banda.hi`) intocada, e os 583 testes do ciclo
+/// passaram: o teste que existia (`fom_hi_usado == banda.hi`) comparava duas
+/// CÓPIAS estáticas, nunca o argumento que a corrida efetivamente recebeu.
+///
+/// Agora só existe UMA variável: quem chama esta função recebe de volta
+/// exatamente o `fom_static` que ela usou, e é ESSE valor — nunca uma cópia
+/// reconstruída à parte — que `analisa` publica como `fom_lo_usado`/
+/// `fom_hi_usado`. Divergir deixou de ser um erro detectável por teste e
+/// passou a ser impossível de escrever: não há uma segunda linha para
+/// desalinhar.
 fn roda_com_fom(
     cfg: &AircraftConfig,
     engine: &EngineSpec,
     req: &Requirements,
     fom_static: f64,
     fom_design: Option<f64>,
-) -> Ponto {
+) -> (f64, Ponto) {
     let mut cfg2 = cfg.clone();
     cfg2.propeller.fom_static = fom_static;
     // O teto de quantidade de movimento usa AS DUAS âncoras em 1,0. Com
@@ -125,10 +146,14 @@ fn roda_com_fom(
     if let Some(fd) = fom_design {
         cfg2.propeller.fom_design = fd;
     }
-    match crate::pipeline::executa(&cfg2, engine, req) {
+    let ponto = match crate::pipeline::executa(&cfg2, engine, req) {
         Ok(res) => Ponto::Ok(ids_do_ponto(&res.report, &res.portoes)),
         Err(e) => Ponto::Falha(e.to_string()),
-    }
+    };
+    // `cfg2.propeller.fom_static` (não o parâmetro `fom_static`) é o valor
+    // devolvido DE PROPÓSITO: é literalmente o campo lido pela chamada a
+    // `pipeline::executa` acima, a MESMA leitura, não uma reconstrução.
+    (cfg2.propeller.fom_static, ponto)
 }
 
 /// Um check sob a banda de incerteza (ciclo 16, spec §5.7).
@@ -361,15 +386,16 @@ pub fn analisa(
     let banda = cfg.propeller.banda();
 
     // Valores EFETIVAMENTE usados, publicados em `Incerteza` — ver o
-    // doc-comment do campo para o porquê (CONSERTO 3 da revisão da Task 4).
-    let fom_lo_usado = banda.lo;
-    let fom_hi_usado = banda.hi;
-
-    let ponto_lo = roda_com_fom(cfg, engine, req, fom_lo_usado, None);
-    let ponto_hi = roda_com_fom(cfg, engine, req, fom_hi_usado, None);
+    // doc-comment do campo para o porquê (CONSERTO 3 da revisão da Task 4) e
+    // o doc-comment de `roda_com_fom` para o conserto ESTRUTURAL da Task 5:
+    // `fom_lo_usado`/`fom_hi_usado` vêm do RETORNO da chamada, nunca de uma
+    // segunda leitura de `banda.lo`/`banda.hi` — uma fonte, não duas.
+    let (fom_lo_usado, ponto_lo) = roda_com_fom(cfg, engine, req, banda.lo, None);
+    let (fom_hi_usado, ponto_hi) = roda_com_fom(cfg, engine, req, banda.hi, None);
     // Teto de quantidade de movimento: as DUAS âncoras em 1,0 — ver
-    // comentário em `roda_com_fom`.
-    let ponto_teto = roda_com_fom(cfg, engine, req, 1.0, Some(1.0));
+    // comentário em `roda_com_fom`. O `fom` devolvido aqui não é publicado
+    // (não há campo `fom_teto_usado` — o teto é sempre 1,0 por definição).
+    let (_fom_teto_usado, ponto_teto) = roda_com_fom(cfg, engine, req, 1.0, Some(1.0));
 
     let ids_nominal: HashSet<String> = ids_do_ponto(&nominal.report, &nominal.portoes);
 
@@ -438,6 +464,126 @@ pub fn analisa(
         banda,
         checks,
     }
+}
+
+// ─── Task 5 — publicação ───────────────────────────────────────────────────
+// `analisa` (acima) só CLASSIFICA. As duas funções abaixo são a fronteira
+// entre a classificação e o que o usuário lê — o veredito global de três
+// estados (spec §5.5) e a reescrita do texto de violação (spec §5.6 + o
+// ERRATUM que cobre o caso indeterminado AUSENTE do nominal).
+
+/// Terceiro estado do veredito global (ciclo 16, spec §5.5).
+///
+/// ```text
+/// FAIL           se existe QUALQUER check com falha DETERMINADA
+/// INDETERMINADO  senão, se existe qualquer check indeterminado
+/// PASS           senão
+/// ```
+///
+/// Falha determinada DOMINA indeterminação — de propósito (spec §5.6, razão
+/// 1): INDETERMINADO tem que ser lido como "o modelo não sabe", nunca como
+/// "está tudo bem". `inc.checks` já é a união dos quatro pontos avaliados
+/// (nominal ∪ lo ∪ hi ∪ teto, ver `analisa`), incluindo os 9 portões — logo
+/// esta função não precisa (e não deve) reconsultar `report.violations`
+/// separadamente: um check que nunca aparece em `checks` nunca violou em
+/// ponto nenhum, e portanto é PASSA por definição.
+pub fn veredito_global(inc: &Incerteza) -> &'static str {
+    if inc.checks.iter().any(|c| c.veredito == Veredito::Falha) {
+        "FAIL"
+    } else if inc.checks.iter().any(|c| c.veredito == Veredito::Indeterminado) {
+        "INDETERMINADO"
+    } else {
+        "PASS"
+    }
+}
+
+/// Descreve a variação de um check indeterminado para o texto publicado —
+/// ou o bracket do breakeven (caso normal, travessia única), ou o `motivo`
+/// que `analisa` já produziu quando não há bracket (não monotônico, ou um
+/// extremo que não convergiu). Extraída de `texto_indeterminado_*` para as
+/// duas variantes do ERRATUM da spec §5.6 citarem a MESMA frase.
+fn cita_variacao(banda: &Banda, c: &CheckIncerto) -> String {
+    match c.breakeven {
+        Some((a, b)) => {
+            let delta_pct = (a - banda.nominal) / banda.nominal * 100.0;
+            format!(
+                "breakeven em [{a:.6}–{b:.6}], {delta_pct:+.1}% sobre o nominal {:.3}",
+                banda.nominal
+            )
+        }
+        None => {
+            let motivo = c.motivo.as_deref()
+                .unwrap_or("sem bracket medido — motivo não registrado, achado de primeira ordem");
+            format!("sem breakeven único ({motivo})")
+        }
+    }
+}
+
+/// Caso 1 do ERRATUM (spec §5.6): indeterminado PRESENTE no nominal.
+/// Reescreve o texto ORIGINAL — não o substitui por um texto genérico — com
+/// prefixo `INDETERMINADO — ` e a variação medida.
+fn texto_indeterminado_presente(original: &str, banda: &Banda, c: &CheckIncerto) -> String {
+    format!(
+        "INDETERMINADO — {original}. O veredito VIRA dentro da banda declarada de \
+         propeller.fom_static [{:.6}–{:.6}]: {}. O modelo NÃO sustenta este veredito.",
+        banda.lo, banda.hi, cita_variacao(banda, c),
+    )
+}
+
+/// Caso 2 do ERRATUM (spec §5.6) — o que a primeira versão da seção não
+/// cobria: indeterminado AUSENTE do nominal. Não há texto original para
+/// reescrever (o check nem aparece em `report.violations` no nominal), então
+/// esta função MONTA uma violação nova a partir do `id` do check — é o único
+/// caso em que o silêncio favoreceria o projeto (um check que "passa" hoje e
+/// vira dentro da banda declarada).
+fn texto_indeterminado_ausente(id: &str, banda: &Banda, c: &CheckIncerto) -> String {
+    format!(
+        "INDETERMINADO — check '{id}' passa no nominal ({:.3}) mas VIRA dentro da banda \
+         declarada de propeller.fom_static [{:.6}–{:.6}]: {}. O modelo NÃO sustenta este \
+         veredito.",
+        banda.nominal, banda.lo, banda.hi, cita_variacao(banda, c),
+    )
+}
+
+/// Publica a lista final de violações (ciclo 16, spec §5.6 + ERRATUM da
+/// revisão da Task 4 — os DOIS casos).
+///
+/// - indeterminado PRESENTE no nominal → reescreve o texto ORIGINAL daquela
+///   `Violacao` (prefixo `INDETERMINADO — `); a contagem NÃO muda.
+/// - indeterminado AUSENTE do nominal → INSERE uma violação nova (mesmo
+///   prefixo); a contagem SOBE.
+///
+/// INDETERMINADO NUNCA remove violação: toda `Violacao` de `nominal` sai
+/// desta função, reescrita ou intocada — nunca descartada. É por isso que a
+/// função itera `nominal` primeiro (preservando cada entrada, uma a uma) e só
+/// DEPOIS considera inserções.
+pub fn publica_violacoes(nominal: &[Violacao], inc: &Incerteza) -> Vec<String> {
+    use std::collections::HashMap;
+
+    let indeterminados: HashMap<&str, &CheckIncerto> = inc.checks.iter()
+        .filter(|c| c.veredito == Veredito::Indeterminado)
+        .map(|c| (c.id.as_str(), c))
+        .collect();
+
+    let mut saida: Vec<String> = Vec::with_capacity(nominal.len());
+    for v in nominal {
+        match indeterminados.get(v.id.as_str()) {
+            Some(c) => saida.push(texto_indeterminado_presente(&v.texto, &inc.banda, c)),
+            None => saida.push(v.texto.clone()),
+        }
+    }
+
+    let ids_nominais: HashSet<&str> = nominal.iter().map(|v| v.id.as_str()).collect();
+    // Ordem determinística: `inc.checks` já vem de um `BTreeSet` em `analisa`
+    // (ordem alfabética de id) — não itero `indeterminados` (HashMap, ordem
+    // não determinística) para as inserções.
+    for c in inc.checks.iter().filter(|c| c.veredito == Veredito::Indeterminado) {
+        if !ids_nominais.contains(c.id.as_str()) {
+            saida.push(texto_indeterminado_ausente(&c.id, &inc.banda, c));
+        }
+    }
+
+    saida
 }
 
 #[cfg(test)]
@@ -669,5 +815,142 @@ mod tests {
         let ponto_teto = Ponto::Ok(ids);
         assert_eq!(decide_teto("id_presente", &ponto_teto), (false, None));
         assert_eq!(decide_teto("id_ausente", &ponto_teto), (true, None));
+    }
+
+    // ── Task 5, Passo 2: o terceiro estado do veredito global ─────────────
+    // Puro — `veredito_global` só olha `inc.checks`, então os testes abaixo
+    // constroem `Incerteza` sintética, sem rodar o pipeline nenhuma vez.
+
+    fn check_teste(id: &str, veredito: Veredito) -> CheckIncerto {
+        CheckIncerto {
+            id: id.to_string(),
+            veredito,
+            veredito_lo: veredito,
+            veredito_nominal: veredito,
+            veredito_hi: veredito,
+            alcance_de_helice: true,
+            breakeven: None,
+            motivo: None,
+        }
+    }
+
+    fn incerteza_teste(checks: Vec<CheckIncerto>) -> Incerteza {
+        Incerteza {
+            parametro: "propeller.fom_static",
+            banda: banda_teste(),
+            fom_lo_usado: 0.675,
+            fom_hi_usado: 0.816,
+            teto_avaliado: true,
+            checks,
+        }
+    }
+
+    #[test]
+    fn veredito_global_pass_sem_checks() {
+        assert_eq!(veredito_global(&incerteza_teste(vec![])), "PASS");
+    }
+
+    #[test]
+    fn veredito_global_indeterminado_sem_falha_determinada() {
+        let inc = incerteza_teste(vec![check_teste("a", Veredito::Passa),
+                                        check_teste("b", Veredito::Indeterminado)]);
+        assert_eq!(veredito_global(&inc), "INDETERMINADO",
+            "só há Passa e Indeterminado — sem NENHUMA falha determinada, o veredito global \
+             tem que ser INDETERMINADO, não PASS (silenciar a indeterminação seria a máquina \
+             de lavar reprovação que a spec §5.6 proíbe)");
+    }
+
+    /// A regra central da spec §5.5: falha determinada DOMINA indeterminação.
+    /// Config sintética com um check indeterminado E um determinado ⇒ FAIL,
+    /// nunca INDETERMINADO — INDETERMINADO teria que ser lido como "pior que
+    /// FAIL" (o modelo não sabe), nunca como um meio-termo que abranda FAIL.
+    #[test]
+    fn veredito_global_falha_determinada_domina_indeterminado() {
+        let inc = incerteza_teste(vec![check_teste("indet", Veredito::Indeterminado),
+                                        check_teste("det", Veredito::Falha)]);
+        assert_eq!(veredito_global(&inc), "FAIL",
+            "falha determinada tem que DOMINAR — mesmo com um check indeterminado presente, \
+             o veredito global não pode amaciar para INDETERMINADO");
+    }
+
+    #[test]
+    fn veredito_global_pass_so_com_checks_passa() {
+        let inc = incerteza_teste(vec![check_teste("a", Veredito::Passa)]);
+        assert_eq!(veredito_global(&inc), "PASS");
+    }
+
+    // ── Task 5, Passo 3: publicação do texto de violação ──────────────────
+    // Cobre os DOIS casos do ERRATUM da spec §5.6 com config sintética —
+    // "presente no nominal" (reescreve, contagem NÃO muda) e "ausente do
+    // nominal" (insere, contagem SOBE) — o segundo não ocorre no baseline
+    // real, mas a regra tem que valer em código, não só em spec.
+
+    fn violacao_teste(id: &str, texto: &str) -> Violacao {
+        Violacao { id: id.to_string(), texto: texto.to_string() }
+    }
+
+    fn check_indeterminado_com_breakeven(id: &str) -> CheckIncerto {
+        CheckIncerto {
+            id: id.to_string(),
+            veredito: Veredito::Indeterminado,
+            veredito_lo: Veredito::Falha,
+            veredito_nominal: Veredito::Falha,
+            veredito_hi: Veredito::Passa,
+            alcance_de_helice: true,
+            breakeven: Some((0.700_000, 0.700_001)),
+            motivo: None,
+        }
+    }
+
+    #[test]
+    fn publica_violacoes_indeterminado_presente_no_nominal_reescreve_sem_mudar_contagem() {
+        let nominal = vec![violacao_teste("x", "X falhou por Y")];
+        let inc = incerteza_teste(vec![check_indeterminado_com_breakeven("x")]);
+
+        let saida = publica_violacoes(&nominal, &inc);
+        assert_eq!(saida.len(), 1, "contagem NÃO muda — só reescreve");
+        assert!(saida[0].starts_with("INDETERMINADO — X falhou por Y."),
+            "texto original tem que sobreviver, com o prefixo — obtido: {}", saida[0]);
+        assert!(saida[0].contains("banda declarada de propeller.fom_static"), "{}", saida[0]);
+        assert!(saida[0].contains("breakeven em"), "{}", saida[0]);
+        assert!(saida[0].ends_with("O modelo NÃO sustenta este veredito."), "{}", saida[0]);
+    }
+
+    /// O caso que o ERRATUM da revisão da Task 4 adicionou à spec §5.6: o
+    /// indeterminado AUSENTE do nominal. Não existe `Violacao` de origem —
+    /// esta função tem que MONTAR uma violação nova, e a contagem SOBE.
+    #[test]
+    fn publica_violacoes_indeterminado_ausente_do_nominal_insere_e_sobe_a_contagem() {
+        let nominal: Vec<Violacao> = vec![]; // "y" nunca apareceu no nominal
+        let inc = incerteza_teste(vec![check_indeterminado_com_breakeven("y")]);
+
+        let saida = publica_violacoes(&nominal, &inc);
+        assert_eq!(saida.len(), 1, "contagem SOBE de 0 para 1 — a inserção é o único caso em \
+                                     que o silêncio favoreceria o projeto");
+        assert!(saida[0].starts_with("INDETERMINADO — check 'y' passa no nominal"),
+            "obtido: {}", saida[0]);
+        assert!(saida[0].ends_with("O modelo NÃO sustenta este veredito."), "{}", saida[0]);
+    }
+
+    /// INDETERMINADO nunca REMOVE violação: toda `Violacao` do nominal sai
+    /// da função, reescrita ou intocada, mesmo quando NENHUM check é
+    /// indeterminado (`Incerteza` vazia) — o caso degenerado que provaria
+    /// uma remoção acidental primeiro.
+    #[test]
+    fn publica_violacoes_sem_indeterminados_preserva_tudo_intocado() {
+        let nominal = vec![violacao_teste("a", "A"), violacao_teste("b", "B")];
+        let inc = incerteza_teste(vec![]);
+        let saida = publica_violacoes(&nominal, &inc);
+        assert_eq!(saida, vec!["A".to_string(), "B".to_string()]);
+    }
+
+    /// Um check FALHA determinada (não indeterminado) presente no nominal
+    /// não é tocado — só INDETERMINADO reescreve.
+    #[test]
+    fn publica_violacoes_ignora_checks_com_falha_determinada() {
+        let nominal = vec![violacao_teste("a", "A original")];
+        let inc = incerteza_teste(vec![check_teste("a", Veredito::Falha)]);
+        let saida = publica_violacoes(&nominal, &inc);
+        assert_eq!(saida, vec!["A original".to_string()]);
     }
 }

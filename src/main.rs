@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
-use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION};
+use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, UncertaintySpec, SCHEMA_VERSION};
 
 fn sep() { println!("{}", "─".repeat(64)); }
 
@@ -988,11 +988,27 @@ fn main() {
          SENSÍVEL aos parâmetros semi-empíricos citados acima; validar em ensaio de voo antes \
          de tratar como definitivo.)".into());
 
+    // ── Incerteza (ciclo 16, Task 5) ────────────────────────────────────────────
+    // Re-executa o pipeline nos extremos da banda de `propeller.fom_static`
+    // (Task 4) e classifica cada check em PASSA/FALHA/INDETERMINADO. É a
+    // ÚNICA fonte, a partir daqui, de `validation_status` (spec §5.5, 3
+    // estados) e do texto final de `violations` (spec §5.6 — reescreve o
+    // check indeterminado presente no nominal, insere o ausente): `all_ok`
+    // (9 portões, calculado acima só para o print `[ VALIDAÇÃO ]`) NÃO
+    // alimenta mais o JSON — `veredito_global` deriva do MESMO conjunto de
+    // ids que `all_ok` cobria (união dos 4 pontos, portões incluídos, ver
+    // `ids_do_ponto`), só que capaz de dizer "indeterminado" em vez de só
+    // PASS/FAIL.
+    let inc = aeronave::validation::incerteza::analisa(&cfg, &engine, &req, &res);
+    let validation_status = aeronave::validation::incerteza::veredito_global(&inc).to_string();
+    let violations_final = aeronave::validation::incerteza::publica_violacoes(&report.violations, &inc);
+    let uncertainty = UncertaintySpec::from_incerteza(cfg.propeller.fom_static_tol_pct, &inc);
+
     // ── JSON Final ────────────────────────────────────────────────────────────
     let report_final = AircraftReport {
         schema_version:   SCHEMA_VERSION.to_string(),
         revision:         SCHEMA_VERSION.to_string(),
-        validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
+        validation_status,
         wing:             wing.clone(),
         propulsion:       prop.clone(),
         geometry:         Some(geometry),
@@ -1010,8 +1026,9 @@ fn main() {
         sizing:           Some(sizing),
         robustness:       Some(robustness.clone()),
         fidelity,
-        violations:       report.textos(),
+        violations:       violations_final,
         warnings:         report.warnings.clone(),
+        uncertainty,
     };
 
     let json = serde_json::to_string_pretty(&report_final)

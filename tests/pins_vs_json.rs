@@ -844,7 +844,16 @@ fn fontes_reais() -> Vec<Fonte> {
 ///
 /// 48 = os 47 cobrados vinculáveis da spec §7.5.1 mais o voluntário de
 /// `empennage.rs:42`.
-const MINIMO_DE_PINS_VINCULADOS: usize = 48;
+///
+/// `old→new` (ciclo 16, Task 5): 48 → 58 — o VALOR MEDIDO ao fim da task
+/// (`pins_de_teste_batem_com_o_json_commitado` com este piso elevado
+/// artificialmente reporta "58 marcadores vinculados encontrados"), não um
+/// número escolhido "com folga" (spec §7). Os 10 novos: `fom_static` deixou
+/// de ser NAO-PUBLICADO (2 sítios, `tests/generic_engine.rs`) e o bloco
+/// `uncertainty` entrou com 8 vínculos novos em `tests/schema_v4.rs`
+/// (`nominal`, `declared_tol_pct`, `band_declared_lo`, `band_declared_hi`,
+/// `band_lo`, `band_hi`, `checks.2.breakeven_lo`, `checks.2.breakeven_hi`).
+const MINIMO_DE_PINS_VINCULADOS: usize = 58;
 
 #[test]
 fn pins_de_teste_batem_com_o_json_commitado() {
@@ -888,7 +897,15 @@ fn conteudo_do_schema_doc() -> String {
 }
 
 /// Piso de números atuais conferidos no doc — mesma razão do piso de pins.
-const MINIMO_DE_NUMEROS_NO_DOC: usize = 12;
+///
+/// `old→new` (ciclo 16, Task 5): 12 → 20 — o VALOR MEDIDO ao fim da task
+/// (mesma técnica do piso de pins: elevar o piso artificialmente e ler
+/// "só X números atuais conferidos" na mensagem de falha), não "com
+/// folga". Os 8 novos são a entrada v6.0 de §1 e a seção `uncertainty` de
+/// §4 do schema doc (`band_lo`, `band_hi`, `declared_tol_pct`, `nominal`,
+/// `checks.2.breakeven_lo`, `checks.2.breakeven_hi` — alguns citados mais
+/// de uma vez).
+const MINIMO_DE_NUMEROS_NO_DOC: usize = 20;
 
 #[test]
 fn numeros_atuais_do_schema_doc_batem_com_o_json() {

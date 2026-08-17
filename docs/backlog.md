@@ -1067,7 +1067,7 @@ projeto. Ponteiro: `agents::performance::max_level_speed_ms`
 `agents::propulsion::search_cruise_rpm` (uso do rpm buscado), spec
 ciclo13 §1.1 (`old→new`, tabela de medição).
 
-## 21. Âncora de cruzeiro preserva o PONTO exatamente, mas `range_km`/`endurance_h` residuam −0,037% via o laço de convergência de MTOW
+## 21. Âncora de cruzeiro preserva o PONTO exatamente, mas `range_km`/`endurance_h` residuam −0,037% via o laço de convergência de MTOW — RESOLVIDO ciclo 16
 
 Achado medido na Task 5 do ciclo 13, fora de escopo de correção — resíduo
 declarado, não corrigido (spec ciclo13 §3.2 nota "a âncora tem uma
@@ -1114,6 +1114,37 @@ final), `agents::mission::MissionAgent::run` (`fuel_climb_kg`, consome
 `state.figure_of_merit()` via `climb_rate_ms`/`excess_power_kw`),
 `tests/generic_engine.rs` (pins `mission.*`, `sizing.*`, `old→new`
 ciclo 13).
+
+**RESOLVIDO** (ciclo 16, ciclo16-veredito-indeterminado, spec
+`2026-08-16-ciclo16-veredito-indeterminado-design.md`). "Resolvido" aqui
+**não** quer dizer "o resíduo de −0,037% desapareceu" — ele não desapareceu,
+e não podia: nenhum número de física mudou neste ciclo (`fom_static`
+continua 0,75, a lei `FoM(J)` continua a mesma). O que este ciclo ataca é a
+CAUSA do item, não o sintoma: a assimetria descrita acima (cruzeiro
+saturado em `fom_design`, calibrado; subida na região LINEAR da curva,
+dependendo do parâmetro CRU `fom_static`) significa que qualquer veredito
+avaliado perto de J baixo (a CS 23.65 é avaliada em Vx, J≈0,82) carrega até
+56,3% de peso de um parâmetro que NUNCA foi calibrado
+(`∂FoM/∂fom_static = 1 − min(J/j_design,1)`, ver spec §1) — e o modelo, até
+este ciclo, publicava esse veredito com a mesma confiança de um check
+totalmente determinado.
+
+O ciclo publica a banda de incerteza declarada de `fom_static` (bloco novo
+`uncertainty`, `docs/aircraft_spec.schema.md` §4) e um TERCEIRO estado de
+veredito, `INDETERMINADO`, para todo check cujo resultado VIRA dentro dessa
+banda. No baseline real, é exatamente o gradiente da CS 23.65 (o achado
+original do #21, medido em §2.3 da spec): breakeven em `fom_static ≈
+0,7849`, +4,6% sobre o nominal — o modelo agora DIZ que não sabe, em vez de
+carimbar FAIL com quinze dígitos apoiados num fator herdado de McCormick
+com dois algarismos significativos. `range_km`/`endurance_h` continuam
+residuando −0,037% (não corrigido, não é o que este ciclo se propôs a
+corrigir — ver acima) e `validation_status` do baseline real CONTINUA
+`"FAIL"` (as outras 3 violações são determinadas). O que mudou é que o
+modelo agora consegue DISTINGUIR "meu avião não atende" (FALHA) de "meu
+modelo não sabe" (INDETERMINADO) — que é a promessa do título do ciclo.
+Ponteiro: `validation::incerteza` (`src/validation/incerteza.rs`),
+`UncertaintySpec` (`src/models/specs.rs`), `docs/aircraft_spec.schema.md`
+§1 (entrada v6.0) e §4 (bloco `uncertainty`).
 
 ## 22. Nome do teste `envelope_de_cg_fechado_sem_violacao_no_baseline_real` ficou incoerente com o conteúdo (agora 1 violação de envelope)
 
@@ -1480,3 +1511,105 @@ Ponteiro: `tests/pins_vs_json.rs` (`fn interpreta_marcador`, `fn
 confere_vinculos`, `const MINIMO_DE_PINS_VINCULADOS`), revisão final de
 branch do ciclo 15 (aprovada para merge com este item como
 não-bloqueante).
+
+## 31. Calibrar `fom_static` por elemento de pá / JavaProp em J=0 — substituir a banda DECLARADA por banda MEDIDA
+
+A banda de incerteza publicada em `uncertainty` (ciclo 16, ver item #21
+acima) é **política de projeto** sobre uma entrada não calibrada
+(`fom_static_tol_pct = 10%`), não uma medição de hélice. Ninguém mediu
+hélice nenhuma no ciclo 16 — o que fecharia isto de verdade é análise de
+elemento de pá (BEMT) ou uma corrida JavaProp em J=0, produzindo uma banda
+MEDIDA (com sua própria incerteza de medição) em vez de uma banda
+DECLARADA por confiança subjetiva.
+
+Mitigação parcial já em vigor: o breakeven publicado (`uncertainty.checks[].
+breakeven_lo`/`breakeven_hi`) é FATO medido do modelo — mesmo que a banda
+declarada esteja errada, o número do breakeven continua certo; a banda só
+escolhe a PALAVRA (`FALHA` determinada vs. `INDETERMINADO`) que se aplica a
+ele. Ponteiro: spec `2026-08-16-ciclo16-veredito-indeterminado-design.md`
+§9, item 1; `config/aircraft/baseline_4seat.toml` (bloco de proveniência de
+`propeller.fom_static`).
+
+## 32. Varrer as demais entradas declaradamente não validadas do baseline
+
+O bloco `uncertainty` (ciclo 16) varre UM parâmetro: `propeller.fom_static`.
+A maquinaria (`validation::incerteza::analisa`) é genérica — reexecuta o
+pipeline com um campo de config perturbado e classifica cada check — mas a
+APLICAÇÃO é de um parâmetro só. O baseline tem outras entradas
+declaradamente não validadas que NUNCA são varridas por este mecanismo:
+`ground_clearance_min_m` ("PROXY de projeto conservador"),
+`prop_plane_x_m` ("ESTIMATIVA de geometria — validar no CAD"), entre
+outras (ver `config/aircraft/baseline_4seat.toml`, comentários de
+proveniência). `uncertainty.parameter` nomeia explicitamente qual entrada
+foi varrida exatamente para NÃO ser lido como "o resto do JSON é certo" —
+mas ninguém garante que um consumidor lê o nome do campo antes de assumir
+isso. Ponteiro: spec ciclo16 §9, item 2.
+
+## 33. Incoerência de idioma no domínio de `validation_status` (`"PASS"`/`"FAIL"` em inglês, `"INDETERMINADO"` em português)
+
+Ciclo 16 (Task 5): o terceiro valor do domínio de `validation_status` foi
+adicionado em PORTUGUÊS (`"INDETERMINADO"`) ao lado de dois valores em
+INGLÊS (`"PASS"`/`"FAIL"`) herdados desde a v4.0. Decisão consciente,
+registrada e não corrigida às escondidas — `"INDETERMINADO"` é o termo do
+contrato acordado com o usuário nesta spec, e os TEXTOS de violação do
+projeto (`violations[]`) já são todos em português; inglês só nos dois
+literais herdados do enum original. Corrigir exigiria escolher entre (a)
+traduzir `"PASS"`/`"FAIL"` para português (quebra MAJOR, todo consumidor
+que compara string precisa mudar) ou (b) traduzir `"INDETERMINADO"` para
+inglês (perde a aderência ao vocabulário desta spec e do resto do
+projeto). Nenhuma das duas foi decidida — fica aberto. Ponteiro: spec
+ciclo16 §5.5, `docs/aircraft_spec.schema.md` §1 (entrada v6.0).
+
+## 34. Interações entre incertezas — banda multidimensional não explorada
+
+`uncertainty` varre `propeller.fom_static` SOZINHO, um parâmetro por vez.
+Duas entradas, cada uma dentro da sua própria banda declarada, podem
+combinar-se para fazer um check VIRAR que nenhuma das duas vira sozinha —
+esse efeito de interação não é explorado nem detectado por este mecanismo.
+Fechar isto exigiria variar múltiplos parâmetros simultaneamente (custo
+combinatório: `2^n` extremos para `n` parâmetros incertos, mais o teto),
+fora de escopo do ciclo 16. Ponteiro: spec ciclo16 §9, item 3.
+
+## 35. Achado de PROJETO (não de modelo): mais tração estática piora o limite dianteiro de CG e a robustez do cenário '2 pax dianteiros'
+
+Medido durante o ciclo 16 (varredura da banda de `fom_static`,
+`tests/incerteza.rs::cg_e_robustez_falham_ate_no_teto`): o check de
+envelope de CG do cenário 'Solo (piloto)' e o flip de robustez de '2 pax
+dianteiros' FALHAM em TODOS os quatro pontos avaliados, incluindo o TETO
+de quantidade de movimento (`fom_static`/`fom_design` ambos em 1,0) —
+`alcance_de_helice: false` nos dois. Ou seja: **nenhuma hélice, por melhor
+que seja, resolve estas duas violações** — mais tração PIORA as duas (o
+limite dianteiro do envelope é de ROTAÇÃO, que carrega um termo de momento
+`−T·prop_axis_above_cg_m`; o balanço de robustez do cenário dianteiro
+herda o mesmo limite). Isto não é um achado sobre o MODELO de tração — é
+um achado sobre o PROJETO da aeronave: a linha de tração está posicionada
+de um jeito que trocar de hélice/motor para um mais potente não vai
+consertar o envelope de CG dianteiro nem a robustez de '2 pax dianteiros'.
+Merece investigação de projeto própria (reposicionar `prop_axis_above_cg_m`,
+recuar o limite dianteiro por outro caminho, ou aceitar a restrição de
+carregamento) — fora de escopo de um ciclo de modelagem. Ponteiro:
+`agents::trim_authority` (limite dianteiro de rotação),
+`validation::robustness` (cenário '2 pax dianteiros'), spec ciclo16 §12.
+
+## 36. Esclarecimento de documentação: `violations: []` NÃO implica `validation_status == "PASS"` (a linha da tabela de §4 estava certa; a prosa de "`fidelity`, `violations`, `warnings`" fazia uma alegação mais forte e FALSA)
+
+Achado da Task 5 do ciclo 16 (revisão de plano). `docs/aircraft_spec.schema.md`
+tinha DUAS afirmações sobre `violations` em lugares diferentes: a linha da
+tabela de blocos de topo (§4) dizia "vazio se `validation_status ==
+"PASS"`" — verdadeira, uma direção só, e por isso **não foi reescrita**. A
+prosa da subseção "`fidelity`, `violations`, `warnings`" (mesmo §4) dizia
+"vazio **se e somente se** `validation_status == "PASS"`" — a MESMA
+implicação MAIS a recíproca, e a recíproca é FALSA: `violations: []` NÃO
+implica PASS, porque 8 dos 9 `Portao` do veredito global
+(`pipeline::Portao`) podem reprovar sem empurrar NENHUMA `Violacao`
+companheira (`portao_v_cruzeiro`, `portao_flutter`, `portao_antitombamento`,
+`portao_estabilidade_long` não têm violação correspondente nenhuma —
+achado da revisão da Task 4 do próprio ciclo 16, que motivou incluir os 9
+portões na varredura de `validation::incerteza::analisa`). Corrigido
+in-loco na Task 5 (a prosa agora afirma só a direção verdadeira e nomeia a
+recíproca falsa explicitamente); registrado aqui como esclarecimento de
+documentação, não como defeito de comportamento — o CÓDIGO sempre se
+comportou assim, só a PROSA de uma seção fazia a alegação mais forte que o
+código nunca sustentou. Ponteiro: `docs/aircraft_spec.schema.md` §4
+("`fidelity`, `violations`, `warnings`"), spec ciclo16, Task 5 Passo 6
+(ERRATUM da revisão de plano).

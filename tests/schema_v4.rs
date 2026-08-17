@@ -15,8 +15,9 @@ use std::path::PathBuf;
 use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{
-    AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION,
+    AircraftReport, GeometrySpec, SizingReport, UncertaintySpec, SCHEMA_VERSION,
 };
+use aeronave::validation::incerteza;
 use std::collections::BTreeMap;
 
 fn config_path(rel: &str) -> PathBuf {
@@ -38,8 +39,17 @@ fn config_path(rel: &str) -> PathBuf {
 /// doença do #13 (`docs/backlog.md`) em outra roupa: o teste que deveria
 /// vigiar o pipeline mantinha uma cópia dele que podia divergir em
 /// silêncio. Agora chama `pipeline::executa` — a MESMA função que
-/// `main.rs` chama — e usa a MESMA regra de veredito (AND dos 9
-/// `res.portoes`, não só `report.all_satisfied()`).
+/// `main.rs` chama.
+///
+/// `old→new` (ciclo 16, Task 5): o veredito global deixou de ser o AND dos 9
+/// `res.portoes` — vira `validation::incerteza::veredito_global`, os TRÊS
+/// estados PASS/FAIL/INDETERMINADO da spec §5.5, calculados sobre a MESMA
+/// união de ids que os 9 portões cobriam (`Incerteza::checks`, ver
+/// `ids_do_ponto`), então nenhuma cobertura foi perdida — só ganhou um
+/// terceiro valor. `violations` também deixou de ser `report.textos()` cru:
+/// vira `incerteza::publica_violacoes`, que reescreve/insere o texto
+/// INDETERMINADO (spec §5.6 + ERRATUM). Mesma função que `main.rs` chama —
+/// mantendo o precedente do parágrafo acima.
 fn build_baseline_report() -> AircraftReport {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
@@ -51,9 +61,10 @@ fn build_baseline_report() -> AircraftReport {
     let design_mtow_kg = res.state.mtow_kg;
     let envelope_mtow_kg = res.wb.spec.mtow_kg;
 
-    // Veredito global: AND dos 9 portões (mesma regra de `main.rs`), não
-    // apenas `res.report.all_satisfied()` — ver doc-comment desta função.
-    let all_ok = res.portoes.iter().all(|p| p.ok);
+    let inc = incerteza::analisa(&cfg, &engine, &req, &res);
+    let validation_status = incerteza::veredito_global(&inc).to_string();
+    let violations = incerteza::publica_violacoes(&res.report.violations, &inc);
+    let uncertainty = UncertaintySpec::from_incerteza(cfg.propeller.fom_static_tol_pct, &inc);
 
     let geometry = GeometrySpec {
         wing_le_root_x_m: cfg.wing.le_root_x_m,
@@ -94,7 +105,7 @@ fn build_baseline_report() -> AircraftReport {
     AircraftReport {
         schema_version: SCHEMA_VERSION.to_string(),
         revision: SCHEMA_VERSION.to_string(),
-        validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
+        validation_status,
         wing: res.wing.clone(),
         propulsion: res.prop.clone(),
         geometry: Some(geometry),
@@ -112,15 +123,18 @@ fn build_baseline_report() -> AircraftReport {
         sizing: Some(sizing),
         robustness: Some(res.robustness.clone()),
         fidelity,
-        violations: res.report.textos(),
+        violations,
         warnings: res.report.warnings.clone(),
+        uncertainty,
     }
 }
 
 #[test]
 fn schema_version_e_16_blocos_de_topo_presentes() {
     let report = build_baseline_report();
-    assert_eq!(report.schema_version, "5.7");
+    // `old→new` (ciclo 16, Task 5 — bump MAJOR, ver docstring de
+    // `SCHEMA_VERSION` para a justificativa completa): "5.7" → "6.0".
+    assert_eq!(report.schema_version, "6.0");
     assert_eq!(report.schema_version, SCHEMA_VERSION);
 
     let json = serde_json::to_string_pretty(&report).expect("deveria serializar");
@@ -132,12 +146,117 @@ fn schema_version_e_16_blocos_de_topo_presentes() {
         "geometry", "empennage", "control_surfaces", "weight", "trim", "performance",
         "vn_diagram", "structure", "landing_gear", "propeller", "mission",
         "electrical", "sizing", "robustness", "fidelity", "violations", "warnings",
+        // Ciclo 16, Task 5: bloco novo — ver `UncertaintySpec`.
+        "uncertainty",
     ];
-    assert!(expected_keys.len() >= 16, "lista de chaves esperadas deveria ter pelo menos 16 entradas");
+    assert!(expected_keys.len() >= 17, "lista de chaves esperadas deveria ter pelo menos 17 entradas");
     for key in expected_keys {
         assert!(obj.contains_key(key), "chave de topo ausente no JSON: '{key}'");
     }
-    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "5.7");
+    assert_eq!(obj.get("schema_version").unwrap().as_str().unwrap(), "6.0");
+}
+
+/// Ciclo 16 (Task 5, spec §5.7): o bloco `uncertainty` publica a banda
+/// EFETIVA (truncada em `fom_design`) de `propeller.fom_static` e o único
+/// check indeterminado do baseline (gradiente CS 23.65), com o breakeven
+/// MEDIDO — não um valor recalculado à mão, o mesmo `UncertaintySpec` que
+/// `main.rs` escreve no `aircraft_spec.json` commitado.
+///
+/// Ordem de `checks`: alfabética por `id` (`validation::incerteza::analisa`
+/// itera um `BTreeSet<String>`) — `gradiente_cs2365` cai no índice 2 entre
+/// os 5 ids do baseline (`decolagem_grama` < `envelope_cg::Solo (piloto)` <
+/// `gradiente_cs2365` < `portao_envelope_cg_todos` < `robustez::…`). Se um
+/// dia um sexto check entrar em ordem alfabética anterior, este índice
+/// precisa ser revisto — não é acidente, é a ordem publicada de hoje.
+#[test]
+fn uncertainty_bloco_publica_banda_efetiva_e_o_gradiente_indeterminado() {
+    let report = build_baseline_report();
+    let json = serde_json::to_string(&report).expect("deveria serializar");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("deveria parsear como JSON");
+    let u = &value["uncertainty"];
+
+    assert_eq!(u["parameter"].as_str().unwrap(), "propeller.fom_static");
+    assert_eq!(u["nominal"].as_f64().unwrap(), 0.75); // PIN: uncertainty.nominal
+    assert_eq!(u["declared_tol_pct"].as_f64().unwrap(), 10.0); // PIN: uncertainty.declared_tol_pct
+    assert_eq!(u["band_declared_lo"].as_f64().unwrap(), 0.675); // PIN: uncertainty.band_declared_lo
+    // PIN: uncertainty.band_declared_hi
+    assert_eq!(u["band_declared_hi"].as_f64().unwrap(), 0.825_000_000_000_000_1);
+    assert_eq!(u["band_lo"].as_f64().unwrap(), 0.675); // PIN: uncertainty.band_lo
+    // PIN: uncertainty.band_hi
+    assert_eq!(u["band_hi"].as_f64().unwrap(), 0.815_976_999_245_888);
+    assert!(u["band_truncated"].as_bool().unwrap(),
+        "baseline real: a banda tem que estar truncada em fom_design");
+    assert!(u["band_truncated_reason"].as_str().unwrap().contains("fom_design"),
+        "a razão de truncagem tem que citar fom_design — publicada, não em silêncio");
+    assert!(u["ceiling_evaluated"].as_bool().unwrap());
+
+    let checks = u["checks"].as_array().expect("checks deveria ser um array");
+    assert_eq!(checks.len(), 5,
+        "baseline real: 5 checks entram no bloco (violam em pelo menos um dos 4 pontos) — \
+         {checks:#?}");
+
+    let gradiente = &checks[2];
+    assert_eq!(gradiente["id"].as_str().unwrap(), "gradiente_cs2365");
+    assert_eq!(gradiente["veredito"].as_str().unwrap(), "INDETERMINADO");
+    assert_eq!(gradiente["veredito_lo"].as_str().unwrap(), "FALHA");
+    assert_eq!(gradiente["veredito_nominal"].as_str().unwrap(), "FALHA");
+    assert_eq!(gradiente["veredito_hi"].as_str().unwrap(), "PASSA");
+    assert!(gradiente["alcance_de_helice"].as_bool().unwrap());
+    // PIN: uncertainty.checks.2.breakeven_lo
+    assert_eq!(gradiente["breakeven_lo"].as_f64().unwrap(), 0.784_867_237_235_786_1);
+    // PIN: uncertainty.checks.2.breakeven_hi
+    assert_eq!(gradiente["breakeven_hi"].as_f64().unwrap(), 0.784_867_775_020_359_6);
+    assert!(gradiente["motivo"].is_null(),
+        "o gradiente tem bracket medido — não precisa de motivo textual");
+
+    // Os outros 4 checks são FALHA determinada, sem breakeven — cobertura
+    // direta de que `UncertaintyCheckSpec::from` NÃO inventa bracket para
+    // quem não tem.
+    for c in checks {
+        if c["id"].as_str().unwrap() == "gradiente_cs2365" {
+            continue;
+        }
+        assert_eq!(c["veredito"].as_str().unwrap(), "FALHA", "id={}", c["id"]);
+        assert!(c["breakeven_lo"].is_null(), "id={}", c["id"]);
+        assert!(c["breakeven_hi"].is_null(), "id={}", c["id"]);
+    }
+}
+
+/// `validation::incerteza::publica_violacoes` reescreveu o texto da CS 23.65
+/// com o prefixo `INDETERMINADO — ` — a interface pública de facto é o
+/// TEXTO (spec §5.6, razão 3), então o vínculo com o JSON tem que ser
+/// verificado no `violations` publicado, não só no bloco `uncertainty`.
+#[test]
+fn violations_publica_o_texto_indeterminado_para_o_gradiente() {
+    let report = build_baseline_report();
+    assert_eq!(report.violations.len(), 4,
+        "contagem PERMANECE 4 — INDETERMINADO reescreve, não insere, porque o gradiente JÁ \
+         violava no nominal: {:#?}", report.violations);
+
+    let gradiente = report.violations.iter()
+        .find(|v| v.contains("Gradiente de subida"))
+        .expect("uma das 4 violações tem que ser o gradiente CS 23.65");
+    assert!(gradiente.starts_with("INDETERMINADO — "), "obtido: {gradiente}");
+    assert!(gradiente.contains("banda declarada de propeller.fom_static"), "obtido: {gradiente}");
+    assert!(gradiente.contains("breakeven em"), "obtido: {gradiente}");
+    assert!(gradiente.ends_with("O modelo NÃO sustenta este veredito."), "obtido: {gradiente}");
+
+    // As outras 3 violações NÃO carregam o prefixo — só o check indeterminado
+    // é reescrito.
+    let nao_indeterminadas: Vec<&String> = report.violations.iter()
+        .filter(|v| !v.starts_with("INDETERMINADO — "))
+        .collect();
+    assert_eq!(nao_indeterminadas.len(), 3, "obtido: {nao_indeterminadas:#?}");
+}
+
+/// Falha determinada domina indeterminação (spec §5.5): mesmo com o
+/// gradiente CS 23.65 indeterminado, `validation_status` continua FAIL —
+/// as outras 3 violações são falha DETERMINADA. Este ciclo não muda o
+/// veredito do projeto, só o que o modelo consegue dizer sobre ele.
+#[test]
+fn validation_status_do_baseline_continua_fail_com_indeterminado_presente() {
+    let report = build_baseline_report();
+    assert_eq!(report.validation_status, "FAIL");
 }
 
 /// Schema 5.0 (Task 2, ciclo7-clmax-decolagem — bump MAJOR): `wing.cl_max_to`
