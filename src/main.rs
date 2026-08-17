@@ -2,22 +2,11 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use aeronave::agents::control_surfaces::ControlSurfacesAgent;
-use aeronave::agents::electrical::ElectricalAgent;
-use aeronave::agents::performance::PerformanceAgent;
-use aeronave::agents::propeller::PropellerAgent;
-use aeronave::agents::structural::StructuralAgent;
-use aeronave::agents::landing_gear::LandingGearAgent;
 use std::collections::BTreeMap;
 
 use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION};
-use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::{
-    ConstraintChecker, VerifyInputs, RC_SL_MIN_MS, SERVICE_CEILING_MIN_M,
-};
-use aeronave::validation::robustness::RobustnessAgent;
 
 fn sep() { println!("{}", "─".repeat(64)); }
 
@@ -85,6 +74,19 @@ fn main() {
     println!("╚══════════════════════════════════════════════════════════════╝\n");
     println!("Motor: {}  |  Trem: Retrátil Elétrico\n", engine.name);
 
+    // ── PIPELINE — Ciclo 16: função extraída para variação de banda ────────────────
+    // O pipeline inteiro (sizing + todos os agentes + portões) agora vive em
+    // `pipeline::executa` — existe porque `validation::incerteza` precisa
+    // re-executar o pipeline com `[propeller].fom_static` alterado, e antes
+    // deste ciclo não havia nada para chamar (eram 1.078 linhas dentro de
+    // `main`). A mensagem de erro abaixo é a MESMA de antes da extração —
+    // `pipeline::executa` só falha quando `size_aircraft` falha em
+    // convergir.
+    let res = aeronave::pipeline::executa(&cfg, &engine, &req).unwrap_or_else(|e| {
+        eprintln!("Erro ao convergir MTOW: {e}");
+        std::process::exit(1);
+    });
+
     // ── Sizing: convergência de MTOW (Task 3.1) ─────────────────────────────────
     // Fecha o laço de ponto fixo entre aerodinâmica (que precisa do peso para
     // CL/CD de cruzeiro) e peso/balanceamento (que precisa do arrasto/consumo
@@ -106,30 +108,26 @@ fn main() {
     //     dimensionar para a carga máxima que a aeronave pode legalmente
     //     carregar (tipicamente MAIOR que o MTOW de missão, que não enche o
     //     tanque até a borda no payload máximo).
-    let sized = size_aircraft(&cfg, &engine, &req).unwrap_or_else(|e| {
-        eprintln!("Erro ao convergir MTOW: {e}");
-        std::process::exit(1);
-    });
-    let design_mtow_kg = sized.state.mtow_kg;
-    let envelope_mtow_kg = sized.wb.spec.mtow_kg;
+    let design_mtow_kg = res.state.mtow_kg;
+    let envelope_mtow_kg = res.wb.spec.mtow_kg;
 
     println!("[ SIZING ] Convergência de MTOW");
     // `iterations.len() - 1`: o vetor tem N palpites intermediários MAIS o
     // valor final convergido anexado ao término do laço — o número de
     // PASSAGENS do laço de ponto fixo é `len() - 1`, não `len()`.
     println!("  Iterações: {}  |  MTOW inicial: {:.1}kg → MTOW missão (convergido): {:.1}kg",
-             sized.iterations.len() - 1, sized.iterations[0], design_mtow_kg);
+             res.iterations.len() - 1, res.iterations[0], design_mtow_kg);
     println!("  MTOW envelope (cenário máximo: 4 pax + bagagem + tanque cheio): {:.1}kg",
              envelope_mtow_kg);
     println!("  Combustível de missão (autonomia mínima + reserva): {:.1}kg\n",
-             sized.mission_fuel_kg);
+             res.mission_fuel_kg);
 
     // ── Diagrama de restrições W/S × P/W (Task 3.2) ─────────────────────────────
     // Puramente informativo — recomenda uma área de asa a partir dos limites
     // clássicos de stall/cruzeiro/subida, mas não redimensiona a aeronave
     // automaticamente (ver `agents::constraint_diagram`).
     println!("[ RESTRIÇÕES ] Diagrama W/S × P/W (Raymer cap. 5 / Gudmundsson cap. 3)");
-    let cons = &sized.constraints;
+    let cons = &res.constraints;
     println!("  W/S máximo (stall, Vs_ref={:.1}m/s): {:.1}N/m²  |  W/S ótimo (cruzeiro): {:.1}N/m²",
              cons.v_stall_ref_ms, cons.ws_max_stall_n_m2, cons.ws_optimal_cruise_n_m2);
     println!("  W/S atual: {:.1}N/m²  |  W/S escolhido p/ recomendação: {:.1}N/m²",
@@ -137,17 +135,15 @@ fn main() {
     println!("  P/W mínimo (RC≥1.5m/s): {:.3}W/N  |  P/W atual (pot. máx. contínua, SL): {:.3}W/N",
              cons.pw_min_climb_w_n, cons.pw_actual_w_n);
     println!("  Área de asa recomendada: {:.2}m²  |  Área atual: {:.2}m²",
-             cons.recommended_wing_area_m2, sized.wing.area_m2);
+             cons.recommended_wing_area_m2, res.wing.area_m2);
     let ws_ok = cons.ws_actual_n_m2 <= cons.ws_max_stall_n_m2;
     let pw_ok = cons.pw_actual_w_n >= cons.pw_min_climb_w_n;
     println!("  {} W/S atual ≤ W/S máximo (stall)", if ws_ok { "✓" } else { "✗" });
     println!("  {} P/W atual ≥ P/W mínimo (subida)\n", if pw_ok { "✓" } else { "✗" });
 
-    let state = &sized.state;
-
     // ── Agente 1: Aerodinâmica ────────────────────────────────────────────────
     println!("[ AGENTE 1 ] AerodynamicsAgent");
-    let wing = &sized.wing;
+    let wing = &res.wing;
     println!("  Envergadura: {:.2}m  |  Área: {:.1}m²  |  AR: {:.2}",
              wing.span_m, wing.area_m2, wing.aspect_ratio);
     println!("  Perfil: {}  |  e={:.3}  |  L/D={:.1}",
@@ -160,7 +156,7 @@ fn main() {
 
     // ── Agente 2: Propulsão ───────────────────────────────────────────────────
     println!("[ AGENTE 2 ] PropulsionAgent — {} + PSRU", engine.name);
-    let prop = &sized.prop;
+    let prop = &res.prop;
     println!("  {:.0} hp / {:.1} kW  |  {:.0} Nm  |  PSRU {:.3}:1",
              prop.power_hp, prop.power_kw, prop.max_torque_nm, prop.psru_ratio);
     println!("  Motor {:.0} rpm (cruzeiro)  |  Hélice {:.0} rpm  Ø{:.2}m  η={:.1}%  Tração: {:.0}N",
@@ -181,7 +177,7 @@ fn main() {
     // fonte do combustível de missão do laço de convergência de MTOW — ver
     // `agents::mission::MissionAgent`.
     println!("[ MISSÃO ] MissionAgent — táxi, subida integrada, cruzeiro Breguet, descida");
-    let mission = &sized.mission;
+    let mission = &res.mission;
     println!("  Táxi:     {:.2}kg", mission.fuel_taxi_kg);
     println!("  Subida:   {:.2}kg  |  {:.1}min  |  {:.1}km",
              mission.fuel_climb_kg, mission.climb_time_min, mission.climb_distance_km);
@@ -200,7 +196,7 @@ fn main() {
     // propulsão porque precisa de `prop.prop_rpm_cruise` (rpm de cruzeiro já
     // escolhido pela busca de BSFC do PropulsionAgent).
     println!("[ AGENTE 9 ] PropellerAgent — Mach de Ponta e Folga de Solo");
-    let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
+    let propeller = &res.propeller;
     println!("  Diâmetro: {:.2}m ({})  |  Pás: {}",
              propeller.diameter_m, propeller.source, propeller.blades);
     println!("  Mach de ponta: {:.3} estático / {:.3} cruzeiro (helicoidal)  |  Folga de solo: {:.3}m",
@@ -228,7 +224,7 @@ fn main() {
     // Dimensionada por coeficiente de volume (Task 4.1) — geometria pura,
     // consumida pelo NP dentro do AGENTE 3 abaixo.
     println!("[ EMPENAGEM ] EmpennageAgent — dimensionamento por coeficiente de volume");
-    let emp = &sized.emp;
+    let emp = &res.empennage;
     println!("  Horizontal: S={:.2}m²  b={:.2}m  c_raiz={:.2}m  c_ponta={:.2}m  AR={:.1}  V_h={:.2}",
              emp.s_horizontal_m2, emp.span_h_m, emp.chord_h_root_m, emp.chord_h_tip_m,
              emp.ar_h, emp.volume_h);
@@ -243,7 +239,7 @@ fn main() {
     // MTOW), calculado uma única vez a partir da asa e da empenagem já
     // dimensionadas, sem participar do laço de convergência de MTOW.
     println!("[ AGENTE 8 ] ControlSurfacesAgent — Aileron, Flap, Profundor e Leme");
-    let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
+    let cs = &res.control_surfaces;
     println!("  Aileron:   span/lado={:.3}m  área(2 lados)={:.3}m²  corda_média={:.3}m  [{:.3}–{:.3}]m por lado, da linha de centro",
              cs.aileron.span_m, cs.aileron.area_m2, cs.aileron.chord_mean_m,
              cs.aileron.start_m, cs.aileron.end_m);
@@ -259,7 +255,7 @@ fn main() {
 
     // ── Agente 3: Peso e Balanceamento ────────────────────────────────────────
     println!("[ AGENTE 3 ] WeightBalanceAgent — CG e Estabilidade");
-    let wb = &sized.wb;
+    let wb = &res.wb;
     println!("  Corda: raiz {:.3}m  ponta {:.3}m  MAC {:.3}m",
              wb.chord_root_m, wb.chord_tip_m, wb.mac_m);
     println!("  OEW: {:.1}kg  |  MTOW (cenário estrutural, tanque cheio): {:.1}kg  |  NP: {:.3}m do nariz",
@@ -304,11 +300,11 @@ fn main() {
     // ── Massas Estruturais Computadas (Task 5, oew-parametrico) ────────────────
     // As 7 massas ESTRUTURAIS que entraram no OEW acima (`agents::
     // mass_model`, Raymer 15.2 GA × fatores de composto Tab. 15.4) — mesmos
-    // valores de `sized.structural_masses`, com o braço de momento de cada
+    // valores de `res.structural_masses`, com o braço de momento de cada
     // uma (mesma `ArmConfig` usada por `weight_balance::oew_items`).
     println!("[ MASSAS ESTRUTURAIS ]  (Raymer 15.2 GA × composto)");
     let sm_arms = aeronave::agents::weight_balance::ArmConfig::from_config(&cfg);
-    let sm = &sized.structural_masses;
+    let sm = &res.structural_masses;
     let sm_items: [(&str, f64, f64); 7] = [
         ("asa",             sm.asa_kg,             sm_arms.wing_struct_m),
         ("fuselagem",       sm.fuselagem_kg,       sm_arms.fuselage_struct_m),
@@ -331,7 +327,7 @@ fn main() {
     // resultado a `wb` acima (`WeightBalanceOutput::apply_trim`) antes
     // deste bloco imprimir os detalhes.
     println!("[ TRIM ] TrimAuthorityAgent — Autoridade de Profundor (flare + rotação)");
-    let trim = &sized.trim;
+    let trim = &res.trim;
     println!("  Autoridade calculada por geometria DATCOM/Nelson: τ={:.5} (c_e/c={:.2})  |  \
               cl_h_max_down_calc={:.4}{}  |  cl_h_max_down (operacional)={:.4}",
              trim.tau_elevator, cfg.control_surfaces.elevator_chord_frac,
@@ -419,7 +415,7 @@ fn main() {
     // entradas que este bloco computava localmente antes desta task,
     // valores idênticos. `mass_light_kg` recalculado aqui só para o print
     // abaixo (mesma expressão usada dentro do orchestrator).
-    let vn = &sized.vn;
+    let vn = &res.vn;
     let mass_light_kg = wb.scenarios.iter()
         .map(|s| s.total_mass_kg)
         .fold(f64::INFINITY, f64::min);
@@ -436,8 +432,7 @@ fn main() {
 
     // ── Agente 4: Desempenho ──────────────────────────────────────────────────
     println!("[ AGENTE 4 ] PerformanceAgent");
-    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
-                                      &cfg.performance, cfg.stability.cl_ground_rotation);
+    let perf = &res.perf;
     println!("  V_cruzeiro: {:.1}km/h  |  V_stall: {:.1}km/h",
              perf.v_cruise_kmh, perf.v_stall_kmh);
     println!("  RC (SL/MTOW): {:.2}m/s ({:.0}fpm)  |  RC (2500m): {:.2}m/s",
@@ -466,10 +461,9 @@ fn main() {
     // Massa da asa COMPUTADA (ciclo 3, `agents::mass_model` via
     // `SizedAircraft::structural_masses`) — a MESMA massa que entrou no OEW
     // do `WeightBalanceAgent`, não mais um item fixo de `[[masses.items]]`.
-    let wing_mass_kg = sized.structural_masses.asa_kg;
     // Estrutura dimensiona para o pior caso de carga LEGAL (envelope), não
     // para o MTOW de missão — ver comentário do bloco [ SIZING ] acima.
-    let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
+    let struc = &res.struc;
     println!("  Fator de carga: {:.2}g projeto (n_design, manobra ou rajada)  |  {:.2}g último",
              struc.design_load_factor_g, struc.ultimate_load_factor_g);
     println!("  M_raiz (limite): {:.0}N·m  |  (último): {:.0}N·m",
@@ -495,17 +489,13 @@ fn main() {
     // carregamento REAL observado, não o limite físico de autoridade de
     // profundor. x_cg = x_mac_le + %MAC/100 × MAC — x_mac_le vem de
     // [wing] le_root_x_m (única fonte da posição do bordo de ataque).
-    let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
-    let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
     // Massas do trem COMPUTADAS (ciclo 3, `agents::mass_model`) — as MESMAS
     // que entraram no OEW; `LandingGearAgent` deriva a massa de uma perna
     // (atuador de retração) como metade da total.
-    let mass_main_total = sized.structural_masses.trem_principal_kg;
-    let mass_nose = sized.structural_masses.trem_nariz_kg;
     // Trem de pouso também dimensiona para o envelope estrutural (mesma
     // razão da StructuralAgent acima) — as cargas de pouso/solo devem
     // suportar o pior caso legal, não o MTOW de missão.
-    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
+    let gear = &res.gear;
     println!("  Tipo: {}",     gear.gear_type);
     println!("  Bitola: {:.2}m  |  Empeno: {:.2}m  |  Anti-tombamento (lateral): {:.1}°",
              gear.track_width_m, gear.wheelbase_m, gear.tipover_angle_deg);
@@ -525,9 +515,9 @@ fn main() {
              gear.actuator_power_w / 28.0, gear.total_weight_kg);
 
     // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25,
-    // CS 23.925) — só possível AGORA que `gear` existe (ver docstring de
-    // `PropellerSpec::prop_clearance_critical_m`).
-    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
+    // CS 23.925) — só possível quando `gear` existe (ver docstring de
+    // `PropellerSpec::prop_clearance_critical_m`); já preenchido dentro de
+    // `pipeline::executa` antes de `res` ser construído.
     println!("  Folga crítica CS 23.925 (batente + pneu murcho): {:.3}m  |  {}",
              propeller.prop_clearance_critical_m,
              if propeller.prop_clearance_critical_m > 0.0 { "✓" } else { "✗" });
@@ -539,8 +529,7 @@ fn main() {
     // acima (`wb`/`gear`) — ver `validation::robustness` para a dedução
     // completa. Checagem #19 de `ConstraintChecker::verify` transforma cada
     // flip numa violação nomeada.
-    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp, sm, wb, &gear,
-                                           &propeller, mission, &perf);
+    let robustness = &res.robustness;
     println!("[ ROBUSTEZ ] RobustnessAgent — Incerteza de Massa Estrutural (±σ)");
     // `mtow_masstotal_kg` (achado de review, ciclo 5, Minor 7): MTOW
     // re-convergido do 3º caso adversarial (massa-total, todas as 5 massas
@@ -596,71 +585,30 @@ fn main() {
 
     // ── Orçamento Elétrico (Task 5.2) ─────────────────────────────────────────
     println!("[ ELÉTRICO ] ElectricalAgent — Orçamento de Cargas");
-    let electrical = ElectricalAgent::run(&cfg);
+    let electrical = &res.electrical;
     println!("  Barramento: {:.0}V  |  Alternador: {:.0}W", electrical.bus_voltage_v, electrical.alternator_w);
     println!("  Carga contínua: {:.0}W  ({:.1}% de margem sobre o alternador)",
              electrical.continuous_load_w, electrical.margin_continuous_pct);
     println!("  Carga de pico (pior caso, todas simultâneas): {:.0}W\n", electrical.peak_load_w);
 
     // ── Validação Global ──────────────────────────────────────────────────────
+    // Ciclo 16: os 9 portões (antes um array `checks` recomputado aqui, com
+    // os mesmos gates já calculados por `ConstraintChecker::verify` dentro
+    // de `pipeline::executa`) agora vêm prontos em `res.portoes`, com id —
+    // ver `pipeline::executa` para os rótulos/gates e o histórico de cada
+    // um (achado de review ciclo 5 sobre RC/teto redundantes com
+    // `report.all_satisfied()`; Task 2 refino-ciclo2 sobre carga de
+    // nariz/tipback/tail-strike/margem de combustível migrados para dentro
+    // de `ConstraintChecker::verify`; Finding 3 da revisão final sobre
+    // rótulos formatados com `req.*` em vez de literais hardcoded; Task 5.1
+    // Finding 1 sobre `block_time_h` substituindo `prop.endurance_h`).
     println!("[ VALIDAÇÃO ] Todos os requisitos do projeto:");
     sep();
-    let report  = ConstraintChecker::verify(&VerifyInputs {
-        req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
-        propeller: &propeller, perf: &perf, mission, electrical: &electrical,
-        gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
-        robustness: &robustness, prop_cfg: &cfg.propeller,
-    });
-    // Achado de review (ciclo 5): estes dois pisos agora são consumidos de
-    // `validation::constraint_checker` (fonte única) em vez de literais
-    // hardcoded aqui — `ConstraintChecker::verify` também os checa
-    // nominalmente (#21/#22), então `rc_ok`/`ceil_ok` abaixo ficam
-    // redundantes com `report.all_satisfied()`, mas mantidos como gates
-    // explícitos no relatório de console (rótulo próprio, mais legível que
-    // procurar dentro de `report.violations`).
-    let rc_ok   = perf.rc_sl_ms   >= RC_SL_MIN_MS;
-    let ceil_ok = perf.service_ceiling_m >= SERVICE_CEILING_MIN_M;
-    let fl_ok   = struc.flutter_ok;
-    let tip_ok  = gear.tipover_angle_deg < 55.0;
-    // Carga de nariz (dois extremos), tipback e tail-strike (Task 2,
-    // refino-ciclo2) migraram para dentro de `ConstraintChecker::verify`
-    // (checks #15-#17) — substituem o antigo `nose_ok` ad hoc daqui, que só
-    // checava um único CG (o traseiro) contra os dois limites. Margem
-    // mínima de combustível (Task 3, refino-ciclo2, check #18) também vive
-    // só em `ConstraintChecker::verify` — não há gate ad hoc equivalente
-    // aqui.
+    let report = &res.report;
 
-    // Finding 3 da revisão final: literais de requisito hardcoded (280 km/h,
-    // "≥ 8 h") divergiam de `req.*` para qualquer missão diferente da
-    // missão de projeto padrão — o gate de V_cruzeiro chegava a marcar
-    // "requisito não satisfeito" para missões que pedem uma velocidade
-    // menor (ex.: uma missão de traslado a 200 km/h), mesmo quando a
-    // aeronave sustentava com folga o requisito REAL daquela missão.
-    // Rótulos agora formatados com `req.cruise_speed_min_kmh`/
-    // `req.endurance_min_h` — corretos para qualquer `mission.toml`.
-    let checks: [(bool, String); 9] = [
-        (report.all_satisfied(),
-            "Autonomia, consumo, alcance, V_stall, envelope de CG, hélice, gradiente CS 23.65, \
-             tipback, tail-strike, carga de nariz, margem de combustível".to_string()),
-        (perf.v_cruise_kmh >= req.cruise_speed_min_kmh,
-            format!("V_cruzeiro ≥ {:.0} km/h", req.cruise_speed_min_kmh)),
-        // Task 5.1 (achado da revisão, Finding 1): gate honesto sobre o
-        // tempo de bloco da missão por segmentos, não mais o endurance a
-        // tanque cheio/consumo constante (`prop.endurance_h`, agora
-        // informativo — ver seu doc-comment em `specs.rs`).
-        (mission.block_time_h >= req.endurance_min_h,
-            format!("Autonomia da missão (block_time_h) ≥ {:.1} h", req.endurance_min_h)),
-        (rc_ok,                               format!("RC ≥ {RC_SL_MIN_MS:.1} m/s ao nível do mar")),
-        (ceil_ok,                             format!("Teto de serviço ≥ {SERVICE_CEILING_MIN_M:.0} m")),
-        (fl_ok,                               "V_flutter ≥ 1.20 × VD (CS-23)".to_string()),
-        (tip_ok,                              "Anti-tombamento (lateral) < 55°".to_string()),
-        (all_stable,                          "Estabilidade longitudinal (todos cenários, SM>3%, referência)".to_string()),
-        (all_inside_envelope,                 "Envelope de CG admissível (todos cenários, Task 4.4)".to_string()),
-    ];
-
-    let all_ok = checks.iter().all(|(ok, _)| *ok);
-    for (ok, label) in &checks {
-        println!("  {} {}", if *ok { "✓" } else { "✗" }, label);
+    let all_ok = res.portoes.iter().all(|p| p.ok);
+    for p in &res.portoes {
+        println!("  {} {}", if p.ok { "✓" } else { "✗" }, p.rotulo);
     }
 
     println!();
@@ -717,20 +665,20 @@ fn main() {
     };
 
     // ── Dimensionamento/convergência (Task 6.1) ─────────────────────────────────
-    // `sized.iterations`/`sized.constraints` já existiam em `SizedAircraft`
+    // `res.iterations`/`res.constraints` já existiam em `SizedAircraft`
     // desde as Tasks 3.1/3.2 mas não eram serializados no relatório final —
     // ver `specs::SizingReport`.
     let fuel_margin_l = cfg.fuel_system.capacity_l - mission.fuel_total_l;
     let sizing = SizingReport {
         mtow_mission_kg:  design_mtow_kg,
         mtow_envelope_kg: envelope_mtow_kg,
-        iterations:       sized.iterations.clone(),
+        iterations:       res.iterations.clone(),
         converged:        true,
         fuel_required_l:  mission.fuel_total_l,
         fuel_capacity_l:  cfg.fuel_system.capacity_l,
         fuel_margin_l,
         fuel_margin_pct:  fuel_margin_l / cfg.fuel_system.capacity_l * 100.0,
-        constraints:      sized.constraints.clone(),
+        constraints:      res.constraints.clone(),
     };
 
     // ── Mapa de fidelidade por bloco (Task 6.1) ─────────────────────────────────
@@ -1052,18 +1000,18 @@ fn main() {
         control_surfaces: Some(cs.clone()),
         weight:           Some(wb.spec.clone()),
         trim:             Some(trim.clone()),
-        performance:      Some(perf),
+        performance:      Some(perf.clone()),
         vn_diagram:       Some(vn.clone()),
-        structure:        Some(struc),
-        landing_gear:     Some(gear),
-        propeller:        Some(propeller),
+        structure:        Some(struc.clone()),
+        landing_gear:     Some(gear.clone()),
+        propeller:        Some(propeller.clone()),
         mission:          Some(mission.clone()),
         electrical:       Some(electrical.clone()),
         sizing:           Some(sizing),
         robustness:       Some(robustness.clone()),
         fidelity,
-        violations:       report.violations,
-        warnings:         report.warnings,
+        violations:       report.violations.clone(),
+        warnings:         report.warnings.clone(),
     };
 
     let json = serde_json::to_string_pretty(&report_final)

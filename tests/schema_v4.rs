@@ -12,22 +12,11 @@
 
 use std::path::PathBuf;
 
-use aeronave::agents::control_surfaces::ControlSurfacesAgent;
-use aeronave::agents::electrical::ElectricalAgent;
-use aeronave::agents::landing_gear::LandingGearAgent;
-use aeronave::agents::performance::PerformanceAgent;
-use aeronave::agents::propeller::PropellerAgent;
-use aeronave::agents::structural::StructuralAgent;
-use aeronave::agents::trim_authority::TrimAuthorityAgent;
-use aeronave::agents::vn_diagram::VnDiagramAgent;
 use aeronave::agents::weight_balance::mac_spanwise_pos;
 use aeronave::models::config::{load_aircraft, load_engine, load_mission};
 use aeronave::models::specs::{
     AircraftReport, GeometrySpec, SizingReport, SCHEMA_VERSION,
 };
-use aeronave::orchestrator::size_aircraft;
-use aeronave::validation::constraint_checker::{ConstraintChecker, VerifyInputs};
-use aeronave::validation::robustness::RobustnessAgent;
 use std::collections::BTreeMap;
 
 fn config_path(rel: &str) -> PathBuf {
@@ -36,101 +25,59 @@ fn config_path(rel: &str) -> PathBuf {
 
 /// Monta o `AircraftReport` completo a partir da aeronave-base real
 /// (`config/aircraft/baseline_4seat.toml` + Toyota 1GD-FTV + missão
-/// default) — mesma sequência de agentes de `main.rs`.
+/// default).
+///
+/// Ciclo 16 (Task 1, dividendo — spec §5.3): antes desta task, esta função
+/// REIMPLEMENTAVA o pipeline inteiro (uma cópia da sequência de agentes de
+/// `main.rs`) e decidia o veredito global só por `report.all_satisfied()`
+/// — o portão `#0` de `main.rs`, sem os outros 8 (V_cruzeiro, autonomia de
+/// bloco, RC, teto de serviço, flutter, anti-tombamento, estabilidade
+/// longitudinal, envelope de CG). Eram DUAS definições de "veredito
+/// global" DIVERGENTES coincidindo por acaso no baseline (nenhum dos 8
+/// portões extras jamais reprovava sozinho enquanto `#0` passava) — a
+/// doença do #13 (`docs/backlog.md`) em outra roupa: o teste que deveria
+/// vigiar o pipeline mantinha uma cópia dele que podia divergir em
+/// silêncio. Agora chama `pipeline::executa` — a MESMA função que
+/// `main.rs` chama — e usa a MESMA regra de veredito (AND dos 9
+/// `res.portoes`, não só `report.all_satisfied()`).
 fn build_baseline_report() -> AircraftReport {
     let cfg = load_aircraft(&config_path("config/aircraft/baseline_4seat.toml")).unwrap();
     let engine = load_engine(&config_path("config/engines/toyota_1gd_ftv.toml")).unwrap();
     let req = load_mission(&config_path("config/missions/default.toml")).unwrap();
 
-    let sized = size_aircraft(&cfg, &engine, &req)
+    let res = aeronave::pipeline::executa(&cfg, &engine, &req)
         .expect("aeronave-base + Toyota deveria convergir com o tanque de 260 L");
 
-    let design_mtow_kg = sized.state.mtow_kg;
-    let envelope_mtow_kg = sized.wb.spec.mtow_kg;
-    let state = &sized.state;
-    let wing = &sized.wing;
-    let prop = &sized.prop;
-    let mission = &sized.mission;
-    let wb = &sized.wb;
-    let emp = &sized.emp;
-    // task trim-authority: já aplicado a `sized.wb` por `size_aircraft`
-    // (`WeightBalanceOutput::apply_trim`) — recalcula aqui só para popular
-    // o bloco `trim` do relatório, mesma sequência de `main.rs`.
-    // Ciclo 10 (task 2): `state`/`engine`/`req` + `prop.thrust_cruise_n` —
-    // momento da linha de tração na rotação e no trim de cruzeiro.
-    let trim = TrimAuthorityAgent::run(&cfg, wing, emp, wb, state, &engine, &req,
-                                       prop.thrust_cruise_n);
+    let design_mtow_kg = res.state.mtow_kg;
+    let envelope_mtow_kg = res.wb.spec.mtow_kg;
 
-    let mut propeller = PropellerAgent::run(&cfg, &engine, prop, &req);
-    let cs = ControlSurfacesAgent::run(wing, emp, &cfg);
-
-    let mass_light_kg = wb.scenarios.iter()
-        .map(|s| s.total_mass_kg)
-        .fold(f64::INFINITY, f64::min);
-    let vn = VnDiagramAgent::run(
-        wing, envelope_mtow_kg, mass_light_kg, &req, &cfg.structure.design_category,
-    );
-
-    let perf = PerformanceAgent::run(state, wing, prop, design_mtow_kg, &engine, &req,
-                                      &cfg.performance, cfg.stability.cl_ground_rotation);
-
-    // Ciclo 3 (oew-parametrico): massas estruturais COMPUTADAS
-    // (`agents::mass_model` via `SizedAircraft::structural_masses`) —
-    // mesma fiação de `main.rs`, não mais itens fixos de
-    // `[[masses.items]]`.
-    let wing_mass_kg = sized.structural_masses.asa_kg;
-    let struc = StructuralAgent::run(wing, envelope_mtow_kg, wing_mass_kg, &req, &cfg.structure, vn.n_design);
-
-    let x_cg_fwd = cfg.wing.le_root_x_m + wb.spec.cg_mac_fwd_pct / 100.0 * wb.mac_m;
-    let x_cg_aft = cfg.wing.le_root_x_m + wb.spec.cg_mac_aft_pct / 100.0 * wb.mac_m;
-    let mass_main_total = sized.structural_masses.trem_principal_kg;
-    let mass_nose = sized.structural_masses.trem_nariz_kg;
-    let gear = LandingGearAgent::run(envelope_mtow_kg, x_cg_fwd, x_cg_aft, &cfg.gear, mass_main_total, mass_nose);
-
-    // Ciclo 8 (task 2): preenche `prop_clearance_critical_m` (checagem #25)
-    // no MESMO caminho de `main.rs` — depois que `gear` existe.
-    propeller.fill_critical_clearance(&gear, &cfg.gear, &cfg.propeller);
-
-    let electrical = ElectricalAgent::run(&cfg);
-
-    // Ciclo 4 (task robustez, wiring): `RobustnessSpec` na MESMA sequência
-    // de `main.rs` — logo após o `LandingGearAgent`, contra os limites
-    // NOMINAIS já calculados (`wb`/`gear`).
-    let robustness = RobustnessAgent::run(&cfg, &engine, &req, state, wing, emp,
-                                           &sized.structural_masses, wb, &gear, &propeller,
-                                           mission, &perf);
-
-    let report = ConstraintChecker::verify(&VerifyInputs {
-        req: &req, wing, prop, mtow_kg: design_mtow_kg, engine: &engine, wb,
-        propeller: &propeller, perf: &perf, mission, electrical: &electrical,
-        gear: &gear, gear_cfg: &cfg.gear, fuel_capacity_l: cfg.fuel_system.capacity_l,
-        robustness: &robustness, prop_cfg: &cfg.propeller,
-    });
-    let all_ok = report.all_satisfied();
+    // Veredito global: AND dos 9 portões (mesma regra de `main.rs`), não
+    // apenas `res.report.all_satisfied()` — ver doc-comment desta função.
+    let all_ok = res.portoes.iter().all(|p| p.ok);
 
     let geometry = GeometrySpec {
         wing_le_root_x_m: cfg.wing.le_root_x_m,
-        chord_root_m: wb.chord_root_m,
-        chord_tip_m: wb.chord_tip_m,
-        mac_m: wb.mac_m,
-        mac_le_x_m: wb.mac_le_x_m,
-        y_mac_m: mac_spanwise_pos(wing.span_m, wing.taper_ratio),
+        chord_root_m: res.wb.chord_root_m,
+        chord_tip_m: res.wb.chord_tip_m,
+        mac_m: res.wb.mac_m,
+        mac_le_x_m: res.wb.mac_le_x_m,
+        y_mac_m: mac_spanwise_pos(res.wing.span_m, res.wing.taper_ratio),
         fuselage_length_m: cfg.fuselage.length_m,
         cabin_width_m: cfg.fuselage.cabin_width_m,
         cabin_height_m: cfg.fuselage.cabin_height_m,
     };
 
-    let fuel_margin_l = cfg.fuel_system.capacity_l - mission.fuel_total_l;
+    let fuel_margin_l = cfg.fuel_system.capacity_l - res.mission.fuel_total_l;
     let sizing = SizingReport {
         mtow_mission_kg: design_mtow_kg,
         mtow_envelope_kg: envelope_mtow_kg,
-        iterations: sized.iterations.clone(),
+        iterations: res.iterations.clone(),
         converged: true,
-        fuel_required_l: mission.fuel_total_l,
+        fuel_required_l: res.mission.fuel_total_l,
         fuel_capacity_l: cfg.fuel_system.capacity_l,
         fuel_margin_l,
         fuel_margin_pct: fuel_margin_l / cfg.fuel_system.capacity_l * 100.0,
-        constraints: sized.constraints.clone(),
+        constraints: res.constraints.clone(),
     };
 
     let mut fidelity: BTreeMap<String, String> = BTreeMap::new();
@@ -148,25 +95,25 @@ fn build_baseline_report() -> AircraftReport {
         schema_version: SCHEMA_VERSION.to_string(),
         revision: SCHEMA_VERSION.to_string(),
         validation_status: if all_ok { "PASS".to_string() } else { "FAIL".to_string() },
-        wing: wing.clone(),
-        propulsion: prop.clone(),
+        wing: res.wing.clone(),
+        propulsion: res.prop.clone(),
         geometry: Some(geometry),
-        empennage: Some(emp.clone()),
-        control_surfaces: Some(cs.clone()),
-        weight: Some(wb.spec.clone()),
-        trim: Some(trim),
-        performance: Some(perf),
-        vn_diagram: Some(vn.clone()),
-        structure: Some(struc),
-        landing_gear: Some(gear),
-        propeller: Some(propeller),
-        mission: Some(mission.clone()),
-        electrical: Some(electrical.clone()),
+        empennage: Some(res.empennage.clone()),
+        control_surfaces: Some(res.control_surfaces.clone()),
+        weight: Some(res.wb.spec.clone()),
+        trim: Some(res.trim.clone()),
+        performance: Some(res.perf.clone()),
+        vn_diagram: Some(res.vn.clone()),
+        structure: Some(res.struc.clone()),
+        landing_gear: Some(res.gear.clone()),
+        propeller: Some(res.propeller.clone()),
+        mission: Some(res.mission.clone()),
+        electrical: Some(res.electrical.clone()),
         sizing: Some(sizing),
-        robustness: Some(robustness),
+        robustness: Some(res.robustness.clone()),
         fidelity,
-        violations: report.violations,
-        warnings: report.warnings,
+        violations: res.report.violations.clone(),
+        warnings: res.report.warnings.clone(),
     }
 }
 
