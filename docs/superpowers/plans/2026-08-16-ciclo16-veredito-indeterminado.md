@@ -462,15 +462,33 @@ Dois literais são **contrato entre tasks** e ficam fixados aqui:
   Passos 5-6 e a Task 5 Passo 3 dependem dele.
 - Checks em laço sobre cenários: `format!("envelope_cg::{}", cenario.nome)`.
 
-**Lacuna declarada da verificação estática.** `envelope_cg::{}` é o único id
-**não literal**, então a varredura de fonte não consegue provar a unicidade
-dele — ela depende de `cenario.nome` nunca se repetir. A revisão de plano
-conferiu: os nomes de cenário são `&'static str` fixos em
-`src/agents/weight_balance.rs:553-554`, não vêm de TOML de usuário. É lista
-pequena, em código, revisada como qualquer outro literal — não é caminho de
-colisão realista, mas **é** o ponto onde as três camadas param de provar e
-passam a confiar. Fica escrito para que quem um dia mover os nomes de cenário
-para config saiba o que quebra.
+> **ERRATUM (Task 2, achado do implementador).** O parágrafo abaixo dizia que
+> `envelope_cg::{}` era **o único** id não literal. **São dois.** O check `#19`
+> (laço sobre `robustness.flips`) é estruturalmente idêntico ao `#9`: um único
+> sítio de `push`, 0..N violações por corrida. Um id fixo `"robustez"` colidiria
+> sempre que dois flips ocorressem na mesma corrida — cenário real, não
+> hipotético, com registro histórico neste arquivo. A Task 2 usou
+> `format!("robustez::{}::{}", flip.check, flip.caso)`, mesma lógica.
+>
+> Eu escrevi "o único" tendo examinado o `#9` e **não** o `#19`. Sétima
+> ocorrência do padrão do backlog #29: uma afirmação de escopo publicada ao
+> lado de uma regra correta, derivada por leitura parcial em vez de pela regra.
+> Desta vez quem pegou foi o implementador, olhando o código que eu não olhei.
+
+**Lacuna declarada da verificação estática.** `envelope_cg::{}` e
+`robustez::{}::{}` são os **dois** ids não literais, então a varredura de
+fonte não consegue provar a unicidade
+deles — ela depende de `cenario.nome`, e de `(flip.check, flip.caso)`, nunca se
+repetirem. A revisão de plano conferiu os nomes de cenário: são `&'static str`
+fixos em `src/agents/weight_balance.rs:553-554`, não vêm de TOML de usuário. É
+lista pequena, em código, revisada como qualquer outro literal — não é caminho
+de colisão realista, mas **é** o ponto onde as três camadas param de provar e
+passam a confiar.
+
+Fica escrito para quem um dia mover os nomes de cenário para config, e para
+quem for verificar se `(check, caso)` é de fato único por corrida dentro de
+`robustness.flips` — essa segunda garantia **não foi verificada por ninguém
+neste ciclo** e é item para a revisão da Task 2.
 
 - [ ] **Passo 5: consertar os leitores**
 

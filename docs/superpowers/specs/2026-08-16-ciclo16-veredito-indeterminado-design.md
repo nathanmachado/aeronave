@@ -815,6 +815,48 @@ condições do `#10` e as duas do `#17` — julgamento de nomeação, não
 transcrição. O teste de varredura de fonte prova a unicidade, mas não escolhe
 os nomes.
 
+### Task 2 — identidade de check
+
+Fechada pelo operacional de **julgamento** (reclassificada, ver acima). 558
+testes (554 + 4), invariante provado, gate APROVADO, `aircraft_spec.json`
+byte-idêntico. 25 ids atribuídos, um por sítio de `push`.
+
+**SÉTIMA ocorrência do #29, e outra vez contra mim.** O plano declarava, como
+lacuna da verificação estática, que `envelope_cg::{}` era **o único** id não
+literal. **São dois.** O check `#19` (laço sobre `robustness.flips`) é
+estruturalmente idêntico ao `#9` — um sítio de `push`, 0..N violações por
+corrida — e um id fixo colidiria sempre que dois flips ocorressem juntos, o que
+tem registro histórico no próprio arquivo. Eu examinei o `#9` e escrevi "o
+único" sem examinar o `#19`.
+
+O implementador pegou, olhando o código que eu não olhei, e resolveu com
+`format!("robustez::{}::{}", flip.check, flip.caso)` — mesma lógica.
+
+O padrão do #29 é teimoso porque a afirmação de escopo ("é o único") parece
+parte da regra e não é: a regra estava certa, o **censo** é que foi feito por
+leitura parcial. Vale registrar que as duas ocorrências deste ciclo (§2.2 e
+esta) foram pegas por quem executou algo, não por quem leu.
+
+**Consequência ainda em aberto:** a unicidade de `(flip.check, flip.caso)`
+dentro de uma corrida **não foi verificada por ninguém**. Vai para a revisão da
+Task 2 como item explícito. Uma lacuna herdada de um erratum não é menos
+lacuna.
+
+**Desvio de localização declarado.** O teste de varredura de fonte não coube em
+`constraint_checker.rs::mod tests` — precisa de `mascara_arquivo`, que vive no
+crate de testes de integração e não é visível de um teste unitário de lib. A
+máscara foi movida para `tests/common/mod.rs` (convenção do Cargo) e
+`tests/pins_vs_json.rs` passou a importá-la. Reuso real, não duplicação: os
+**três autotestes da máscara** (aspa escapada, máscara presa reprovando alto,
+conteúdo de string e comentário) continuam em `pins_vs_json.rs`, exercitando
+agora a função importada, e os 34 testes daquele arquivo seguem verdes — mesma
+contagem do ciclo 15.
+
+Risco novo a declarar: se alguém remover `mod common;` de `pins_vs_json.rs`, os
+autotestes da máscara vão junto e `identidade_de_checks.rs` passa a usar uma
+máscara não testada. É o item #28 numa roupa nova — dois consumidores, um só
+com testes.
+
 ---
 
 ## 12. Backlog a abrir
