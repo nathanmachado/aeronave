@@ -425,11 +425,52 @@ byte-idênticos.** Provado por script no plano, não por inspeção.
 precedente de re-executar `size_aircraft` com config perturbada,
 `robustness.rs:428`/`:502`).
 
+> **ERRATUM (revisão da Task 4) — CONTRADIÇÃO INTERNA DESTA SPEC.** O
+> algoritmo abaixo dizia "conjunto de ids **violados**", e a implementação
+> leu isso, corretamente, como `report.violations`. Mas a §5.2 diz que os 9
+> portões ganham id **exatamente para entrar na varredura** ("sem id ficariam
+> fora da varredura"). As duas seções se contradizem, e a Task 4 seguiu esta.
+>
+> Resultado medido pela revisão: a varredura ignorava os 9 portões, e
+> **`portao_v_cruzeiro`, `portao_flutter`, `portao_antitombamento` e
+> `portao_estabilidade_long` não têm nenhuma `Violacao` correspondente** — são
+> quatro gates de aeronavegabilidade inteiramente invisíveis ao mecanismo que
+> este ciclo existe para construir. No baseline de hoje nenhum deles vira
+> dentro da banda, então os números não mudam; isso é propriedade do baseline,
+> não do desenho.
+>
+> A forma como foi achado merece registro: a revisão tentou aplicar a mutação
+> "faça a varredura ignorar os portões" e **não conseguiu, porque já era o
+> comportamento**. Uma mutação inaplicável porque o defeito já ocupa o lugar
+> dela é o achado mais limpo possível.
+>
+> **A definição correta do conjunto de um ponto é a UNIÃO:**
+>
+> ```
+> ids(ponto) = { v.id  para v em report.violations }
+>            ∪ { p.id  para p em portoes, se !p.ok }
+> ```
+>
+> **Menos os portões que são função determinística do conjunto de violações** —
+> esses não são checks independentes, são agregados, e publicar um agregado ao
+> lado dos seus próprios componentes é a doença do #21 na direção contrária.
+> Hoje **exatamente um** portão satisfaz isso: `portao_restricoes`, que é
+> literalmente `violations.is_empty()`. A exclusão é por REGRA provável, não
+> por lista escolhida a dedo.
+>
+> Alguns portões duplicam uma `Violacao` em SIGNIFICADO (`portao_rc_sl` e o id
+> `rc_sl`, `portao_teto_servico` e `teto_servico`, `portao_envelope_cg_todos` e
+> os `envelope_cg::*`). Eles **permanecem**, e a duplicação fica visível na
+> saída. Removê-los exigiria uma lista de equivalências mantida à mão — e o
+> histórico deste projeto (backlog #29, sete ocorrências) diz que uma lista
+> dessas envelhece errado e em silêncio. Duplicação visível é melhor que
+> supressão frágil.
+
 ```
 1. banda efetiva ← §5.1
-2. executa(cfg com fom_static = lo)          → conjunto de ids violados L
-3. executa(cfg com fom_static = hi)          → conjunto de ids violados H
-4. executa(cfg com FoM ≡ 1,0)                → conjunto de ids violados T
+2. executa(cfg com fom_static = lo)          → ids(lo) = L
+3. executa(cfg com fom_static = hi)          → ids(hi) = H
+4. executa(cfg com FoM ≡ 1,0)                → ids(teto) = T
    (as DUAS âncoras a 1,0 — teto de quantidade de movimento)
 5. para cada id em L ∪ N ∪ H ∪ T:
      DETERMINADO   se a pertinência é IDÊNTICA nos três pontos {L, N, H}
@@ -494,6 +535,26 @@ backlog, não corrigido às escondidas.
 
 Um check indeterminado **continua na lista de violações**. Não sai, não vira
 warning, não é rebaixado. Só o texto muda:
+
+> **ERRATUM (revisão da Task 4) — o caso que esta seção não fechava.** O texto
+> abaixo pressupõe que o check indeterminado JÁ ESTÁ na lista de violações, e
+> só precisa ter o texto reescrito. Isso vale quando ele viola no nominal. Mas
+> a regra da §5.4 admite `(lo=não, nominal=não, hi=sim)` — um check
+> INDETERMINADO **ausente** da lista nominal. Não ocorre no baseline; a regra
+> não pode depender disso (é o mesmo argumento da não monotonicidade).
+>
+> Regra completa, então:
+> - indeterminado **presente** no nominal → reescreve o texto, prefixo
+>   `INDETERMINADO — `; a contagem de violações não muda;
+> - indeterminado **ausente** do nominal → **INSERE** uma violação nova com o
+>   mesmo prefixo, dizendo que o check passa no nominal mas vira dentro da
+>   banda; a contagem SOBE.
+>
+> A segunda metade é a que importa para a honestidade do artefato: um check que
+> passa hoje e reprova dentro da banda declarada é precisamente o que o usuário
+> precisa ver, e seria o único caso em que o silêncio favoreceria o projeto.
+> Um portão de aeronavegabilidade que "passa" por 0,4% e vira com uma hipótese
+> não calibrada não é um portão que passa.
 
 ```
 INDETERMINADO — Gradiente de subida 7.9% vs mínimo de 8.3% exigido pela
