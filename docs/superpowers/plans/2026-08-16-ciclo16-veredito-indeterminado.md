@@ -658,8 +658,38 @@ fom_static_tol_pct = 10.0
 Fixtures: `config.rs:1699` e `aircraft_config.rs:872` ganham o campo. Escolha
 para as fixtures um valor que **não** dispare truncagem (a fixture tem
 `fom_static = 0.72`, `fom_design = 0.80`; `10.0` dá topo 0,792 < 0,80, sem
-truncagem) — assim a fixture exercita o caminho não truncado e o baseline
-exercita o truncado.
+truncagem) — assim a fixture **pode** exercitar o caminho não truncado.
+
+> **ERRATUM (revisão da Task 3).** A frase acima terminava em "assim a fixture
+> exercita o caminho não truncado e o baseline exercita o truncado" — e o
+> passo parava aí. **Escolher a fixture certa não exercita nada; testar
+> exercita.** Nenhum teste chamava `banda()` sobre a fixture, e a revisão
+> provou por mutação que forçar `truncada = true` com motivo falso passava nos
+> 562 testes. Uma intenção de cobertura publicada como se fosse cobertura é o
+> padrão do #29 numa terceira forma.
+>
+> Por isso o teste abaixo é **obrigatório**, não opcional:
+
+```rust
+/// O caminho NÃO TRUNCADO da banda. A spec §5.1 promete que a truncagem é
+/// publicada COM a razão e nunca em silêncio; uma banda que AFIRMA ter
+/// encolhido sem ter encolhido é o mesmo defeito espelhado, e sem este teste
+/// ele passa despercebido.
+#[test]
+fn banda_da_fixture_nao_e_truncada() {
+    let cfg = /* a fixture desta seção */;
+    let b = cfg.propeller.banda();
+    assert!(!b.truncada);
+    assert!(b.motivo_truncagem.is_none());
+    assert_eq!(b.hi, b.hi_declarado);   // bit-exato: sem truncagem, é o mesmo valor
+    assert_eq!(b.lo, b.lo_declarado);
+}
+```
+
+E o teste tem que ser **visto reprovando**: aplique a mutação (forçar
+`truncada: true` e `motivo_truncagem: Some(…)` com `motivos` vazio), confirme
+que ele reprova, reverta. Um teste novo que ninguém viu reprovar não prova
+nada.
 
 - [ ] **Passo 6: invariante** — `bash <scratchpad>/prova16.sh`. A banda ainda não é publicada,
   então o JSON e o stdout continuam byte-idênticos.

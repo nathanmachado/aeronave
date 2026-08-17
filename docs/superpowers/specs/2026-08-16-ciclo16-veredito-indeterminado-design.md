@@ -890,6 +890,59 @@ Mutações que a revisão rodou, todas revertidas:
 A primeira linha é a que importa: o scanner de unicidade **reprova quando
 enganado**, e não só quando obedecido.
 
+### Task 3 — a banda em config
+
+Executada pelo operacional **mecânico**, e desta vez o roteamento acertou: o
+plano entregava o código literal e o conteúdo de julgamento era baixo. 562
+testes, invariante provado, gate APROVADO, banda do baseline saindo
+`[0,675 ; 0,81597699924588796]`, truncada em `fom_design` com a razão escrita.
+
+Entrou junto a validação que faltava desde o ciclo 13: **`fom_design ≥
+fom_static`**. Até aqui, uma curva de tração DECRESCENTE em J — uma hélice
+entregando fração menor da tração ideal quanto mais rápido voasse — passava
+calada pelo carregador.
+
+**REPROVADA na revisão. O bloqueador é meu, e é o #29 numa terceira forma.**
+
+O plano escolheu deliberadamente `fom_static_tol_pct = 10.0` para a fixture,
+com a justificativa escrita de que "assim a fixture exercita o caminho não
+truncado e o baseline exercita o truncado". Mas **nenhum teste chama `banda()`
+sobre a fixture** — existe uma única chamada a `.banda()` no repositório
+inteiro, e é sobre o baseline.
+
+A revisão provou por mutação: forçar `truncada = true` com
+`motivo_truncagem = Some("BOGUS")` **mesmo com `motivos` vazio** passa nos 562
+testes. Nada impedia a banda de afirmar uma truncagem que não houve.
+
+As duas formas anteriores do #29 neste ciclo foram censos derivados de leitura
+parcial (§2.2, e o "único id não literal"). Esta é diferente e pior: publiquei
+uma **intenção de cobertura como se fosse cobertura**. Escolher a fixture certa
+não testa nada — testar testa. E o buraco caiu exatamente nos dois campos que a
+Task 5 vai publicar para explicar ao usuário por que a banda encolheu.
+
+A spec §5.1 promete que a truncagem é publicada com a razão e nunca em
+silêncio. Uma banda que **afirma** ter encolhido sem ter encolhido é o mesmo
+defeito espelhado, e estava desprotegida.
+
+**Segundo achado, também meu.** O comentário que prova a inatingibilidade do
+ramo `hi > 1.0` cita **duas** validações; a prova precisa de **uma**. Se
+`fom_design ≤ 1,0`, então ou o primeiro `if` truncou e `hi = fom_design ≤ 1,0`,
+ou não truncou — o que significa `fom_design ≥ hi_declarado`, logo
+`hi = hi_declarado ≤ fom_design ≤ 1,0`. A guarda de monotonicidade não entra em
+passo nenhum. O perigo de deixar assim: quem um dia mexer na monotonicidade
+concluirá, lendo o comentário, que a prova caiu — quando ela nunca dependeu
+dela.
+
+**Registrado sem conserto** (achado 3 da revisão): cada uma das duas validações
+novas é pega por **exatamente um** teste, sem rede secundária. Se o teste
+dedicado for enfraquecido num ciclo futuro, nada mais denuncia.
+
+**Confirmado pela revisão, contra o meu briefing:** o inventário de fixtures
+estava completo (ela refez a busca em vez de confiar em mim), `NaN`/`inf`/`-inf`
+na tolerância são rejeitados só pela semântica IEEE754 de `!(v > 0 && v < 100)`,
+e `hi_declarado` do baseline é de fato `0.8250000000000001` — sem nenhum
+literal `0.825` escondido em teste ou comentário.
+
 ---
 
 ## 12. Backlog a abrir
