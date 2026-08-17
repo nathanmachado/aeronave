@@ -165,3 +165,119 @@ fn checks_determinados_nao_tem_breakeven_e_vereditos_por_ponto_sao_consistentes(
         }
     }
 }
+
+// ── CONSERTO 1 (revisão da Task 4) — os portões entram na varredura ────
+//
+// A §5.2 deu id aos 9 portões EXATAMENTE para isto ("sem id ficariam fora
+// da varredura"); a §5.4 escrevia o algoritmo só em termos de
+// `report.violations`, contradizendo a §5.2. `portao_v_cruzeiro`,
+// `portao_flutter`, `portao_antitombamento` e `portao_estabilidade_long`
+// não têm NENHUMA `Violacao` correspondente — sem a união eram
+// inteiramente invisíveis à varredura.
+
+/// Suporte do `PORTOES_AGREGADOS` de `src/validation/incerteza.rs`:
+/// `portao_restricoes.ok` é literalmente `report.all_satisfied()` ==
+/// `violations.is_empty()`. PROVADO aqui, não assumido — se um dia deixar
+/// de valer, este teste reprova primeiro.
+#[test]
+fn portao_restricoes_e_funcao_deterministica_das_violacoes() {
+    let (cfg, engine, req) = carrega_baseline();
+    let res = aeronave::pipeline::executa(&cfg, &engine, &req)
+        .expect("baseline tem que convergir");
+    let p = res.portoes.iter().find(|p| p.id == "portao_restricoes")
+        .expect("portao_restricoes tem que existir entre os 9 portões");
+    assert_eq!(p.ok, res.report.violations.is_empty(),
+        "portao_restricoes.ok tem que ser EXATAMENTE violations.is_empty() — se isto \
+         falhar, a exclusão de PORTOES_AGREGADOS deixou de ser válida e precisa ser \
+         revista, não só re-testada");
+}
+
+/// `portao_envelope_cg_todos` reprova de VERDADE no baseline (duplica
+/// `envelope_cg::Solo (piloto)` em SIGNIFICADO, mas tem id DIFERENTE — a
+/// duplicação fica visível por regra, não é suprimida) e TEM que aparecer
+/// na varredura. `portao_restricoes` NUNCA aparece — é o agregado excluído.
+///
+/// Verificado por mutação: revertendo `ids_do_ponto` para só
+/// `report.violations` (o comportamento de antes deste conserto), este
+/// teste reprova — ver relatório da task.
+#[test]
+fn portoes_entram_na_varredura_do_baseline() {
+    let (cfg, engine, req) = carrega_baseline();
+    let nominal = aeronave::pipeline::executa(&cfg, &engine, &req)
+        .expect("baseline tem que convergir");
+    let inc = analisa(&cfg, &engine, &req, &nominal);
+
+    let ids: Vec<&str> = inc.checks.iter().map(|c| c.id.as_str()).collect();
+
+    let portao_cg = inc.checks.iter().find(|c| c.id == "portao_envelope_cg_todos")
+        .unwrap_or_else(|| panic!(
+            "portao_envelope_cg_todos reprova no baseline (duplica envelope_cg::* em \
+             significado) e TEM que estar na varredura — se isto falhar, os portões \
+             pararam de entrar no conjunto de ids. ids obtidos: {ids:?}"));
+    assert_eq!(portao_cg.veredito, Veredito::Falha);
+    assert_eq!(portao_cg.veredito_lo, Veredito::Falha);
+    assert_eq!(portao_cg.veredito_nominal, Veredito::Falha);
+    assert_eq!(portao_cg.veredito_hi, Veredito::Falha);
+
+    assert!(!ids.contains(&"portao_restricoes"),
+        "portao_restricoes é agregado — não pode aparecer como check independente. \
+         ids obtidos: {ids:?}");
+
+    // A duplicação em SIGNIFICADO fica visível: o id da violação de origem
+    // e o id do portão que a duplica aparecem os DOIS.
+    assert!(ids.contains(&"envelope_cg::Solo (piloto)"));
+}
+
+// ── CONSERTO 3 (revisão da Task 4) — a banda EFETIVA está protegida ────
+//
+// ACHADO reportado ao coordenador: no baseline de hoje, os CONJUNTOS de id
+// violados em `banda.hi` (0,815976999245888) e em `banda.hi_declarado`
+// (0,8250000000000001) COINCIDEM — {"decolagem_grama",
+// "envelope_cg::Solo (piloto)", "robustez::Cenário '2 pax
+// dianteiros'::dianteiro"} nos dois pontos, mesmo incluindo os portões do
+// CONSERTO 1. Só os TEXTOS (magnitudes: "778 m" vs "768 m"; "18.68" vs
+// "18.70") diferem. Uma proteção apoiada só em vereditos/ids NÃO
+// distinguiria `banda.hi` de `banda.hi_declarado` neste baseline — por
+// isso `Incerteza` agora expõe o valor de `fom_static` EFETIVAMENTE usado
+// (`fom_lo_usado`/`fom_hi_usado`), e a proteção é sobre ESSE valor, não
+// sobre o efeito indireto que ele produziria hoje.
+#[test]
+fn varredura_usa_banda_hi_nao_hi_declarado_mesmo_quando_os_ids_coincidem() {
+    let (cfg, engine, req) = carrega_baseline();
+    let nominal = aeronave::pipeline::executa(&cfg, &engine, &req)
+        .expect("baseline tem que convergir");
+    let inc = analisa(&cfg, &engine, &req, &nominal);
+
+    assert_eq!(inc.fom_lo_usado, inc.banda.lo);
+    assert_eq!(inc.fom_hi_usado, inc.banda.hi);
+    assert_ne!(inc.fom_hi_usado, inc.banda.hi_declarado,
+        "a varredura tem que rodar em banda.hi, NUNCA em banda.hi_declarado — mesmo \
+         sabendo (achado acima) que no baseline de hoje os dois pontos produzem o \
+         MESMO conjunto de ids violados");
+
+    // Proteção estrutural, independente de qualquer coincidência do
+    // baseline: hi_declarado cai FORA do domínio fisicamente admissível
+    // (fom_static > fom_design ⇒ FoM(J) decrescente em J — spec §5.1), então
+    // usá-lo nunca pode ser correto, mesmo que o conjunto de ids não denuncie.
+    assert!(inc.banda.hi <= cfg.propeller.fom_design,
+        "banda.hi tem que respeitar o domínio admissível");
+    assert!(inc.banda.hi_declarado > cfg.propeller.fom_design,
+        "banda.hi_declarado tem que estar FORA do domínio admissível no baseline — é \
+         o motivo da truncagem existir; se isto falhar, a fixture mudou e este teste \
+         perde a base");
+
+    // Prova complementar, mais fraca (não se apoia nela sozinha): os TEXTOS
+    // das violações em hi e em hi_declarado DIFEREM, mesmo com os IDS iguais.
+    let mut cfg_hi = cfg.clone();
+    cfg_hi.propeller.fom_static = inc.banda.hi;
+    let res_hi = aeronave::pipeline::executa(&cfg_hi, &engine, &req).unwrap();
+
+    let mut cfg_decl = cfg.clone();
+    cfg_decl.propeller.fom_static = inc.banda.hi_declarado;
+    let res_decl = aeronave::pipeline::executa(&cfg_decl, &engine, &req).unwrap();
+
+    assert_ne!(res_hi.report.textos(), res_decl.report.textos(),
+        "os textos têm que diferir (magnitudes diferentes) mesmo com os ids \
+         coincidindo — achado desta task: os CONJUNTOS de id em hi e hi_declarado \
+         coincidem no baseline de hoje, então este teste NÃO se apoia neles sozinhos");
+}

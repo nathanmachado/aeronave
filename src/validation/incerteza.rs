@@ -18,7 +18,10 @@ use std::collections::{BTreeSet, HashSet};
 use crate::models::aircraft_config::{AircraftConfig, Banda};
 use crate::models::engine::EngineSpec;
 use crate::models::requirements::Requirements;
-use crate::pipeline::Resultado;
+use crate::pipeline::{Portao, Resultado};
+use crate::validation::constraint_checker::ConstraintReport;
+#[cfg(test)]
+use crate::validation::constraint_checker::Violacao;
 
 /// Estado de veredito de um check sob incerteza (ciclo 16, spec §5.5).
 ///
@@ -59,6 +62,52 @@ impl Ponto {
     }
 }
 
+/// Portões que são FUNÇÃO DETERMINÍSTICA do conjunto de violações — não são
+/// checks independentes, são agregados, e publicar um agregado ao lado dos
+/// próprios componentes que o compõem é a doença do #21 na direção
+/// contrária (spec §5.4, ERRATUM da revisão da Task 4).
+///
+/// Hoje EXATAMENTE UM portão satisfaz isso: `portao_restricoes`, cujo `ok`
+/// é literalmente `report.all_satisfied()` == `violations.is_empty()`
+/// (`pipeline.rs`: `Portao { id: "portao_restricoes", ok:
+/// report.all_satisfied(), .. }`). Isso é PROVADO, não assumido, pelo teste
+/// `portao_restricoes_e_funcao_deterministica_das_violacoes`
+/// (`tests/incerteza.rs`) — se um dia deixar de valer (por exemplo, se
+/// `portao_restricoes` ganhar uma condição própria), aquele teste reprova
+/// primeiro, antes de qualquer consequência silenciosa aqui.
+///
+/// Os demais portões que DUPLICAM uma `Violacao` em SIGNIFICADO
+/// (`portao_rc_sl`/`rc_sl`, `portao_teto_servico`/`teto_servico`,
+/// `portao_envelope_cg_todos`/`envelope_cg::*`) **permanecem** na
+/// varredura — a duplicação fica visível na saída. Suprimi-los exigiria uma
+/// lista de equivalências mantida à mão, e este projeto tem sete
+/// ocorrências documentadas (backlog #29) de uma lista dessas envelhecendo
+/// errada em silêncio. Duplicação visível é melhor que supressão frágil.
+const PORTOES_AGREGADOS: &[&str] = &["portao_restricoes"];
+
+/// `ids(ponto) = { v.id para v em report.violations } ∪ { p.id para p em
+/// portoes, se !p.ok }`, menos `PORTOES_AGREGADOS` (spec §5.4, ERRATUM).
+///
+/// Antes deste conserto a varredura só lia `report.violations`, e os 9
+/// portões (que ganharam id na Task 2 EXATAMENTE para entrar aqui — spec
+/// §5.2: "sem id ficariam fora da varredura") nunca eram consultados.
+/// Achado da revisão: `portao_v_cruzeiro`, `portao_flutter`,
+/// `portao_antitombamento` e `portao_estabilidade_long` não têm NENHUMA
+/// `Violacao` correspondente — eram quatro gates de aeronavegabilidade
+/// inteiramente invisíveis a este módulo.
+fn ids_do_ponto(report: &ConstraintReport, portoes: &[Portao]) -> HashSet<String> {
+    let mut ids: HashSet<String> = report.violations.iter().map(|v| v.id.clone()).collect();
+    for p in portoes {
+        if PORTOES_AGREGADOS.contains(&p.id) {
+            continue;
+        }
+        if !p.ok {
+            ids.insert(p.id.to_string());
+        }
+    }
+    ids
+}
+
 fn roda_com_fom(
     cfg: &AircraftConfig,
     engine: &EngineSpec,
@@ -77,7 +126,7 @@ fn roda_com_fom(
         cfg2.propeller.fom_design = fd;
     }
     match crate::pipeline::executa(&cfg2, engine, req) {
-        Ok(res) => Ponto::Ok(res.report.violations.iter().map(|v| v.id.clone()).collect()),
+        Ok(res) => Ponto::Ok(ids_do_ponto(&res.report, &res.portoes)),
         Err(e) => Ponto::Falha(e.to_string()),
     }
 }
@@ -105,6 +154,17 @@ pub struct CheckIncerto {
 pub struct Incerteza {
     pub parametro: &'static str,
     pub banda: Banda,
+    /// Valor de `fom_static` EFETIVAMENTE usado para o ponto inferior/
+    /// superior — sempre `banda.lo`/`banda.hi` (nunca `lo_declarado`/
+    /// `hi_declarado`). Exposto como dado, não como suposição, porque a
+    /// proteção por conjunto-de-ids não basta sozinha: a revisão do
+    /// CONSERTO 3 mediu que, no baseline de hoje, os CONJUNTOS de id
+    /// violados em `banda.hi` e em `banda.hi_declarado` COINCIDEM (só os
+    /// TEXTOS, com as magnitudes, diferem) — então um teste apoiado só em
+    /// vereditos não distinguiria o valor certo do errado. Com o valor
+    /// usado publicado aqui, a distinção fica checável diretamente.
+    pub fom_lo_usado: f64,
+    pub fom_hi_usado: f64,
     pub teto_avaliado: bool,
     pub checks: Vec<CheckIncerto>,
 }
@@ -199,6 +259,93 @@ fn avalia(
     }
 }
 
+/// Resultado de decidir os dois extremos ANTES de tentar bissecar — separado
+/// para que a decisão "um extremo não convergiu" seja pura e testável com
+/// `Ponto::Falha` sintético, sem rodar o pipeline (ciclo 16, CONSERTO 2 da
+/// revisão da Task 4: "`Ponto::Falha` aparece só nos `match` de `analisa` e
+/// nunca em teste nenhum" — a lição da Task 3, comportamento declarado e
+/// nunca observado sob teste).
+#[derive(Debug, Clone, PartialEq)]
+enum DecisaoExtremos {
+    /// Os dois extremos convergiram — segue para `avalia()` com estes
+    /// booleanos de pertinência.
+    Convergiu { em_lo: bool, em_hi: bool },
+    /// Um dos dois extremos (ou os dois) não convergiu. O veredito final já
+    /// é `Indeterminado`, SEM bissecar — bissecar exige uma função `viola`
+    /// avaliável em todo o domínio, e um extremo que não converge não
+    /// garante isso para os pontos internos.
+    Falhou { veredito_lo: Veredito, veredito_hi: Veredito, motivo: String },
+}
+
+/// Pura: não chama o pipeline. Recebe os `Ponto`s já resolvidos (reais ou
+/// sintéticos) e a `Banda` só para citar `lo`/`hi` na mensagem do motivo.
+fn decide_extremos(id: &str, banda: &Banda, ponto_lo: &Ponto, ponto_hi: &Ponto) -> DecisaoExtremos {
+    match (ponto_lo, ponto_hi) {
+        (Ponto::Ok(ids_lo), Ponto::Ok(ids_hi)) => DecisaoExtremos::Convergiu {
+            em_lo: ids_lo.contains(id),
+            em_hi: ids_hi.contains(id),
+        },
+        (Ponto::Falha(msg), ph) => DecisaoExtremos::Falhou {
+            veredito_lo: Veredito::Indeterminado,
+            veredito_hi: veredito_de(ph.contains(id)),
+            motivo: format!(
+                "extremo inferior da banda (fom_static={:.6}) não convergiu: {msg} \
+                 — precedente: RobustnessSpec::mtow_masstotal_kg",
+                banda.lo
+            ),
+        },
+        (pl, Ponto::Falha(msg)) => DecisaoExtremos::Falhou {
+            veredito_lo: veredito_de(pl.contains(id)),
+            veredito_hi: Veredito::Indeterminado,
+            motivo: format!(
+                "extremo superior da banda (fom_static={:.6}) não convergiu: {msg} \
+                 — precedente: RobustnessSpec::mtow_masstotal_kg",
+                banda.hi
+            ),
+        },
+    }
+}
+
+/// Pura: `alcance_de_helice` a partir do `Ponto` do teto. Se o teto não
+/// convergiu, marca CONSERVADORAMENTE `false` (não provado que a física
+/// alcança) e publica o motivo — nunca afirma alcance sem ter medido.
+fn decide_teto(id: &str, ponto_teto: &Ponto) -> (bool, Option<String>) {
+    match ponto_teto {
+        Ponto::Ok(ids_teto) => (!ids_teto.contains(id), None),
+        Ponto::Falha(msg) => (
+            false,
+            Some(format!(
+                "teto de quantidade de movimento não convergiu: {msg} — \
+                 alcance_de_helice marcado conservadoramente como falso, \
+                 não provado que a física alcança"
+            )),
+        ),
+    }
+}
+
+/// Combina `decide_extremos` + `avalia`: a peça central testável sem
+/// pipeline. Só o ramo `Convergiu` chama `viola` (e só quando a
+/// classificação pede travessia) — os ramos `Falhou` NUNCA chamam.
+fn decide_check(
+    id: &str,
+    banda: &Banda,
+    ponto_lo: &Ponto,
+    em_nominal: bool,
+    ponto_hi: &Ponto,
+    viola: &mut dyn FnMut(f64) -> bool,
+) -> (Veredito, Veredito, Veredito, Option<(f64, f64)>, Option<String>) {
+    match decide_extremos(id, banda, ponto_lo, ponto_hi) {
+        DecisaoExtremos::Falhou { veredito_lo, veredito_hi, motivo } => {
+            (Veredito::Indeterminado, veredito_lo, veredito_hi, None, Some(motivo))
+        }
+        DecisaoExtremos::Convergiu { em_lo, em_hi } => {
+            let (veredito, breakeven, motivo) =
+                avalia(banda.lo, banda.hi, em_lo, em_nominal, em_hi, viola);
+            (veredito, veredito_de(em_lo), veredito_de(em_hi), breakeven, motivo)
+        }
+    }
+}
+
 /// Roda a varredura completa da banda de `propeller.fom_static` e classifica
 /// cada check afetado (ciclo 16, spec §5.4).
 ///
@@ -213,18 +360,23 @@ pub fn analisa(
 ) -> Incerteza {
     let banda = cfg.propeller.banda();
 
-    let ponto_lo = roda_com_fom(cfg, engine, req, banda.lo, None);
-    let ponto_hi = roda_com_fom(cfg, engine, req, banda.hi, None);
+    // Valores EFETIVAMENTE usados, publicados em `Incerteza` — ver o
+    // doc-comment do campo para o porquê (CONSERTO 3 da revisão da Task 4).
+    let fom_lo_usado = banda.lo;
+    let fom_hi_usado = banda.hi;
+
+    let ponto_lo = roda_com_fom(cfg, engine, req, fom_lo_usado, None);
+    let ponto_hi = roda_com_fom(cfg, engine, req, fom_hi_usado, None);
     // Teto de quantidade de movimento: as DUAS âncoras em 1,0 — ver
     // comentário em `roda_com_fom`.
     let ponto_teto = roda_com_fom(cfg, engine, req, 1.0, Some(1.0));
 
-    let ids_nominal: HashSet<String> =
-        nominal.report.violations.iter().map(|v| v.id.clone()).collect();
+    let ids_nominal: HashSet<String> = ids_do_ponto(&nominal.report, &nominal.portoes);
 
-    // L ∪ N ∪ H ∪ T (spec §5.4, passo 5). `BTreeSet` só para ordem
-    // determinística de saída — não é requisito de corretude, é
-    // reprodutibilidade de teste/diff.
+    // L ∪ N ∪ H ∪ T (spec §5.4, passo 5 — agora incluindo os portões via
+    // `ids_do_ponto`, CONSERTO 1). `BTreeSet` só para ordem determinística
+    // de saída — não é requisito de corretude, é reprodutibilidade de
+    // teste/diff.
     let mut todos: BTreeSet<String> = ids_nominal.iter().cloned().collect();
     if let Ponto::Ok(ids) = &ponto_lo { todos.extend(ids.iter().cloned()); }
     if let Ponto::Ok(ids) = &ponto_hi { todos.extend(ids.iter().cloned()); }
@@ -236,72 +388,30 @@ pub fn analisa(
         let em_nominal = ids_nominal.contains(&id);
         let veredito_nominal = veredito_de(em_nominal);
 
+        let id_bissecao = id.clone();
+        let mut viola = |fom: f64| -> bool {
+            let mut cfg2 = cfg.clone();
+            cfg2.propeller.fom_static = fom;
+            let res = crate::pipeline::executa(&cfg2, engine, req)
+                .expect(
+                    "bisseção: um ponto INTERNO da banda deixou de convergir \
+                     mesmo com os dois extremos convergindo — fora do escopo \
+                     medido neste ciclo (pipeline converge de fom_static 0,55 \
+                     a 1,0), reportar como achado de primeira ordem",
+                );
+            ids_do_ponto(&res.report, &res.portoes).contains(&id_bissecao)
+        };
+
         // Falha ao convergir num extremo é PUBLICADA, não engolida
-        // (precedente: `RobustnessSpec::mtow_masstotal_kg`). Não monta
-        // `avalia`/bisseção quando falta um dos dois pontos: bissecar exige
-        // uma função `viola` avaliável em todo o domínio, e um extremo que
-        // não converge não garante isso para os pontos internos.
+        // (precedente: `RobustnessSpec::mtow_masstotal_kg`) — decidido pela
+        // função PURA `decide_check` (CONSERTO 2 da revisão da Task 4), que
+        // só chama `viola` no ramo em que os dois extremos convergem E a
+        // classificação pede travessia.
         let (veredito, veredito_lo, veredito_hi, breakeven, motivo_extremo) =
-            match (&ponto_lo, &ponto_hi) {
-                (Ponto::Ok(ids_lo), Ponto::Ok(ids_hi)) => {
-                    let em_lo = ids_lo.contains(&id);
-                    let em_hi = ids_hi.contains(&id);
-                    let id_bissecao = id.clone();
-                    let mut viola = |fom: f64| -> bool {
-                        let mut cfg2 = cfg.clone();
-                        cfg2.propeller.fom_static = fom;
-                        let res = crate::pipeline::executa(&cfg2, engine, req)
-                            .expect(
-                                "bisseção: um ponto INTERNO da banda deixou de convergir \
-                                 mesmo com os dois extremos convergindo — fora do escopo \
-                                 medido neste ciclo (pipeline converge de fom_static 0,55 \
-                                 a 1,0), reportar como achado de primeira ordem",
-                            );
-                        res.report.violations.iter().any(|v| v.id == id_bissecao)
-                    };
-                    let (veredito, breakeven, motivo) =
-                        avalia(banda.lo, banda.hi, em_lo, em_nominal, em_hi, &mut viola);
-                    (veredito, veredito_de(em_lo), veredito_de(em_hi), breakeven, motivo)
-                }
-                (Ponto::Falha(msg), ponto_hi) => (
-                    Veredito::Indeterminado,
-                    Veredito::Indeterminado,
-                    veredito_de(ponto_hi.contains(&id)),
-                    None,
-                    Some(format!(
-                        "extremo inferior da banda (fom_static={:.6}) não convergiu: {msg} \
-                         — precedente: RobustnessSpec::mtow_masstotal_kg",
-                        banda.lo
-                    )),
-                ),
-                (ponto_lo, Ponto::Falha(msg)) => (
-                    Veredito::Indeterminado,
-                    veredito_de(ponto_lo.contains(&id)),
-                    Veredito::Indeterminado,
-                    None,
-                    Some(format!(
-                        "extremo superior da banda (fom_static={:.6}) não convergiu: {msg} \
-                         — precedente: RobustnessSpec::mtow_masstotal_kg",
-                        banda.hi
-                    )),
-                ),
-            };
+            decide_check(&id, &banda, &ponto_lo, em_nominal, &ponto_hi, &mut viola);
 
         // `alcance_de_helice`: presente no teto ⇒ nenhuma hélice conserta.
-        // Se o teto não convergiu, marca conservadoramente `false` (não
-        // provado que a física alcança) e publica o motivo — nunca afirma
-        // alcance sem ter medido.
-        let (alcance_de_helice, motivo_teto) = match &ponto_teto {
-            Ponto::Ok(ids_teto) => (!ids_teto.contains(&id), None),
-            Ponto::Falha(msg) => (
-                false,
-                Some(format!(
-                    "teto de quantidade de movimento não convergiu: {msg} — \
-                     alcance_de_helice marcado conservadoramente como falso, \
-                     não provado que a física alcança"
-                )),
-            ),
-        };
+        let (alcance_de_helice, motivo_teto) = decide_teto(&id, &ponto_teto);
 
         let mut partes: Vec<String> = Vec::new();
         if let Some(m) = motivo_extremo { partes.push(m); }
@@ -323,6 +433,8 @@ pub fn analisa(
     Incerteza {
         parametro: "propeller.fom_static",
         teto_avaliado: matches!(ponto_teto, Ponto::Ok(_)),
+        fom_lo_usado,
+        fom_hi_usado,
         banda,
         checks,
     }
@@ -395,5 +507,167 @@ mod tests {
     fn bisseca_reprova_se_extremos_concordam() {
         let mut viola = |_: f64| -> bool { true }; // sempre viola — não discorda
         let _ = bisseca(0.0, 1.0, &mut viola);
+    }
+
+    // ── CONSERTO 1 (revisão da Task 4): portões entram na varredura ────
+    // A §5.2 deu id aos 9 portões EXATAMENTE para isto ("sem id ficariam
+    // fora da varredura"); a §5.4 escrevia o algoritmo só em termos de
+    // `report.violations`, contradizendo a §5.2, e a Task 4 seguiu a §5.4.
+    // Estes testes cobrem `ids_do_ponto` isoladamente (sem pipeline); o
+    // teste que prova que a UNIÃO chega ao baseline real está em
+    // `tests/incerteza.rs`.
+
+    #[test]
+    fn ids_do_ponto_inclui_portoes_reprovados_e_ignora_os_aprovados() {
+        let report = ConstraintReport { violations: vec![], warnings: vec![] };
+        let portoes = vec![
+            Portao { id: "portao_flutter", ok: false, rotulo: "x".to_string() },
+            Portao { id: "portao_v_cruzeiro", ok: true, rotulo: "y".to_string() },
+        ];
+        let ids = ids_do_ponto(&report, &portoes);
+        assert!(ids.contains("portao_flutter"),
+            "portão REPROVADO tem que entrar no conjunto — obtido: {ids:?}");
+        assert!(!ids.contains("portao_v_cruzeiro"),
+            "portão APROVADO não entra no conjunto — obtido: {ids:?}");
+    }
+
+    /// `portao_restricoes` é excluído POR REGRA (é função determinística do
+    /// conjunto de violações), não por lista escolhida a dedo — a exclusão
+    /// vive em `PORTOES_AGREGADOS`, uma constante nomeada e documentada.
+    #[test]
+    fn ids_do_ponto_exclui_portao_restricoes_por_regra() {
+        let report = ConstraintReport {
+            violations: vec![Violacao { id: "x".to_string(), texto: "x".to_string() }],
+            warnings: vec![],
+        };
+        let portoes = vec![Portao {
+            id: "portao_restricoes", ok: false, rotulo: "agregado".to_string(),
+        }];
+        let ids = ids_do_ponto(&report, &portoes);
+        assert!(ids.contains("x"), "a violação em si continua entrando");
+        assert!(!ids.contains("portao_restricoes"),
+            "portao_restricoes é agregado — não pode entrar como check independente, \
+             senão publicaria o agregado ao lado dos próprios componentes (doença do \
+             #21 na direção contrária)");
+    }
+
+    /// Portões que DUPLICAM uma violação em SIGNIFICADO (mas não em id)
+    /// permanecem — a duplicação fica visível, em vez de suprimida por uma
+    /// lista de equivalências mantida à mão.
+    #[test]
+    fn ids_do_ponto_mantem_portoes_que_duplicam_violacao_em_significado() {
+        let report = ConstraintReport {
+            violations: vec![Violacao {
+                id: "envelope_cg::Solo (piloto)".to_string(),
+                texto: "x".to_string(),
+            }],
+            warnings: vec![],
+        };
+        let portoes = vec![Portao {
+            id: "portao_envelope_cg_todos", ok: false, rotulo: "y".to_string(),
+        }];
+        let ids = ids_do_ponto(&report, &portoes);
+        assert!(ids.contains("envelope_cg::Solo (piloto)"));
+        assert!(ids.contains("portao_envelope_cg_todos"),
+            "o portão duplicado EM SIGNIFICADO continua entrando com seu próprio id — \
+             obtido: {ids:?}");
+        assert_eq!(ids.len(), 2, "os dois ids ficam visíveis, sem supressão");
+    }
+
+    // ── CONSERTO 2 (revisão da Task 4): falha de convergência, pura ────
+    // `Ponto::Falha` só aparecia nos `match` de `analisa` e nunca em teste
+    // nenhum. `decide_extremos`/`decide_teto`/`decide_check` são puras —
+    // testáveis com `Ponto::Falha` sintético, sem quebrar o sizing de
+    // verdade.
+
+    fn banda_teste() -> Banda {
+        Banda {
+            nominal: 0.75,
+            lo: 0.675,
+            hi: 0.816,
+            lo_declarado: 0.675,
+            hi_declarado: 0.825,
+            truncada: true,
+            motivo_truncagem: Some("teste".to_string()),
+        }
+    }
+
+    /// (i) falha no extremo INFERIOR → Indeterminado com motivo citando
+    /// "extremo inferior" e a mensagem do erro; o extremo superior (que
+    /// convergiu) mantém seu veredito pontual de verdade.
+    #[test]
+    fn decide_extremos_com_lo_falho_da_indeterminado_sem_bissecar() {
+        let banda = banda_teste();
+        let ponto_lo = Ponto::Falha("sizing não convergiu".to_string());
+        let mut ids_hi = HashSet::new();
+        ids_hi.insert("algum_id".to_string());
+        let ponto_hi = Ponto::Ok(ids_hi);
+
+        match decide_extremos("algum_id", &banda, &ponto_lo, &ponto_hi) {
+            DecisaoExtremos::Falhou { veredito_lo, veredito_hi, motivo } => {
+                assert_eq!(veredito_lo, Veredito::Indeterminado);
+                assert_eq!(veredito_hi, Veredito::Falha, "hi convergiu e contém o id");
+                assert!(motivo.contains("extremo inferior"), "motivo: {motivo}");
+                assert!(motivo.contains("sizing não convergiu"), "motivo: {motivo}");
+            }
+            other => panic!("esperava DecisaoExtremos::Falhou, obtido {other:?}"),
+        }
+    }
+
+    /// (i) falha no extremo SUPERIOR — espelho do teste acima.
+    #[test]
+    fn decide_extremos_com_hi_falho_da_indeterminado_sem_bissecar() {
+        let banda = banda_teste();
+        let ponto_lo = Ponto::Ok(HashSet::new());
+        let ponto_hi = Ponto::Falha("MTOW não convergiu".to_string());
+
+        match decide_extremos("algum_id", &banda, &ponto_lo, &ponto_hi) {
+            DecisaoExtremos::Falhou { veredito_lo, veredito_hi, motivo } => {
+                assert_eq!(veredito_lo, Veredito::Passa, "lo convergiu e não contém o id");
+                assert_eq!(veredito_hi, Veredito::Indeterminado);
+                assert!(motivo.contains("extremo superior"), "motivo: {motivo}");
+                assert!(motivo.contains("MTOW não convergiu"), "motivo: {motivo}");
+            }
+            other => panic!("esperava DecisaoExtremos::Falhou, obtido {other:?}"),
+        }
+    }
+
+    /// (iii) confirma que a bisseção NÃO é chamada quando um extremo
+    /// falhou — a `viola` sintética PANICA se for invocada.
+    #[test]
+    fn decide_check_nao_bisseca_quando_extremo_falha() {
+        let banda = banda_teste();
+        let ponto_lo = Ponto::Falha("sizing não convergiu".to_string());
+        let ponto_hi = Ponto::Ok(HashSet::new());
+        let mut viola = |_: f64| -> bool {
+            panic!("decide_check não deveria chamar viola quando um extremo falhou");
+        };
+        let (veredito, veredito_lo, veredito_hi, breakeven, motivo) =
+            decide_check("id", &banda, &ponto_lo, true, &ponto_hi, &mut viola);
+        assert_eq!(veredito, Veredito::Indeterminado);
+        assert_eq!(veredito_lo, Veredito::Indeterminado);
+        assert_eq!(veredito_hi, Veredito::Passa);
+        assert_eq!(breakeven, None);
+        assert!(motivo.unwrap().contains("extremo inferior"));
+    }
+
+    /// (ii) teto falhando → `alcance_de_helice = false` com motivo.
+    #[test]
+    fn decide_teto_falho_marca_alcance_falso_com_motivo() {
+        let ponto_teto = Ponto::Falha("sizing do teto não convergiu".to_string());
+        let (alcance, motivo) = decide_teto("id", &ponto_teto);
+        assert!(!alcance, "sem prova de alcance, marca conservadoramente falso");
+        let motivo = motivo.expect("teto falho tem que publicar motivo");
+        assert!(motivo.contains("teto"), "motivo: {motivo}");
+        assert!(motivo.contains("sizing do teto não convergiu"), "motivo: {motivo}");
+    }
+
+    #[test]
+    fn decide_teto_ok_deriva_alcance_da_pertinencia() {
+        let mut ids = HashSet::new();
+        ids.insert("id_presente".to_string());
+        let ponto_teto = Ponto::Ok(ids);
+        assert_eq!(decide_teto("id_presente", &ponto_teto), (false, None));
+        assert_eq!(decide_teto("id_ausente", &ponto_teto), (true, None));
     }
 }
