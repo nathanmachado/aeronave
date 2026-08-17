@@ -206,27 +206,41 @@ O `rotulo` é o mesmo `String` de hoje, `format!` incluído — o stdout tem que
 sair idêntico. `main` imprime iterando `res.portoes` com o mesmo `if *ok { "✓" }
 else { "✗" }`.
 
-- [ ] **Passo 4: capturar a linha de base ANTES de comparar**
+- [ ] **Passo 4: a linha de base JÁ ESTÁ capturada — não recapture**
+
+O chefe capturou a base com a árvore limpa em `bfd4921`, antes de qualquer
+edição, via `<scratchpad>/base16.sh`. Ficou provado no ato que o JSON gerado é
+idêntico ao commitado (459 linhas de JSON, 177 de stdout, stderr vazio).
+
+**Nunca recapture a base depois de editar** — a comparação viraria tautologia.
+
+> **NÃO use `git stash`.** Uma versão anterior deste plano mandava
+> `git stash` / `git stash pop` para capturar a base. A pilha de stash é
+> **compartilhada entre todos os worktrees do repositório** e outras sessões
+> podem empilhar/desempilhar concorrentemente: um `git stash pop` cego pode
+> restaurar o trabalho de outra sessão sobre o seu. Se em algum momento você
+> precisar mesmo guardar trabalho de lado, use um commit WIP temporário.
+
+- [ ] **Passo 5: provar os três invariantes**
 
 ```bash
-git stash
-cargo build --release --quiet
-./target/release/aeronave --out /tmp/base16.json > /tmp/base16.out 2> /tmp/base16.err
-git stash pop
+bash <scratchpad>/prova16.sh
 ```
 
-- [ ] **Passo 5: provar os dois invariantes**
+Esperado, literalmente:
 
-```bash
-cargo build --release --quiet
-./target/release/aeronave --out /tmp/novo16.json > /tmp/novo16.out 2> /tmp/novo16.err
-diff /tmp/base16.json /tmp/novo16.json && echo "JSON IDENTICO"
-diff /tmp/base16.out  /tmp/novo16.out  && echo "STDOUT IDENTICO"
-diff /tmp/base16.err  /tmp/novo16.err  && echo "STDERR IDENTICO"
+```
+codigo de saida: 0 (base: 0)
+  OK        json identico
+  OK        out identico
+  OK        err identico
+INVARIANTE PROVADO: json, stdout e stderr byte-identicos.
 ```
 
-Esperado: as três linhas. Qualquer diff é falha da task — **não ajuste o
-esperado**.
+Qualquer divergência é falha da task. **Não ajuste a base, não ajuste o
+esperado, não "aceite" um diff cosmético** — conserte o código. Se você achar
+que uma divergência é legítima e inevitável, PARE e reporte; não decida
+sozinho.
 
 - [ ] **Passo 6: teste versionado do invariante**
 
@@ -464,8 +478,8 @@ para config saiba o que quebra.
 Nos testes, `v.contains(…)` → `v.texto.contains(…)`. O compilador aponta cada
 sítio; não procure de cabeça.
 
-- [ ] **Passo 6: provar o invariante** — os mesmos três `diff` do Passo 5 da
-  Task 1, contra a mesma linha de base.
+- [ ] **Passo 6: provar o invariante** — `bash <scratchpad>/prova16.sh` (o mesmo do Passo 5 da
+  Task 1, contra a MESMA linha de base — não recapture).
 
 - [ ] **Passo 7: suíte, portão, commit**
 
@@ -629,7 +643,7 @@ para as fixtures um valor que **não** dispare truncagem (a fixture tem
 truncagem) — assim a fixture exercita o caminho não truncado e o baseline
 exercita o truncado.
 
-- [ ] **Passo 6: invariante** — os três `diff`. A banda ainda não é publicada,
+- [ ] **Passo 6: invariante** — `bash <scratchpad>/prova16.sh`. A banda ainda não é publicada,
   então o JSON e o stdout continuam byte-idênticos.
 
 - [ ] **Passo 7: suíte, portão, commit**
@@ -860,7 +874,7 @@ fn breakeven_publicado_e_provado_re_rodando_o_pipeline() {
 }
 ```
 
-- [ ] **Passo 7: invariante** — os três `diff`. Nada publicado ainda.
+- [ ] **Passo 7: invariante** — `bash <scratchpad>/prova16.sh`. Nada publicado ainda.
 
 - [ ] **Passo 8: suíte, portão, commit**
 
